@@ -5,7 +5,7 @@ Updated 2026-10-30. Independent of Roblox and nurse-scheduler.
 ## Verified
 
 - Native Android app installed on Galaxy S26 base, Android17/API37, about12GB RAM/256GB storage. Package com.user.localagent and signing identity remain stable.
-- Latest installed signed APK SHA256: c05e86e07c33e367ba766e03cff93afe6b9f7ff370ed65dc2f197c0a63971d3b.
+- Current installed release0.1.2/version1002 APK SHA256:3cc3a19064688231feedc649575c92e2099cb3f18407d4b457f6a52f12092707. GitHub CI94b3b8d passed; the app applied the signed update itself without a separate install-button action. Post-install certificate, version and four carried scoped grants passed.
 - Core79/79 tests and release lint passed; subsequent draft-race fix assembled app/test APK successfully. Synthetic file-import/phone-record/audio-decoder/document tests19/19, encrypted memory/unload2/2, and isolated encrypted-draft3/3 passed on the phone.
 - Gemma4 E2B initial CPU4K smoke: load3891ms, TTFT1376ms, decode12.13tokens/sec, PSS1,367,901KiB. Gemma4 E4B smoke: load6151ms, TTFT3070ms, decode4.58tokens/sec.
 - E4B ten-minute endurance:609.4sec/67generations, average4.19tokens/sec, peakPSS2,916,447KiB, battery68→64%, temperature37.3→40.8°C, maxthermal2, no failure. E2B endurance was deliberately stopped for user chat; no spontaneous failure is inferred.
@@ -28,8 +28,8 @@ Updated 2026-10-30. Independent of Roblox and nurse-scheduler.
 ## Remaining
 
 - Finish foreground UI validation when the phone is available; test actual user-selected audio, restart/reminder recovery and app-specific adapters.
-- Offline-only APK/network-denied inference verification; wireless ADB and the user's ChatGPT connection must remain available.
-- Source publication/remote CI/signed release/phone OTA and final dedicated-source handoff are being completed.
+- Offline-only APK test PASSED: the APK lacked INTERNET permission while cached E2B inference and encrypted note save/search/delete succeeded. Normal online release was restored afterward; phone Wi-Fi/ChatGPT connectivity was preserved.
+- Public source, remote CI/signing/release and phone OTA are verified. Additional offline/update validation tests and this status update are being committed; they do not change release inference behavior.
 - No general DOCX/XLSX editor, OCR, image/video generation engine, executable MCP installer, unrestricted app-private database access or autonomous all-app operation.
 
 Private signing material, reports/screenshots, device identity, personal content and model weights stay outside Git. Previously authorized pairing and setup must not be requested again.

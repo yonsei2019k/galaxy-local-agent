@@ -20,6 +20,16 @@ android {
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
         buildConfigField("String", "UPDATE_URL", "\"https://github.com/yonsei2019k/galaxy-local-agent/releases/latest/download/update.json\"")
     }
+    // Verification APK retains the production package/data and release native flags.
+    // It is unsigned here; the release owner applies the existing private signing key.
+    buildTypes {
+        create("offlineVerification") {
+            initWith(getByName("release"))
+            signingConfig = null
+            matchingFallbacks += listOf("release")
+            versionNameSuffix = "-offlinecheck"
+        }
+    }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
@@ -58,3 +68,4 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+

@@ -4,7 +4,7 @@ ZipHap.Agent is a local-first Android assistant for Galaxy S26. It uses Kotlin, 
 
 ## Project status — 2026-10-30
 
-The integrated app and test APK build passed; core tests are 79/79 and release lint passed. The signed integrated APK (SHA-256 `71ed36ceb4ed837fe80c99177206febeb211b48c9510cb6b8efa0e79d45725a5`) was installed on Galaxy S26/Android 17/API 37. The subsequent encrypted-draft race fix is installed; current APK/test details are recorded in PROJECT_STATE.md. The repository exists and GitHub Actions signing secrets are configured; source push, remote CI, signed release, and OTA remain pending.
+Release0.1.2 is installed on Galaxy S26/Android17/API37. GitHub CI, APK/manifest signing and automatic in-app upgrade from1000 to1002 passed. The installed APK hash is3cc3a19064688231feedc649575c92e2099cb3f18407d4b457f6a52f12092707. Core79/79 tests, release lint and synthetic phone checks passed; detailed scope and remaining UI/audio checks are in PROJECT_STATE.md.
 
 ### Model measurements
 
