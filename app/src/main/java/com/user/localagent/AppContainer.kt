@@ -12,6 +12,10 @@ import com.user.localagent.updates.UpdateManager
 import com.user.localagent.automation.AutomationController
 import com.user.localagent.skills.BuiltinSkills
 import com.user.localagent.models.LocalOrchestration
+import com.user.localagent.images.ImageStudioController
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.*
 import com.user.localagent.benchmark.RuntimeGate
 
@@ -29,7 +33,15 @@ class AppContainer(context: Context) {
     val scheduler = ReminderScheduler(context.applicationContext)
     val conversationImports = ConversationImport(context.applicationContext,repository)
     val phoneRecords = PhoneRecords(context.applicationContext)
-    val tools = ToolExecutor(context.applicationContext, repository, scheduler,conversationImports,phoneRecords)
+    val smsAnalysis by lazy {com.user.localagent.automation.SmsAnalysisController(appContext,repository)}
+    val calendarGateway by lazy {com.user.localagent.automation.CalendarGateway(appContext,repository)}
+    val imageStudio by lazy {ImageStudioController(context.applicationContext,this)}
+    val tools = ToolExecutor(context.applicationContext, repository, scheduler,conversationImports,phoneRecords) {call->
+        imageStudio.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
+            call.arguments["negativePrompt"]?.jsonPrimitive?.content.orEmpty(),
+            call.arguments["steps"]?.jsonPrimitive?.intOrNull?:4,
+            call.arguments["seed"]?.jsonPrimitive?.longOrNull?:-1).toolResult()
+    }
     val updates = UpdateManager(context.applicationContext)
     val automation = AutomationController(context.applicationContext)
     val skills = BuiltinSkills(context.applicationContext)

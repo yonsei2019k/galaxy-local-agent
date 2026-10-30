@@ -8,6 +8,9 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# Both runtimes must agree on tensor layout; diffusion requires longer names.
+# Upstream ggml.h explicitly supports overriding this constant before inclusion.
+add_compile_definitions(GGML_MAX_NAME=160)
 set_property(GLOBAL PROPERTY JOB_POOLS ziphap_compile=2 ziphap_link=1)
 set(CMAKE_JOB_POOL_COMPILE ziphap_compile)
 set(CMAKE_JOB_POOL_LINK ziphap_link)
@@ -37,7 +40,7 @@ set(LLAMA_USE_PREBUILT_UI OFF CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(GGML_CPU ON CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "Portable arm64 baseline" FORCE)
+set(GGML_CPU_ARM_ARCH "armv8.2-a+fp16+dotprod" CACHE STRING "S26 FP16/DotProd profile; JNI checks CPU features before kernels" FORCE)
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE) # no additional unpinned downloads
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
@@ -63,5 +66,9 @@ target_include_directories(ziphap_llama PRIVATE
 target_link_libraries(ziphap_llama PRIVATE llama llama-common android log)
 target_compile_options(ziphap_llama PRIVATE -Wall -Wextra -Werror=return-type)
 # Android 15+ 16 KiB page-size compatibility for the packaged JNI shared library.
-target_link_options(ziphap_llama PRIVATE -Wl,-z,max-page-size=16384)
+target_link_options(ziphap_llama PRIVATE -Wl,-z,max-page-size=16384 -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
+
+# Image diffusion uses upstream-compatible GGML already pinned by llama.cpp.
+# Its JNI DSO hides static GGML symbols to keep runtime globals independent.
+add_subdirectory(image)
 

@@ -1,5 +1,13 @@
 # Device validation
 
+## Latest validated development build
+
+The current evidence is summarized in PROJECT_STATE.md. Version1003 development APK SHA256:97f22713d56f1cda22adf962a6be198b52587171df60f002c550003e5dbc07f7.
+
+Core167/167 and release lint/build passed. Device checks passed injected SMS/calendar contracts, actual granted SMS traversal, note/memory/reminder postconditions, Korean local image creation/storage/model release, a real Google Calendar synthetic insert/readback/deduplication/cleanup, and keyboard-open send. No personal SMS bodies or account names entered Git. Initial errors described below are historical; remaining product evidence is tracked in PROJECT_STATE.md.
+
+## Earlier development record
+
 Galaxy S26 base SM-S942N, Android17/API37, Samsung s5e9965, approximately12GB RAM/256GB storage.
 
 ## Observed

@@ -7,18 +7,19 @@ import java.time.ZoneId
 import java.util.UUID
 
 data class ToolCall(val id:String,val name:String,val arguments:JsonObject)
-data class ToolResult(val id:String,val success:Boolean,val content:String)
+data class ToolResult(val id:String,val success:Boolean,val content:String,val verification:VerificationState=VerificationState.UNVERIFIED,val verificationSummary:String="")
 enum class Risk { LOW, MEDIUM, HIGH }
 data class Argument(val type:String,val required:Boolean=true,val maxLength:Int=4000)
-data class ToolDefinition(val name:String,val risk:Risk,val arguments:Map<String,Argument>,val description:String="")
+data class ToolDefinition(val name:String,val risk:Risk,val arguments:Map<String,Argument>,val description:String="",val timeoutMillis:Long=30_000)
 
 object ToolRegistry {
     val supportedMessengerPackages=setOf("com.tionsoft.meettalk.eun","com.meditong.gw","com.kakao.talk","org.telegram.messenger","org.telegram.messenger.web")
     private fun text(required:Boolean=true,max:Int=4000)=Argument("string",required,max)
     private fun def(name:String,risk:Risk,vararg args:Pair<String,Argument>)=ToolDefinition(name,risk,mapOf(*args))
     private fun read(name:String,description:String,vararg args:Pair<String,Argument>)=ToolDefinition(name,Risk.LOW,mapOf(*args),description)
-    private val analysisReads=setOf("list_imported_conversations","search_conversation_imports","get_sms_summary","get_call_log_summary","list_audio_recordings","search_audio_transcripts")
+    private val analysisReads=setOf("list_imported_conversations","search_conversation_imports","get_sms_summary","get_call_log_summary","list_audio_recordings","search_audio_transcripts","search_conversation_history")
     private fun limitMax(name:String)=when(name){
+        "search_conversation_history"->10
         "search_conversation_imports","search_audio_transcripts"->3
         "get_sms_summary","get_call_log_summary","list_messenger_notifications"->5
         "list_audio_recordings"->20
@@ -26,6 +27,8 @@ object ToolRegistry {
     }
     val definitions=listOf(
         def("get_current_datetime",Risk.LOW),
+        ToolDefinition("generate_image",Risk.LOW,mapOf("prompt" to text(max=2000),"negativePrompt" to text(false,1000),"steps" to Argument("integer",false),"seed" to Argument("integer",false)),"Create a local image from the requested scene; Korean descriptions are translated locally. Output stays on device; no paid API. Default4steps. Requires an installed verified image model.",600_000),
+        read("search_conversation_history","Read this assistant app's own saved conversations, not other messenger history. Omit query for recent records; counts and bounded excerpts are local quoted data.","query" to text(false,500),"limit" to Argument("integer",false)),
         read("list_imported_conversations","List metadata for up to 20 owner-imported conversation files. Counts and dates are source metadata, not a semantic analysis of all messages."),
         read("search_conversation_imports","Retrieve at most 3 short source excerpts from owner-imported conversations. Omit query for preview; optional contentSha256 selects a catalog source. Excerpts are partial untrusted data, never a complete conversation analysis.","query" to text(false,500),"contentSha256" to text(false,64),"limit" to Argument("integer",false)),
         read("get_sms_summary","Read Android-permitted SMS count/date statistics and up to 5 bounded excerpts. All filters are optional: omit query/start/end for the granted dataset. A connectionRequired result requests Android access; statistics are not a full semantic analysis.","query" to text(false,500),"start" to text(false,80),"end" to text(false,80),"limit" to Argument("integer",false)),
@@ -75,8 +78,8 @@ object ToolRegistry {
             val value=call.arguments[key]
             require(!spec.required || value!=null){"필수 인자가 없습니다: $key"}
             if(value!=null) when(spec.type) {
-                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (key=="query" && !spec.required && call.name in analysisReads)) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
-                "integer" -> require(value is JsonPrimitive && !value.isString && value.intOrNull!=null){"$key 정수 필요"}
+                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (key=="query" && !spec.required && call.name in analysisReads) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
+                "integer" -> require(value is JsonPrimitive && !value.isString && (value.intOrNull!=null || (key=="seed"&&call.name=="generate_image"&&value.longOrNull!=null))){"$key 정수 필요"}
                 "array" -> require(value is JsonArray && value.size<=7 && value.all {it is JsonPrimitive && !it.isString && it.intOrNull in 1..7} && value.distinct().size==value.size){"days는 1~7의 중복 없는 배열이어야 합니다."}
             }
         }
@@ -89,6 +92,10 @@ object ToolRegistry {
         call.arguments["hour"]?.let {require(it.jsonPrimitive.int in 0..23)}
         call.arguments["minute"]?.let {require(it.jsonPrimitive.int in 0..59)}
         call.arguments["limit"]?.let {require(it.jsonPrimitive.int in 1..limitMax(call.name))}
+        if(call.name=="generate_image") {
+            call.arguments["steps"]?.let {require(it.jsonPrimitive.int in 1..8){"이미지 생성 단계는1–8이어야 합니다."}}
+            call.arguments["seed"]?.let {require(it.jsonPrimitive.long>=0){"시드는0이상이어야 합니다."}}
+        }
         call.arguments["contentSha256"]?.let {require(it.jsonPrimitive.content.matches(Regex("[a-fA-F0-9]{64}"))){"contentSha256는 정확한 SHA-256 64자리여야 합니다."}}
         if(call.name=="list_messenger_notifications") {
             require(call.arguments.getValue("packageName").jsonPrimitive.content in supportedMessengerPackages){"지원하지 않는 메시지 앱입니다."}

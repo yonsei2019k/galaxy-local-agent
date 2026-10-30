@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/leejet/stable-diffusion.cpp",
+  "commit": "e239e4b0fd3de49834cec67031a44796ca465abc",
+  "archive": "https://codeload.github.com/leejet/stable-diffusion.cpp/tar.gz/e239e4b0fd3de49834cec67031a44796ca465abc",
+  "archiveBytes": 128950362,
+  "archiveSha256": "77e5e6e14a7f33570c3c861a2338e7a5ece3f09da969dde827488678d168a78c",
+  "license": "MIT",
+  "ggmlMode": "SD_USE_UPSTREAM_GGML using the application's separately pinned llama.cpp GGML target",
+  "requiredConsistentGgmlDefinition": "GGML_MAX_NAME=160 across all native consumers",
+  "cpuProfile": "armv8.2-a+fp16+dotprod",
+  "requiredArm64Hwcap": ["FPHP", "ASIMDHP", "ASIMDDP"],
+  "backend": "CPU",
+  "networkDuringGeneration": false,
+  "modelsBundledInApk": false
+}

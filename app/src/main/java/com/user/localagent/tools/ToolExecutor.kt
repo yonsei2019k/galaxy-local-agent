@@ -16,13 +16,16 @@ import com.user.localagent.scheduling.ReminderScheduler
 import com.user.localagent.automation.AssistantNotificationListener
 import com.user.localagent.integrations.MessengerInbox
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.time.OffsetDateTime
 import java.time.ZonedDateTime
 import java.time.ZoneId
 
 class ToolExecutor(private val context:Context,private val repository:LocalRepository,private val scheduler:ReminderScheduler,
-    private val conversationImports:ConversationImport,private val phoneRecords:PhoneRecords) {
+    private val conversationImports:ConversationImport,private val phoneRecords:PhoneRecords,
+    private val createImage:(suspend(ToolCall)->String)?=null) {
     private fun ToolCall.s(key:String,default:String="")=arguments[key]?.jsonPrimitive?.content?:default
     private fun ToolCall.i(key:String,default:Int)=arguments[key]?.jsonPrimitive?.int?:default
     fun prepareIntent(call:ToolCall):Intent? {
@@ -38,27 +41,37 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             else->null
         }
     }
-    suspend fun execute(call:ToolCall):ToolResult {
+    suspend fun execute(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
             val result=when(call.name){
                 "get_current_datetime"->ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString()
+                "generate_image"->checkNotNull(createImage){"이미지 생성 연결을 준비해주세요."}.invoke(call)
+                "search_conversation_history"->{
+                    val query=call.s("query");val page=repository.messagePage(limit=call.i("limit",10),query=query)
+                    scoped("ziphap_assistant_conversations","bounded_message_excerpts",buildJsonObject {
+                        put("totalMatching",repository.messageCount(query));put("hasMore",page.nextCursor!=null)
+                        put("messages",buildJsonArray {page.messages.forEach {message->add(buildJsonObject {
+                            put("id",message.id);put("role",message.role);put("createdAt",message.createdAt);put("text",clip(message.text,500))
+                        })}})
+                    },"ZipHap.Agent 자체 대화 기록의 일부입니다. 전체 원문은 대화 기록 화면에서 조회·내보낼 수 있습니다.")
+                }
                 "list_imported_conversations"->listImportedConversations()
                 "search_conversation_imports"->searchConversationImports(call)
                 "get_sms_summary"->phoneJson(phoneRecords.smsSummary(call.optional("query"),call.epoch("start"),call.epoch("end"),call.i("limit",5)),"android_sms",call,::summaryJson)
                 "get_call_log_summary"->phoneJson(phoneRecords.callLogSummary(call.optional("query"),call.epoch("start"),call.epoch("end"),call.i("limit",5)),"android_call_log",call,::summaryJson)
                 "list_audio_recordings"->phoneJson(phoneRecords.recordAudio(call.optional("query"),call.i("limit",20)),"android_recording_metadata",call,::audioJson)
                 "search_audio_transcripts"->searchAudioTranscripts(call)
-                "save_note"->{val note=repository.saveNote(call.s("title","메모"),call.s("content"),call.s("scope","default"));"메모 저장 완료 · id=${note.id}"}
+                "save_note"->{val note=repository.saveNote(call.s("title","메모"),call.s("content"),call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};"메모 저장·재조회 확인 · id=${note.id}"}
                 "search_notes"->searchNotesBounded(call)
-                "save_memory"->{val memory=repository.saveMemory(call.s("content"),call.s("kind","fact"));"승인한 기억 저장 완료 · id=${memory.id}"}
+                "save_memory"->{val memory=repository.saveMemory(call.s("content"),call.s("kind","fact"));check(repository.getMemory(memory.id)==memory){"기억 저장 후 재조회가 일치하지 않습니다."};"승인한 기억 저장·재조회 확인 · id=${memory.id}"}
                 "search_memories"->repository.searchMemories(call.s("query"),call.i("limit",5)).joinToString("\n"){"${it.id} | ${it.text}"}.ifBlank {"관련 기억이 없습니다."}
-                "delete_memory"->{repository.forgetMemory(call.s("id"));"기억과 연결된 원문·요약 삭제 완료"}
-                "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);"${scheduled.message} id=${record.id}, 시각=${call.s("datetime")}"}
-                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id);"메모 수정 완료"}
-                "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());scheduler.cancel(old.id);val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id);scheduler.schedule(record).message}
-                "delete_note"->{repository.deleteNote(call.s("id"));"메모 삭제 완료"}
-                "delete_reminder"->{scheduler.cancel(call.s("id"));repository.deleteReminder(call.s("id"));"리마인더 삭제 완료"}
+                "delete_memory"->{repository.forgetMemory(call.s("id"));check(repository.getMemory(call.s("id"))==null){"기억 삭제 후에도 레코드가 남아 있습니다."};"기억과 연결된 원문·요약 삭제 확인"}
+                "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 저장 또는 예약 큐 재조회를 확인하지 못했습니다. 중복 생성 전 기존 작업을 확인해주세요."};"${scheduled.message} 저장·예약 큐 확인 · id=${record.id}, 시각=${call.s("datetime")}"}
+                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id);check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};"메모 수정·재조회 확인"}
+                "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());scheduler.cancel(old.id);val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};scheduled.message+" 저장·예약 큐 확인"}
+                "delete_note"->{repository.deleteNote(call.s("id"));check(repository.getNote(call.s("id"))==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
+                "delete_reminder"->{scheduler.cancel(call.s("id"));repository.deleteReminder(call.s("id"));check(repository.getReminder(call.s("id"))==null){"리마인더 삭제를 확인하지 못했습니다."};"리마인더 삭제·재조회 확인"}
                 "list_calendar_events"->listCalendar(call)
                 "search_contacts"->searchContacts(call)
                 "list_messenger_notifications"->listMessengerNotifications(call)
@@ -66,8 +79,16 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "reply_messenger_notification"->replyMessengerNotification(call)
                 else->error("관련 앱의 확인 화면을 열어야 하는 도구입니다.")
             }
-            return ToolResult(call.id,true,result)
-        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){return ToolResult(call.id,false,error.message?:"도구 실행 실패")}
+            if(call.name in setOf("get_sms_summary","get_call_log_summary","list_audio_recordings")) {
+                val report=Json.parseToJsonElement(result).jsonObject
+                check(report["status"]?.jsonPrimitive?.content=="ok"){
+                    report["details"]?.jsonObject?.get("description")?.jsonPrimitive?.content?:"자료 조회 결과를 확인하지 못했습니다."
+                }
+            }
+            val prepared=call.name=="reply_messenger_notification"
+            ToolResult(call.id,true,result,if(prepared)VerificationState.PREPARED else VerificationState.VERIFIED,
+                if(prepared)"메신저 전송 요청 전달 확인 · 수신 완료는 확인되지 않음" else "기기 제공자 조회 또는 저장 후 재조회 확인")
+        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패")}
     }
     private fun ToolCall.optional(key:String)=arguments[key]?.jsonPrimitive?.content?.takeIf {it.isNotBlank()}
     private fun ToolCall.epoch(key:String)=optional(key)?.let {OffsetDateTime.parse(it).toInstant().toEpochMilli()}
@@ -115,9 +136,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         },"이미 기기에서 전사해 저장한 녹음 자료의 일부 발췌 · 미전사 파일이나 모든 녹음의 분석 결과가 아님")
     }
     private suspend fun searchNotesBounded(call:ToolCall):String {
-        val items=repository.searchNotes(call.s("query")).asSequence()
-            .filter {it.collection !in setOf("imported-chats","native-sms","audio-transcripts","rawaudio-transcripts")}
-            .filter {call.s("scope").isBlank()||it.collection==call.s("scope")}.take(call.i("limit",5).coerceIn(1,5)).toList()
+        val items=repository.searchUserNotes(call.s("query"),call.s("scope"),call.i("limit",5))
         return scoped("ordinary_notes","bounded_note_excerpts",buildJsonObject {
             put("limit",5);put("maxExcerptChars",1000)
             put("notes",buildJsonArray {items.forEach {item->add(buildJsonObject {

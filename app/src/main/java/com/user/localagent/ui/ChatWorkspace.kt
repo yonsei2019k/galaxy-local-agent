@@ -171,7 +171,7 @@ fun ChatWorkspace(
                     MenuMark(Modifier.size(20.dp))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    listOf("대화" to 0, "모델" to 1, "기억과 할 일" to 2, "문서" to 3, "자료 연결·분석" to 5, "설정" to 4).forEach { (label, section) ->
+                    listOf("대화" to 0, "문자·일정 분석" to 8, "이미지 작업실" to 7, "대화 기록" to 6, "모델" to 1, "기억과 할 일" to 2, "문서" to 3, "자료 연결·분석" to 5, "설정" to 4).forEach { (label, section) ->
                         DropdownMenuItem(text = { Text(label) }, onClick = { navigate(section) })
                     }
                 }
@@ -208,10 +208,15 @@ fun ChatWorkspace(
                 ) {
                     items(messages, key = { it.id }) { line ->
                         ZipHapChatBubble(
-                            text = line.text,
+                            text = if(line.role=="assistant")line.text.replace(Regex("\\[\\[image:image-[a-f0-9-]{36}\\.png]]"),"").replace("[[screen:sms-schedules]]","").replace("[[screen:imports]]","")else line.text,
                             fromUser = line.role == "user",
                             modifier = Modifier.testTag(if (line.role == "user") "user_message" else "assistant_message"),
                         )
+                        if(line.role=="assistant") {
+                            GeneratedImageChatPreview(line.text)
+                            if("[[screen:sms-schedules]]" in line.text)TextButton(onClick={navigate(8)}){Text("일정 후보 확인·저장 ›")}
+                            if("[[screen:imports]]" in line.text)TextButton(onClick={navigate(5)}){Text("대화 자료 연결 ›")}
+                        }
                     }
                     if (busy) {
                         item(key = "workspace_busy") {

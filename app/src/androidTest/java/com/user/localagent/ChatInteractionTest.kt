@@ -134,8 +134,8 @@ class ChatInteractionTest {
 
     private fun waitForChat() {
         compose.waitUntil(timeoutMillis = 20_000) {
-            compose.onAllNodesWithTag("chat_input").fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodesWithTag("model_selector").fetchSemanticsNodes().isNotEmpty()
+            runCatching {compose.onAllNodesWithTag("chat_input").fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithTag("model_selector").fetchSemanticsNodes().isNotEmpty()}.getOrDefault(false)
         }
     }
     private fun assistantTexts(): List<String> = compose.onAllNodesWithTag("assistant_message", useUnmergedTree = false)

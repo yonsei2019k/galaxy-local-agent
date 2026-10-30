@@ -62,6 +62,11 @@ class ReminderScheduler(private val context: Context) {
             cancel(id.hashCode()) // Clear notifications posted by the previous app version.
         }
     }
+    /** Read the persisted backup queue; scheduling success is distinct from future delivery. */
+    suspend fun verifyScheduled(record:ReminderRecord):Boolean=withContext(Dispatchers.IO) {
+        WorkManager.getInstance(context).getWorkInfosForUniqueWork(workName(record.id))
+            .get(5,TimeUnit.SECONDS).any {it.state in setOf(WorkInfo.State.ENQUEUED,WorkInfo.State.RUNNING,WorkInfo.State.BLOCKED)}
+    }
     /** At-least-once restoration: a crash after posting may repost the same stable notification tag/id. */
     suspend fun restoreAll(): Int = deliveryMutex.withLock {
         val repository = LocalRepository(context)

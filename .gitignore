@@ -14,6 +14,9 @@ local.properties
 secrets/
 *.litertlm
 *.gguf
+*.safetensors
+*.onnx
+*.tflite
 *.mnn
 *.part
 *.download

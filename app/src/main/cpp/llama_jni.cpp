@@ -1,6 +1,7 @@
 // ZipHap Android JNI adapter. Upstream llama.cpp v0.8.0 is pinned in CMakeLists.txt.
 // No network, subprocesses, tool execution, or persistent conversation history here.
 #include <jni.h>
+#include "cpu_features.h"
 #include "llama.h"
 #include "chat.h"
 #include "log.h"
@@ -43,6 +44,7 @@ void translate_exception(JNIEnv * env) {
     try { throw; }
     catch (const PendingJavaException &) { }
     catch (const Cancelled &) { throw_java(env, "java/util/concurrent/CancellationException", "Native inference cancelled"); }
+    catch (const ziphap_native::UnsupportedCpu & error) { throw_java(env, "java/lang/UnsupportedOperationException", error.what()); }
     catch (const std::invalid_argument & error) { throw_java(env, "java/lang/IllegalArgumentException", error.what()); }
     catch (const std::exception &) { throw_java(env, "java/lang/IllegalStateException", "llama.cpp model, template, allocation, or decode operation failed"); }
     catch (...) { throw_java(env, "java/lang/IllegalStateException", "Unexpected llama.cpp native failure"); }
@@ -50,6 +52,7 @@ void translate_exception(JNIEnv * env) {
 void discard_log(ggml_log_level, const char *, void *) {}
 std::once_flag backend_once;
 void initialize_backend() {
+    ziphap_native::require_fp16_dotprod_cpu();
     std::call_once(backend_once, [] {
         // Upstream parser warnings can contain full generated text. Never log user content.
         common_log_set_verbosity_thold(-1);

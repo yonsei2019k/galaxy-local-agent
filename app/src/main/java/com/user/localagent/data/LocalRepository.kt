@@ -22,6 +22,9 @@ import javax.crypto.spec.GCMParameterSpec
 @Entity(tableName="memories") data class MemoryRecord(@PrimaryKey val id:String=UUID.randomUUID().toString(),val text:String,val kind:String="fact",val sourceMessageId:String?=null,val updatedAt:Long=System.currentTimeMillis())
 @Entity(tableName="reminders") data class ReminderRecord(@PrimaryKey val id:String=UUID.randomUUID().toString(),val title:String,val atEpochMillis:Long,@ColumnInfo(name="reminder_group") val group:String="default",val status:String="pending",val updatedAt:Long=System.currentTimeMillis())
 @Entity(tableName="messages") data class MessageRecord(@PrimaryKey val id:String=UUID.randomUUID().toString(),val role:String,val text:String,val createdAt:Long=System.currentTimeMillis())
+data class MessageCursor(val createdAt:Long,val id:String)
+data class MessagePage(val messages:List<MessageRecord>,val nextCursor:MessageCursor?)
+data class ToolAuditMetadataRecord(val id:String,val name:String,val success:Boolean,val at:Long)
 @Entity(tableName="tool_runs") data class ToolRunRecord(@PrimaryKey val id:String=UUID.randomUUID().toString(),val name:String,val success:Boolean,val summary:String,val at:Long=System.currentTimeMillis())
 @Entity(tableName="grants",primaryKeys=["extensionId","codeHash","toolName","scope"]) data class GrantRecord(val extensionId:String,val codeHash:String,val toolName:String,val scope:String)
 @Entity(tableName="summaries") data class SummaryRecord(@PrimaryKey val id:String,val text:String,val sourceMessageIds:String)
@@ -31,6 +34,12 @@ import javax.crypto.spec.GCMParameterSpec
     @Query("SELECT * FROM memories ORDER BY updatedAt DESC") fun observeMemories():Flow<List<MemoryRecord>>
     @Query("SELECT * FROM reminders ORDER BY atEpochMillis") fun observeReminders():Flow<List<ReminderRecord>>
     @Query("SELECT * FROM messages ORDER BY createdAt DESC LIMIT 200") fun observeMessages():Flow<List<MessageRecord>>
+    @Query("SELECT * FROM messages WHERE (:beforeAt IS NULL OR createdAt<:beforeAt OR (createdAt=:beforeAt AND id<:beforeId)) AND (:query='' OR instr(lower(text),lower(:query))>0) ORDER BY createdAt DESC,id DESC LIMIT :limit")
+    suspend fun messageHistory(beforeAt:Long?,beforeId:String?,query:String,limit:Int):List<MessageRecord>
+    @Query("SELECT COUNT(*) FROM messages WHERE :query='' OR instr(lower(text),lower(:query))>0")
+    suspend fun messageCount(query:String):Long
+    @Query("SELECT id,name,success,at FROM tool_runs WHERE at>=:start AND at<=:end ORDER BY at DESC,id DESC LIMIT :limit")
+    suspend fun toolAuditMetadata(start:Long,end:Long,limit:Int):List<ToolAuditMetadataRecord>
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun note(value:NoteRecord)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun memory(value:MemoryRecord)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun reminder(value:ReminderRecord)
@@ -44,6 +53,8 @@ import javax.crypto.spec.GCMParameterSpec
     suspend fun carryableBuiltinGrants(oldCodeHash:String):List<GrantRecord>
     @Query("DELETE FROM grants WHERE extensionId=:extensionId") suspend fun revoke(extensionId:String)
     @Query("SELECT * FROM notes WHERE title LIKE '%' || :query || '%' ESCAPE '!' OR body LIKE '%' || :query || '%' ESCAPE '!' ORDER BY updatedAt DESC LIMIT 50") suspend fun searchNotes(query:String):List<NoteRecord>
+    @Query("SELECT * FROM notes WHERE collection NOT IN ('imported-chats','native-sms','audio-transcripts','rawaudio-transcripts','calendar-event-links','sms-schedule-candidates','generated-images') AND (:scope='' OR collection=:scope) AND (title LIKE '%' || :query || '%' ESCAPE '!' OR body LIKE '%' || :query || '%' ESCAPE '!') ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun searchUserNotes(query:String,scope:String,limit:Int):List<NoteRecord>
     @Query("SELECT * FROM memories WHERE text LIKE '%' || :query || '%' ESCAPE '!' ORDER BY updatedAt DESC LIMIT :limit") suspend fun searchMemories(query:String,limit:Int):List<MemoryRecord>
     @Query("SELECT * FROM memories WHERE text=:text LIMIT 1") suspend fun exactMemory(text:String):MemoryRecord?
     @Query("SELECT * FROM memories ORDER BY updatedAt DESC LIMIT 500") suspend fun recentMemories():List<MemoryRecord>
@@ -51,6 +62,7 @@ import javax.crypto.spec.GCMParameterSpec
     @Query("DELETE FROM memories WHERE id=:id OR text=:text OR sourceMessageId IN (SELECT id FROM messages WHERE id=:sourceId OR instr(text,:text)>0)") suspend fun removeLinkedMemories(id:String,sourceId:String,text:String)
     @Query("SELECT * FROM memories WHERE id=:id") suspend fun memoryById(id:String):MemoryRecord?
     @Query("SELECT * FROM notes WHERE id=:id") suspend fun noteById(id:String):NoteRecord?
+    @Query("SELECT * FROM notes WHERE collection=:collection ORDER BY updatedAt DESC, id DESC LIMIT 1") suspend fun latestNote(collection:String):NoteRecord?
     @Query("SELECT * FROM reminders WHERE id=:id") suspend fun reminderById(id:String):ReminderRecord?
     @Query("SELECT * FROM reminders WHERE status='pending'") suspend fun pendingReminders():List<ReminderRecord>
     @Query("UPDATE reminders SET status=:status WHERE id=:id") suspend fun reminderStatus(id:String,status:String)
@@ -73,10 +85,25 @@ class LocalRepository(context:Context) {
     private val database=DatabaseProvider.get(context.applicationContext)
     private val dao=database.dao()
     val notes=dao.observeNotes();val memories=dao.observeMemories();val reminders=dao.observeReminders();val messages=dao.observeMessages()
+    /** All stored app conversations, cursor-paged independently of the recent-200 UI flow. */
+    suspend fun messagePage(before:MessageCursor?=null,limit:Int=100,query:String=""):MessagePage {
+        require(limit in 1..200);require(query.length<=500 && '\u0000' !in query)
+        require(before==null || before.id.length in 1..100)
+        val found=dao.messageHistory(before?.createdAt,before?.id,query,limit+1)
+        val page=found.take(limit)
+        return MessagePage(page,if(found.size>limit)page.last().let {MessageCursor(it.createdAt,it.id)} else null)
+    }
+    suspend fun messageCount(query:String=""):Long {require(query.length<=500 && '\u0000' !in query);return dao.messageCount(query)}
+    /** Metadata projection deliberately excludes tool summaries and arguments. */
+    suspend fun toolAuditMetadata(start:Long,end:Long,limit:Int=1000):List<ToolAuditMetadataRecord> {
+        require(end>=start && limit in 1..1001);return dao.toolAuditMetadata(start,end,limit)
+    }
     suspend fun addMessage(role:String,text:String):String {require(role in setOf("user","assistant"));val record=MessageRecord(role=role,text=text.take(20000));dao.message(record);return record.id}
     suspend fun deleteMessage(id:String)=database.withTransaction {dao.deleteMessageMemories(id);dao.deleteMessage(id);dao.invalidateSummaries()}
     suspend fun saveNote(title:String,body:String,collection:String="default",id:String?=null):NoteRecord {require(body.isNotBlank()&&body.length<=12000);val record=NoteRecord(id?:UUID.randomUUID().toString(),title.take(300),body,collection.take(80));dao.note(record);return record}
     suspend fun searchNotes(query:String)=dao.searchNotes(escapeLike(query.take(500)))
+    suspend fun searchUserNotes(query:String,scope:String="",limit:Int=5)=dao.searchUserNotes(escapeLike(query.take(500)),scope.take(80),limit.coerceIn(1,5))
+    suspend fun latestNote(collection:String):NoteRecord? {require(collection.length<=80);return dao.latestNote(collection)}
     suspend fun saveMemory(text:String,kind:String="fact",sourceMessageId:String?=null):MemoryRecord {
         require(text.isNotBlank()&&text.length<=4000);require(kind.isNotBlank()&&kind.length<=80)
         return database.withTransaction {
@@ -148,6 +175,7 @@ class LocalRepository(context:Context) {
     suspend fun pendingReminders()=dao.pendingReminders()
     suspend fun getReminder(id:String)=dao.reminderById(id)
     suspend fun getNote(id:String)=dao.noteById(id)
+    suspend fun getMemory(id:String)=dao.memoryById(id)
     suspend fun deleteNote(id:String)=dao.deleteNote(id)
     suspend fun deleteReminder(id:String)=dao.deleteReminder(id)
     suspend fun recordToolRun(name:String,success:Boolean,summary:String)=dao.toolRun(ToolRunRecord(name=name,success=success,summary=summary.take(200)))
