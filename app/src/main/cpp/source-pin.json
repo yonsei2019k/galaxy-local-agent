@@ -1,0 +1,18 @@
+{
+  "project": "ggml-org/llama.cpp",
+  "release": "v0.8.0",
+  "releasePublishedAt": "2026-10-28T12:47:51Z",
+  "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+  "sourceUrl": "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/8642541b255bfb5dc39cd351a178be09013a55d6",
+  "sourceArchiveBytes": 38685236,
+  "sourceArchiveSha256": "1688a167a8edd9499cdd0c19b8bd044f0fa184b466981977bbf2222d884953a4",
+  "architectureImplementation": "src/models/qwen35.cpp",
+  "supportedModelArchitecture": "qwen35",
+  "backend": "CPU",
+  "threads": 4,
+  "contextTokens": 4096,
+  "maxOutputTokens": 2048,
+  "license": "MIT",
+  "weightsIncluded": false,
+  "runtimeNativeNetworkOrToolsExposed": false
+}

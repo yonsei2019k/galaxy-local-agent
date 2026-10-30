@@ -1,0 +1,12 @@
+ZipHap.Agent
+
+This application uses Google LiteRT-LM and builds on the documented on-device
+assistant and skill patterns of Google AI Edge Gallery.
+
+LiteRT-LM and AI Edge Gallery: Copyright Google LLC, Apache License 2.0.
+SQLCipher Community Edition: Copyright Zetetic LLC, see upstream license.
+Other AndroidX, Kotlin and model licenses remain with their respective authors.
+The Qwen CPU engine uses llama.cpp (ggml-org), MIT License. The exact upstream
+source pin, archive SHA-256 and license are in app/src/main/cpp/.
+
+Model weights and third-party extensions are not distributed inside the APK.

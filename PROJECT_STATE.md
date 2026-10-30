@@ -1,27 +1,35 @@
-# Galaxy Local Agent
+# ZipHap.Agent project state
 
-Status: implementation in progress; core security tests 12/12 passed. No APK installed or runtime benchmark yet.
+Updated 2026-10-30. Independent of Roblox and nurse-scheduler.
 
-Requested destination: C:\Users\VICTUS\source\galaxy-local-agent.
-Authorized writable staging: C:\Users\Public\Documents\ESTsoft\CreatorTemp\galaxy-local-agent.
-Final source will be copied to the requested destination with filesystem approval.
+## Verified
 
-Source public repository planned: yonsei2019k/galaxy-local-agent. GitHub connector authenticated; repository not created yet.
-Device: Galaxy S26 base, RAM/storage/SoC unknown. Wireless debugging enabled, pairing details pending.
-Wireless network verified locally. Network identifiers are excluded from published source.
+- Native Android app installed on Galaxy S26 base, Android17/API37, about12GB RAM/256GB storage. Package com.user.localagent and signing identity remain stable.
+- Latest installed signed APK SHA256: c05e86e07c33e367ba766e03cff93afe6b9f7ff370ed65dc2f197c0a63971d3b.
+- Core79/79 tests and release lint passed; subsequent draft-race fix assembled app/test APK successfully. Synthetic file-import/phone-record/audio-decoder/document tests19/19, encrypted memory/unload2/2, and isolated encrypted-draft3/3 passed on the phone.
+- Gemma4 E2B initial CPU4K smoke: load3891ms, TTFT1376ms, decode12.13tokens/sec, PSS1,367,901KiB. Gemma4 E4B smoke: load6151ms, TTFT3070ms, decode4.58tokens/sec.
+- E4B ten-minute endurance:609.4sec/67generations, average4.19tokens/sec, peakPSS2,916,447KiB, battery68→64%, temperature37.3→40.8°C, maxthermal2, no failure. E2B endurance was deliberately stopped for user chat; no spontaneous failure is inferred.
+- Native SYSTEM-role E2B test passed: identifies ZipHap.Agent; synthetic Kakao dialogue produced report preparation by the morning and a3PM meeting. Identity TTFT5.89sec; summary TTFT3.43sec. These are synthetic behavior observations, not whole-history analysis.
+- Qwen3.5 4B Q4_K_M (2,740,937,888bytes) installed and SHA256 verified. Official pinned llama.cpp v0.8.0 CPU4thread runtime. Smoke:load2682ms, TTFT4147ms, decode5.38tokens/sec, peakPSS3,025,903KiB. Short smoke is not endurance or answer-quality proof.
+- Qwen synthetic native tests passed: Korean/Unicode streaming, actual token counts, cancellation81ms, singleton runtime and facade reload. Korean test prefill6.6–7.1tokens/sec and first-text14–20sec show that the current portable CPU runtime is slow for long prompts; retain E2B fast default. Qwen is manually selectable for comparison.
+- Keyboard/time-rule check passed. The whole UI suite remains pending: phone switching to ChatGPT interrupted later model-picker/resident checks. A stale QA-draft race was fixed and its isolated regression test passed. No real work message was sent.
 
-Baseline empty. See CONTRACTS.md and .agent_state/locks.json for worker write scopes.
+## Implemented, with remaining workflow checks
 
-## Implementation checkpoint
+- Compose chat, same-row IME-safe composer, actual model selection, encrypted draft persistence, native system/user/history roles, bounded six-round typed tools, valid-JSON context compaction and request-scoped authority.
+- Encrypted Room/Keystore memories/notes, explicit memory approval/deletion, correction storage, reminders with AlarmManager/WorkManager recovery.
+- Conversation-file import/catalog/search/deletion; SMS read/import and call-log aggregates through granted Android providers; scoped notification-session queries. Provider tests use synthetic injected cursors, not personal records.
+- Owner-selected audio decoding into30sec mono16k WAV chunks and local Gemma transcription pipeline. Decoder tests pass; actual audio-model end-to-end smoke remains pending.
+- Native TXT/Markdown, CSV, PDF and email draft utilities. Email testing verifies correct encoded URI and extras rather than Android MailTo's double-decoding parser.
+- Optional local usage/correction analysis, foreground event coordinator, charging-only reflection proposals. Weights stay fixed; proposals need memory approval.
+- Per-app notifications, scoped fixed-template replies, deterministic user-driven screen inspector; actual Meditong/Kakao/Telegram workflows are not validated.
+- Pinned model/artifact provenance, declarative extension scanner, signed GitHub update verifier and capability/permission review.
 
-- Toolchain installed in sibling galaxy-local-agent-tools: JDK21.0.13, SDK37.0, BuildTools37.0.0, ADB37.0.1, Gradle9.5.0, GitHubCLI2.103.3.
-- Build upgraded from AGP9.0.1/Kotlin2.3 to AGP9.3.3 built-in Kotlin with Kotlin2.4.21 to support SDK37 and current LiteRT metadata without skip flags.
-- Root wrote Compose chat/models/memory UI, typed strict tool core, signed update verifier, LiteRT engine, resumable SHA256 model manager, encrypted Room repository, native tool executor, reminders and update installer.
-- Core tests: 12 tests, 0 failures. An earlier empty core NO-SOURCE run is not counted as testing.
-- Worker checkpoints did not arrive; agents interrupted before any files appeared. All write locks reassigned to root after checking baseline.
-- Android full compile underway; first run preceded data/scheduler writes and failed on missing imports plus Message.text API mismatch. Message.toString verified with actual library bytecode and used instead.
-- GitHub workflow and manifest signing script written; not executed remotely. GitHub connector authenticated as yonsei2019k; CLI device login expired without confirmation, must restart when user ready.
-- Phone discovered on the local network; initial pairing did not complete. Current pairing endpoint pending. No phone connection yet. Never commit pairing codes, network identifiers, device serials or runtime logs.
-- Extension runner/MCP/media/semantic embedding/native GGUF engine, full benchmark/export, grants UI and update UI integration still pending. Main UI extension screen explicitly says integration incomplete.
-- Signing key generation script exists outside repo but not yet run. Public trust file currently empty, updates fail closed.
-- First debug APK built successfully after integration. Core tests12/12 passed. Device install and runtime inference remain unverified.
+## Remaining
+
+- Finish foreground UI validation when the phone is available; test actual user-selected audio, restart/reminder recovery and app-specific adapters.
+- Offline-only APK/network-denied inference verification; wireless ADB and the user's ChatGPT connection must remain available.
+- Source publication/remote CI/signed release/phone OTA and final dedicated-source handoff are being completed.
+- No general DOCX/XLSX editor, OCR, image/video generation engine, executable MCP installer, unrestricted app-private database access or autonomous all-app operation.
+
+Private signing material, reports/screenshots, device identity, personal content and model weights stay outside Git. Previously authorized pairing and setup must not be requested again.

@@ -13,19 +13,20 @@ The `core` JVM module has no Android dependencies. App code uses `kotlinx.serial
 - Update and extension parsing/verification utilities; canonical signed payload is base64 JSON bytes signed with Ed25519, verified before JSON decode. Do not trust hashes without pinned signer.
 
 ## App shared contracts (root owner)
-`AppContainer(context)` owns singleton `LocalRepository`, `ModelManager`, `LiteRtInferenceEngine`, `ToolExecutor`, `ReminderScheduler`.
+`AppContainer(context)` owns singleton `LocalRepository`, `ModelManager`, `LocalInferenceEngine`, `ConversationImport`, `PhoneRecords`, `ToolExecutor`, `ReminderScheduler`.
 
 ## Inference/models owner
 Package `com.user.localagent.inference`:
-`data class InferenceOptions(val contextSize:Int=4096,val thinking:Boolean=false,val backend:String="CPU")`
-`interface InferenceEngine { suspend fun load(path:String, options:InferenceOptions); fun generate(prompt:String): Flow<String>; suspend fun unload(); fun cancel() }`
+`InferenceOptions(contextSize=4096, thinking=false, backend="CPU", maxOutputTokens=512, audioEnabled=false, visionEnabled=false)`
+`InferenceEngine` exposes load/generate/generateChat/transcribeAudio/unload/cancel plus state, residentModelPath and actual native lastMetrics. `generateChat(userText,systemInstruction,history)` preserves model roles.
+`LocalInferenceEngine` serializes full requests and runtime replacement, releasing old weights before loading another model. LiteRT-LM handles `.litertlm`; the pinned llama.cpp JNI handles CPU `.gguf` text. No native tool execution.
 `class LiteRtInferenceEngine(context: Context) : InferenceEngine` using LiteRT-LM 0.18.1; never automatically executes tools.
 Package `com.user.localagent.models`: `ModelManager(context)`, `ModelDescriptor(id,title,url,sha256,sizeBytes,runtime)`, model import/download/verify/delete/scan. Public APIs coordinate with root through messages before changing.
 Package `com.user.localagent.benchmark`: benchmark runner with JSON/CSV export, actual measured values only; unsupported metrics null and recorded as unsupported.
 
 ## Data/tools/scheduling owner
 `LocalRepository(context)` in `com.user.localagent.data`: encrypted Room, conversations/notes/memories/reminders/tool_runs/grants, public suspend methods and Flow observers; publish signatures before integration.
-`ToolExecutor(context, repository, scheduler)` in `.tools`: `suspend fun execute(call: ToolCall): ToolResult`, `fun prepareIntent(call): Intent?`; Activity launch is root UI responsibility.
+`ToolExecutor(context, repository, scheduler, conversationImports, phoneRecords)` in `.tools`: `suspend fun execute(call: ToolCall): ToolResult`, `fun prepareIntent(call): Intent?`; Activity launch is root UI responsibility. Read results carry source/connection/partial scope. `compactJsonData` preserves valid JSON under prompt limits.
 `ReminderScheduler(context)` in `.scheduling`: schedule/cancel/restore; `AlarmManager` exact where allowed, fallback status explicit; persistent WorkManager for inexact work.
 
 ## Ownership

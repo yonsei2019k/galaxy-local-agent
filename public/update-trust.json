@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "keys": {
+    "release-1": "MCowBQYDK2VwAyEAAaJezA3MQcYDoSn5V2DRVsILQLhKDIUU8cxghocYeF0="
+  },
+  "apkCertificateSha256": "a74bbfeb00c631ead95cf64554d7409d3b8ce9fa6364fbd3a42603efb9ec9461",
+  "approvedCapabilities": [
+    "alarm.prepare",
+    "audio.read",
+    "audio.transcribe_local",
+    "background.orchestrate",
+    "calendar.prepare",
+    "calendar.read",
+    "calllog.read",
+    "contacts.read",
+    "conversation.import",
+    "datetime.read",
+    "document.read",
+    "document.write",
+    "email.compose",
+    "email.prepare",
+    "inference.gguf_cpu",
+    "map.open",
+    "memory.read",
+    "memory.write",
+    "note.read",
+    "note.write",
+    "notification.events",
+    "notification.message.read",
+    "notification.reply.rules",
+    "pdf.create",
+    "pdf.inspect",
+    "reminder.write",
+    "screen.inspect",
+    "screen.user_action",
+    "sms.prepare",
+    "sms.read",
+    "spreadsheet.read_csv",
+    "spreadsheet.write_csv",
+    "url.open",
+    "usage.read"
+  ]
+}
