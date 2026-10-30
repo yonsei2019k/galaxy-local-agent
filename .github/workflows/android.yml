@@ -28,8 +28,7 @@ jobs:
       - name: Install pinned Android SDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865' 'cmake;3.22.1'
+          bash scripts/setup-android.sh 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865' 'cmake;3.22.1'
       - name: Compile and test
         shell: bash
         run: |
@@ -70,7 +69,7 @@ jobs:
           path: unsigned
       - name: Install signing dependencies
         run: |
-          sdkmanager 'build-tools;37.0.0'
+          bash scripts/setup-android.sh 'build-tools;37.0.0'
           python -m pip install --disable-pip-version-check -r scripts/ci-requirements.txt
       - name: Sign verified artifact and manifest
         shell: bash
