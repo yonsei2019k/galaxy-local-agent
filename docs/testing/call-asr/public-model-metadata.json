@@ -1,0 +1,48 @@
+[
+  {
+    "id": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "license": "mit",
+    "files": [
+      {
+        "path": "ggml-large-v3-turbo-q5_0.bin",
+        "bytes": 574041195,
+        "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+      },
+      {
+        "path": "ggml-large-v3-turbo-q8_0.bin",
+        "bytes": 874188075,
+        "sha256": "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1"
+      },
+      {
+        "path": "ggml-large-v3-turbo.bin",
+        "bytes": 1624555275,
+        "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
+      }
+    ]
+  },
+  {
+    "id": "FunAudioLLM/SenseVoiceSmall",
+    "revision": "3847d57b6bdf2dd8875cb1508d2af43d80a16bf7",
+    "license": "other",
+    "files": []
+  },
+  {
+    "id": "Qwen/Qwen3-ASR-1.7B",
+    "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+    "license": "apache-2.0",
+    "files": []
+  },
+  {
+    "id": "ghost613/whisper-large-v3-turbo-korean",
+    "revision": "eddbfbef75b14ff0106c8275ddf5ad2b00f0b0a4",
+    "license": null,
+    "files": [
+      {
+        "path": "model.safetensors",
+        "bytes": 3235581408,
+        "sha256": "a12f5c9339407b9f110329afb432de6e6fb61fd053408f4627d8d3f2c80867f2"
+      }
+    ]
+  }
+]

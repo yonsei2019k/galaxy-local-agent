@@ -27,16 +27,30 @@ data class DownloadProgress(val title: String, val bytes: Long, val total: Long,
 
 class ModelManager(private val context: Context) {
     val candidates = listOf(
-        ModelCandidate("gemma-e2b", "Gemma 4 E2B · 기본 비교", "litert-community/gemma-4-E2B-it-litert-lm", "litertlm"),
-        ModelCandidate("gemma-e4b", "Gemma 4 E4B · 품질 비교", "litert-community/gemma-4-E4B-it-litert-lm", "litertlm"),
+        ModelCandidate("gemma-e2b", "Gemma 4 E2B · HauhauCS Aggressive IQ3_M", "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive", "gguf"),
+        ModelCandidate("gemma-e2b-media", "Gemma 4 E2B · 음성·사진 전용", "litert-community/gemma-4-E2B-it-litert-lm", "litertlm"),
+        ModelCandidate("gemma-e4b", "Gemma 4 E4B · HauhauCS Aggressive Q4_K_M", "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive", "gguf"),
+        ModelCandidate("gemma-e2b-mmproj", "Gemma 4 E2B · 음성·사진 지원 파일", "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive", "gguf"),
+        ModelCandidate("gemma-e4b-mmproj", "Gemma 4 E4B · 음성·사진 지원 파일", "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive", "gguf"),
+        ModelCandidate("asr-qwen-06b", "Qwen3-ASR 0.6B · 가벼운 음성 인식", "ggml-org/Qwen3-ASR-0.6B-GGUF", "gguf"),
+        ModelCandidate("asr-qwen-06b-mmproj", "Qwen3-ASR 0.6B · 음성 입력 지원 파일", "ggml-org/Qwen3-ASR-0.6B-GGUF", "gguf"),
+        ModelCandidate("asr-qwen-17b", "Qwen3-ASR 1.7B · 정확도 우선 음성 인식", "ggml-org/Qwen3-ASR-1.7B-GGUF", "gguf"),
+        ModelCandidate("asr-qwen-17b-mmproj", "Qwen3-ASR 1.7B · 음성 입력 지원 파일", "ggml-org/Qwen3-ASR-1.7B-GGUF", "gguf"),
         ModelCandidate("qwen-06b", "Qwen3 0.6B · 가벼운 CPU 대안", "litert-community/Qwen3-0.6B", "litertlm"),
         ModelCandidate("qwen-2b", "Qwen3.5 2B · CPU 대안", "unsloth/Qwen3.5-2B-GGUF", "gguf"),
         ModelCandidate("qwen-4b", "Qwen3.5 4B · 품질 비교", "unsloth/Qwen3.5-4B-GGUF", "gguf"),
     )
     // Generic artifacts are explicit. Alphabetical/CPU-substring sorting can select GPU-only or NPU bundles.
     private val genericFiles = mapOf(
-        "gemma-e2b" to "gemma-4-E2B-it.litertlm",
-        "gemma-e4b" to "gemma-4-E4B-it.litertlm",
+        "gemma-e2b" to "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf",
+        "gemma-e2b-media" to "gemma-4-E2B-it.litertlm",
+        "gemma-e4b" to "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+        "gemma-e2b-mmproj" to "mmproj-Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+        "gemma-e4b-mmproj" to "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+        "asr-qwen-06b" to "Qwen3-ASR-0.6B-Q8_0.gguf",
+        "asr-qwen-06b-mmproj" to "mmproj-Qwen3-ASR-0.6B-bf16.gguf",
+        "asr-qwen-17b" to "Qwen3-ASR-1.7B-Q8_0.gguf",
+        "asr-qwen-17b-mmproj" to "mmproj-Qwen3-ASR-1.7B-bf16.gguf",
         "qwen-06b" to "Qwen3-0.6B.litertlm",
         "qwen-2b" to "Qwen3.5-2B-Q4_K_M.gguf",
         "qwen-4b" to "Qwen3.5-4B-Q4_K_M.gguf",
@@ -54,6 +68,97 @@ class ModelManager(private val context: Context) {
     private data class Verification(val size: Long, val modified: Long, val expected: String)
     private val verificationCache = mutableMapOf<String, Verification>()
 
+    private val mutableMediaSelection = MutableStateFlow(MediaSelection(
+        selected.getString("audio-id", "gemma-e2b") ?: "gemma-e2b",
+        selected.getString("vision-id", "gemma-e2b") ?: "gemma-e2b"))
+    val mediaSelection: StateFlow<MediaSelection> = mutableMediaSelection.asStateFlow()
+
+    fun mediaReady(model: InstalledModel): Boolean = model.id in GemmaMediaCatalog.modelIds && model.runtime == "gguf" && model.verified &&
+        mutableModels.value.any { it.id == model.id + "-mmproj" && it.verified && File(it.path).isFile }
+
+    fun mediaModel(purpose: String): InstalledModel {
+        require(purpose in setOf("audio", "vision"))
+        val id = if (purpose == "audio") mediaSelection.value.audio else mediaSelection.value.vision
+        return mutableModels.value.firstOrNull { it.id == id && mediaReady(it) }
+            ?: error("모델 화면에서 선택한 Gemma의 음성·사진 지원 파일을 먼저 내려받아주세요.")
+    }
+
+    suspend fun selectMedia(purpose: String, id: String) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            require(purpose in setOf("audio", "vision"))
+            val model = mutableModels.value.firstOrNull { it.id == id } ?: error("모델 없음")
+            require(mediaReady(model)) { "검증된 Gemma 모델과 음성·사진 지원 파일이 필요합니다." }
+            check(selected.edit().putString("$purpose-id", id).commit())
+            mutableMediaSelection.value = if (purpose == "audio") mutableMediaSelection.value.copy(audio=id) else mutableMediaSelection.value.copy(vision=id)
+        }
+    }
+
+    fun mediaOptions(model: InstalledModel, audio: Boolean): com.user.localagent.inference.InferenceOptions {
+        require(mediaReady(model))
+        val projector = mutableModels.value.single { it.id == model.id + "-mmproj" && it.verified }
+        return com.user.localagent.inference.InferenceOptions(contextSize=4096, thinking=false, backend="CPU",
+            maxOutputTokens=if(audio)512 else 256, audioEnabled=audio, visionEnabled=!audio,
+            projectorPath=projector.path, cpuThreads=if(model.id=="gemma-e4b")2 else 4)
+    }
+
+    suspend fun downloadBundle(candidate: ModelCandidate) {
+        download(resolve(candidate))
+        if (candidate.id in GemmaMediaCatalog.modelIds || candidate.id in AsrCatalog.modelIds) download(resolve(candidates.single { it.id == candidate.id + "-mmproj" }))
+    }
+
+    /** Called only for the owner's explicit legacy cleanup after both new media models pass QA. */
+    suspend fun deleteLegacyGemma(): Long = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            require(GemmaMediaCatalog.modelIds.all { id -> mutableModels.value.any { it.id == id && mediaReady(it) } })
+            val legacy = Regex("gemma-e[24]b(?:-media)?-[a-f0-9]{12}\\.litertlm(?:\\.part)?")
+            var bytes = 0L
+            directory.listFiles().orEmpty().filter { it.isFile && legacy.matches(it.name) }.forEach { file ->
+                bytes += file.length(); deleteFixedFile(file); verificationCache.remove(file.canonicalPath)
+            }
+            saveIndex(mutableModels.value.filterNot { it.id == "gemma-e2b-media" || it.id in GemmaMediaCatalog.modelIds && it.runtime == "litertlm" })
+            require(directory.listFiles().orEmpty().none { legacy.matches(it.name) })
+            bytes
+        }
+    }
+
+    private val mutableAsrSelection=MutableStateFlow(AsrSelection(
+        selected.getString("asr-id",AsrCatalog.DEFAULT_MODEL)?:AsrCatalog.DEFAULT_MODEL,
+        selected.getString("asr-language","ko")?:"ko"))
+    val asrSelection:StateFlow<AsrSelection> = mutableAsrSelection.asStateFlow()
+    private val mutableDeviceAsrStatus=MutableStateFlow(DeviceAsrStatus())
+    val deviceAsrStatus:StateFlow<DeviceAsrStatus> = mutableDeviceAsrStatus.asStateFlow()
+    suspend fun prepareDeviceAsr(download:Boolean=false) {
+        mutableDeviceAsrStatus.value=com.user.localagent.inference.SystemAsrEngine.prepare(asrSelection.value.language,download)
+    }
+    fun asrReady(id:String):Boolean = id in AsrCatalog.modelIds &&
+        mutableModels.value.any {it.id==id&&it.verified&&File(it.path).isFile} &&
+        mutableModels.value.any {it.id=="$id-mmproj"&&it.verified&&File(it.path).isFile}
+    fun asrModel():InstalledModel {
+        val id=asrSelection.value.modelId
+        if(id==AsrCatalog.DEVICE_MODEL)return InstalledModel(id,"기기 내 음성 AI · ML Kit",AsrCatalog.DEVICE_PATH,"",true,"aicore")
+        require(asrReady(id)){"모델 화면에서 선택한 전용 음성 인식 모델과 지원 파일을 먼저 내려받아주세요."}
+        return mutableModels.value.single {it.id==id&&it.verified}
+    }
+    fun asrOptions(model:InstalledModel):com.user.localagent.inference.InferenceOptions {
+        if(model.id==AsrCatalog.DEVICE_MODEL)return com.user.localagent.inference.InferenceOptions(contextSize=2048,audioEnabled=true)
+        require(asrReady(model.id))
+        val projector=mutableModels.value.single {it.id==model.id+"-mmproj"&&it.verified}
+        return com.user.localagent.inference.InferenceOptions(contextSize=2048,thinking=false,backend="CPU",maxOutputTokens=512,
+            audioEnabled=true,projectorPath=projector.path,cpuThreads=if(model.id=="asr-qwen-17b")2 else 4)
+    }
+    suspend fun selectAsr(id:String)=withContext(Dispatchers.IO){mutex.withLock {
+        require(if(id==AsrCatalog.DEVICE_MODEL)mutableDeviceAsrStatus.value.available&&asrSelection.value.language!="auto" else asrReady(id)){"음성 모델의 다운로드 또는 기기 내 AI의 지원 확인이 필요합니다."}
+        check(selected.edit().putString("asr-id",id).commit())
+        mutableAsrSelection.value=mutableAsrSelection.value.copy(modelId=id)
+    }}
+    suspend fun selectAsrLanguage(language:String)=withContext(Dispatchers.IO){mutex.withLock {
+        require(language in setOf("ko","en","auto"))
+        require(language!="auto"||asrSelection.value.modelId!=AsrCatalog.DEVICE_MODEL){"기기 내 음성 AI는 한국어 또는 영어를 지정해주세요."}
+        check(selected.edit().putString("asr-language",language).commit())
+        mutableAsrSelection.value=mutableAsrSelection.value.copy(language=language)
+        mutableDeviceAsrStatus.value=DeviceAsrStatus()
+    }}
+
     suspend fun refresh() = withContext(Dispatchers.IO) { mutex.withLock { refreshInternal() } }
 
     private suspend fun refreshInternal() {
@@ -69,9 +174,17 @@ class ModelManager(private val context: Context) {
             throw IllegalStateException("모델 목록 파일을 읽을 수 없습니다. 기존 모델 파일은 유지됩니다.", error)
         }
         require(values.size <= 100 && values.map { it.id }.distinct().size == values.size) { "모델 목록이 유효하지 않습니다." }
+        // Keep the original multimodal E2B when replacing its chat weights with GGUF.
+        // The alias retains the original file in place; no weights are copied or deleted.
+        val legacyMedia = values.firstOrNull { it.id == "gemma-e2b" && it.runtime == "litertlm" }
+        val current = if (legacyMedia == null) values else {
+            values.filterNot { it.id == legacyMedia.id } +
+                if (values.any { it.id == "gemma-e2b-media" }) emptyList() else
+                    listOf(legacyMedia.copy(id = "gemma-e2b-media", title = candidates.first { it.id == "gemma-e2b-media" }.title))
+        }
         val checked = mutableListOf<InstalledModel>()
         try {
-            for (model in values) {
+            for (model in current) {
                 currentCoroutineContext().ensureActive()
                 val file = managedFile(model) ?: continue
                 if (!file.isFile) continue
@@ -90,6 +203,7 @@ class ModelManager(private val context: Context) {
 
     suspend fun resolve(candidate: ModelCandidate): ModelDescriptor = withContext(Dispatchers.IO) {
         require(candidate in candidates && candidate.runtime in setOf("litertlm", "gguf")) { "지원하지 않는 실행 엔진입니다." }
+        AsrCatalog.descriptors[candidate.id]?.let {return@withContext it}
         val expectedName = genericFiles.getValue(candidate.id)
         val connection = connection("https://huggingface.co/api/models/${candidate.repository}?blobs=true")
         val root = try {
@@ -255,6 +369,7 @@ class ModelManager(private val context: Context) {
     }
 
     suspend fun select(id: String) = withContext(Dispatchers.IO) {
+        require(!GemmaMediaCatalog.auxiliary(id)) { "음성·사진 지원 파일은 대화 모델로 선택할 수 없습니다." }
         mutex.withLock {
             val model = mutableModels.value.find { it.id == id } ?: error("모델 없음")
             require(model.runtime in setOf("litertlm", "gguf")) { "지원하지 않는 실행 엔진입니다." }
@@ -300,7 +415,9 @@ class ModelManager(private val context: Context) {
         if (!importId(model.id) && candidates.none { it.id == model.id }) return null
         val file = File(model.path)
         val safeName = if (importId(model.id)) file.name == "${model.id}.${model.runtime}" else Regex("${Regex.escape(model.id)}-[a-f0-9]{12}\\.${Regex.escape(model.runtime)}").matches(file.name)
-        return if (safeName && file.canonicalFile.parentFile == directory.canonicalFile && file.canonicalFile.name == file.name) file else null
+        val legacyMediaName = model.id == "gemma-e2b-media" && model.runtime == "litertlm" &&
+            file.name == "gemma-e2b-${model.sha256.take(12)}.litertlm"
+        return if ((safeName || legacyMediaName) && file.canonicalFile.parentFile == directory.canonicalFile && file.canonicalFile.name == file.name) file else null
     }
 
     private fun importId(id: String): Boolean = runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)

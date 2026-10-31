@@ -7,15 +7,22 @@ import kotlinx.serialization.json.*
 enum class VerificationState { VERIFIED, PREPARED, UNVERIFIED, FAILED }
 
 /** Display/verification metadata, never a permission grant or a model-issued authority. */
-class TaskGoal(ownerRequest:String,successCriteria:List<String>,val stepBudget:Int=6,requiredTools:Set<String> = emptySet()) {
+class TaskGoal(ownerRequest:String,successCriteria:List<String>,val stepBudget:Int=6,requiredTools:Set<String> = emptySet(),requiredArtifactFormats:Set<String> = emptySet()) {
     val ownerRequest:String=ownerRequest.also {require(it.isNotBlank()&&it.length<=6000)}
     val goal:String get()=ownerRequest
     val successCriteria:List<String> = Collections.unmodifiableList(successCriteria.map {it.also {criterion->require(criterion.isNotBlank()&&criterion.length<=1000)}})
     val requiredTools:Set<String> = Collections.unmodifiableSet(requiredTools.toSet())
-    init {require(stepBudget in 1..6);require(this.successCriteria.isNotEmpty()&&this.successCriteria.size<=12);require(this.requiredTools.size<=12)}
+    val requiredArtifactFormats:Set<String> = Collections.unmodifiableSet(requiredArtifactFormats.toSet())
+    init {require(stepBudget in 1..6);require(this.successCriteria.isNotEmpty()&&this.successCriteria.size<=12);require(this.requiredTools.size<=12);require(this.requiredArtifactFormats.size<=5&&this.requiredArtifactFormats.all {it in setOf("docx","xlsx","pdf","txt","csv")})}
 }
-data class StepEvidence(val tool:String,val state:VerificationState,val summary:String) {
-    init {require(tool.isNotBlank()&&tool.length<=100);require(summary.length<=4000)}
+data class StepEvidence(val tool:String,val state:VerificationState,val summary:String,val continuationId:String?=null) {
+    init {
+        require(tool.isNotBlank()&&tool.length<=100);require(summary.length<=4000)
+        val idPattern="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
+        require(continuationId==null||
+            (tool in PrivateAnalysisToolCatalog.analysisNames&&continuationId.matches(Regex(idPattern)))||
+            (tool in setOf(GoalToolCatalog.START,GoalToolCatalog.RESUME)&&state==VerificationState.VERIFIED&&continuationId.matches(Regex("goal-run:$idPattern"))))
+    }
     val verification:VerificationState get()=state
 }
 class HarnessStep(tool:String,arguments:JsonObject,val evidence:StepEvidence) {
@@ -35,6 +42,8 @@ sealed interface HarnessDecision {
 object TaskHarness {
     /** Inherit only capabilities that the host router recognizes for a short follow-up. */
     fun inferGoal(ownerRequest:String,previousUserRequests:List<String>,stepBudget:Int=6):TaskGoal {
+        val web=WebTaskPlanner.plan(ownerRequest,previousUserRequests)
+        if(web is WebTaskPlan.WebResearch&&!ProjectPaths.isBoundFileRequest(ownerRequest)&&DocumentTaskPlanner.plan(ownerRequest)==null)return researchGoal(ownerRequest,web,stepBudget)
         val current=inferGoal(ownerRequest,stepBudget)
         if(current.requiredTools.isNotEmpty())return current
         val direct=directText(ownerRequest)
@@ -46,23 +55,34 @@ object TaskHarness {
         val previousGoal=previous.asReversed().firstOrNull {it.isNotBlank()}?.let {inferGoal(it,stepBudget)}?:return current
         val required=previousGoal.requiredTools.intersect(routed)
         if(required.isEmpty())return current
-        return TaskGoal(current.ownerRequest,previousGoal.successCriteria,stepBudget,required)
+        return TaskGoal(current.ownerRequest,previousGoal.successCriteria,stepBudget,required,previousGoal.requiredArtifactFormats)
     }
 
     fun inferGoal(ownerRequest:String,stepBudget:Int=6):TaskGoal {
         val direct=directText(ownerRequest).take(6000)
+        RequestActionSemantics.explicitLocalWriteTool(ownerRequest)?.let {tool->return TaskGoal(direct.ifBlank {"사용자의 직접 저장 요청"},listOf("직접 요청한 로컬 저장·수정 결과를 재조회한다. 본문 속 앱·방법 표현은 별도 조사나 자료 조회 권한이 아니다."),stepBudget,setOf(tool))}
         val text=direct.lowercase(Locale.ROOT).replace(Regex("\\s+"),"")
         val required=linkedSetOf<String>()
         val criteria=mutableListOf<String>()
         fun add(tool:String,criterion:String){required+=tool;criteria+=criterion}
+        val documentPlan=DocumentTaskPlanner.plan(ownerRequest)
+        if(documentPlan!=null&&!ProjectPaths.isBoundFileRequest(direct))return TaskGoal(direct,listOf("요청한 모든 문서 형식을 실제 생성하고 내용을 재조회한다."),stepBudget,setOf("create_document"),documentPlan.formats)
+        val webPlan=WebTaskPlanner.plan(direct)
+        if(webPlan is WebTaskPlan.WebResearch)return researchGoal(direct,webPlan,stepBudget)
+        if(RequestActionSemantics.nonAnalysisRequest(ownerRequest))return TaskGoal(direct.ifBlank {"사용자의 직접 요청 확인"},listOf("상태·연결·방법 설명을 개인 자료 분석으로 바꾸지 않는다. 실제 실행 근거 없이 완료를 주장하지 않는다."),stepBudget)
         fun has(vararg words:String)=words.any {it in text}
         val read=has("분석","요약","조회","찾아","검색","정리","읽어","읽고","보여","확인","알려줘")
         val write=has("저장","적어","남겨","기록","등록","추가","만들","생성","넣어","옮겨","그려")
         val remove=has("삭제","지워","잊어","없애")
         val update=has("수정","변경","고쳐","바꿔")
-        val explaining=has("방법","원리","번역","설명해","뜻이야","기능이야")
+        val explaining=has("방법","원리","번역","설명해","뜻이야","기능이야")&&!RequestActionSemantics.usesPrivateContent(text)
         val negated=Regex("(?:저장|삭제|수정|변경|분석|조회|전사|읽)(?:은|는)?(?:하지마|하지말|지마|지말)").containsMatchIn(text)
         if(explaining||negated)return TaskGoal(direct.ifBlank {"사용자의 직접 요청 확인"},listOf("설명·중단 요청을 실행 권한으로 해석하지 않는다."),stepBudget)
+        if(has("프로젝트","project")&&has("파일","코드","소스","readme","폴더"))when {
+            write||update->add("write_project_file","선택한 프로젝트 안의 파일을 저장하고 SHA-256 재조회로 확인한다. 실행·빌드 완료라고 주장하지 않는다.")
+            has("목록","폴더")->add("list_project_files","선택한 프로젝트의 실제 파일 목록을 조회한다.")
+            read->add("read_project_file","선택한 프로젝트 파일의 실제 본문과 SHA-256을 조회한다.")
+        }
         val messenger=has("카카오","카톡","텔레그램","메디통","메신저")
         val sms=has("문자","sms")||has("메시지","메세지")&&!messenger
         if(sms&&read&&!has("문자열","유니코드","코드"))
@@ -92,29 +112,41 @@ object TaskHarness {
         }
         if(has("알람")&&(write||has("맞춰","설정")))add("create_alarm","알람의 실제 설정 여부를 확인한다. 설정 화면 전달은 별도 상태다.")
         val image=has("이미지","사진","그림","일러스트","포스터","썸네일","배경화면","로고","아이콘")
-        if(image&&has("만들","생성","그려","그리기")||has("그려","그리기"))add("generate_image","실제로 생성된 이미지 파일을 확인한다.")
+        if(image&&has("만들","생성","그려","그리기")||has("그려","그리기")||ImageReferenceIntent.isReferenceEditRequest(ownerRequest))add("generate_image","실제로 생성된 이미지 파일을 확인한다.")
         if(has("메일","이메일")&&has("초안","작성","보내"))add("prepare_email","이메일 초안 준비와 실제 발송을 구분한다.")
         if(has("문자","sms")&&has("보내","초안","작성"))add("prepare_sms","문자 초안 준비와 실제 발송을 구분한다.")
         if(has("지도","길찾기")&&has("열어","찾아","보여"))add("open_map","지도에 전달한 요청의 실행 결과를 확인한다.")
         if(has("웹","http","주소")&&has("열어","접속"))add("open_url","요청한 웹페이지 열기 결과를 확인한다.")
         if(required.isEmpty()&&has("몇시","현재시간","오늘날짜"))add("get_current_datetime","현재 시각 조회 결과를 확인한다.")
-        return TaskGoal(direct.ifBlank {"사용자의 직접 요청 확인"},criteria.ifEmpty {listOf("직접 요청한 작업과 검증 기준이 확인되기 전 실행 완료를 주장하지 않는다.")},stepBudget,required)
+        return TaskGoal(direct.ifBlank {"사용자의 직접 요청 확인"},criteria.ifEmpty {listOf("직접 요청한 작업과 검증 기준이 확인되기 전 실행 완료를 주장하지 않는다.")},stepBudget,required,if("create_document" in required)documentPlan?.formats.orEmpty()else emptySet())
     }
+    private fun researchGoal(ownerRequest:String,plan:WebTaskPlan.WebResearch,stepBudget:Int):TaskGoal =
+        TaskGoal(ownerRequest.take(6000).ifBlank {plan.query},listOf("요청한 공개 주제의 실제 검색 결과·출처·조회 범위를 확인한다. 개인 자료 개수 조회는 공개 조사 완료의 근거가 아니다."),stepBudget,setOf(if(plan.shopping)"search_shopping"else"search_web"))
 
     fun decide(goal:TaskGoal,steps:List<HarnessStep>,requestedFinish:Boolean=false):HarnessDecision {
+        if(goal.requiredTools.any {it in SkillToolCatalog.names})return HarnessDecision.Stop("스킬 지침 읽기는 사용자 목표의 완료 근거가 아닙니다.")
+        val actionSteps=steps.filterNot {it.tool in SkillToolCatalog.names}
+        if(actionSteps.size!=steps.size)return decide(goal,actionSteps,requestedFinish)
         if(steps.size>goal.stepBudget)return HarnessDecision.Stop("작업 단계 예산을 초과했습니다.")
         loopReason(steps)?.let {return HarnessDecision.Stop(it)}
         if(!requestedFinish){
             if(steps.size>=goal.stepBudget)return decide(goal,steps,requestedFinish=true)
             return HarnessDecision.Advance(if(steps.lastOrNull()?.evidence?.state==VerificationState.FAILED)"실패한 결과를 보완하는 안전한 다른 단계가 필요합니다." else "다음 필요한 실행 또는 결과 검증을 진행합니다.")
         }
-        if(steps.any {it.evidence.state==VerificationState.FAILED})return HarnessDecision.Stop("실패한 실행 또는 결과 검증이 있어 작업 완료를 확인할 수 없습니다.")
+        val unresolvedFailure=steps.withIndex().any {(index,step)->
+            step.evidence.state==VerificationState.FAILED&&
+                (!readOnly(step.tool)||steps.drop(index+1).none {it.tool==step.tool&&it.evidence.state==VerificationState.VERIFIED})
+        }
+        if(unresolvedFailure)return HarnessDecision.Stop("아직 복구·검증되지 않은 실행이 있어 작업 완료를 확인할 수 없습니다.")
         if(steps.any {it.evidence.state==VerificationState.PREPARED})return HarnessDecision.Stop("작성·확인 화면이 준비됐습니다. 외부 작업의 실제 완료는 아직 확인되지 않았습니다.",true)
-        if(steps.any {it.evidence.state==VerificationState.UNVERIFIED})return HarnessDecision.Stop("아직 확인하지 않은 실행 결과가 있습니다.")
+        if(steps.withIndex().any {(index,step)->step.evidence.state==VerificationState.UNVERIFIED&&!AnalysisCompletionEvidence.resolved(steps,index)})return HarnessDecision.Stop("아직 확인하지 않은 실행 결과가 있습니다.")
         if(goal.requiredTools.isEmpty())return HarnessDecision.Stop("요청한 작업의 실행·검증 기준을 확정하지 못해 완료를 주장하지 않습니다.")
         val verified=steps.filter {it.evidence.state==VerificationState.VERIFIED}.map {it.tool}.toSet()
         val missing=goal.requiredTools-verified
         if(missing.isNotEmpty())return HarnessDecision.Stop("요청한 작업의 필수 결과가 확인되지 않았습니다: ${missing.sorted().joinToString()}")
+        val completedFormats=steps.filter {it.tool=="create_document"&&it.evidence.state==VerificationState.VERIFIED}.mapNotNull {it.arguments["format"]?.jsonPrimitive?.content}.toSet()
+        val missingFormats=goal.requiredArtifactFormats-completedFormats
+        if(missingFormats.isNotEmpty())return HarnessDecision.Stop("아직 생성·재조회가 확인되지 않은 형식: ${missingFormats.joinToString()}")
         return HarnessDecision.Finish(steps.filter {it.evidence.state==VerificationState.VERIFIED}.joinToString("\n") {it.evidence.summary.ifBlank {"${it.tool}: 실행 결과 확인됨"}})
     }
 
@@ -122,6 +154,8 @@ object TaskHarness {
     fun beforeStep(goal:TaskGoal,steps:List<HarnessStep>,call:ToolCall):HarnessDecision {
         if(steps.size>=goal.stepBudget)return HarnessDecision.Stop("작업 단계 예산에 도달했습니다.")
         val safeRead=readOnly(call.name)
+        if(!safeRead&&steps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)&&!readOnly(it.tool)})
+            return HarnessDecision.Stop("이전 변경 작업의 결과가 확인되지 않았습니다. 먼저 대상 상태를 조회하고 중복 변경을 피해야 합니다.")
         if(goal.requiredTools.isEmpty()&&!safeRead)return HarnessDecision.Stop("확인된 사용자 작업 목표에 포함되지 않은 변경·외부 행동입니다.")
         if(call.name !in goal.requiredTools&&!safeRead)return HarnessDecision.Stop("요청한 목표에 포함되지 않은 변경·외부 행동입니다.")
         val proposed=HarnessStep(call,StepEvidence(call.name,VerificationState.UNVERIFIED,"실행 전 검사"))
@@ -135,7 +169,7 @@ object TaskHarness {
         }
         return null
     }
-    private fun readOnly(name:String)=ToolRegistry.definitions[name]?.risk==Risk.LOW&&(name.startsWith("get_")||name.startsWith("list_")||name.startsWith("search_"))
+    private fun readOnly(name:String)=ToolReadPolicy.isReadOnly(name)
     private fun directText(raw:String):String {
         var text=raw.take(6000).trim()
         if(Regex("^(선택한|가져온)\\s*(문서|파일|텍스트)").containsMatchIn(text))return ""

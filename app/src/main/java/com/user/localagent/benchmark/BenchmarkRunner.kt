@@ -29,7 +29,7 @@ class BenchmarkRunner(private val context: Context, private val engine: Inferenc
         val reportFile = File(directory, "benchmark-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}.json")
         val samples = mutableListOf<JsonObject>()
         val started = SystemClock.elapsedRealtime()
-        val effectiveOptions = if (enduranceMinutes == 0) options.copy(maxOutputTokens = minOf(options.maxOutputTokens, 128)) else options
+        val effectiveOptions = (if (enduranceMinutes == 0) options.copy(maxOutputTokens = minOf(options.maxOutputTokens, 128)) else options).copy(deviceOnly=true)
         var ownsBenchmark = false
         var ownsInference = false
         var startBattery: JsonObject? = null

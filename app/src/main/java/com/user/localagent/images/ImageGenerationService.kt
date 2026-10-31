@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.collect
 class ImageGenerationService:Service() {
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     private var observer:Job?=null
+    private var computeWake:android.os.PowerManager.WakeLock?=null
     override fun onBind(intent:Intent?):IBinder?=null
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
         if(intent?.action=="stop") {(application as LocalAgentApplication).container.imageStudio.cancel();stopSelf();return START_NOT_STICKY}
@@ -26,10 +27,15 @@ class ImageGenerationService:Service() {
         fun notification(status:String):Notification=NotificationCompat.Builder(this,"image-generation").setSmallIcon(R.drawable.ic_agent).setContentTitle("ZipHap.Agent · 이미지 생성 중")
             .setContentText(status).setContentIntent(content).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setOngoing(true).addAction(0,"중단",stop).build()
         ServiceCompat.startForeground(this,7315,notification("휴대전화에서 만들고 있습니다."),if(android.os.Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+        if(computeWake?.isHeld!=true){
+            computeWake=getSystemService(android.os.PowerManager::class.java).newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"ZipHap:image-compute").apply{
+                setReferenceCounted(false);acquire(com.user.localagent.core.PhoneImageQuality.TIMEOUT_MILLIS+120_000L)
+            }
+        }
         if(observer==null)observer=scope.launch {(application as LocalAgentApplication).container.imageStudio.state.collect {state->
             if(state.running)manager.notify(7315,notification(state.phase+if(state.totalSteps>0)" · ${state.step}/${state.totalSteps}" else ""))
         }}
         return START_NOT_STICKY
     }
-    override fun onDestroy(){observer?.cancel();scope.cancel();ServiceCompat.stopForeground(this,ServiceCompat.STOP_FOREGROUND_REMOVE);super.onDestroy()}
+    override fun onDestroy(){observer?.cancel();scope.cancel();computeWake?.let{if(it.isHeld)it.release()};computeWake=null;ServiceCompat.stopForeground(this,ServiceCompat.STOP_FOREGROUND_REMOVE);super.onDestroy()}
 }

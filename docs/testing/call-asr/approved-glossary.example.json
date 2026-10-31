@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "scope": "synthetic-administration-only",
+  "terms": [
+    {"id":"handoff","canonical":"인수인계","aliases":["인수 인계"],"approvedByOwner":false,"approvalId":null},
+    {"id":"duty-roster","canonical":"근무표","aliases":[],"approvedByOwner":false,"approvalId":null},
+    {"id":"approval-versus-payment","canonical":"결재","aliases":[],"approvedByOwner":false,"approvalId":null}
+  ],
+  "activationRule": "Only owner-approved, versioned terms may be used. Do not substitute 결제 for 결재 or rewrite raw transcripts automatically."
+}

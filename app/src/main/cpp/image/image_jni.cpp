@@ -3,12 +3,15 @@
 #include "stable-diffusion.h"
 #include <atomic>
 #include <cstdint>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <thread>
+#include <chrono>
 
 namespace {
 struct Cancelled {};
@@ -37,6 +40,7 @@ struct State {
     std::mutex callback_mutex;
     std::atomic<bool> cancelled{false};
     std::atomic<bool> callback_failed{false};
+    std::atomic<int> throttle_millis{0};
     sd_ctx_t* context=nullptr;
     JavaVM* vm=nullptr;
     jobject progress_sink=nullptr;
@@ -94,6 +98,14 @@ void progress_callback(int step,int total,float seconds,void* data){
     auto& state=*static_cast<State*>(data);
     std::lock_guard<std::mutex> guard(state.callback_mutex);
     if(!state.progress_sink||!state.vm||state.cancelled.load(std::memory_order_acquire))return;
+    // Yield between native chunks without changing latents, sampler, seed or progress.
+    // Owner cancellation remains responsive even when another phone task needs time.
+    const auto yielded=std::chrono::steady_clock::now();
+    while(!state.cancelled.load(std::memory_order_acquire)&&
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-yielded).count()<state.throttle_millis.load(std::memory_order_relaxed)){
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if(state.cancelled.load(std::memory_order_acquire))return;
     JNIEnv* env=nullptr;
     bool attached=false;
     jint status=state.vm->GetEnv(reinterpret_cast<void**>(&env),JNI_VERSION_1_6);
@@ -228,16 +240,33 @@ Java_com_user_localagent_inference_ImageNative_nativeDestroy(JNIEnv* env,jobject
     }catch(...){translate(env);}
 }
 
-extern "C" JNIEXPORT jintArray JNICALL
-Java_com_user_localagent_inference_ImageNative_nativeGenerate(JNIEnv* env,jobject,jlong handle,
-    jstring prompt,jstring negative,jlong seed,jint steps,jint width,jint height,jfloat guidance,jint sampler,jobject sink){
+static jintArray generate_image_jni(JNIEnv* env,jlong handle,
+    jstring prompt,jstring negative,jlong seed,jint steps,jint width,jint height,jfloat guidance,jint sampler,
+    jintArray reference,jfloat strength,jobject sink){
     try{
-        require(width>=256&&width<=512&&height>=256&&height<=512&&width%64==0&&height%64==0,"Invalid initial image dimensions");
-        require(steps>=1&&steps<=8&&seed>=0&&guidance>=1&&guidance<=15,"Invalid initial image sampling parameters");
-        require(sampler>=0&&sampler<=2,"Unsupported image sampler");
+        require(width>=256&&width<=1024&&height>=256&&height<=1024&&width%64==0&&height%64==0,"Invalid image dimensions");
+        require(sampler!=0||(width<=512&&height<=512),"LCM profile supports at most 512px");
+        require(steps>=1&&steps<=50&&(sampler!=0||steps<=8)&&seed>=0&&std::isfinite(guidance)&&guidance>=1&&guidance<=15,"Invalid image sampling parameters");
+        require(sampler>=0&&sampler<=3,"Unsupported image sampler");
         const auto text=utf8(env,prompt,16000);
         const auto negative_text=utf8(env,negative,8000);
         require(!text.empty(),"Image prompt must not be empty");
+        std::vector<uint8_t> reference_rgb;
+        if(reference){
+            require(width==height&&(width==512||width==1024)&&env->GetArrayLength(reference)==width*height,"Reference image must match the selected square size");
+            require(std::isfinite(strength)&&strength>=0.4f&&strength<=0.85f,"Invalid reference denoising strength");
+            const size_t count=static_cast<size_t>(width)*height;
+            std::vector<jint> argb(count);
+            env->GetIntArrayRegion(reference,0,static_cast<jsize>(count),argb.data());
+            if(env->ExceptionCheck())throw JavaFailure{};
+            reference_rgb.resize(count*3);
+            for(size_t i=0;i<count;++i){
+                const auto pixel=static_cast<uint32_t>(argb[i]);const uint32_t alpha=pixel>>24;
+                reference_rgb[i*3]=static_cast<uint8_t>((((pixel>>16)&255)*alpha+255*(255-alpha)+127)/255);
+                reference_rgb[i*3+1]=static_cast<uint8_t>((((pixel>>8)&255)*alpha+255*(255-alpha)+127)/255);
+                reference_rgb[i*3+2]=static_cast<uint8_t>(((pixel&255)*alpha+255*(255-alpha)+127)/255);
+            }
+        }
         auto state=lookup(handle);
         std::lock_guard<std::mutex> operation(state->operation_mutex);
         check_cancel(*state);
@@ -249,10 +278,14 @@ Java_com_user_localagent_inference_ImageNative_nativeGenerate(JNIEnv* env,jobjec
         sd_img_gen_params_init(&params);
         params.prompt=text.c_str();params.negative_prompt=negative_text.c_str();
         params.width=width;params.height=height;params.seed=seed;params.batch_count=1;
+        if(!reference_rgb.empty()){
+            params.init_image={static_cast<uint32_t>(width),static_cast<uint32_t>(height),3,reference_rgb.data()};
+            params.strength=strength;
+        }
         params.sample_params.sample_steps=steps;
         params.sample_params.guidance.txt_cfg=guidance;
-        params.sample_params.sample_method=sampler==0?LCM_SAMPLE_METHOD:(sampler==1?EULER_SAMPLE_METHOD:EULER_A_SAMPLE_METHOD);
-        params.sample_params.scheduler=sd_get_default_scheduler(context,params.sample_params.sample_method);
+        params.sample_params.sample_method=sampler==0?LCM_SAMPLE_METHOD:(sampler==1?EULER_SAMPLE_METHOD:(sampler==2?EULER_A_SAMPLE_METHOD:DPMPP2M_SAMPLE_METHOD));
+        params.sample_params.scheduler=sampler==3?KARRAS_SCHEDULER:sd_get_default_scheduler(context,params.sample_params.sample_method);
         params.vae_tiling_params.enabled=true;
         params.vae_tiling_params.tile_size_w=256;params.vae_tiling_params.tile_size_h=256;
         Images images;
@@ -276,4 +309,25 @@ Java_com_user_localagent_inference_ImageNative_nativeGenerate(JNIEnv* env,jobjec
         if(env->ExceptionCheck()){env->DeleteLocalRef(result);throw JavaFailure{};}
         return result;
     }catch(...){translate(env);return nullptr;}
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_user_localagent_inference_ImageNative_nativeSetThrottle(JNIEnv* env,jobject,jlong handle,jint milliseconds){
+    try{
+        require(milliseconds>=0&&milliseconds<=2000,"Invalid image yield budget");
+        auto state=lookup(handle,false);
+        if(state)state->throttle_millis.store(milliseconds,std::memory_order_relaxed);
+    }catch(...){translate(env);}
+}
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_user_localagent_inference_ImageNative_nativeGenerate(JNIEnv* env,jobject,jlong handle,
+    jstring prompt,jstring negative,jlong seed,jint steps,jint width,jint height,jfloat guidance,jint sampler,jobject sink){
+    return generate_image_jni(env,handle,prompt,negative,seed,steps,width,height,guidance,sampler,nullptr,0.65f,sink);
+}
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_user_localagent_inference_ImageNative_nativeGenerateReference(JNIEnv* env,jobject,jlong handle,
+    jstring prompt,jstring negative,jlong seed,jint steps,jint width,jint height,jfloat guidance,jint sampler,jintArray reference,jfloat strength,jobject sink){
+    if(reference==nullptr){throw_java(env,"java/lang/IllegalArgumentException","Missing reference image pixels");return nullptr;}
+    return generate_image_jni(env,handle,prompt,negative,seed,steps,width,height,guidance,sampler,reference,strength,sink);
 }

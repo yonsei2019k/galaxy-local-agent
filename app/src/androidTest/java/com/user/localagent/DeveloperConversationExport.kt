@@ -49,7 +49,7 @@ class DeveloperConversationExport {
             val oldSigners=installed.signingInfo!!.apkContentsSigners.map {it.toCharsString()}
             require(archive.signingInfo!!.apkContentsSigners.map {it.toCharsString()}==oldSigners)
             val additions=archive.requestedPermissions.orEmpty().toSet()-installed.requestedPermissions.orEmpty().toSet()
-            val explicitlyApproved=if(args.getString("approvedCalendarWriteAddition")=="true")setOf(android.Manifest.permission.WRITE_CALENDAR)else emptySet()
+            val explicitlyApproved=buildSet {if(args.getString("approvedCalendarWriteAddition")=="true")add(android.Manifest.permission.WRITE_CALENDAR);if(args.getString("approvedMicrophoneAddition")=="true")add(android.Manifest.permission.RECORD_AUDIO);if(args.getString("approvedPhoneStateAddition")=="true")add(android.Manifest.permission.READ_PHONE_STATE)}
             require((additions-explicitlyApproved).isEmpty()){"The developer update requests an unreviewed Android permission"}
             val app=(context.applicationContext as LocalAgentApplication).container
             val copied=app.repository.carryBuiltinGrants(app.hostCodeHash,expected)

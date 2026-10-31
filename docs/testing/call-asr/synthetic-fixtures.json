@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "fixtureKind": "public_synthetic_text_only_not_recorded_audio",
+  "cases": [
+    {
+      "id": "schedule-correction-001",
+      "referenceText": "가상 회의는 이천삼십 년 일월 이일 오후 세 시가 아니라 세 시 삼십 분으로 정정합니다.",
+      "hypothesisText": "가상 회의는 이천삼십 년 일월 이일 오후 세 시가 아니라 세 시 삼십 분으로 정정합니다.",
+      "annotationComplete": true,
+      "extractionStatus": "completed",
+      "referenceFacts": [{"kind":"DATE","role":"appointment","value":"2030-01-02","state":"AFFIRMED"},{"kind":"TIME","role":"appointment","value":"15:30","state":"AFFIRMED"}],
+      "predictedFacts": [{"kind":"DATE","role":"appointment","value":"2030-01-02","state":"AFFIRMED","evidenceValid":true},{"kind":"TIME","role":"appointment","value":"15:00","state":"AFFIRMED","evidenceValid":true}]
+    },
+    {
+      "id": "administrative-negation-002",
+      "referenceText": "가상 행정 보고서는 아직 보내지 마세요. 근무표 확인 뒤에 초안만 만들어주세요.",
+      "hypothesisText": "가상 행정 보고서는 아직 보내세요. 근무표 확인 뒤에 초안만 만들어주세요.",
+      "annotationComplete": true,
+      "extractionStatus": "completed",
+      "referenceFacts": [{"kind":"ACTION","role":"administrative_report","value":"send-email","state":"NEGATED"},{"kind":"ACTION","role":"administrative_report","value":"prepare-draft","state":"CONDITIONAL"}],
+      "predictedFacts": [{"kind":"ACTION","role":"administrative_report","value":"send-email","state":"AFFIRMED","evidenceValid":true}]
+    },
+    {"id":"silence-negative-control-003","referenceText":"","hypothesisText":"시청해 주셔서 감사합니다.","annotationComplete":true,"extractionStatus":"completed","referenceFacts":[],"predictedFacts":[]},
+    {"id":"nursing-administration-004","referenceText":"인수 인계 자료와 근무표를 확인해 주세요.","hypothesisText":"인수인계 자료와 근무표를 확인해 주세요.","annotationComplete":false,"extractionStatus":"not_run"}
+  ]
+}

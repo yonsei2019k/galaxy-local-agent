@@ -50,6 +50,22 @@ sealed interface ModelRoute {
     data class NoReadyModel(override val reason: String) : ModelRoute
 }
 
+/** Response length is independent of which model is resident or selected. */
+object ResponseOutputPolicy {
+    const val STANDARD_TOKENS = 768
+    const val DETAILED_TOKENS = 1536
+    const val EXTENDED_TOKENS = 2048
+
+    fun tokenBudget(explicitDeep: Boolean, complexity: Int): Int {
+        require(complexity in 0..3)
+        return when {
+            explicitDeep -> EXTENDED_TOKENS
+            complexity >= 2 -> DETAILED_TOKENS
+            else -> STANDARD_TOKENS
+        }
+    }
+}
+
 /** Pure, deterministic policy. No downloads, engine loads, model switching, or automatic actions. */
 object LocalModelRouter {
     private const val MODERATE_THERMAL_STATUS = 2
@@ -71,11 +87,7 @@ object LocalModelRouter {
         val selected = quality ?: fast ?: return ModelRoute.NoReadyModel(
             "No supported CPU model has validated smoke measurements and sufficient memory headroom for this request.")
         val thinking = profile.explicitDeep && quality != null && unrestricted
-        val outputCap = when {
-            profile.explicitDeep -> 1024
-            profile.complexity >= 2 -> 512
-            else -> 192
-        }
+        val outputCap = ResponseOutputPolicy.tokenBudget(profile.explicitDeep,profile.complexity)
         val peak8k = selected.context8192PeakPssMb
         val context = if (unrestricted && profile.contextChars >= LARGE_CONTEXT_CHARS && peak8k != null &&
             peak8k >= selected.peakPssMb!! && fits(profile.availableMemoryMb, selected, peak8k)) 8192 else 4096

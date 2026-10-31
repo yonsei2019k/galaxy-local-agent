@@ -5,6 +5,12 @@
   },
   "apkCertificateSha256": "a74bbfeb00c631ead95cf64554d7409d3b8ce9fa6364fbd3a42603efb9ec9461",
   "approvedCapabilities": [
+    "memory.knowledge_graph",
+    "workspace.read",
+    "workspace.write_reviewed",
+    "attachment.analyze_local",
+    "image.understand_local",
+    "image.transform_local",
     "alarm.prepare",
     "audio.read",
     "audio.transcribe_local",
@@ -42,6 +48,15 @@
     "spreadsheet.read_csv",
     "spreadsheet.write_csv",
     "url.open",
-    "usage.read"
+    "usage.read",
+    "web.search_public",
+    "web.read_public",
+    "document.docx",
+    "spreadsheet.xlsx",
+    "artifact.create_local",
+    "email.read_eml",
+    "audio.speak_local",
+    "audio.listen_ondevice",
+    "video.edit_local"
   ]
 }

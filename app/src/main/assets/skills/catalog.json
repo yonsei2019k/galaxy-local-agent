@@ -1,0 +1,598 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "id": "plan",
+      "title": "계획",
+      "description": "복합 요청을 실행 가능한 작은 작업과 검증 기준으로 정리합니다.",
+      "category": "planning",
+      "version": "1",
+      "asset": "skills/plan/SKILL.md",
+      "sha256": "9004ef9126652ed2ea3ba5238ad3627305c0d4fd64548f873a882b83500e838b",
+      "tools": [
+        "search_notes",
+        "list_project_files",
+        "read_project_file",
+        "save_note",
+        "update_note"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills",
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/superpowers/skills/writing-plans/SKILL.md"
+      ],
+      "limitations": [
+        "계획은 작업 완료 증거가 아닙니다.",
+        "전용 계획 실행기·Git·셸 권한을 추가하지 않습니다."
+      ]
+    },
+    {
+      "id": "goal",
+      "title": "목표 설정",
+      "description": "사용자가 요청한 목표를 범위·성공 기준·다음 행동으로 구체화합니다.",
+      "category": "planning",
+      "version": "2",
+      "asset": "skills/goal/SKILL.md",
+      "sha256": "dfd306c5131681c1098579ea4e2c794030e9c225ba669b97b993b866abafd914",
+      "tools": [
+        "get_goal",
+        "create_goal",
+        "update_goal",
+        "start_goal",
+        "pause_goal",
+        "resume_goal",
+        "clear_goal"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/build/skills",
+        "https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/define-goal/SKILL.md"
+      ],
+      "limitations": [
+        "별도 create_goal API는 현재 등록되어 있지 않습니다.",
+        "노트에 보존된 목표가 백그라운드 실행을 자동 예약하지 않습니다."
+      ]
+    },
+    {
+      "id": "debug",
+      "title": "디버그",
+      "description": "재현 조건과 실제 증거로 오류 원인을 좁히고 수정안을 검증합니다.",
+      "category": "development",
+      "version": "1",
+      "asset": "skills/debug/SKILL.md",
+      "sha256": "09f3dca4b3a19c9063fb8b6a669c1a2c939d0178e04eb9ec8e4671124e87311a",
+      "tools": [
+        "list_project_files",
+        "read_project_file",
+        "write_project_file",
+        "search_conversation_history"
+      ],
+      "sourceUrls": [
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/superpowers/skills/systematic-debugging/SKILL.md"
+      ],
+      "limitations": [
+        "앱 전체 logcat·다른 앱 내부 로그를 자동 수집하지 않습니다.",
+        "셸·컴파일·테스트 실행 도구는 별도로 구현되어야 합니다."
+      ]
+    },
+    {
+      "id": "review",
+      "title": "코드 검토",
+      "description": "요구사항과 소스의 불일치·오류·데이터 손실 위험을 근거로 찾습니다.",
+      "category": "development",
+      "version": "1",
+      "asset": "skills/review/SKILL.md",
+      "sha256": "1cd16ab633908da0c0043c127768640bbf1870a1a6adc9468540361a1d1f34fb",
+      "tools": [
+        "list_project_files",
+        "read_project_file"
+      ],
+      "sourceUrls": [
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/superpowers/skills/requesting-code-review/SKILL.md"
+      ],
+      "limitations": [
+        "읽은 범위의 정적 검토이며 자동 실행 검증이 아닙니다.",
+        "Git diff·PR·원격 저장소 인증 도구가 추가되지는 않습니다."
+      ]
+    },
+    {
+      "id": "android-coding",
+      "title": "Android 코딩",
+      "description": "선택한 프로젝트의 Kotlin·Compose 소스를 읽고 안전하게 수정합니다.",
+      "category": "development",
+      "version": "1",
+      "asset": "skills/android-coding/SKILL.md",
+      "sha256": "747fe97475e88e0cd3360d964d8041387bb499e2b84a9aa9d98c6ac9922dc25b",
+      "tools": [
+        "list_project_files",
+        "read_project_file",
+        "write_project_file",
+        "search_web",
+        "read_webpage"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/build/skills"
+      ],
+      "limitations": [
+        "휴대폰 도구는 제한된 UTF-8 파일 읽기·쓰기입니다.",
+        "Gradle·ADB·Git·APK 서명·자동 설치는 실행하지 못합니다."
+      ]
+    },
+    {
+      "id": "test-verification",
+      "title": "테스트·완료 검증",
+      "description": "변경과 주장에 맞는 검증을 고르고 실제 증거에 맞춰 상태를 보고합니다.",
+      "category": "development",
+      "version": "1",
+      "asset": "skills/test-verification/SKILL.md",
+      "sha256": "8df1fdad7db8b39b49f510b81f40d5bfd7ed250757a582f04bef89a628db37d0",
+      "tools": [
+        "read_project_file",
+        "list_project_files"
+      ],
+      "sourceUrls": [
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/superpowers/skills/verification-before-completion/SKILL.md",
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/superpowers/skills/test-driven-development/SKILL.md"
+      ],
+      "limitations": [
+        "등록된 셸·테스트 러너가 없어 직접 테스트를 실행하지 않습니다.",
+        "기존 로그를 읽었다는 사실은 현재 버전 통과를 보장하지 않습니다."
+      ]
+    },
+    {
+      "id": "documents",
+      "title": "문서",
+      "description": "요청한 내용으로 DOCX·TXT 문서를 만들고 실제 파일을 확인합니다.",
+      "category": "office",
+      "version": "1",
+      "asset": "skills/documents/SKILL.md",
+      "sha256": "9a5f3e1ef57b4b603531ec85fe27d5c4c5a077c1147cb24f0b1955890544b875",
+      "tools": [
+        "create_document",
+        "read_project_file",
+        "read_google_document",
+        "create_google_document",
+        "search_drive_files"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills",
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-drive/skills/google-docs/SKILL.md"
+      ],
+      "limitations": [
+        "DOCX는 기본 본문·표 텍스트이며 원본 레이아웃 보존 편집은 아닙니다.",
+        "Google Docs 도구는 실제 OAuth 연결이 필요하며 현재 인증 성공은 검증되지 않았습니다."
+      ]
+    },
+    {
+      "id": "spreadsheets",
+      "title": "스프레드시트",
+      "description": "CSV·XLSX 값을 정리하고 표 파일 또는 연결된 시트를 다룹니다.",
+      "category": "office",
+      "version": "1",
+      "asset": "skills/spreadsheets/SKILL.md",
+      "sha256": "88ba56525f07cdb8762eb786152cf6903e3b029d3bee82e80702be28450080ae",
+      "tools": [
+        "create_document",
+        "read_project_file",
+        "read_google_sheet",
+        "create_google_sheet",
+        "analyze_selected_data",
+        "query_selected_data"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills",
+        "https://github.com/openai/plugins/blob/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-drive/skills/google-sheets/SKILL.md"
+      ],
+      "limitations": [
+        "로컬 XLSX·CSV는 값 중심이며 수식 계산·차트·서식 보존을 보장하지 않습니다.",
+        "PC 분석은 별도 페어링·동의·선택 파일이 필요하고 Google Sheets는 OAuth가 필요합니다."
+      ]
+    },
+    {
+      "id": "pdf",
+      "title": "PDF",
+      "description": "PDF의 읽을 수 있는 텍스트를 다루고 기본 PDF를 생성합니다.",
+      "category": "office",
+      "version": "1",
+      "asset": "skills/pdf/SKILL.md",
+      "sha256": "22f37351ec2c1fbb95f5c12b38c0ed392ccd4a0d961f93e019a62e89210fadc1",
+      "tools": [
+        "create_document",
+        "read_project_file"
+      ],
+      "sourceUrls": [
+        "https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/pdf/SKILL.md"
+      ],
+      "limitations": [
+        "새 PDF는 기본 텍스트 페이지입니다.",
+        "스캔 OCR·복잡한 레이아웃·서식 보존 편집과 시각 검수가 자동 제공되지는 않습니다."
+      ]
+    },
+    {
+      "id": "email",
+      "title": "이메일",
+      "description": "선택한 메일을 요약하고 검토 가능한 답장·메일 초안을 준비합니다.",
+      "category": "assistant",
+      "version": "2",
+      "asset": "skills/email/SKILL.md",
+      "sha256": "82eeccec22962e0eaa162e9aa713558ec5114ec7d059bce51b2a5f88aca78433",
+      "tools": [
+        "prepare_email",
+        "search_gmail_messages",
+        "read_gmail_message",
+        "create_gmail_draft",
+        "search_contacts",
+        "send_gmail_message",
+        "reply_gmail_message"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills"
+      ],
+      "limitations": [
+        "prepare_email은 작성 화면·초안이며 실제 발송이 아닙니다.",
+        "Gmail은 실제 OAuth 연결이 필요하고 현재 인증 성공은 검증되지 않았습니다."
+      ]
+    },
+    {
+      "id": "calendar",
+      "title": "일정·알림",
+      "description": "실제 일정과 시간대를 확인해 일정 초안·알림을 준비합니다.",
+      "category": "assistant",
+      "version": "1",
+      "asset": "skills/calendar/SKILL.md",
+      "sha256": "3bf25bb2f1345fcb2a91c98d6e204b73674b5fecd5975719f90d54900facc526",
+      "tools": [
+        "get_current_datetime",
+        "list_calendar_events",
+        "prepare_calendar_event",
+        "create_reminder",
+        "create_alarm",
+        "list_google_calendar_events",
+        "create_google_calendar_event"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills"
+      ],
+      "limitations": [
+        "Android 일정 권한 또는 실제 Google Calendar 연결이 필요합니다.",
+        "일정 초안 준비와 제공자 저장·알람 설정은 서로 다른 결과입니다."
+      ]
+    },
+    {
+      "id": "notes-memory",
+      "title": "메모·기억",
+      "description": "현재 방과 프로젝트 범위에서 메모·승인된 기억을 찾아 관리합니다.",
+      "category": "assistant",
+      "version": "1",
+      "asset": "skills/notes-memory/SKILL.md",
+      "sha256": "107de8ef0b8dd77e7d9c302f0dc99748a27893c6d9aafcf43cfae77a78f0f3af",
+      "tools": [
+        "search_notes",
+        "save_note",
+        "update_note",
+        "delete_note",
+        "search_memories",
+        "save_memory",
+        "delete_memory",
+        "search_conversation_history"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills"
+      ],
+      "limitations": [
+        "모델 가중치를 자동 재학습하는 기능이 아닙니다.",
+        "다른 프로젝트·앱의 모든 과거 대화를 읽는 권한을 추가하지 않습니다."
+      ]
+    },
+    {
+      "id": "files",
+      "title": "프로젝트 파일",
+      "description": "선택한 폴더 안의 파일을 읽고 해시를 확인하며 수정합니다.",
+      "category": "productivity",
+      "version": "1",
+      "asset": "skills/files/SKILL.md",
+      "sha256": "4e354e5a10270e1065c2e96c4818948efd8dc18f3740ef0e0fe2cb6143b8a8d9",
+      "tools": [
+        "list_project_files",
+        "read_project_file",
+        "write_project_file",
+        "create_document",
+        "search_drive_files",
+        "read_drive_text_file",
+        "create_drive_text_file"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/build/skills"
+      ],
+      "limitations": [
+        "폰 프로젝트는 소유자가 선택한 폴더의 제한된 UTF-8 파일입니다.",
+        "임의 시스템 파일·실행 파일·압축 프로그램 설치 도구가 아닙니다."
+      ]
+    },
+    {
+      "id": "web-research",
+      "title": "웹 조사",
+      "description": "공개 출처를 비교하고 관찰한 근거와 접근 실패를 함께 정리합니다.",
+      "category": "research",
+      "version": "1",
+      "asset": "skills/web-research/SKILL.md",
+      "sha256": "a8956d3131c53571b0e353541fcac0c6403a3cdc5198dc4f2e28d87096ce49a8",
+      "tools": [
+        "search_web",
+        "read_webpage",
+        "open_url"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills"
+      ],
+      "limitations": [
+        "일부 사이트는 차단·동적 페이지·인증 때문에 읽지 못할 수 있습니다.",
+        "공개 검색 결과만으로 사적 데이터·전체 시장·완전한 사실 검증을 주장하지 않습니다."
+      ]
+    },
+    {
+      "id": "shopping",
+      "title": "상품 비교",
+      "description": "실제 상품·옵션·관찰 가격을 구분해 구매 판단을 돕습니다.",
+      "category": "research",
+      "version": "1",
+      "asset": "skills/shopping/SKILL.md",
+      "sha256": "54d12266def2b4259ecc5695ecc704fca375f447bcab2637bf3d59583356bee9",
+      "tools": [
+        "search_shopping",
+        "search_web",
+        "read_webpage",
+        "open_url"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills"
+      ],
+      "limitations": [
+        "구매·결제·예약 확정 도구가 아닙니다.",
+        "실시간 재고·배송비 포함 총액·전 세계 최저가를 자동 보장하지 않습니다."
+      ]
+    },
+    {
+      "id": "images",
+      "title": "이미지 제작",
+      "description": "요청한 장면·참조·스타일을 보존해 설치된 이미지 엔진을 사용합니다.",
+      "category": "creative",
+      "version": "1",
+      "asset": "skills/images/SKILL.md",
+      "sha256": "1ca55c177be8c3485fe8c01cc41e56fdd845dee5ec420464fceec314c4da7523",
+      "tools": [
+        "generate_image"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills"
+      ],
+      "limitations": [
+        "설치·검증된 호환 모델과 엔진이 필요하며 모델별 품질·라이선스가 다릅니다.",
+        "스킬은 모델 설치·화질 향상·영상 생성·제한 없는 콘텐츠 생성을 보장하지 않습니다."
+      ]
+    },
+    {
+      "id": "security-review",
+      "title": "보안 점검",
+      "description": "소스·연동·확장 후보의 신뢰 경계와 권한·전송 위험을 검토합니다.",
+      "category": "security",
+      "version": "1",
+      "asset": "skills/security-review/SKILL.md",
+      "sha256": "ea8a10cca8c905c73e50ab96b18a32d018bdae5a4058d3d8a79f41cfc8d4cefe",
+      "tools": [
+        "list_project_files",
+        "read_project_file",
+        "search_web",
+        "read_webpage"
+      ],
+      "sourceUrls": [
+        "https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/security-threat-model/SKILL.md"
+      ],
+      "limitations": [
+        "정적 점검은 악성 코드 부재·취약점 없음·실제 샌드박스 검증을 보장하지 않습니다.",
+        "Kotlin 전용 자동 보안 분석기나 패키지 실행기를 추가하지 않습니다."
+      ]
+    },
+    {
+      "id": "extensions",
+      "title": "스킬·연동 추천",
+      "description": "반복되는 작업에 맞는 스킬·플러그인·MCP 후보를 검토해 추천합니다.",
+      "category": "extensions",
+      "version": "1",
+      "asset": "skills/extensions/SKILL.md",
+      "sha256": "30d951dad61854ff3e6c8ed7b726343078ac19ddf01328046ecc5faf13941386",
+      "tools": [
+        "search_web",
+        "read_webpage",
+        "list_project_files",
+        "read_project_file"
+      ],
+      "sourceUrls": [
+        "https://developers.openai.com/plugins/concepts/skills",
+        "https://developers.openai.com/plugins/build/skills",
+        "https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.system/skill-creator/SKILL.md"
+      ],
+      "limitations": [
+        "추천과 설치는 다르며 범용 MCP·Python·셸 런타임은 내장되지 않습니다.",
+        "스킬의 본문은 새 권한·실행 능력·모델 학습을 자동으로 추가하지 않습니다."
+      ]
+    },
+    {
+      "id": "work-briefing",
+      "title": "업무 정리·후속 조치",
+      "description": "메일·할 일·일정에서 오늘의 우선순위와 후속 업무를 근거로 정리합니다.",
+      "category": "assistant",
+      "version": "1",
+      "asset": "skills/work-briefing/SKILL.md",
+      "sha256": "078192d51e78f080eca155c1812d3d02bc7870a59cfb89e0d6e7c54445f02e6e",
+      "tools": [
+        "get_current_datetime",
+        "search_gmail_messages",
+        "read_gmail_message",
+        "list_google_tasks",
+        "list_google_calendar_events",
+        "list_calendar_events",
+        "search_notes",
+        "search_memories",
+        "create_gmail_draft",
+        "create_google_task",
+        "create_document"
+      ],
+      "sourceUrls": [
+        "https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.drafts/create",
+        "https://developers.google.com/workspace/tasks/reference/rest/v1/tasks/list",
+        "https://developers.google.com/workspace/calendar/api/v3/reference/events/list"
+      ],
+      "limitations": [
+        "연결·권한이 허용한 기간과 계정 자료만 읽으며 계정의 모든 업무를 확인하지 않습니다.",
+        "메일 초안 생성은 발송이 아니며 사용자가 요청한 후속 작업만 기존 승인 흐름으로 실행합니다."
+      ]
+    },
+    {
+      "id": "availability-planning",
+      "title": "가능한 시간·업무 일정",
+      "description": "실제 일정과 근무 조건에서 가능한 시간을 계산하고 후보를 비교합니다.",
+      "category": "assistant",
+      "version": "1",
+      "asset": "skills/availability-planning/SKILL.md",
+      "sha256": "e1a0e7dcb7ba55abbcc92feb3403593b487af0b1cb7d3bce01dd53b794f39351",
+      "tools": [
+        "get_current_datetime",
+        "list_calendar_events",
+        "list_google_calendar_events",
+        "search_notes",
+        "search_memories",
+        "date_calculate",
+        "calculate",
+        "find_free_time",
+        "search_web",
+        "read_webpage",
+        "prepare_calendar_event",
+        "create_google_calendar_event"
+      ],
+      "sourceUrls": [
+        "https://developers.google.com/workspace/calendar/api/v3/reference/events/list"
+      ],
+      "limitations": [
+        "빈 시간 계산은 명시적으로 전달한 일정과 허용 구간만 반영합니다.",
+        "실시간 항공요금·좌석·예약 API를 추가하지 않으며 근무 패턴이 없는 날을 자유 시간으로 추정하지 않습니다."
+      ]
+    },
+    {
+      "id": "evidence-research",
+      "title": "근거 조사·참고문헌",
+      "description": "논문·공식 자료와 참고문헌을 확인해 판단 가능한 조사 결과를 만듭니다.",
+      "category": "research",
+      "version": "1",
+      "asset": "skills/evidence-research/SKILL.md",
+      "sha256": "5c804c816628e2d25a85238631251839a5d10e0ecbc52cd6bb35f743b40a5aa2",
+      "tools": [
+        "search_publications",
+        "verify_reference",
+        "search_web",
+        "read_webpage",
+        "create_document",
+        "create_google_document",
+        "create_google_sheet"
+      ],
+      "sourceUrls": [
+        "https://dev.europepmc.org/RestfulWebService",
+        "https://dev.europepmc.org/Copyright",
+        "https://www.crossref.org/documentation/retrieve-metadata/rest-api/",
+        "https://www.crossref.org/blog/announcing-changes-to-rest-api-rate-limits/"
+      ],
+      "limitations": [
+        "Europe PMC는 생명과학·의학 문헌 중심이며 모든 분야·원문을 포함하지 않습니다.",
+        "Crossref의 서지 일치가 연구 결론의 타당성을 증명하지 않으며 조회 실패·미등록을 허위 인용으로 단정하지 않습니다."
+      ]
+    },
+    {
+      "id": "message-analysis",
+      "title": "문자·대화 분석",
+      "description": "문자·대화의 실제 읽은 범위에서 흐름·약속·변경·미해결 업무를 분석합니다.",
+      "category": "analysis",
+      "version": "1",
+      "asset": "skills/message-analysis/SKILL.md",
+      "sha256": "d452af8d8206a654f40d1b6327019a6ee746e8796d62c3bb22443d587e834f88",
+      "tools": [
+        "list_analysis_sources",
+        "analyze_sms",
+        "analyze_conversation_import",
+        "read_analysis_evidence",
+        "get_sms_summary",
+        "list_imported_conversations",
+        "search_conversation_imports",
+        "list_messenger_notifications",
+        "search_conversation_history",
+        "create_document"
+      ],
+      "sourceUrls": [
+        "https://aclanthology.org/2022.acl-long.112/",
+        "https://arxiv.org/abs/2410.10813",
+        "https://arxiv.org/abs/2502.05167"
+      ],
+      "limitations": [
+        "분할 분석은 실제 처리한 출처·기간·구간의 결과이며 상한·실패·남은 범위를 보존합니다.",
+        "원문 인용 일치와 의미 해석의 정확성은 별도이며 SMS·메신저·알림의 범위를 혼동하지 않습니다."
+      ]
+    },
+    {
+      "id": "recording-analysis",
+      "title": "녹음·전사 분석",
+      "description": "녹음과 전사문의 시간 근거·인식 한계를 보존해 핵심 내용과 후속 업무를 정리합니다.",
+      "category": "analysis",
+      "version": "2",
+      "asset": "skills/recording-analysis/SKILL.md",
+      "sha256": "eccc514ba89ed79c082d1ddac247c98768980a5e6d78093e785d4d8c699c25d8",
+      "tools": [
+        "list_analysis_sources",
+        "list_audio_recordings",
+        "transcribe_recording",
+        "analyze_audio_transcript",
+        "read_analysis_evidence",
+        "search_audio_transcripts",
+        "create_document"
+      ],
+      "sourceUrls": [
+        "https://aclanthology.org/2021.naacl-main.472/",
+        "https://arxiv.org/abs/2303.00747",
+        "https://github.com/m-bain/whisperX"
+      ],
+      "limitations": [
+        "전사는 현재 요청의 실제 녹음 ID에 한정되며 임의 URI·파일 경로·클라우드 전사를 허용하지 않습니다.",
+        "전사 조각 시간은 단어별 시각이 아니며 화자 분리·실제 인물 식별·오인식 없음은 보장하지 않습니다."
+      ]
+    },
+    {
+      "id": "evidence-synthesis",
+      "title": "개인 기록 근거 종합",
+      "description": "여러 개인 기록의 시점·중복·정정·모순을 근거와 연결해 종합합니다.",
+      "category": "analysis",
+      "version": "1",
+      "asset": "skills/evidence-synthesis/SKILL.md",
+      "sha256": "446b97b2c770e7e2f606c784971ba1c79e90fea184bc6a90cf701e254dcb4dbc",
+      "tools": [
+        "list_analysis_sources",
+        "analyze_sms",
+        "analyze_audio_transcript",
+        "analyze_conversation_import",
+        "read_analysis_evidence",
+        "get_sms_summary",
+        "list_imported_conversations",
+        "search_conversation_imports",
+        "search_audio_transcripts",
+        "search_conversation_history",
+        "calculate",
+        "date_calculate",
+        "create_document"
+      ],
+      "sourceUrls": [
+        "https://arxiv.org/abs/2305.14251",
+        "https://arxiv.org/abs/2410.10813",
+        "https://arxiv.org/abs/2404.16130"
+      ],
+      "limitations": [
+        "실제 처리한 범위·근거를 종합하며 요약 답변이 전체 상세 결과나 원문을 대체하지 않습니다.",
+        "정확한 인용은 의미 해석의 타당성이나 누락 없음의 증거가 아니며 미해결 모순을 보존합니다."
+      ]
+    }
+  ]
+}

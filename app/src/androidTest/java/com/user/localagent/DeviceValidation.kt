@@ -179,7 +179,7 @@ class DeviceValidation {
             val minutes = InstrumentationRegistry.getArguments().getString("enduranceMinutes", "0").toInt()
             val file = BenchmarkRunner(context, app.engine).run(
                 model.path,
-                InferenceOptions(maxOutputTokens = if (minutes == 0) 128 else 512),
+                InferenceOptions(maxOutputTokens = if (minutes == 0) 128 else 512, deviceOnly = true),
                 minutes,
             ) { progress -> checkpoint(progress) }
             benchmarkFile = file.name

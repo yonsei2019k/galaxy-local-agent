@@ -33,9 +33,11 @@ class LocalOrchestration(
     fun summary(): String = latestSummary
 
     /** Null means no eligible model; this method never downloads, selects, loads, or executes one. */
-    suspend fun choose(text: String, explicitDeep: Boolean = false): ChosenInference? = withContext(Dispatchers.IO) {
+    suspend fun choose(text: String, explicitDeep: Boolean = false, requireStructured:Boolean=false): ChosenInference? = withContext(Dispatchers.IO) {
         models.refresh()
-        val installed = models.models.value.filter { it.verified && File(it.path).isFile }
+        val validation=context.getSharedPreferences("validated-tools",Context.MODE_PRIVATE)
+        val installed = models.models.value.filter { it.verified && File(it.path).isFile &&
+            if(requireStructured)it.runtime=="litertlm"&&validation.getBoolean("structured."+it.sha256,false)else !GemmaMediaCatalog.auxiliary(it.id) }
         val reports = loadReports(installed.map { File(it.path).name }.toSet())
         val resident = engine.residentModelPath
         val readiness = installed.map { model ->
@@ -66,8 +68,8 @@ class LocalOrchestration(
         val power = context.getSystemService(PowerManager::class.java)
         val profile = RequestProfile(
             ruleMatched = false, // Registered deterministic commands are resolved by the host before this adapter.
-            explicitDeep = explicitDeep,
-            complexity = if (COMPLEXITY_HINTS.any { it in text.take(8_000) }) 2 else 0,
+            explicitDeep = explicitDeep&&!requireStructured,
+            complexity = if (!requireStructured&&COMPLEXITY_HINTS.any { it in text.take(8_000) }) 2 else 0,
             thermalStatus = runCatching { power.currentThermalStatus.coerceAtLeast(0) }.getOrDefault(PowerManager.THERMAL_STATUS_MODERATE),
             powerSave = runCatching { power.isPowerSaveMode }.getOrDefault(true),
             availableMemoryMb = availableMb,

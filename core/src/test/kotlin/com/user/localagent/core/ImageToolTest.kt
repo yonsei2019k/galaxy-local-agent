@@ -8,7 +8,7 @@ class ImageToolTest {
         val call=ToolRegistry.parseAndValidate("""{"type":"tool_call","tool":"generate_image","arguments":{"prompt":"숲속의 고양이 사진","negativePrompt":"","steps":4,"seed":4294967296}}""")
         assertEquals(Risk.LOW,ToolRegistry.definitions.getValue(call.name).risk)
         assertFalse(CapabilityPolicy.requiresConfirmation(call,"builtin","hash",emptyList()))
-        assertEquals(600_000,ToolRegistry.definitions.getValue(call.name).timeoutMillis)
+        assertEquals(43_200_000L,ToolRegistry.definitions.getValue(call.name).timeoutMillis)
     }
     @Test fun imageParametersCannotIntroduceExternalProgramsOrModelUrls() {
         listOf("\"url\":\"https://example.test/model\"","\"command\":\"sh run\"").forEach {extra->
@@ -16,8 +16,16 @@ class ImageToolTest {
         }
     }
     @Test fun invalidStepsAndSeedAreRejectedBeforeExecution() {
-        listOf("\"steps\":0","\"steps\":9","\"seed\":-1","\"steps\":\"4\"").forEach {extra->
+        listOf("\"steps\":0","\"steps\":51","\"seed\":-1","\"steps\":\"4\"").forEach {extra->
             assertThrows(IllegalArgumentException::class.java){ToolRegistry.parseAndValidate("""{"name":"generate_image","arguments":{"prompt":"a cat",$extra}}""")}
         }
+    }
+    @Test fun pcQualityStepsAreAcceptedAndDefaultsRemainProfileSpecific() {
+        val call=ToolRegistry.parseAndValidate("""{"name":"generate_image","arguments":{"prompt":"a cat","steps":50}}""")
+        assertEquals("generate_image",call.name)
+        assertThrows(IllegalArgumentException::class.java){PcComputeContract.steps(false,50)}
+        assertThrows(IllegalArgumentException::class.java){PcComputeContract.steps(true,4)}
+        assertEquals(8,PcComputeContract.steps(false,null))
+        assertEquals(50,PcComputeContract.steps(true,null))
     }
 }

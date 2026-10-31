@@ -24,34 +24,40 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.user.localagent.AppContainer
+import com.user.localagent.audio.PrivateDataPickerOrigin
+import com.user.localagent.audio.PrivateDataPickerPurpose
+import com.user.localagent.audio.PrivateDataPickerScope
+import com.user.localagent.imports.ConversationImport
 import com.user.localagent.imports.ConversationImportCatalogItem
 import com.user.localagent.imports.PhoneRecordResult
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 
 /** User-directed imports and permission-gated phone snapshots. Nothing is read on composition. */
 @Composable
-fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: (Uri) -> Unit) {
+fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTranscribe: (Uri, PrivateDataPickerOrigin) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val catalog = remember { mutableStateListOf<ConversationImportCatalogItem>() }
     var busy by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("가져올 자료를 직접 선택하거나, 필요한 휴대전화 접근 권한을 따로 허용하세요.") }
-    var deleteTarget by remember { mutableStateOf<ConversationImportCatalogItem?>(null) }
+    var deleteTarget by remember { mutableStateOf<Pair<ConversationImportCatalogItem, PrivateDataPickerScope>?>(null) }
     var smsGranted by remember { mutableStateOf(false) }
     var callGranted by remember { mutableStateOf(false) }
     var audioGranted by remember { mutableStateOf(false) }
@@ -59,6 +65,88 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
     var callResult by remember { mutableStateOf("") }
     var audioResult by remember { mutableStateOf("") }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var textPickerToken by rememberSaveable { mutableStateOf<String?>(null) }
+    var audioPickerToken by rememberSaveable { mutableStateOf<String?>(null) }
+    var importOperation by remember { mutableStateOf<Job?>(null) }
+    val selectedThreadId by app.runs.selectedThreadId.collectAsState()
+    val selectionReady by app.runs.selectionReady.collectAsState()
+    val modelBusy by app.runs.busy.collectAsState()
+    val threads by app.repository.chat.threads.collectAsState(emptyList())
+    val projects by app.repository.chat.projects.collectAsState(emptyList())
+    val panelThreadId = selectedThreadId // Freeze the rendered origin in retained button callbacks.
+    val thread = threads.firstOrNull { it.id == panelThreadId }
+    val project = projects.firstOrNull { it.id == thread?.projectId }
+    val catalogKey = listOf(panelThreadId, thread?.revision, thread?.activeBranchId, thread?.projectId, project?.revision)
+    val latestCatalogKey by rememberUpdatedState(catalogKey)
+    var loadedCatalogKey by remember { mutableStateOf<List<Any?>?>(null) }
+    var catalogScope by remember { mutableStateOf<PrivateDataPickerScope?>(null) }
+    var catalogLoading by remember { mutableStateOf(false) }
+    var catalogLoadToken by remember { mutableStateOf<Any?>(null) }
+    val visibleCatalog = if (loadedCatalogKey == catalogKey) catalog.toList() else emptyList()
+    val pickerPending = textPickerToken != null || audioPickerToken != null
+    val panelReady = selectionReady && panelThreadId.isNotBlank() && thread != null
+
+    fun displaysScope(origin: PrivateDataPickerScope): Boolean =
+        app.runs.selectedThreadId.value == origin.threadId && latestCatalogKey.getOrNull(0) == origin.threadId &&
+            latestCatalogKey.getOrNull(1) == origin.threadRevision &&
+            latestCatalogKey.getOrNull(2) == origin.branchId && latestCatalogKey.getOrNull(3) == origin.projectId
+
+    suspend fun scopedImports(origin: PrivateDataPickerScope): ConversationImport {
+        requirePrivateDataUiScope(app.repository, origin)
+        val repository = app.repository.forThread(origin.threadId)
+        requirePrivateDataUiScope(app.repository, origin)
+        return ConversationImport(context, repository, discardIncompleteNotes = repository::discardIncompleteConversationNotes)
+    }
+
+    suspend fun <T> monitorOrigin(origin: PrivateDataPickerOrigin, block: suspend () -> T): T = coroutineScope {
+        app.validatePrivateDataOrigin(origin)
+        val operation = checkNotNull(currentCoroutineContext()[Job])
+        val guard = launch(Dispatchers.Default) {
+            while (isActive) {
+                delay(200)
+                try { app.validatePrivateDataOrigin(origin) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { operation.cancel(CancellationException("원래 자료 선택 범위가 변경되었습니다.")); return@launch }
+            }
+        }
+        try { block() } finally { withContext(NonCancellable) { guard.cancelAndJoin() } }
+    }
+
+    fun launchPicker(purpose: PrivateDataPickerPurpose, launch: () -> Unit) {
+        if (busy || pickerPending) return
+        val clickedThreadId = panelThreadId
+        if (!app.runs.selectionReady.value || app.runs.selectedThreadId.value != clickedThreadId) {
+            status = "자료를 연결할 대화를 먼저 확인해주세요."; return
+        }
+        busy = true
+        scope.launch {
+            var token: String? = null
+            try {
+                val origin = capturePrivateDataUiScope(app.repository, clickedThreadId)
+                check(app.runs.selectionReady.value && app.runs.selectedThreadId.value == clickedThreadId)
+                token = app.privateDataPickerOrigins.begin(origin, purpose)
+                when (purpose) {
+                    PrivateDataPickerPurpose.CONVERSATION_IMPORT -> textPickerToken = token
+                    PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION -> audioPickerToken = token
+                }
+                launch()
+            } catch (cancel: CancellationException) {
+                token?.let { app.privateDataPickerOrigins.cancel(it) }
+                when (purpose) {
+                    PrivateDataPickerPurpose.CONVERSATION_IMPORT -> textPickerToken = null
+                    PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION -> audioPickerToken = null
+                }
+                throw cancel
+            } catch (_: Exception) {
+                token?.let { app.privateDataPickerOrigins.cancel(it) }
+                when (purpose) {
+                    PrivateDataPickerPurpose.CONVERSATION_IMPORT -> textPickerToken = null
+                    PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION -> audioPickerToken = null
+                }
+                status = "원래 대화에서 파일 선택을 다시 시작해주세요."
+            } finally { busy = false }
+        }
+    }
 
     fun refreshPermissions() {
         smsGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
@@ -67,30 +155,78 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
         audioGranted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
     }
     LaunchedEffect(Unit) { refreshPermissions() }
-    LaunchedEffect(app, refreshKey) {
+    LaunchedEffect(app, catalogKey, selectionReady, refreshKey) {
+        val loadToken = Any(); catalogLoadToken = loadToken
+        catalog.clear(); loadedCatalogKey = null; catalogScope = null; deleteTarget = null
+        catalogLoading = false
+        if (!panelReady) return@LaunchedEffect
+        catalogLoading = true
+        val originKey = catalogKey
+        val originThreadId = panelThreadId
         try {
-            val entries = app.conversationImports.catalog()
-            catalog.clear(); catalog.addAll(entries)
+            val origin = capturePrivateDataUiScope(app.repository, originThreadId)
+            val entries = scopedImports(origin).catalog()
+            requirePrivateDataUiScope(app.repository, origin)
+            if (latestCatalogKey == originKey && catalogLoadToken === loadToken && app.runs.selectedThreadId.value == originThreadId) {
+                catalog.addAll(entries); catalogScope = origin; loadedCatalogKey = originKey
+            }
         } catch (cancel: CancellationException) { throw cancel }
-        catch (error: Exception) { status = error.message ?: "가져온 자료 목록을 불러오지 못했습니다." }
+        catch (_: Exception) { if (latestCatalogKey == originKey && catalogLoadToken === loadToken) status = "현재 대화 범위의 가져온 자료를 확인하지 못했습니다." }
+        finally { if (catalogLoadToken === loadToken) catalogLoading = false }
     }
 
     val textPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            busy = true; progress = "파일 확인 중"; status = "선택한 텍스트 파일을 안전하게 가져오는 중입니다."
-            try {
-                val result = app.conversationImports.importUri(uri) { done, total ->
-                    context.mainExecutor.execute { progress = "자료 조각 $done / $total" }
+        val token = textPickerToken
+        textPickerToken = null
+        if (uri == null) { token?.let { app.privateDataPickerOrigins.cancel(it) } }
+        else if (token == null) { status = "원래 파일 선택 요청을 확인할 수 없습니다. 파일을 다시 선택해주세요." }
+        else {
+            val origin = runCatching { app.privateDataPickerOrigins.consume(token, PrivateDataPickerPurpose.CONVERSATION_IMPORT) }.getOrNull()
+            if (origin == null) status = "원래 파일 선택 요청을 확인할 수 없습니다. 파일을 다시 선택해주세요."
+            else {
+                busy = true
+                lateinit var operation: Job
+                operation = scope.launch(start = CoroutineStart.LAZY) {
+                    var importer: ConversationImport? = null
+                    if (displaysScope(origin.scope)) { progress = "파일 확인 중"; status = "선택한 텍스트 파일을 원래 대화에 가져오는 중입니다." }
+                    try {
+                        val repository = app.privateDataRepository(origin)
+                        importer = ConversationImport(context, repository, discardIncompleteNotes = repository::discardIncompleteConversationNotes)
+                        val result = monitorOrigin(origin) { checkNotNull(importer).importUri(uri) { done, total ->
+                            context.mainExecutor.execute { if (displaysScope(origin.scope)) progress = "자료 조각 $done / $total" }
+                        } }
+                        app.validatePrivateDataOrigin(origin)
+                        if (displaysScope(origin.scope)) {
+                            status = "가져오기 완료 · ${result.messageCount}개 메시지 인식 · ${result.chunkCount}개 조각${if (result.duplicate) " · 기존 자료와 동일" else ""}"
+                        }
+                        refreshKey++ // Reload the displayed repository; never publish another scope's counts.
+                    } catch (cancel: CancellationException) {
+                        if (displaysScope(origin.scope)) status = if (importer?.lastCleanupResult?.verified == false)
+                            "가져오기를 중단했습니다. 변경됐거나 정리를 확인하지 못한 자료가 있습니다." else "가져오기를 중단했습니다."
+                        throw cancel
+                    } catch (error: Exception) {
+                        if (displaysScope(origin.scope)) status = error.message?.take(200) ?: "파일을 가져오지 못했습니다."
+                    } finally { busy = false; progress = ""; if (importOperation === operation) importOperation = null }
                 }
-                status = "가져오기 완료 · ${result.messageCount}개 메시지 인식 · ${result.chunkCount}개 조각${if (result.duplicate) " · 기존 자료와 동일" else ""}"
-                refreshKey++
-            } catch (cancel: CancellationException) { throw cancel }
-            catch (error: Exception) { status = error.message ?: "파일을 가져오지 못했습니다." }
-            finally { busy = false; progress = "" }
+                importOperation = operation; operation.start()
+            }
         }
     }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) onTranscribe(uri)
+        val token = audioPickerToken
+        audioPickerToken = null
+        if (uri == null) { token?.let { app.privateDataPickerOrigins.cancel(it) } }
+        else if (token == null) { status = "원래 오디오 선택 요청을 확인할 수 없습니다. 파일을 다시 선택해주세요." }
+        else {
+            val origin = runCatching { app.privateDataPickerOrigins.consume(token, PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION) }.getOrNull()
+            if (origin == null) status = "원래 오디오 선택 요청을 확인할 수 없습니다. 파일을 다시 선택해주세요."
+            else { busy = true; scope.launch {
+                try { app.privateDataRepository(origin); onTranscribe(uri, origin) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { status = "원래 대화 범위가 변경되어 전사를 시작하지 않았습니다. 파일을 다시 선택해주세요." }
+                finally { busy = false }
+            } }
+        }
     }
     val smsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         refreshPermissions(); smsResult = if (granted) "문자 접근이 허용되었습니다. 아래 버튼을 눌러 가져오기를 시작하세요." else "문자 접근이 허용되지 않았습니다."
@@ -111,13 +247,16 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("대화 파일 가져오기", style = MaterialTheme.typography.titleMedium)
                     Text("카카오톡 등에서 내보낸 텍스트·CSV 파일을 선택합니다. 가져온 파일 범위만 보관하고, 전체 메신저 대화에 접근하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { textPicker.launch(arrayOf("text/plain", "text/csv", "application/octet-stream")) }, enabled = !busy) {
+                    Button(onClick = { launchPicker(PrivateDataPickerPurpose.CONVERSATION_IMPORT) {
+                        textPicker.launch(arrayOf("text/plain", "text/csv", "application/octet-stream"))
+                    } }, enabled = !busy && !pickerPending && panelReady) {
                         Text("텍스트 파일 선택")
                     }
                     if (busy) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Text(progress, style = MaterialTheme.typography.bodySmall)
                     }
+                    if (importOperation?.isActive == true) TextButton(onClick = { importOperation?.cancel() }) { Text("가져오기 중단") }
                 }
             }
         }
@@ -130,22 +269,29 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
                         onGrant = { smsPermission.launch(Manifest.permission.READ_SMS) },
                         actionLabel = if (smsGranted) "허용됨" else "문자 접근 허용",
                         onAction = {
+                            val clickedThreadId = panelThreadId
                             scope.launch {
                                 busy = true; progress = "문자 자료 가져오는 중"; smsResult = ""
                                 try {
-                                    when (val result = app.phoneRecords.importSmsToRepository(app.repository) { done, total ->
-                                        context.mainExecutor.execute { progress = "문자 자료 조각 $done / $total" }
-                                    }) {
+                                    check(app.runs.selectedThreadId.value == clickedThreadId && app.runs.selectionReady.value)
+                                    val origin = capturePrivateDataUiScope(app.repository, clickedThreadId)
+                                    val repository = app.repository.forThread(origin.threadId)
+                                    requirePrivateDataUiScope(app.repository, origin)
+                                    val result = app.phoneRecords.importSmsToRepository(repository) { done, total ->
+                                        context.mainExecutor.execute { if (displaysScope(origin)) progress = "문자 자료 조각 $done / $total" }
+                                    }
+                                    requirePrivateDataUiScope(app.repository, origin)
+                                    if (displaysScope(origin)) when (result) {
                                         is PhoneRecordResult.Ready -> smsResult = "가져오기 완료 · ${result.value.recordCount}개 문자 · ${result.value.chunkCount}개 조각${if (result.value.duplicate) " · 기존 자료와 동일" else ""}. 본문은 이 화면에 표시하지 않습니다."
                                         is PhoneRecordResult.ConnectionRequired -> smsResult = result.description
                                         is PhoneRecordResult.LimitExceeded -> smsResult = result.description
                                         is PhoneRecordResult.Unavailable -> smsResult = result.description
                                     }
                                 } catch (cancel: CancellationException) { throw cancel }
-                                catch (error: Exception) { smsResult = error.message ?: "문자 자료를 가져오지 못했습니다." }
+                                catch (error: Exception) { if (app.runs.selectedThreadId.value == clickedThreadId) smsResult = error.message ?: "문자 자료를 가져오지 못했습니다." }
                                 finally { busy = false; progress = "" }
                             }
-                        }, actionEnabled = smsGranted && !busy)
+                        }, actionEnabled = smsGranted && !busy && !pickerPending && panelReady)
                     PermissionLine("통화 기록", callGranted, callResult,
                         onGrant = { callPermission.launch(Manifest.permission.READ_CALL_LOG) },
                         actionLabel = if (callGranted) "통화 기록 요약" else "통화 기록 접근 허용",
@@ -182,7 +328,9 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
                                 finally { busy = false }
                             }
                         }, actionEnabled = audioGranted && !busy)
-                    OutlinedButton(onClick = { audioPicker.launch(arrayOf("audio/*")) }, enabled = !busy) {
+                    OutlinedButton(onClick = { launchPicker(PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION) {
+                        audioPicker.launch(arrayOf("audio/*"))
+                    } }, enabled = !busy && !pickerPending && panelReady && !modelBusy) {
                         Text("오디오 파일 직접 선택 · 추가 권한 불필요")
                     }
                     Text("녹음 분석은 파일을 직접 선택해야 시작됩니다. 알림 기록은 권한을 허용한 시점 이후부터만 볼 수 있으며, 카카오톡 전체 기록은 내보낸 파일로 가져오세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -192,10 +340,16 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
         item {
             Text("가져온 대화 자료", style = MaterialTheme.typography.titleLarge)
         }
-        if (catalog.isEmpty()) item {
-            ZipHapCard { Text("아직 가져온 자료가 없습니다. 분석할 파일을 직접 선택하면 여기에 범위와 인식 결과가 표시됩니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (visibleCatalog.isEmpty()) item {
+            val message = when {
+                !panelReady -> "자료를 연결할 대화를 먼저 선택해주세요."
+                catalogLoading -> "현재 대화에 연결한 자료를 확인하는 중입니다."
+                loadedCatalogKey != catalogKey -> "자료 목록을 확인하지 못했습니다. 원래 대화를 다시 확인해주세요."
+                else -> "아직 가져온 자료가 없습니다. 분석할 파일을 직접 선택하면 여기에 범위와 인식 결과가 표시됩니다."
+            }
+            ZipHapCard { Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        items(catalog, key = { it.contentSha256 }) { entry ->
+        items(visibleCatalog, key = { it.contentSha256 }) { entry ->
             ZipHapCard {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("자료 ${entry.contentSha256.take(12)}", style = MaterialTheme.typography.titleMedium)
@@ -203,15 +357,28 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
                     val dates = listOfNotNull(entry.firstTimestamp, entry.lastTimestamp).distinct()
                     if (dates.isNotEmpty()) Text("인식한 기간: ${dates.joinToString(" ~ ")}", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onAsk("가져온 대화 자료 ${entry.contentSha256}를 요약하고, 확인 가능한 범위와 기간을 밝혀 핵심 내용을 정리해줘.") }) { Text("이 자료 분석") }
-                        OutlinedButton(onClick = { deleteTarget = entry }, enabled = !busy) { Text("삭제") }
+                        Button(onClick = {
+                            val origin = catalogScope
+                            if (origin == null || !displaysScope(origin)) status = "현재 대화의 자료 목록을 다시 확인해주세요."
+                            else scope.launch {
+                                try {
+                                    requirePrivateDataUiScope(app.repository, origin)
+                                    check(displaysScope(origin))
+                                    onAsk("가져온 대화 자료 ${entry.contentSha256}를 요약하고, 확인 가능한 범위와 기간을 밝혀 핵심 내용을 정리해줘.", origin.threadId)
+                                } catch (cancel: CancellationException) { throw cancel }
+                                catch (_: Exception) { status = "현재 대화의 자료 목록을 다시 확인해주세요." }
+                            }
+                        }, enabled = !busy && !pickerPending) { Text("이 자료 분석") }
+                        OutlinedButton(onClick = {
+                            catalogScope?.takeIf(::displaysScope)?.let { deleteTarget = entry to it }
+                        }, enabled = !busy && !pickerPending) { Text("삭제") }
                     }
                 }
             }
         }
     }
 
-    deleteTarget?.let { target ->
+    deleteTarget?.let { (target, origin) ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("가져온 자료를 삭제할까요?") },
@@ -221,11 +388,15 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String) -> Unit, onTranscribe: 
                 scope.launch {
                     busy = true
                     try {
-                        app.conversationImports.deleteImport(target.contentSha256)
-                        catalog.removeAll { it.contentSha256 == target.contentSha256 }
-                        status = "선택한 가져오기 자료를 삭제했습니다."
+                        check(displaysScope(origin))
+                        scopedImports(origin).deleteImport(target.contentSha256)
+                        requirePrivateDataUiScope(app.repository, origin)
+                        if (displaysScope(origin)) {
+                            catalog.removeAll { it.contentSha256 == target.contentSha256 }
+                            status = "선택한 가져오기 자료를 삭제했습니다."
+                        }
                     } catch (cancel: CancellationException) { throw cancel }
-                    catch (error: Exception) { status = error.message ?: "자료를 삭제하지 못했습니다." }
+                    catch (error: Exception) { if (displaysScope(origin)) status = error.message ?: "자료를 삭제하지 못했습니다." }
                     finally { busy = false }
                 }
             }) { Text("삭제") } },

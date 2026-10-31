@@ -16,18 +16,42 @@ import java.io.InputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.util.UUID
 
 data class AudioChunk(val file: File, val index: Int, val startMillis: Long, val durationMillis: Long)
 
 /** Decodes user-selected audio into short private WAV files without uploading source audio. */
 class AudioChunkDecoder(private val context: Context) {
-    suspend fun decode(uri: Uri, onChunk: suspend (AudioChunk) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun decode(uri: Uri, chunkSeconds: Int = 30, expectedSourceSha256: String? = null,
+        expectedSourceBytes: Long? = null, onChunk: suspend (AudioChunk) -> Unit) = withContext(Dispatchers.IO) {
         require(uri.scheme == "content") { "Select an audio file using the system file picker." }
-        val dir = File(context.cacheDir, "audio-chunks").apply { mkdirs() }
-        val source = File.createTempFile("audio-source-", ".bin", context.cacheDir)
-        val writer = ChunkWriter(dir, onChunk)
+        require(expectedSourceSha256 == null || Regex("[a-f0-9]{64}").matches(expectedSourceSha256))
+        require(expectedSourceBytes == null || expectedSourceBytes in 1..MAX_INPUT_BYTES)
+        require(chunkSeconds in 5..30)
+        val dir = createSession(context)
+        val source = File(dir, "source.bin")
+        val writer = ChunkWriter(dir, chunkSeconds * OUTPUT_RATE, onChunk)
         try {
             copyBounded(uri, source)
+            // Verify the actual private decoder input, before any PCM or transcript can be published.
+            expectedSourceBytes?.let { check(source.length() == it) { "녹음 파일 크기가 바뀌었습니다. 다시 확인해주세요." } }
+            expectedSourceSha256?.let { expected ->
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                source.inputStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                check(digest.digest().joinToString("") { "%02x".format(it) } == expected) {
+                    "분석하려던 녹음과 실제 입력 파일이 다릅니다. 분석을 중단했습니다."
+                }
+            }
             val header = ByteArray(12)
             source.inputStream().use { it.read(header) }
             if (header.size >= 12 && String(header, 0, 4, Charsets.US_ASCII) == "RIFF" &&
@@ -39,8 +63,9 @@ class AudioChunkDecoder(private val context: Context) {
             writer.finish()
         } finally {
             writer.abort()
-            source.delete()
-            dir.listFiles()?.takeIf { it.isEmpty() }?.let { dir.delete() }
+            synchronized(SESSION_LOCK) {
+                try { deleteSessionFiles(dir) } finally { activeSessions.remove(dir.absolutePath) }
+            }
         }
     }
 
@@ -252,7 +277,7 @@ class AudioChunkDecoder(private val context: Context) {
         suspend fun finish() = Unit
     }
 
-    private class ChunkWriter(private val directory: File, private val callback: suspend (AudioChunk) -> Unit) {
+    private class ChunkWriter(private val directory: File, private val framesPerChunk: Int, private val callback: suspend (AudioChunk) -> Unit) {
         private var output: RandomAccessFile? = null
         private var file: File? = null
         private var framesInChunk = 0
@@ -266,7 +291,7 @@ class AudioChunkDecoder(private val context: Context) {
             val pcm = (sample.coerceIn(-1f, 1f) * 32767f).toInt().coerceIn(-32768, 32767)
             output!!.write(pcm and 0xff); output!!.write((pcm shr 8) and 0xff)
             framesInChunk++; totalFrames++
-            if (framesInChunk == FRAMES_PER_CHUNK) emit()
+            if (framesInChunk == framesPerChunk) emit()
         }
 
         private fun openChunk() {
@@ -301,6 +326,67 @@ class AudioChunkDecoder(private val context: Context) {
     }
 
     companion object {
+        private const val SESSION_DIRECTORY = "audio-decoder-sessions"
+        private val SESSION_LOCK = Any()
+        private val activeSessions = mutableSetOf<String>()
+        private val SESSION_NAME = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
+        private val LEGACY_SOURCE = Regex("audio-source-[0-9]+\\.bin")
+        private val CHUNK_NAME = Regex("audio-chunk-[0-9]+\\.wav")
+
+        private fun createSession(context: Context): File = synchronized(SESSION_LOCK) {
+            val cache = context.cacheDir.canonicalFile
+            val root = File(cache, SESSION_DIRECTORY)
+            check(!Files.isSymbolicLink(root.toPath())) { "Audio session directory must not be a link" }
+            check(root.mkdir() || Files.isDirectory(root.toPath(), LinkOption.NOFOLLOW_LINKS))
+            check(root.canonicalFile.parentFile == cache)
+            val session = File(root, UUID.randomUUID().toString())
+            // Registration and creation share the cleanup lock: a new live directory is never an orphan.
+            check(activeSessions.add(session.absolutePath))
+            try { check(session.mkdir()); session } catch (error: Throwable) {
+                activeSessions.remove(session.absolutePath); throw error
+            }
+        }
+
+        /** Call on an IO thread after process startup. Only this decoder's unowned files are eligible. */
+        fun cleanupOrphanedSessions(context: Context): Unit = synchronized(SESSION_LOCK) {
+            val cache = context.cacheDir.canonicalFile
+            val root = File(cache, SESSION_DIRECTORY)
+            if (Files.isDirectory(root.toPath(), LinkOption.NOFOLLOW_LINKS) &&
+                !Files.isSymbolicLink(root.toPath()) && root.canonicalFile.parentFile == cache) {
+                root.listFiles()?.forEach { session ->
+                    if (SESSION_NAME.matches(session.name) && session.absolutePath !in activeSessions &&
+                        Files.isDirectory(session.toPath(), LinkOption.NOFOLLOW_LINKS) &&
+                        !Files.isSymbolicLink(session.toPath()) && session.canonicalFile.parentFile == root.canonicalFile) {
+                        deleteSessionFiles(session)
+                    }
+                }
+            }
+            // The old implementation shared these names across invocations. Clean them only when
+            // no decoder in this process is active; never recursively erase another cache directory.
+            if (activeSessions.isEmpty()) {
+                cache.listFiles()?.filter { LEGACY_SOURCE.matches(it.name) }?.forEach { deleteOwnedFile(it, cache) }
+                val legacy = File(cache, "audio-chunks")
+                if (Files.isDirectory(legacy.toPath(), LinkOption.NOFOLLOW_LINKS) &&
+                    !Files.isSymbolicLink(legacy.toPath()) && legacy.canonicalFile.parentFile == cache) {
+                    legacy.listFiles()?.filter { CHUNK_NAME.matches(it.name) }?.forEach { deleteOwnedFile(it, legacy) }
+                    if (legacy.listFiles()?.isEmpty() == true) legacy.delete()
+                }
+            }
+        }
+
+        private fun deleteSessionFiles(session: File) {
+            if (!SESSION_NAME.matches(session.name) || Files.isSymbolicLink(session.toPath()) ||
+                !Files.isDirectory(session.toPath(), LinkOption.NOFOLLOW_LINKS)) return
+            session.listFiles()?.filter { it.name == "source.bin" || CHUNK_NAME.matches(it.name) }
+                ?.forEach { deleteOwnedFile(it, session) }
+            if (session.listFiles()?.isEmpty() == true) session.delete()
+        }
+
+        private fun deleteOwnedFile(file: File, parent: File) {
+            if (Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS) &&
+                !Files.isSymbolicLink(file.toPath()) && file.canonicalFile.parentFile == parent.canonicalFile) file.delete()
+        }
+
         const val MAX_INPUT_BYTES = 100L * 1024 * 1024
         const val MAX_DURATION_MS = 2L * 60 * 60 * 1000
         const val OUTPUT_RATE = 16_000

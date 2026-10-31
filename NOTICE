@@ -10,3 +10,12 @@ The Qwen CPU engine uses llama.cpp (ggml-org), MIT License. The exact upstream
 source pin, archive SHA-256 and license are in app/src/main/cpp/.
 
 Model weights and third-party extensions are not distributed inside the APK.
+
+Dedicated Qwen3-ASR model weights: Qwen team, Apache License 2.0.
+Official GGUF conversion: ggml-org; model/encoder downloads are pinned separately.
+ML Kit on-device speech recognition uses the Google ML Kit Terms of Service:
+https://developers.google.com/ml-kit/terms
+Galaxy AI Transcript Assist is a separate Samsung app feature, not a bundled SDK.
+
+OkHttp 5.3.2: Copyright Square, Inc., Apache License 2.0.
+https://square.github.io/okhttp/

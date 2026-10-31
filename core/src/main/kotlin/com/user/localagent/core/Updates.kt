@@ -35,7 +35,7 @@ class UpdateVerifier(private val pinnedKeys:Map<String,ByteArray>,private val pi
         require(manifest.apkSha256.matches(Regex("[a-fA-F0-9]{64}")))
         require(manifest.commitSha.matches(Regex("[a-fA-F0-9]{40}")))
         require(manifest.apkCertificateSha256.equals(pinnedApkCertificateSha256,true)){"APK 서명 인증서 변경은 승인되지 않았습니다."}
-        require(manifest.minSdk>=31 && manifest.capabilityApiVersion==1 && manifest.databaseSchemaVersion==1){"지원하지 않는 호환 버전입니다."}
+        require(manifest.minSdk>=31 && manifest.capabilityApiVersion==1 && manifest.databaseSchemaVersion==3){"지원하지 않는 호환 버전입니다."}
         val uri=URI(manifest.apkUrl)
         require(uri.isAbsolute && uri.scheme=="https" && uri.host=="github.com" && uri.rawUserInfo==null && uri.port==-1 && uri.rawQuery==null && uri.rawFragment==null)
         val rawPath=uri.rawPath ?: error("업데이트 경로가 없습니다.")

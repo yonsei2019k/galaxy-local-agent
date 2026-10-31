@@ -7,9 +7,21 @@ object RequestToolRouter {
     fun select(text:String,previousUserMessages:List<String> = emptyList()):List<String> {
         val current=normalize(text.take(6000))
         if(current.isBlank()||isDocument(current))return emptyList()
+        RequestActionSemantics.explicitLocalWriteTool(text)?.let {return listOf(it)}
+        if(ProjectPaths.isBoundFileRequest(text))return buildList {
+            add("list_project_files");add("read_project_file")
+            if(listOf("만들","생성","저장","수정","고쳐","작성","업데이트","패치").any {it in current})add("write_project_file")
+        }
+        if(DocumentTaskPlanner.plan(text)!=null)return if(Regex("우리\\s*대화|너와.*대화|비서.*대화|대화\\s*기록|대화내역").containsMatchIn(text))listOf("search_conversation_history","create_document")else listOf("create_document")
+        val web=WebTaskPlanner.plan(text,previousUserMessages)
+        if(web is WebTaskPlan.WebResearch)return listOf(if(web.shopping)"search_shopping"else"search_web","read_webpage","open_url")
+        if(RequestActionSemantics.nonAnalysisRequest(text))return emptyList()
         val inherit=isFollowup(current)
         // A document wrapper stays data-only even when followed by a terse "continue".
-        val previous=previousUserMessages.takeLast(2).map {normalize(it.take(500))}
+        // Preserve the raw barrier: authority normalization intentionally removes wrapper contents.
+        val previousRaw=previousUserMessages.takeLast(2).map {it.take(500)}
+        if(inherit&&previousRaw.lastOrNull()?.let {isDocument(it)||RequestActionSemantics.ownerInput(it).isBlank()}==true)return emptyList()
+        val previous=previousRaw.map(::normalize)
         if(inherit&&previous.lastOrNull()?.let(::isDocument)==true)return emptyList()
         val routing=if(inherit)(listOf(current)+previous.filterNot(::isDocument)).joinToString("\n")else current
         fun has(vararg terms:String)=terms.any {routing.contains(it)}
@@ -17,6 +29,7 @@ object RequestToolRouter {
         val imageSubject=has("이미지","사진","일러스트","그림","포스터","썸네일","배경화면","로고","아이콘")
         val draw=has("그려","그리기","그려주","그려봐")
         val imageAction=has("생성","만들","그려","그리기")
+        if(ImageReferenceIntent.isReferenceEditRequest(text))return listOf("generate_image")
         val technicalBuild=Regex("(?:프로그램|플러그인|기능|코드|스킬|도구).{0,10}(?:만들|개발|구현|설치|업그레이드)").containsMatchIn(current)
         val analysisFollowup=inherit&&currentHas("분석","설명","요약","읽어","인식")&&!currentHas("생성","만들","그려","그리기")
         // Scene descriptions can mention calendars, notes or messages without requesting those actions.
@@ -24,6 +37,10 @@ object RequestToolRouter {
         if(analysisFollowup&&imageSubject)return emptyList()
 
         val tools=linkedSetOf<String>()
+        if(has("프로젝트","project")) {
+            tools.addAll(listOf("list_project_files","read_project_file"))
+            if(has("만들","생성","저장","수정","고쳐","작성","업데이트","패치"))tools.add("write_project_file")
+        }
         val namedMessenger=has("메디통","카카오","카톡","텔레그램")
         val explicitOwnHistory=has("우리 대화","우리대화","너와","너랑","비서 대화","집합에이전트","집합 에이전트","ziphap")
         if(explicitOwnHistory||(!namedMessenger&&has("대화 로그","대화로그","대화 기록","대화기록")))tools.add("search_conversation_history")
@@ -45,7 +62,7 @@ object RequestToolRouter {
         return tools.take(10)
     }
 
-    private fun normalize(text:String)=text.trim().lowercase(Locale.ROOT)
+    private fun normalize(text:String)=RequestActionSemantics.ownerAuthority(text).trim()
     private fun isDocument(text:String)=text.replace(Regex("\\s+"),"").startsWith("선택한문서")
     private val explicitSubjects=listOf("문자","sms","메시지","메신저","카카오","카톡","텔레그램","메디통","대화","ziphap","집합에이전트",
         "메모","기억","일정","회의","약속","캘린더","스케줄","스케쥴","사진","이미지","그림","일러스트","포스터","썸네일","배경화면","로고","아이콘",

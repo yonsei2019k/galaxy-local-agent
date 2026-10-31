@@ -29,7 +29,7 @@ set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_MTMD OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD ON CACHE BOOL "" FORCE)
 set(LLAMA_TOOLS_INSTALL OFF CACHE BOOL "" FORCE)
 set(LLAMA_TESTS_INSTALL OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
@@ -63,10 +63,17 @@ target_include_directories(ziphap_llama PRIVATE
     ${llama_cpp_SOURCE_DIR}/common
     ${llama_cpp_SOURCE_DIR}/ggml/include
 )
-target_link_libraries(ziphap_llama PRIVATE llama llama-common android log)
+target_link_libraries(ziphap_llama PRIVATE llama llama-common mtmd android log)
 target_compile_options(ziphap_llama PRIVATE -Wall -Wextra -Werror=return-type)
 # Android 15+ 16 KiB page-size compatibility for the packaged JNI shared library.
 target_link_options(ziphap_llama PRIVATE -Wl,-z,max-page-size=16384 -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
+
+# Dedicated ASR has its own hidden runtime state; the facade unloads chat weights first.
+add_library(ziphap_asr SHARED asr_jni.cpp)
+target_include_directories(ziphap_asr PRIVATE ${llama_cpp_SOURCE_DIR}/include ${llama_cpp_SOURCE_DIR}/ggml/include)
+target_link_libraries(ziphap_asr PRIVATE llama mtmd android log)
+target_compile_options(ziphap_asr PRIVATE -Wall -Wextra -Werror=return-type)
+target_link_options(ziphap_asr PRIVATE -Wl,-z,max-page-size=16384 -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
 
 # Image diffusion uses upstream-compatible GGML already pinned by llama.cpp.
 # Its JNI DSO hides static GGML symbols to keep runtime globals independent.

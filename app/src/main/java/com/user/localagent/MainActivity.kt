@@ -12,6 +12,8 @@ import com.user.localagent.models.ChosenInference
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +30,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.user.localagent.benchmark.RuntimeGate
 import com.user.localagent.core.AssistantPolicy
+import com.user.localagent.core.IntentPlanning
+import com.user.localagent.core.IntentCapabilities
+import com.user.localagent.core.IntentSource
+import com.user.localagent.core.SourceReadiness
+import com.user.localagent.core.ToolCallSchema
 import com.user.localagent.inference.InferenceTurn
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolRegistry
@@ -55,21 +62,55 @@ private val Background = ZipHapColors.DeepNavy
 private val Panel = ZipHapColors.NavySurface
 private val Accent = ZipHapColors.Periwinkle
 private val Mint = ZipHapColors.Mint
-data class ChatLine(val id:String = UUID.randomUUID().toString(), val role:String, val text:String)
-data class PendingAction(val call:ToolCall, val decision:CompletableDeferred<Boolean>,val remember:MutableStateFlow<Boolean> = MutableStateFlow(false))
+data class ChatLine(val id:String = UUID.randomUUID().toString(), val role:String, val text:String,val requestText:String?=null)
+data class PendingAction(val call:ToolCall, val decision:CompletableDeferred<Boolean>,val remember:MutableStateFlow<Boolean> = MutableStateFlow(false),val runId:String="",val threadId:String="",val projectId:String?=null,val reviewText:String?=null)
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { (application as LocalAgentApplication).container }
-    private val lines = MutableStateFlow<List<ChatLine>>(emptyList())
-    private val status = MutableStateFlow("기기 안에서 실행")
-    private val busy = MutableStateFlow(false)
-    private val approval = MutableStateFlow<PendingAction?>(null)
-    private var requestJob: Job? = null
-    private val requestSteps=mutableListOf<HarnessStep>()
-    private val modelOptions=MutableStateFlow(InferenceOptions())
-    private val preferredModelId=MutableStateFlow("auto")
+    private val lines get()=app.runs.visibleLines
+    private val status get()=app.runs.status
+    private val busy get()=app.runs.busy
+    private val approval get()=app.runs.approval
+
+    private var attachmentJob:Job?=null
+    private var attachmentScope:Triple<String,Long,String>?=null
+    private val attachmentPreparing=MutableStateFlow(false)
+
+    private val modelOptions get()=app.runs.modelOptions
+    private val preferredModelId get()=app.runs.preferredModelId
     private val requestedTab=MutableStateFlow<Int?>(null)
-    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { status.value = "권한 설정을 반영했습니다." }
+    private var folderProjectId:String?=null
+    private val projectFolder=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
+        val projectId=folderProjectId
+        folderProjectId=null
+        if(uri!=null&&projectId!=null)lifecycleScope.launch {
+            try {
+                check(app.repository.chat.project(projectId)?.archived==false){"프로젝트를 다시 확인해주세요."}
+                app.workspaceFor(projectId).select(uri)
+                status.value="선택한 프로젝트의 폴더를 연결했습니다. 작성 중인 설정은 유지됩니다."
+            }catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){status.value=error.message?:"프로젝트 폴더를 연결하지 못했습니다."}
+        }
+    }
+    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result->
+        val actual=result.keys.associateWith{androidx.core.content.ContextCompat.checkSelfPermission(this,it)==android.content.pm.PackageManager.PERMISSION_GRANTED}
+        status.value=permissionResultMessage(actual)
+    }
+    private val attachFiles=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()){uris->
+        val origin=attachmentScope
+        attachmentScope=null
+        if(uris.isNotEmpty()&&!attachmentPreparing.value){attachmentPreparing.value=true;attachmentJob=lifecycleScope.launch {
+            try{
+                check(origin!=null){"첨부할 원래 대화를 확인하지 못했습니다. 해당 방에서 다시 선택해주세요."}
+                val room=app.repository.chat.thread(origin.first)
+                check(room!=null&&room.revision==origin.second&&room.activeBranchId==origin.third){"자료를 선택하는 동안 원래 대화가 변경되었습니다. 다시 선택해주세요."}
+                status.value="첨부 파일을 기기에 준비 중";app.chatAttachments.add(uris,origin.first);status.value="원래 대화에 파일을 첨부했습니다. 해당 방에서 요청을 입력해주세요."
+            }
+            catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){status.value=error.message?:"첨부 파일을 준비하지 못했습니다."}
+            finally{attachmentJob=null;attachmentPreparing.value=false}
+        }}
+    }
     private val importModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri != null) lifecycleScope.launch {
             runCatching { app.models.importModel(uri, "가져온 로컬 모델") }
@@ -80,299 +121,188 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
-        if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,8)
+        folderProjectId=savedInstanceState?.getString("folder-project-id")
+        savedInstanceState?.let {saved->saved.getString("attachment-thread-id")?.let {id->saved.getString("attachment-branch-id")?.let {branch->attachmentScope=Triple(id,saved.getLong("attachment-thread-revision"),branch)}}}
+        if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10)
         enableEdgeToEdge()
         WindowCompat.getInsetsController(window,window.decorView).apply {isAppearanceLightStatusBars=false;isAppearanceLightNavigationBars=false}
-        preferredModelId.value=getSharedPreferences("chat-preferences",MODE_PRIVATE).getString("model","auto")?:"auto"
         lifecycleScope.launch { runCatching { app.models.refresh() } }
-        lifecycleScope.launch {runCatching {val saved=app.repository.messages.first().sortedBy {it.createdAt}.takeLast(60);if(saved.isNotEmpty())lines.value=saved.map {ChatLine(it.id,it.role,it.text)}}}
-        lifecycleScope.launch {repeatOnLifecycle(Lifecycle.State.STARTED){while(isActive){if(!busy.value && !RuntimeGate.benchmark.get())app.updates.checkAndApply();delay(60_000)}}}
+        app.runs.refreshVisibleHistory()
+        openCallReport(intent)
+        lifecycleScope.launch {repeatOnLifecycle(Lifecycle.State.STARTED){while(isActive){if(!busy.value && !RuntimeGate.benchmark.get()&&!app.smsAnalysis.state.value.running&&!app.webResearch.state.value.running&&!app.imageStudio.state.value.running)app.updates.checkAndApply();delay(60_000)}}}
         setContent { ZipHapTheme { AppScreen() } }
     }
     override fun onStart(){super.onStart();RuntimeGate.foreground.set(true)}
-    override fun onStop(){RuntimeGate.foreground.set(false);app.scheduleIdleUnload();super.onStop()}
-    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,8)}
+    override fun onSaveInstanceState(outState:Bundle){
+        outState.putString("folder-project-id",folderProjectId)
+        attachmentScope?.let {(id,revision,branch)->outState.putString("attachment-thread-id",id);outState.putLong("attachment-thread-revision",revision);outState.putString("attachment-branch-id",branch)}
+        super.onSaveInstanceState(outState)
+    }
+    override fun onStop(){app.phoneMedia.cancelListening();RuntimeGate.foreground.set(false);app.scheduleIdleUnload();super.onStop()}
+    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10);openCallReport(intent)}
 
-    private fun send(text:String):Boolean {
-        if(text.isBlank())return false
-        if(busy.value){status.value="답변을 만드는 중입니다. 중지한 뒤 다시 보낼 수 있습니다.";return false}
-        if(RuntimeGate.benchmark.get()){status.value="성능 측정이 진행 중입니다. 측정이 끝난 뒤 보내주세요.";return false}
-        if(text.length>6000){status.value="긴 문서는 문서 화면에서 일부를 선택해 분석해주세요.";return false}
-        if(!RuntimeGate.inference.compareAndSet(false,true)){status.value="모델 작업을 정리 중입니다. 입력한 내용은 유지됩니다.";return false}
-        busy.value=true
-        requestJob=lifecycleScope.launch(start=CoroutineStart.UNDISPATCHED) {
-            app.cancelIdleUnload()
-            busy.value=true
-            app.updates.setBusy(true)
-            lines.value += ChatLine(role="user",text=text)
-            requestSteps.clear()
-            val taskGoal=TaskHarness.inferGoal(text,lines.value.dropLast(1).filter {it.role=="user"}.map {it.text})
-            try {
-                app.repository.addMessage("user",text)
-                val nativePlan=com.user.localagent.core.AssistantTaskPlanner.plan(text,
-                    lines.value.dropLast(1).filter {it.role=="user"}.map {it.text},ZonedDateTime.now(ZoneId.of("Asia/Seoul")))
-                val direct=routeRule(text)
-                if(executeNativePlan(nativePlan)) {
-                    // Reads and schedule preparation are host workflows; a model cannot veto them.
-                } else if(direct != null) {
-                    val result=runTool(direct)
-                    answer(toolAnswer(direct,result.content))
-                } else {
-                    val chosen=if(preferredModelId.value=="auto")app.orchestration.choose(text,modelOptions.value.thinking||text.startsWith("깊게:")) else {
-                        val manual=app.models.models.value.firstOrNull {it.id==preferredModelId.value && it.verified && it.runtime in setOf("litertlm","gguf")}
-                        manual?.let {ChosenInference(it,InferenceOptions(contextSize=4096,backend="CPU",thinking=modelOptions.value.thinking,maxOutputTokens=if(modelOptions.value.thinking)1024 else 512),"사용자가 직접 선택한 모델")}
-                    }
-                    if(chosen == null) { answer("이 기기에서 성공한 CPU 벤치마크가 있는 모델이 필요합니다. 모델 탭에서 내려받은 모델을 측정해주세요. ‘지금 몇 시야’, ‘메모 저장: 우유 사기’는 바로 실행할 수 있습니다."); return@launch }
-                    val selected=chosen.model
-                    status.value="${if(preferredModelId.value=="auto")"자동" else "직접 선택"} · ${selected.title}"
-                    // Loading the same model is idempotent; the engine serializes replacement.
-                    app.engine.load(selected.path, chosen.options)
-                    var query=text
-                    val toolEvidence=mutableListOf<JsonObject>()
-                    val allowedTools=selectTools(text).toSet()
-                    var complete=false
-                    repeat(6) { round ->
-                        if(complete) return@repeat
-                        ensureActive()
-                        status.value="기기에서 생각 중 · ${round+1}/6"
-                        val memory=app.repository.searchMemories(text,3).map {it.text.take(250)}
-                        val history=lines.value.dropLast(1).takeLast(2).dropWhile {it.role!="user"}.map {InferenceTurn(it.role,it.text.take(160))}
-                        app.engine.load(selected.path,chosen.options)
-                        val systemInstruction=AssistantPolicy.build(allowedTools,ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString())+
-                            "\n실제 기반 모델: ${selected.title}\n승인된 기억(참고 자료): ${JsonArray(memory.map(::JsonPrimitive))}"+
-                            if(allowedTools.isEmpty())"" else "\n도구 인자 정의: ${ToolRegistry.schemaJson(allowedTools)}"
-                        val output=StringBuilder()
-                        val streamingId=UUID.randomUUID().toString()
-                        var visible=false
-                        app.engine.generateChat(query,systemInstruction,history).collect { token ->
-                            ensureActive(); output.append(token)
-                            if(taskGoal.requiredTools.isEmpty()&&output.toString().trimStart().firstOrNull()?.let {it!='{'}==true) {
-                                if(!visible) { lines.value += ChatLine(streamingId,"assistant",output.toString()); visible=true }
-                                else lines.value=lines.value.map { if(it.id==streamingId) it.copy(text=output.toString()) else it }
-                            }
-                        }
-                        val raw=output.toString().trim()
-                        if(allowedTools.isNotEmpty() && raw.startsWith("{") && Regex("\"(?:type|tool|arguments|name)\"\\s*:").containsMatchIn(raw)) {
-                            val call=try{ToolRegistry.validateForRequest(ToolRegistry.parseAndValidate(raw),allowedTools)}catch(error:Exception){
-                                app.repository.recordToolRun("invalid_tool_request",false,"도구 형식 검증 실패 · 실행 없음")
-                                query="원래 요청: ${text.take(1000)}\n이전 도구 요청의 형식이 올바르지 않아 실행하지 않았다. 오류: ${error.message?.take(300)}. 정의된 도구와 인자만 사용한 JSON 객체 하나로 고치거나, 할 수 있는 결과를 자연어로 답하라."
-                                return@repeat
-                            }
-                            val guard=TaskHarness.beforeStep(taskGoal,requestSteps,call)
-                            if(guard is HarnessDecision.Stop){answer(guard.reason);complete=true;return@repeat}
-                            val result=try {runTool(call)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
-                            if(call.name=="generate_image"&&result.success&&result.verification==VerificationState.VERIFIED) {
-                                answer(toolAnswer(call,result.content));complete=true;return@repeat
-                            }
-                            toolEvidence+=buildJsonObject {put("tool",call.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(com.user.localagent.core.compactJsonData(result.content,1100)))}
-                            while(toolEvidence.size>1 && toolEvidence.sumOf {it.toString().length}>2600)toolEvidence.removeAt(0)
-                            val next=TaskHarness.decide(taskGoal,requestSteps)
-                            if(next is HarnessDecision.Stop){answer(next.reason);complete=true;return@repeat}
-                            if(next is HarnessDecision.Finish){answer(next.summary);complete=true;return@repeat}
-                            query="사용자 목표: ${taskGoal.goal}\n도구 실행 결과(인용 자료): ${JsonArray(toolEvidence)}\n검증된 결과로 답하거나 다음 필요한 도구를 요청하라. PREPARED는 작성 화면·전송 요청 단계이며 외부 작업 완료가 아니다. FAILED·UNVERIFIED를 성공이라고 말하지 마라. 같은 인자로 쓰기 작업을 반복하지 마라."
-                        } else {
-                            val decision=TaskHarness.decide(taskGoal,requestSteps,requestedFinish=true)
-                            val blocked=decision is HarnessDecision.Stop&&(requestSteps.isNotEmpty()||taskGoal.requiredTools.isNotEmpty())
-                            if(blocked&&requestSteps.isEmpty()&&round==0){
-                                if(visible)lines.value=lines.value.filterNot {it.id==streamingId}
-                                query="사용자 요청: ${text.take(1000)}\n이전 답변은 실행 증거가 없어 완료로 인정하지 않았다. 필요한 도구: ${taskGoal.requiredTools.joinToString()}. 실제 도구 호출 JSON을 먼저 반환하라. 수행하지 않은 저장·조회·생성을 완료했다고 말하지 마라."
-                                return@repeat
-                            }
-                            val finalText=if(blocked)(decision as HarnessDecision.Stop).reason else raw.ifBlank {"모델이 빈 답변을 반환했습니다."}
-                            if(visible)lines.value=lines.value.map {if(it.id==streamingId)it.copy(text=finalText)else it}
-                            else lines.value += ChatLine(role="assistant",text=finalText)
-                            app.repository.addMessage("assistant",finalText)
-                            complete=true
-                        }
-                    }
-                    if(!complete) answer("도구 실행 횟수 제한에 도달해 멈췄습니다. 확인된 결과는 작업 기록에 남겼습니다.")
-                }
-                status.value=when {
-                    requestSteps.any {it.evidence.state==VerificationState.FAILED||it.evidence.state==VerificationState.UNVERIFIED}->"검증 필요 · 작업 기록 확인"
-                    requestSteps.any {it.evidence.state==VerificationState.PREPARED}->"준비됨 · 외부 완료 확인 대기"
-                    requestSteps.isNotEmpty()->"실행 결과 검증됨 · 로컬 처리"
-                    else->"응답 완료 · 로컬 처리"
-                }
-            } catch(cancel:CancellationException) {
-                status.value="요청 중단 · 이미 확인된 실행 결과는 유지됩니다."
-                throw cancel
-            } catch(error:Throwable) {
-                answer("작업을 끝내지 못했습니다: ${error.message ?: error.javaClass.simpleName}")
-                status.value="오류 · 실행 상태 확인 필요"
-            } finally {
-                approval.value?.decision?.complete(false); approval.value=null; busy.value=false;app.updates.setBusy(false);RuntimeGate.inference.set(false)
-                app.scheduleIdleUnload()
-            }
-        }
-        return true
-    }
-
-    private suspend fun answer(text:String) { lines.value += ChatLine(role="assistant",text=text); app.repository.addMessage("assistant",text) }
-    private suspend fun executeNativePlan(plan:com.user.localagent.core.AssistantTaskPlan):Boolean {
-        when(plan) {
-            is com.user.localagent.core.AssistantTaskPlan.SmsAnalysis -> {
-                status.value="문자 전체를 기기에서 확인 중"
-                app.engine.unload()
-                try {
-                    val result=app.smsAnalysis.scan(plan.year){done,total->status.value="문자 분석 · $done / $total"}
-                    check(result.error==null){result.error?:"문자 분석 결과를 확인하지 못했습니다."}
-                    fun date(value:Long?)=value?.let {java.time.Instant.ofEpochMilli(it).atZone(ZoneId.of("Asia/Seoul")).toLocalDate().toString()}?:"기록 없음"
-                    answer(buildString {
-                        append(if(result.truncated)"문자 일부를 분석했습니다."else "문자 분석을 마쳤습니다.")
-                        append("\n${result.scannedCount} / ${result.totalCount}건 · ${date(result.firstAtMillis)} ~ ${date(result.lastAtMillis)}")
-                        append("\n받은 문자 ${result.incomingCount}건 · 보낸 문자 ${result.outgoingCount}건")
-                        if(result.categories.isNotEmpty())append("\n분류: "+result.categories.entries.joinToString(" · "){"${it.key} ${it.value}건"})
-                        append("\n예약·약속 일정 후보 ${result.candidates.size}건을 찾았습니다. 날짜가 불분명한 후보는 확인 필요로 표시했습니다.")
-                        append("\n후보를 확인·수정한 뒤 선택한 캘린더에 저장할 수 있습니다. 아직 캘린더에는 저장하지 않았습니다.")
-                        append("\n기기 안에서 규칙으로 분류·추출한 결과입니다.\n[[screen:sms-schedules]]")
-                    })
-                    app.repository.recordToolRun("analyze_sms",true,"조회 ${result.scannedCount}/${result.totalCount} · 후보 ${result.candidates.size} · 부분=${result.truncated}")
-                    app.automation.recordOutcome("analyze_sms",true)
-                    if(plan.messengerPackages.isNotEmpty())answerMessengerSources(plan.messengerPackages)
-                }catch(cancel:CancellationException){throw cancel}catch(error:Exception){
-                    app.repository.recordToolRun("analyze_sms",false,"문자 분석 실패 · ${error.javaClass.simpleName}")
-                    app.automation.recordOutcome("analyze_sms",false);throw error
-                }
-                return true
-            }
-            is com.user.localagent.core.AssistantTaskPlan.MessengerAnalysis -> {answerMessengerSources(plan.packageNames);return true}
-            com.user.localagent.core.AssistantTaskPlan.NoPlan -> return false
-        }
-    }
-    private suspend fun answerMessengerSources(packages:Set<String>) {
-        val inbox=com.user.localagent.integrations.MessengerInbox
-        val now=System.currentTimeMillis()
-        val current=inbox.messages.value.filter {it.packageName in packages&&it.at in now-10*60_000L..now}
-        val catalog=app.conversationImports.catalog(100)
-        val kakaoOnly=packages==setOf("com.kakao.talk")
-        val imported=if(kakaoOnly)catalog.filter {it.recognizedFormat.contains("kakao",true)}else emptyList()
-        answer(buildString {
-            append(packages.mapNotNull {inbox.supported[it]}.distinct().joinToString("·"));append(" 연결 자료를 확인했습니다.")
-            append("\n현재 수신 알림 ${current.size}건 · 이 앱에 가져온 카카오톡 대화 파일 ${imported.size}개")
-            current.takeLast(3).forEach {message->append("\n• ${message.conversation?:message.title}: ${message.text.take(180)}")}
-            append("\n알림은 현재 연결된 세션의 최근 10분 범위입니다. 이전 대화는 카카오톡의 ‘대화 내보내기’ 파일을 자료 연결 화면에서 가져오면 분석할 수 있습니다.")
-            append("\n[[screen:imports]]")
-        })
-        app.repository.recordToolRun("inspect_messenger_sources",true,"수신 세션 ${current.size}건 · 대화 파일 ${imported.size}개")
-    }
-    private fun refreshVisibleHistory(){if(!busy.value)lifecycleScope.launch {lines.value=app.repository.messages.first().sortedWith(compareBy({it.createdAt},{it.id})).takeLast(60).map {ChatLine(it.id,it.role,it.text)}}}
-    private fun toolAnswer(call:ToolCall,result:String):String {
-        if(call.name!="generate_image")return result
-        val info=Json.parseToJsonElement(result).jsonObject
-        val name=info.getValue("fileName").jsonPrimitive.content
-        require(Regex("image-[a-f0-9-]{36}\\.png").matches(name))
-        return "기기에서 이미지를 만들었습니다. 이미지 작업실에서 저장할 수 있습니다.\n[[image:$name]]"
-    }
-
-    private fun transcribe(uri:android.net.Uri) {
-        if(busy.value||!RuntimeGate.inference.compareAndSet(false,true)){status.value="현재 모델 작업을 마친 뒤 녹음을 선택해주세요.";return}
-        busy.value=true
-        requestJob=lifecycleScope.launch(start=CoroutineStart.UNDISPATCHED) {
-            app.cancelIdleUnload();app.updates.setBusy(true)
-            try {
-                status.value="녹음을 기기 안에서 준비 중"
-                val result=com.user.localagent.audio.LocalAudioTranscriber(app,com.user.localagent.audio.AudioChunkDecoder(this@MainActivity)).transcribe(uri){index,start->status.value="로컬 음성 전사 · ${index+1}번째 조각 · ${start/1000}초"}
-                answer("선택한 녹음 ${result.durationMillis/1000}초를 ${result.chunkCount}개 조각으로 전사해 기기에 저장했습니다. ‘녹음 전사 요약해줘’로 분석할 수 있습니다. 외부 서버로 전송하지 않았습니다.")
-                status.value="녹음 전사 완료"
-            }catch(cancel:CancellationException){status.value="전사를 중단했습니다. 이번 작업의 미완성 자료를 정리했습니다.";throw cancel}
-            catch(error:Exception){answer("녹음 전사를 완료하지 못했습니다: ${error.message}");status.value="전사 오류"}
-            finally {busy.value=false;app.updates.setBusy(false);RuntimeGate.inference.set(false);app.scheduleIdleUnload()}
+    private fun openCallReport(intent:Intent) {
+        val threadId=intent.getStringExtra("open_thread_id")?:return
+        if(threadId.length !in 1..160)return
+        lifecycleScope.launch {
+            app.runs.selectionReady.first {it}
+            val thread=app.repository.chat.thread(threadId)?:return@launch
+            if(thread.archived)return@launch
+            val project=thread.projectId?.let {app.repository.chat.project(it)}
+            if(project?.archived==true)return@launch
+            app.runs.selectThread(threadId);requestedTab.value=0
         }
     }
 
-    private fun chooseModel(id:String) {
-        preferredModelId.value=id
-        getSharedPreferences("chat-preferences",MODE_PRIVATE).edit().putString("model",id).apply()
-    }
-    private fun actionSummary(call:ToolCall):String {
-        if(call.name!="reply_messenger_notification")return call.arguments.toString()
-        val target=com.user.localagent.integrations.MessengerInbox.messages.value.firstOrNull {it.id==call.arguments["id"]?.jsonPrimitive?.content}
-        val label=target?.let {com.user.localagent.integrations.MessengerInbox.supported[it.packageName]}?:"만료된 알림"
-        return "$label\n대화: ${target?.conversation?:target?.title.orEmpty()}\n보낸 사람: ${target?.sender.orEmpty()}\n\n${call.arguments["message"]?.jsonPrimitive?.content.orEmpty()}\n\n확인하면 이 대화에 답장 전송을 요청합니다."
-    }
-    private fun routeRule(text:String):ToolCall? {
-        val trimmed=text.trim()
-        fun call(name:String,args:JsonObject)=ToolCall(UUID.randomUUID().toString(),name,args)
-        if(trimmed.matches(Regex("^(지금\\s*)?(몇\\s*시(야|인가요|예요|죠)?|현재\\s*시간)[?.]?$")) || trimmed=="오늘 날짜") return call("get_current_datetime",buildJsonObject {})
-        if(trimmed.startsWith("메모 저장:")) return call("save_note",buildJsonObject {put("content",trimmed.substringAfter(':').trim());put("scope","default")})
-        if(trimmed.startsWith("메모 검색:")) return call("search_notes",buildJsonObject {put("query",trimmed.substringAfter(':').trim())})
-        if(trimmed.startsWith("기억해:")) return call("save_memory",buildJsonObject {put("content",trimmed.substringAfter(':').trim())})
-        if(trimmed.startsWith("교정:")) return call("save_memory",buildJsonObject {put("content",trimmed.substringAfter(':').trim());put("kind","correction")})
-        if(trimmed.startsWith("이미지 생성:")||trimmed.startsWith("그림 생성:")||trimmed.startsWith("사진 생성:"))return call("generate_image",buildJsonObject {put("prompt",trimmed.substringAfter(':').trim())})
-        return null
-    }
-    private fun selectTools(text:String):List<String> = com.user.localagent.core.RequestToolRouter.select(
-        text,lines.value.dropLast(1).filter {it.role=="user"}.map {it.text})
-    private suspend fun runTool(call:ToolCall):ToolResult {
-        ToolRegistry.validate(call)
-        check(requestSteps.size<6){"실행 예산 6회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
-        val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments}
-        check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
-        val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}
-        val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
-        val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)
-        if(confirmation) {
-            val deferred=CompletableDeferred<Boolean>()
-            val action=PendingAction(call,deferred);approval.value=action
-            val allowed=try { deferred.await() } finally { approval.value=null }
-            if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
-            if(action.remember.value && CapabilityPolicy.canPreapprove(call.name))app.repository.addGrant(GrantRecord("builtin",codeHash,call.name,call.arguments["scope"]?.jsonPrimitive?.content?:"default"))
+    private fun send(text:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text)}
+    private fun sendToThread(text:String,threadId:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text,threadId)}
+    private fun chooseModel(id:String)=app.runs.chooseModel(id)
+    private fun chooseConversationModel(id:String,threadId:String){
+        if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId||busy.value||app.imageStudio.state.value.running||RuntimeGate.inference.get()||RuntimeGate.benchmark.get()){
+            status.value="현재 작업을 마치고 선택한 대화를 확인한 뒤 모델을 바꿔주세요.";return
         }
-        currentCoroutineContext().ensureActive()
-        val intent=app.tools.prepareIntent(call)
-        if(intent != null) {
-            withContext(Dispatchers.Main) { startActivity(intent) }
-            requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.PREPARED,"작성·확인 화면 열림 · 저장·발송 미확인"))
-            recordOutcomeSafely(call.name,true,"PREPARED · 작성·확인 화면 열림")
-            return ToolResult(call.id,true,"관련 앱의 작성·확인 화면을 열었습니다. 실제 저장·발송 완료는 확인되지 않았습니다.",VerificationState.PREPARED,"Android Intent 전달 확인")
-        }
-        val result=try {withTimeout(ToolRegistry.definitions.getValue(call.name).timeoutMillis) { app.tools.execute(call) }}
-        catch(timeout:TimeoutCancellationException){ToolResult(call.id,false,"도구 제한 시간 안에 결과를 확인하지 못했습니다. 중복 실행 전 기존 결과를 확인해야 합니다.",VerificationState.FAILED,"제한 시간 내 후속 조건 미확인")}
-        requestSteps+=HarnessStep(call,StepEvidence(call.name,result.verification,result.verificationSummary))
-        val auditOk=recordOutcomeSafely(call.name,result.success,"${result.verification.name} · ${result.verificationSummary}")
-        if(!result.success) throw IllegalStateException(result.content)
-        return if(auditOk)result else result.copy(content=result.content+"\n실행 결과는 확인했지만 감사 기록 저장은 확인하지 못했습니다. 같은 작업을 다시 실행하기 전에 기존 결과를 확인해주세요.")
+        if(app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치와 무결성이 확인된 대화 모델을 선택해주세요.";return}
+        // A preference change is synchronous. The next serialized request owns runtime loading.
+        app.runs.chooseModel(id,threadId)
+        status.value="이 대화의 다음 요청에 선택한 모델을 사용합니다."
     }
-    private suspend fun recordOutcomeSafely(name:String,success:Boolean,summary:String):Boolean=withContext(NonCancellable+Dispatchers.IO){
-        var ok=true
-        try {app.repository.recordToolRun(name,success,summary)}catch(_:Exception){ok=false}
-        try {app.automation.recordOutcome(name,success)}catch(_:Exception){ok=false}
-        ok
-    }
-
+    private fun transcribe(uri:android.net.Uri,origin:com.user.localagent.audio.PrivateDataPickerOrigin)=app.runs.transcribe(uri,origin)
+    private fun refreshVisibleHistory()=app.runs.refreshVisibleHistory()
+    private fun invalidateKnowledgeContext()=app.runs.invalidateKnowledgeContext()
+    private fun actionSummary(action:ToolCall)=app.runs.actionSummary(action)
     @Composable private fun AppScreen() {
         var tab by rememberSaveable {mutableIntStateOf(0)}
         val requested by requestedTab.collectAsState()
         LaunchedEffect(requested){requested?.let {tab=it;requestedTab.value=null}}
         val state by status.collectAsState()
+        val chat=app.runs
+        val selectedThreadId by chat.selectedThreadId.collectAsState()
+        // Freeze the value, not the delegated State getter, in callbacks retained by an old IME.
+        val composerThreadId=selectedThreadId
+        val selectedProjectId by chat.selectedProjectId.collectAsState()
+        val roomDraft by chat.draft.collectAsState()
+        val answerStates by chat.answerStates.collectAsState()
+        val queuedRequests by chat.queued.collectAsState()
+        val runMode by chat.runMode.collectAsState()
+        val roomGoal by chat.goalState.collectAsState()
+        val roomViewport by chat.viewportState.collectAsState()
+        val composerReady by chat.selectionReady.collectAsState()
+        val roomHasEarlier by chat.hasEarlier.collectAsState()
+        val roomActivities by chat.workActivities.collectAsState()
+        val runEvents by chat.runTimeline.collectAsState()
+        var queueOpen by rememberSaveable{mutableStateOf(false)}
+        var goalEditorThreadId by rememberSaveable{mutableStateOf<String?>(null)}
+        var skillLibraryOpen by rememberSaveable{mutableStateOf(false)}
+        var skillCapabilities by remember{mutableStateOf<List<com.user.localagent.core.ToolCapability>>(emptyList())}
+        LaunchedEffect(skillLibraryOpen){
+            if(skillLibraryOpen)lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED){
+                try{skillCapabilities=app.capabilitySnapshot()}
+                catch(cancel:CancellationException){throw cancel}
+                catch(_:Exception){skillCapabilities=emptyList()}
+                awaitCancellation()
+            }
+        }
+        LaunchedEffect(selectedThreadId){if(goalEditorThreadId!=selectedThreadId)goalEditorThreadId=null}
+        val roomProjects by app.repository.chat.projects.collectAsState(initial=emptyList())
+        val roomThreads by app.repository.chat.threads.collectAsState(initial=emptyList())
+        val currentBranchId=roomThreads.firstOrNull{it.id==selectedThreadId}?.activeBranchId.orEmpty()
+        var roomBranches by remember(selectedThreadId){mutableStateOf<List<UiChatBranch>>(emptyList())}
+        LaunchedEffect(selectedThreadId,currentBranchId){
+            roomBranches=emptyList()
+            if(selectedThreadId.isNotBlank())try{
+                roomBranches=app.repository.chat.branches(selectedThreadId).map{UiChatBranch(it.id,it.title)}
+            }catch(cancel:CancellationException){throw cancel}catch(_:Exception){status.value="대화 버전 목록을 불러오지 못했습니다."}
+        }
         val pending by approval.collectAsState()
         val working by busy.collectAsState()
         val messages by lines.collectAsState()
         val installed by app.models.models.collectAsState()
         val chosenId by preferredModelId.collectAsState()
         val imageWork by app.imageStudio.state.collectAsState()
+        val webWork by app.webResearch.state.collectAsState()
+        val project by app.projectWorkspace.state.collectAsState()
+        val projectFolders by produceState<Map<String,String>>(emptyMap(),roomProjects.map{it.id}) {
+            val ids=roomProjects.map{it.id}
+            if(ids.isEmpty())value=emptyMap()
+            else combine(ids.map{app.workspaceFor(it).state}){states->ids.zip(states.map{it.name}).toMap()}.collect{value=it}
+        }
+        val attachments by app.chatAttachments.state.collectAsState()
+        val preparingAttachments by attachmentPreparing.collectAsState()
+        val steerRunId=chat.activeRunId
+        val steerThreadId=chat.activeThreadId
+        val navigation=ChatNavigation(
+            projects=roomProjects.filterNot{it.archived}.map{UiProject(it.id,it.title,folderLabel=projectFolders[it.id]?:"프로젝트 전용 폴더",instructions=it.settings.instructions,modelId=it.settings.modelId,thinking=it.settings.thinking,contextSize=it.settings.contextSize,memoryMode=it.settings.memoryMode,useOwnerMemory=it.settings.useOwnerMemory,learnOwnerFacts=it.settings.learnOwnerFacts,revision=it.revision,disabledTools=it.settings.disabledTools)},
+            threads=roomThreads.map{thread->UiThread(thread.id,thread.projectId.orEmpty(),thread.title,thread.pinned,thread.archived,thread.deletedAt!=null,thread.updatedAt,
+                runStatus=if(working&&steerThreadId==thread.id)"실행 중"else queuedRequests.count{it.threadId==thread.id}.takeIf{it>0}?.let{"대기 ${it}개"}.orEmpty())},
+            selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
+            actions=ChatNavigationActions(
+                onSelectThread=chat::selectThread,onNewThread=chat::newThread,onSelectProject=chat::selectProject,
+                onSaveProject=chat::saveProject,onChooseProjectFolder={id->folderProjectId=id;projectFolder.launch(null)},
+                onRenameThread=chat::renameThread,onPinThread=chat::pinThread,onArchiveThread=chat::archiveThread,
+                onClearThread=chat::clearThread,onDeleteThread=chat::deleteThread,onDuplicateThread=chat::duplicateThread,
+                onMoveThread=chat::moveThread,onExportThread=chat::exportThread,
+                onSearchThreads=chat::searchThreads,
+            ),
+        )
         Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
-            if(tab==0)ChatWorkspace(messages,working||imageWork.running,if(imageWork.running)imageWork.phase else state,installed,chosenId,::chooseModel,::send,
-                {app.engine.cancel();app.imageStudio.cancel();app.smsAnalysis.cancel();requestJob?.cancel();approval.value?.decision?.complete(false)},
-                {index->if(index==-1){lines.value=emptyList();status.value="새 대화";tab=0}else {tab=index.coerceIn(0,8);if(tab==0)refreshVisibleHistory()}},
-                Modifier.fillMaxSize().padding(padding))
+            if(tab==0)ChatWorkspace(messages,working||imageWork.running||webWork.running||preparingAttachments,if(imageWork.running)imageWork.phase else if(webWork.running)webWork.status else state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chat.chooseModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
+                {app.engine.cancel();app.imageStudio.cancel();app.smsAnalysis.cancel();app.webResearch.cancel();attachmentJob?.cancel();app.runs.stop();approval.value?.decision?.complete(false)},
+                {index->if(index==-1){chat.newThread();tab=0}else {tab=index.coerceIn(0,10);if(tab==0)refreshVisibleHistory()}},
+                Modifier.fillMaxSize().padding(padding),projectName=project.name,onProjectClick={tab=10},onAttach={
+                    val room=roomThreads.firstOrNull{it.id==composerThreadId}
+                    if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId&&room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}
+                },
+                attachments=attachments.map {ChatAttachmentChip(it.id,it.name,when{it.mimeType.startsWith("image/")->"사진";it.mimeType.startsWith("video/")->"영상";else->"파일"})},
+                onRemoveAttachment={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)app.chatAttachments.remove(it)},navigation=navigation,composerKey=composerThreadId,
+                draftValue=roomDraft,onDraftChange={value->chat.updateDraft(value,composerThreadId)},
+                messageActions=UiMessageActions(onEdit=chat::editMessage,onRegenerate=chat::regenerate,onFork=chat::forkMessage,onCopy=chat::copyMessage,onExport=chat::exportMessage),
+                answerStates=answerStates,onContinue=chat::continueAnswer,queuedCount=queuedRequests.size,onQueue={text->sendToThread(text,composerThreadId)},
+                branches=roomBranches,currentBranchId=currentBranchId,onSelectBranch={branchId->chat.selectBranch(selectedThreadId,branchId)},
+                onShowQueue={queueOpen=true},
+                onManageGoal={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)goalEditorThreadId=composerThreadId},onShowSkills={skillLibraryOpen=true},
+                runTimeline=runEvents.filter{it.threadId.isBlank()||it.threadId==selectedThreadId},
+                onSteer=if(working&&steerRunId!=null&&steerThreadId==selectedThreadId)({text->chat.steer(text,steerRunId,steerThreadId)})else null,
+                activeRunKey=steerRunId,viewport=roomViewport,onViewportChange=chat::updateViewport,hasEarlier=roomHasEarlier,onLoadEarlier=chat::loadEarlier,composerReady=composerReady,
+                activityByMessageId=roomActivities,onLoadOlderActivity=chat.workActivityController::loadOlder,
+                activeGoalLabel=roomGoal?.takeIf {it.threadId==composerThreadId&&it.projectId.orEmpty()==selectedProjectId}?.outcome,
+                backgroundWork={CallFollowUpConversationStatus(app,composerThreadId)})
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
                 Row(Modifier.fillMaxWidth().height(56.dp),verticalAlignment=Alignment.CenterVertically) {
-                    TextButton(onClick={tab=0;refreshVisibleHistory()}){Text("‹ 대화")}
-                    Text(listOf("","모델 관리","기억과 작업","문서 작업실","설정","자료 연결과 분석","대화 기록","이미지 작업실","문자·일정 분석")[tab],style=MaterialTheme.typography.titleMedium)
+                    TextButton(onClick={if(tab in setOf(4,7,10)){tab=0;refreshVisibleHistory()}else tab=4}){Text(if(tab in setOf(4,7,10))"‹ 대화"else"‹ 설정·참고")}
+                    Text(listOf("","모델 관리","기억과 작업","문서 작업실","설정·참고","자료 연결과 분석","대화 기록","이미지 작업실","문자·일정 분석","웹·쇼핑 검색","프로젝트 폴더")[tab],style=MaterialTheme.typography.titleMedium)
                 }
                 Text(state,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
-                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){DocumentSkillsScreen(app.skills,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen();5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request->tab=0;send(request)},{uri->tab=0;transcribe(uri)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{status.value=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}}}
+                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen{tab=it};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{status.value=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
             }
         }
-        pending?.let { action -> val remember by action.remember.collectAsState();AlertDialog(onDismissRequest={action.decision.complete(false)},title={Text("실행 내용을 확인해주세요")},text={Column {Text(action.call.name);Text(actionSummary(action.call),style=MaterialTheme.typography.bodySmall);Spacer(Modifier.height(8.dp));Text("승인한 이 작업만 실행합니다.");if(CapabilityPolicy.canPreapprove(action.call.name))Row {Checkbox(remember,onCheckedChange={action.remember.value=it});Text("같은 범위의 반복 생성·수정을 허용")}}},confirmButton={TextButton(onClick={action.decision.complete(true)}){Text("실행")}},dismissButton={TextButton(onClick={action.decision.complete(false)}){Text("취소")}}) }
+        if(queueOpen)RunQueueDialog(
+            items=queuedRequests.map{request->UiQueuedRun(request.runId,request.threadId,request.text.lineSequence().firstOrNull().orEmpty().take(100),request.text,
+                threadLabel=roomThreads.firstOrNull{it.id==request.threadId}?.title?:"대화",modelLabel=if(request.modelId=="auto")"모델 자동"else installed.firstOrNull{it.id==request.modelId}?.title?:"선택한 모델",
+                modeLabel=com.user.localagent.core.AgentWorkMode.entries.firstOrNull{it.wireName==request.mode}?.label?:request.mode,goalLinked=request.goal!=null,continuation=request.continuation!=null)},
+            onDismiss={queueOpen=false},onEdit=chat::editQueued,onMove=chat::reorderQueued,onCancel=chat::cancelQueued,
+        )
+        if(skillLibraryOpen)SkillLibraryDialog(chat.bundledSkills,toolStatuses=skillCapabilities,onDismiss={skillLibraryOpen=false})
+        goalEditorThreadId?.takeIf{it==selectedThreadId&&it.isNotBlank()}?.let {goalThread->
+            GoalEditorDialog(goal=roomGoal?.takeIf{it.threadId==goalThread},threadId=goalThread,
+                projectId=roomThreads.firstOrNull{it.id==goalThread}?.projectId,
+                onSave={goal->chat.saveGoal(goal){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}},
+                onStart={goal->chat.startGoal(goal){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}},
+                onDelete={chat.deleteGoal(goalThread){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}},
+                onDismiss={goalEditorThreadId=null},feedback=state,
+                onDeleteVersioned={snapshot->chat.deleteGoal(goalThread,snapshot){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}})
+        }
+        pending?.let { action -> val remember by action.remember.collectAsState();AlertDialog(onDismissRequest={action.decision.complete(false)},title={Text("실행 내용을 확인해주세요")},text={Column(Modifier.heightIn(max=460.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {Text(action.call.name);Text(action.reviewText?:actionSummary(action.call),style=MaterialTheme.typography.bodySmall);Spacer(Modifier.height(8.dp));Text("승인한 이 작업만 실행합니다.");if(CapabilityPolicy.canPreapprove(action.call.name))Row {Checkbox(remember,onCheckedChange={action.remember.value=it});Text("같은 범위의 반복 생성·수정을 허용")}}},confirmButton={TextButton(onClick={action.decision.complete(true)}){Text("실행")}},dismissButton={TextButton(onClick={action.decision.complete(false)}){Text("취소")}}) }
     }
     @Composable private fun ColumnScope.ModelsScreen() {
         val installed by app.models.models.collectAsState()
-        val selected by app.models.selectedModel.collectAsState()
+        val selectedId by preferredModelId.collectAsState()
+        val media by app.models.mediaSelection.collectAsState()
+        val asr by app.models.asrSelection.collectAsState()
         val progress by app.models.progress.collectAsState()
         val scope=rememberCoroutineScope()
         val options by modelOptions.collectAsState()
+        val thinkingThreadId=app.runs.selectedThreadId.collectAsState().value
+        val thinkingReady by app.runs.selectionReady.collectAsState()
         var endurance by remember { mutableStateOf(false) }
         var downloadJob by remember {mutableStateOf<Job?>(null)}
         var hashTarget by remember {mutableStateOf<String?>(null)}
@@ -380,30 +310,69 @@ class MainActivity : ComponentActivity() {
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             item { InfoCard("한 번에 하나의 모델","CPU를 기준으로 실측합니다. 모델 파일은 APK에 포함하지 않으며 Wi-Fi에서 별도로 내려받습니다.") }
             item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
-            item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험")});FilterChip(selected=options.thinking,onClick={modelOptions.value=options.copy(thinking=!options.thinking,maxOutputTokens=if(options.thinking)512 else 1024)},label={Text("깊게 생각")})}}
+            item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});FilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
             item {Row {FilterChip(selected=options.contextSize==4096,onClick={modelOptions.value=options.copy(contextSize=4096)},label={Text("4K 문맥")});Spacer(Modifier.width(8.dp));FilterChip(selected=options.contextSize==8192,onClick={modelOptions.value=options.copy(contextSize=8192)},label={Text("8K 문맥")})}}
+            item {Text("CPU/GPU와 4K/8K는 아래 성능 측정에 사용합니다. 깊게 생각 요청은 현재 대화에 저장되며, 실제 모델·설정은 기기의 검증 결과와 자원 상태에 따라 선택됩니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
             item {Row {Checkbox(endurance,onCheckedChange={endurance=it});Text("10분 연속 안정성 측정")}}
             item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick={importModel.launch(arrayOf("application/octet-stream","*/*"))}) { Text("파일 가져오기") }
                 OutlinedButton(onClick={scope.launch { app.engine.unload(); status.value="모델 메모리를 해제했습니다." }}) {Text("메모리 해제")}
             } }
             if(progress!=null) item {val p=progress!!;InfoCard(if(p.phase=="hash")"모델 무결성 검증" else "모델 다운로드","${p.title}\n${p.bytes/1024/1024} / ${p.total/1024/1024} MB");LinearProgressIndicator(progress={if(p.total>0)(p.bytes.toDouble()/p.total).toFloat().coerceIn(0f,1f)else 0f},modifier=Modifier.fillMaxWidth());TextButton(onClick={downloadJob?.cancel()}){Text("중단 · 다음 다운로드에서 이어받기")}}
-            items(app.models.candidates) { candidate -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            items(app.models.candidates.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { candidate -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Text(candidate.title,fontWeight=FontWeight.Bold)
                 Text("공식 메타데이터에서 버전·해시를 확인한 뒤 다운로드",style=MaterialTheme.typography.bodySmall)
-                Button(enabled=progress==null,onClick={downloadJob=scope.launch { status.value="모델 출처 확인 중";try{app.models.download(app.models.resolve(candidate));status.value="다운로드·해시 검증 완료"}catch(cancel:CancellationException){status.value="중단했습니다. 받은 부분은 이어받기에 사용합니다.";throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"} }}) {Text("다운로드")}
+                Button(enabled=progress==null,onClick={downloadJob=scope.launch { status.value="모델 출처 확인 중";try{app.models.downloadBundle(candidate);status.value="다운로드·해시 검증 완료"}catch(cancel:CancellationException){status.value="중단했습니다. 받은 부분은 이어받기에 사용합니다.";throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"} }}) {Text("다운로드")}
             } } }
             item {Text("설치한 모델",style=MaterialTheme.typography.titleMedium)}
-            items(installed) { model -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            items(installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { model -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Text(model.title,fontWeight=FontWeight.Bold)
-                Text(if(selected?.id==model.id) "선택됨" else "선택 가능",color=Mint)
+                Text(if(selectedId==model.id) "이 대화에서 선택됨" else "선택 가능",color=Mint)
+                if(model.id in com.user.localagent.models.GemmaMediaCatalog.modelIds) {
+                    val ready=app.models.mediaReady(model)
+                    Text(if(ready)"음성 내용 분석·사진 분석 지원"else"사진 분석 지원 파일 다운로드 필요",style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
+                        FilterChip(selected=media.vision==model.id,enabled=ready,onClick={scope.launch {app.models.selectMedia("vision",model.id)}},label={Text("사진용")})
+                    }
+                    if(model.id=="gemma-e4b")Text("음성·사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
+                }
                 if(!model.verified)TextButton(onClick={hashTarget=model.id;expectedHash=""}){Text("원본 SHA-256 등록")}
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick={scope.launch {app.engine.unload();app.models.select(model.id);chooseModel(model.id);status.value="선택한 모델을 다음 대화에 사용합니다."}}){Text("선택")}
+                    TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("선택")}
                     TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("벤치마크")}
                     TextButton(onClick={scope.launch {app.engine.unload();app.models.delete(model.id);status.value="모델을 삭제했습니다."}}){Text("삭제")}
                 }
             } } }
+            item {InfoCard("전용 음성 인식", "녹음 전사는 전용 ASR이, 전사 내용의 요약·분석은 선택한 대화 모델이 담당합니다. 모델은 순서대로 메모리에 올립니다.")}
+            item {
+                val deviceAsr by app.models.deviceAsrStatus.collectAsState()
+                Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
+                    Text("기기 내 음성 AI · ML Kit",fontWeight=FontWeight.Bold)
+                    Text("S26의 시스템 AI 활용 후보 · 한국어·영어 · 기기·언어별 지원 확인",style=MaterialTheme.typography.bodySmall)
+                    Text(deviceAsr.message,style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        TextButton(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.prepareDeviceAsr(deviceAsr.downloadable)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"기기 내 AI 확인 실패"}}}){Text(if(deviceAsr.downloadable)"시스템 AI 준비"else"지원 확인")}
+                        FilterChip(selected=asr.modelId==com.user.localagent.models.AsrCatalog.DEVICE_MODEL,enabled=deviceAsr.available&&asr.language!="auto",onClick={scope.launch {app.models.selectAsr(com.user.localagent.models.AsrCatalog.DEVICE_MODEL)}},label={Text("전사용")})
+                    }
+                }}
+            }
+            item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                listOf("ko" to "한국어", "en" to "영어", "auto" to "자동 감지").forEach {(code,label)->
+                    FilterChip(selected=asr.language==code,enabled=code!="auto"||asr.modelId!=com.user.localagent.models.AsrCatalog.DEVICE_MODEL,onClick={scope.launch {app.models.selectAsrLanguage(code)}},label={Text(label)})
+                }
+            }}
+            items(app.models.candidates.filter {it.id in com.user.localagent.models.AsrCatalog.modelIds}) {candidate->
+                Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
+                    Text(candidate.title,fontWeight=FontWeight.Bold)
+                    Text(if(candidate.id=="asr-qwen-17b")"정확도 우선 · 지원 파일 포함 약 2.8GB"else"가벼운 모드 · 지원 파일 포함 약 1.2GB",style=MaterialTheme.typography.bodySmall)
+                    Text("기기 내 처리 · Apache 2.0 · 공식 배포 파일·SHA-256 확인",style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        Button(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.downloadBundle(candidate);status.value="음성 인식 파일 검증 완료"}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"}}}){Text("다운로드")}
+                        FilterChip(selected=asr.modelId==candidate.id,enabled=app.models.asrReady(candidate.id),onClick={scope.launch {app.models.selectAsr(candidate.id)}},label={Text("전사용")})
+                    }
+                }}
+            }
             item {InfoCard("모델 역할을 나눕니다","E2B는 빠른 대화, E4B·Qwen은 수동 비교용입니다. 이미지 작업실에서는 별도 로컬 이미지 모델을 사용하며, 대화 모델을 먼저 메모리에서 내립니다.")}
         }
         hashTarget?.let {id->AlertDialog(onDismissRequest={hashTarget=null},title={Text("배포자의 SHA-256 확인")},text={Column{Text("내가 신뢰하는 원본 배포자가 제공한 64자리 해시를 입력하세요.");OutlinedTextField(value=expectedHash,onValueChange={expectedHash=it.trim()},label={Text("SHA-256")})}},confirmButton={TextButton(enabled=expectedHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={scope.launch {runCatching {app.models.verifyImported(id,expectedHash)}.onSuccess{status.value="원본 해시가 일치합니다.";hashTarget=null}.onFailure{status.value=it.message?:"검증 실패"}}}){Text("파일 검증")}},dismissButton={TextButton(onClick={hashTarget=null}){Text("취소")}})}
@@ -417,37 +386,31 @@ class MainActivity : ComponentActivity() {
         } catch(cancel:CancellationException){throw cancel}catch(error:Throwable) {status.value="벤치마크 실패: ${error.message}"} finally {app.updates.setBusy(false)}
     }
     @Composable private fun ColumnScope.MemoryScreen() {
-        val notes by app.repository.notes.collectAsState(emptyList())
-        val userNotes=notes.filter {it.collection !in setOf("calendar-event-links","sms-schedule-candidates","generated-images","imported-chats","native-sms","audio-transcripts","rawaudio-transcripts")}
-        val memories by app.repository.memories.collectAsState(emptyList())
-        val reminders by app.repository.reminders.collectAsState(emptyList())
-        val scope=rememberCoroutineScope()
-        var memory by remember { mutableStateOf("") }
-        var deleteId by remember { mutableStateOf<String?>(null) }
-        LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-            item {InfoCard("기억은 내가 선택합니다","명시적으로 저장한 정보만 장기 기억에 넣습니다. 삭제한 기억은 검색과 관련 원문·요약에서 제거합니다.")}
-            item {OutlinedTextField(value=memory,onValueChange={memory=it},label={Text("기억할 내용")},modifier=Modifier.fillMaxWidth())}
-            item {Button(onClick={val value=memory;memory="";scope.launch {app.repository.saveMemory(value);status.value="승인한 기억을 저장했습니다."}},enabled=memory.isNotBlank()){Text("이 내용을 기억하기")}}
-            item {Text("장기 기억 ${memories.size}",style=MaterialTheme.typography.titleMedium)}
-            items(memories) { record -> Surface(color=Panel,shape=RoundedCornerShape(14.dp)) {Column(Modifier.fillMaxWidth().padding(14.dp)) {if(record.kind=="proposed")Text("AI 제안 · 승인 전에는 대화에 사용하지 않음",color=Mint);Text(record.text);Row {if(record.kind=="proposed")TextButton(onClick={scope.launch {app.repository.editMemory(record.id,record.text,"preference");status.value="제안을 확인하고 기억으로 승인했습니다."}}){Text("기억으로 승인")};TextButton(onClick={deleteId=record.id}){Text("잊어줘")}}}} }
-            item {Text("메모 ${userNotes.size}",style=MaterialTheme.typography.titleMedium)}
-            items(userNotes) {InfoCard(it.title,it.body)}
-            item {Text("리마인더 ${reminders.size}",style=MaterialTheme.typography.titleMedium)}
-            items(reminders) {InfoCard(it.title,java.time.Instant.ofEpochMilli(it.atEpochMillis).atZone(ZoneId.of("Asia/Seoul")).toString())}
-            item {OutlinedButton(onClick={permissions.launch(arrayOf(Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR,Manifest.permission.READ_CONTACTS,Manifest.permission.POST_NOTIFICATIONS))}) {Text("일정·연락처·알림 권한 설정")}}
+        Box(Modifier.weight(1f)) {
+            KnowledgeScreen(app,{status.value=it},::invalidateKnowledgeContext) {
+                permissions.launch(arrayOf(Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR,Manifest.permission.READ_CONTACTS,Manifest.permission.POST_NOTIFICATIONS))
+            }
         }
-        deleteId?.let { id -> AlertDialog(onDismissRequest={deleteId=null},title={Text("이 기억을 잊을까요?")},text={Text("기억과 연결된 검색 정보·원문·요약을 기기에서 제거합니다.")},confirmButton={TextButton(onClick={scope.launch {app.repository.forgetMemory(id);lines.value=app.repository.messages.first().sortedBy {it.createdAt}.map {ChatLine(it.id,it.role,it.text)};deleteId=null;status.value="기억을 삭제했습니다."}}){Text("삭제")}},dismissButton={TextButton(onClick={deleteId=null}){Text("취소")}}) }
     }
-    @Composable private fun ColumnScope.ExtensionsScreen() {
-        var section by remember {mutableIntStateOf(0)}
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("자동화","앱 연결","패치·확장").forEachIndexed {index,label->FilterChip(section==index,onClick={section=index},label={Text(label)})}}
+    @Composable private fun ColumnScope.ExtensionsScreen(onOpen:(Int)->Unit) {
+        var section by rememberSaveable {mutableIntStateOf(0)}
+        val assistantBusy by app.runs.busy.collectAsState()
+        val imageWork by app.imageStudio.state.collectAsState()
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("참고·도구","자동화","앱 연결","패치·확장").forEachIndexed {index,label->FilterChip(section==index,onClick={section=index},label={Text(label)})}}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            if(section==0)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
-            if(section==1)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity){status.value=it}}
-            if(section==1)item {com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}}
-            if(section==2){
+            if(section==0){
+                item {Text("대화에서 파일·사진·영상을 첨부하고 문서·쇼핑·작업을 요청하세요. 아래 화면은 설정과 결과 확인용입니다.",style=MaterialTheme.typography.bodySmall)}
+                items(listOf("프로젝트 폴더" to 10,"모델 관리" to 1,"기억과 할 일" to 2,"내장 도구·권한 상태" to 3,"대화 기록" to 6,"자료 연결·분석" to 5,"문자·일정 후보 관리" to 8,"웹·쇼핑 출처 기록" to 9)){(label,destination)->OutlinedButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}}
+            }
+            if(section==1)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
+            if(section==1)item {CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}}
+            if(section==2)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity){status.value=it}}
+            if(section==2)item {com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}}
+            if(section==2)item {OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))},modifier=Modifier.fillMaxWidth()){Text("Google·메일·문서 앱 연결 설정")}}
+            if(section==2)item {PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get()){status.value=it}}
+            if(section==3){
             item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
-            item {InfoCard("확장 보안 검사","해시와 고정된 Git 커밋을 검증하고 선언형 스킬·템플릿만 허용합니다. 실행 코드와 지원되지 않는 MCP 서버는 설치하지 않습니다. 설치 화면 연결과 앱별 어댑터는 개발 중입니다.")}
+            item {ExtensionInspectionPanel{status.value=it}}
             item {val scope=rememberCoroutineScope();OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("반복 작업 허용 초기화")}}
             }
             item {Text("버전 ${BuildConfig.VERSION_NAME} · ${Build.MODEL}",style=MaterialTheme.typography.bodySmall)}

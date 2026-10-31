@@ -14,6 +14,21 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 # independent of update-trust.json's approvedCapabilities, which is the user's
 # installed-client approval set. New entries therefore fail closed on older apps.
 RELEASE_CAPABILITIES = sorted({
+    "memory.knowledge_graph",
+    "workspace.read",
+    "workspace.write_reviewed",
+    "attachment.analyze_local",
+    "image.understand_local",
+    "image.transform_local",
+    "document.docx",
+    "spreadsheet.xlsx",
+    "artifact.create_local",
+    "email.read_eml",
+    "audio.speak_local",
+    "audio.listen_ondevice",
+    "video.edit_local",
+    "web.search_public",
+    "web.read_public",
     "datetime.read",
     "calendar.read",
     "calendar.prepare",
@@ -104,7 +119,7 @@ def main():
         "apkCertificateSha256": certificate,
         "minSdk": 31,
         "capabilityApiVersion": 1,
-        "databaseSchemaVersion": 1,
+        "databaseSchemaVersion": 3,
         "capabilities": RELEASE_CAPABILITIES,
         "channel": "stable",
     }

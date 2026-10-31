@@ -74,6 +74,13 @@ class ReflectionWorker(context: Context, parameters: WorkerParameters) : Corouti
         val observationRevision = app.automation.observationRevision()
         val automation = app.automation.state()
         if (!automation.enabled || !automation.settings.assistantPatternsEnabled) { controller.status("assistant_pattern_opt_in_required", generation); return Result.success() }
+        // Personal source knowledge is a separate deterministic, opt-in pass. It loads no model
+        // and retains its own incremental cursor, deletion tombstones and generation controls.
+        val knowledge=KnowledgeIngestionController(applicationContext,app.repository)
+        if(knowledge.state().enabled){
+            val batch=knowledge.scanNow(manual=false,maxSources=100)
+            if(batch.hasMore&&batch.status=="incremental_checkpoint_saved")knowledge.requestInitialScan()
+        }
         val sinceSuccess = System.currentTimeMillis() - controller.state().lastSuccessAt
         if (sinceSuccess in 0 until TimeUnit.HOURS.toMillis(8)) return Result.success()
         if (RuntimeGate.foreground.get() || RuntimeGate.benchmark.get() || !RuntimeGate.inference.compareAndSet(false, true)) {
@@ -83,7 +90,7 @@ class ReflectionWorker(context: Context, parameters: WorkerParameters) : Corouti
             // Refresh reads the local model index only. Never resolve/download/import a model here.
             val chosen = app.orchestration.choose("사용 패턴 정리", false)
             val model = chosen?.model
-            if (model == null || !model.verified || model.runtime != "litertlm") {
+            if (model == null || !model.verified || model.runtime !in setOf("litertlm", "gguf")) {
                 controller.status("verified_local_model_required", generation); return Result.success()
             }
             if (!stillAllowed(controller, generation, app.automation, observationRevision)) { controller.status("deferred_runtime_or_opt_in", generation); return Result.success() }

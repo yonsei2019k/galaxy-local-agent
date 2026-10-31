@@ -35,8 +35,11 @@ data class ConversationParseSummary(val messageCount: Int, val recognizedFormat:
     val firstTimestamp: String?, val lastTimestamp: String?)
 
 /** No network, message APIs, contact reads, automatic memory creation, or filesystem-path discovery. */
-class ConversationImport(context: Context, private val repository: LocalRepository) {
+class ConversationImport @JvmOverloads constructor(context: Context, private val repository: LocalRepository,
+    private val discardIncompleteNotes: (suspend (String, List<IncompleteConversationNote>) -> ConversationCleanupResult)? = null) {
     private val context = context.applicationContext
+    @Volatile var lastCleanupResult: ConversationCleanupResult? = null
+        private set
 
     suspend fun importUri(uri: Uri, onProgress: (Int, Int) -> Unit = { _, _ -> }): ConversationImportResult {
         require(uri.scheme == "content" && !uri.authority.isNullOrBlank()) { "사용자가 선택한 문서 URI가 필요합니다." }
@@ -51,7 +54,9 @@ class ConversationImport(context: Context, private val repository: LocalReposito
         importOpened({ input }, false, onProgress)
 
     private suspend fun importOpened(open: () -> InputStream, close: Boolean, onProgress: (Int, Int) -> Unit): ConversationImportResult = IMPORT_LOCK.withLock {
-        val created = mutableListOf<String>()
+        val created = mutableListOf<IncompleteConversationNote>()
+        val run = UUID.randomUUID().toString()
+        lastCleanupResult = null
         try {
             // The lock and rollback registry live outside withContext, including prompt cancellation
             // while the completed IO result is dispatched back to the caller.
@@ -78,30 +83,52 @@ class ConversationImport(context: Context, private val repository: LocalReposito
                 }
                 val occupied = existing.count { it.second.string("kind") == "chunk" }
                 require(occupied + chunks.size <= MAX_CHUNKS) { "저장할 대화 조각이 2,000개를 넘습니다. 기존 가져오기 자료를 정리한 뒤 다시 선택해주세요." }
-                val run = UUID.randomUUID().toString()
                 chunks.forEachIndexed { index, raw ->
                     currentCoroutineContext().ensureActive()
                     val id = UUID.randomUUID().toString()
-                    created += id // Know the ID even if cancellation arrives after SQLite commits.
                     val metadata = metadata(sha, run, "chunk", chunks.size, parsed, decoded.second, index + 1)
-                    repository.saveNote("대화 자료 ${sha.take(12)} · ${index + 1}/${chunks.size}", metadata.toString() + "\n" + raw, COLLECTION, id)
+                    val body = metadata.toString() + "\n" + raw
+                    created += IncompleteConversationNote(id, ConversationImportCleanup.sha256(body))
+                    repository.saveNote("대화 자료 ${sha.take(12)} · ${index + 1}/${chunks.size}", body, COLLECTION, id)
                     onProgress(index + 1, chunks.size)
                     currentCoroutineContext().ensureActive()
                 }
                 val manifestId = UUID.randomUUID().toString()
-                created += manifestId
-                repository.saveNote("대화 자료 ${sha.take(12)} · 범위", metadata(sha, run, "manifest", chunks.size, parsed, decoded.second).toString(), COLLECTION, manifestId)
+                val manifestBody = metadata(sha, run, "manifest", chunks.size, parsed, decoded.second).toString()
+                created += IncompleteConversationNote(manifestId, ConversationImportCleanup.sha256(manifestBody))
+                repository.saveNote("대화 자료 ${sha.take(12)} · 범위", manifestBody, COLLECTION, manifestId)
                 currentCoroutineContext().ensureActive()
-                result(sha, parsed, chunks.size, decoded.second, false, created.toList())
+                result(sha, parsed, chunks.size, decoded.second, false, created.map { it.noteId })
             }
         } catch (error: Throwable) {
             withContext(NonCancellable + Dispatchers.IO) {
-                created.forEach { id ->
-                    try { repository.deleteNote(id) } catch (cleanup: Exception) { error.addSuppressed(cleanup) }
+                lastCleanupResult = try {
+                    // A supplied scoped rollback is authoritative, including an unverified result.
+                    // Never retry through a broader or stale ordinary repository after it fails.
+                    if (discardIncompleteNotes != null) discardIncompleteNotes.invoke(run, created.toList())
+                    else cleanupCurrentScope(run, created.toList())
+                } catch (cleanup: Exception) {
+                    error.addSuppressed(cleanup)
+                    ConversationCleanupResult(retainedUnverified = created.size)
                 }
             }
             throw error
         }
+    }
+    private suspend fun cleanupCurrentScope(run: String, expected: List<IncompleteConversationNote>): ConversationCleanupResult {
+        ConversationImportCleanup.validateExpected(run, expected)
+        var result = ConversationCleanupResult()
+        for (item in expected) try {
+            val note = repository.getNote(item.noteId)
+            if (note == null) { result += ConversationCleanupResult(missing = 1); continue }
+            if (!ConversationImportCleanup.owns(note.collection, note.body, run, item)) {
+                result += ConversationCleanupResult(retainedChanged = 1); continue
+            }
+            repository.deleteNote(item.noteId)
+            result += if (repository.getNote(item.noteId) == null) ConversationCleanupResult(deleted = 1)
+                else ConversationCleanupResult(retainedUnverified = 1)
+        } catch (_: Exception) { result += ConversationCleanupResult(retainedUnverified = 1) }
+        return result
     }
     /** Completed-source metadata only; no transcript excerpts, paths, or participant identifiers. */
     suspend fun catalog(limit: Int = 20): List<ConversationImportCatalogItem> = withContext(Dispatchers.IO) {
@@ -111,6 +138,19 @@ class ConversationImport(context: Context, private val repository: LocalReposito
                 ConversationImportCatalogItem(meta.string("sha256")!!, (meta.integer("recognized_messages") ?: 0).coerceAtLeast(0),
                     meta.integer("chunks")!!, meta.string("format") ?: "plain-text", meta.string("first_timestamp"), meta.string("last_timestamp"))
             }.toList()
+    }
+    /** One explicitly selected complete source, including records outside a bounded catalog page. */
+    suspend fun descriptor(contentSha256: String): ConversationImportCatalogItem? = withContext(Dispatchers.IO) {
+        val normalized = contentSha256.lowercase(Locale.ROOT)
+        require(SHA.matches(normalized)) { "가져온 대화 자료의 실제 SHA256 식별자가 필요합니다." }
+        val notes = ownedNotes()
+        val manifest = notes.asSequence().filter { (_, meta) ->
+            meta.string("kind") == "manifest" && meta.string("sha256") == normalized
+        }.firstOrNull { (_, meta) -> completeChunks(notes, meta).size == meta.integer("chunks") }?.second
+            ?: return@withContext null
+        ConversationImportCatalogItem(normalized, (manifest.integer("recognized_messages") ?: 0).coerceAtLeast(0),
+            manifest.integer("chunks")!!, manifest.string("format") ?: "plain-text",
+            manifest.string("first_timestamp"), manifest.string("last_timestamp"))
     }
     /** Lexical source snippets only. They are untrusted quoted data, not instructions or stored memories. */
     suspend fun retrieve(query: String, limit: Int = 5, contentSha256: String? = null): List<ConversationExcerpt> = withContext(Dispatchers.Default) {

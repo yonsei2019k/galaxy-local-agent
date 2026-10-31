@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -16,13 +17,14 @@ import com.user.localagent.data.MessageCursor
 import com.user.localagent.data.MessageRecord
 import com.user.localagent.diagnostics.ConversationDiagnostics
 import com.user.localagent.diagnostics.ConversationExportFormat
+import com.user.localagent.diagnostics.ConversationExportMetadata
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** Local stored chat browser. Exports run only after the user picks a destination document. */
+/** Local stored chat browser. An explicit save first freezes its query and complete file locally. */
 @Composable
 fun ConversationHistoryPanel(app:AppContainer,onStatus:(String)->Unit) {
     val context=LocalContext.current
@@ -37,27 +39,48 @@ fun ConversationHistoryPanel(app:AppContainer,onStatus:(String)->Unit) {
     var busy by remember{mutableStateOf(false)}
     var deleteTarget by remember{mutableStateOf<MessageRecord?>(null)}
     var exportFormat by remember{mutableStateOf(ConversationExportFormat.JSON)}
+    val exports=remember(context){PendingFileExports.get(context)}
+    val exportOwner="conversation-history"
+    var exportToken by rememberSaveable{mutableStateOf(exports.activeToken(exportOwner))}
     val formatter=remember{DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss").withZone(ZoneId.of("Asia/Seoul"))}
 
-    val jsonDestination=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")){uri->
-        if(uri!=null)scope.launch {
-            busy=true
+    fun finishExport(uri:android.net.Uri?,format:ConversationExportFormat){
+        val token=exportToken;val extension=if(format==ConversationExportFormat.JSON)"json"else"txt"
+        if(uri==null){exports.cancel(token);exportToken=null;return}
+        busy=true
+        scope.launch {
             try {
-                val result=context.contentResolver.openOutputStream(uri,"wt")?.use {diagnostics.exportSnapshot(it,limit=10_000,query=query)}?:error("선택한 파일을 열 수 없습니다.")
-                onStatus("대화 ${result.messageCount}개를 JSON으로 내보냈습니다.${if(result.truncated)" 크기·개수 제한으로 일부만 포함됩니다." else ""}")
+                val snapshot=exports.request(token,exportOwner,extension)
+                val saved=savePendingExport(context,exports,token,exportOwner,extension,uri){/* Full snapshot SHA readback is performed by the shared writer. */}
+                if(saved){
+                    val details=checkNotNull(snapshot?.details)
+                    val count=checkNotNull(details.messageCount);val partial=checkNotNull(details.truncated)
+                    onStatus("선택 당시 검색 범위의 대화 ${count}개를 ${if(format==ConversationExportFormat.JSON)"JSON"else"텍스트"}로 저장하고 파일 SHA-256 일치를 확인했습니다.${if(partial)" 크기·개수 제한으로 일부만 포함됩니다."else""}")
+                }
             }catch(cancel:CancellationException){onStatus("내보내기를 중단했습니다. 선택한 파일이 일부만 저장됐을 수 있습니다.");throw cancel}
-            catch(_:Exception){onStatus("대화를 내보내지 못했습니다. 저장 위치를 확인해주세요.")}
-            finally{busy=false}
+            catch(error:Exception){onStatus(error.message?.take(200)?:"대화를 내보내지 못했습니다. 저장을 다시 눌러주세요.")}
+            finally{exportToken=null;busy=false}
         }
     }
-    val textDestination=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")){uri->
-        if(uri!=null)scope.launch {
-            busy=true
+    val jsonDestination=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")){finishExport(it,ConversationExportFormat.JSON)}
+    val textDestination=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")){finishExport(it,ConversationExportFormat.TEXT)}
+    fun prepareExport(){
+        if(busy||exportToken!=null)return
+        val sourceQuery=query;val format=exportFormat;val extension=if(format==ConversationExportFormat.JSON)"json"else"txt"
+        busy=true
+        scope.launch {
             try {
-                val result=context.contentResolver.openOutputStream(uri,"wt")?.use {diagnostics.exportSnapshot(it,limit=10_000,query=query,format=ConversationExportFormat.TEXT)}?:error("선택한 파일을 열 수 없습니다.")
-                onStatus("대화 ${result.messageCount}개를 텍스트로 내보냈습니다.${if(result.truncated)" 크기·개수 제한으로 일부만 포함됩니다." else ""}")
-            }catch(cancel:CancellationException){onStatus("내보내기를 중단했습니다. 선택한 파일이 일부만 저장됐을 수 있습니다.");throw cancel}
-            catch(_:Exception){onStatus("대화를 내보내지 못했습니다. 저장 위치를 확인해주세요.")}
+                var metadata:ConversationExportMetadata?=null
+                val snapshot=exports.prepare(exportOwner,extension,details={
+                    val record=checkNotNull(metadata)
+                    PendingExportDetails(messageCount=record.messageCount,truncated=record.truncated,query=sourceQuery)
+                }){file->metadata=file.outputStream().use{diagnostics.exportSnapshot(it,limit=10_000,query=sourceQuery,format=format)}}
+                exportToken=snapshot.token
+                onStatus("대화 ${metadata?.messageCount}개의 저장용 복사본을 준비했습니다.${if(metadata?.truncated==true)" 제한으로 일부만 포함됩니다."else""} 저장 위치를 선택해주세요.")
+                try{if(format==ConversationExportFormat.JSON)jsonDestination.launch("ZipHap-conversations.json")else textDestination.launch("ZipHap-conversations.txt")}
+                catch(failure:Exception){exports.cancel(snapshot.token);exportToken=null;throw failure}
+            }catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){onStatus(error.message?.take(200)?:"대화 저장용 복사본을 준비하지 못했습니다.")}
             finally{busy=false}
         }
     }
@@ -88,7 +111,7 @@ fun ConversationHistoryPanel(app:AppContainer,onStatus:(String)->Unit) {
                 FilterChip(selected=exportFormat==ConversationExportFormat.JSON,onClick={exportFormat=ConversationExportFormat.JSON},label={Text("JSON")})
                 FilterChip(selected=exportFormat==ConversationExportFormat.TEXT,onClick={exportFormat=ConversationExportFormat.TEXT},label={Text("텍스트")})
             }
-            OutlinedButton(enabled=!busy,onClick={if(exportFormat==ConversationExportFormat.JSON)jsonDestination.launch("ZipHap-conversations.json")else textDestination.launch("ZipHap-conversations.txt")}){Text("대화 파일 저장")}
+            OutlinedButton(enabled=!busy&&exportToken==null,onClick={prepareExport()}){Text("대화 파일 저장")}
         }}}
         if(busy)item{LinearProgressIndicator(modifier=Modifier.fillMaxWidth())}
         items(messages,key={it.id}) {message->

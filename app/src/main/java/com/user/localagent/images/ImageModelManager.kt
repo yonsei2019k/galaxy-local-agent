@@ -6,6 +6,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.util.AtomicFile
+import com.user.localagent.core.PhoneImageQuality
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -34,9 +35,10 @@ data class ImageModelState(
     val downloading:Boolean=false,
     val downloadedBytes:Long=0,
     val totalBytes:Long=ImageModelManager.DEFAULT_BYTES,
-    val status:String="이미지 모델을 내려받아주세요 · 약 2.13GB",
+    val status:String="휴대폰 고품질 이미지 모델을 내려받아주세요 · 약 2.80GB",
     val modelPath:String?=null,
     val error:String?=null,
+    val qualityModel:Boolean=false,
 )
 
 /** Only weights are imported; archive, pickle, program and plugin execution are not supported. */
@@ -47,6 +49,7 @@ class ImageModelManager(context:Context) {
     private val mutex=Mutex()
     private val mutableState=MutableStateFlow(ImageModelState())
     val state:StateFlow<ImageModelState> = mutableState.asStateFlow()
+    val isQualityModel:Boolean get()=verified?.hash==PhoneImageQuality.SHA256
     private data class Descriptor(val name:String,val hash:String,val size:Long)
     private data class Verified(val file:File,val hash:String,val size:Long,val modified:Long)
     @Volatile private var verified:Verified?=null
@@ -200,7 +203,7 @@ class ImageModelManager(context:Context) {
     private fun publishReady(file:File,hash:String){
         verified=remember(file,hash)
         mutableState.value=ImageModelState(available=true,downloadedBytes=file.length(),totalBytes=file.length(),
-            status=if(file.name==DEFAULT_FILENAME)"DreamShaper8 LCM · 검증 완료"else"가져온 모델 · 검증 완료 · 엔진 호환성 확인 필요",modelPath=file.path)
+            status=if(hash==DEFAULT_SHA256)"SDXL 1.0 Q4_K · 휴대폰 고품질 · 검증 완료"else if(file.name==LEGACY_FILENAME)"기존 DreamShaper8 LCM · 검증 완료"else"가져온 모델 · 검증 완료 · 엔진 호환성 확인 필요",modelPath=file.path,qualityModel=hash==DEFAULT_SHA256)
     }
     private fun publishError(error:Exception){
         val existing=verifiedModelFile()
@@ -284,7 +287,7 @@ class ImageModelManager(context:Context) {
         require(file.canonicalFile.parentFile==directory.canonicalFile&&file.canonicalFile.name==name){"앱 이미지 모델 폴더 밖의 경로는 사용할 수 없습니다."}
         return file
     }
-    private fun validModelName(name:String)=name==DEFAULT_FILENAME||Regex("[a-f0-9-]{36}\\.(safetensors|gguf)").matches(name)
+    private fun validModelName(name:String)=name in setOf(DEFAULT_FILENAME,LEGACY_FILENAME)||Regex("[a-f0-9-]{36}\\.(safetensors|gguf)").matches(name)
     private fun deleteOwned(file:File){val safe=managed(file.name);require(file.canonicalFile==safe.canonicalFile);check(!safe.exists()||(safe.isFile&&safe.delete())){"이미지 모델 파일을 지울 수 없습니다."};cache.remove(safe.canonicalPath)}
     private fun ensureSpace(bytes:Long){require(bytes>=0&&bytes<=MAX_BYTES&&StatFs(directory.path).availableBytes>=bytes+STORAGE_RESERVE_BYTES){"이미지 모델 저장공간이 부족합니다. 최소 512MiB 여유 공간이 필요합니다."}}
     private fun utf8(bytes:ByteArray)=Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
@@ -329,12 +332,13 @@ class ImageModelManager(context:Context) {
     }
 
     companion object {
-        const val DEFAULT_REPOSITORY="Lykon/dreamshaper-8-lcm"
-        const val DEFAULT_REVISION="4645d8bc6a8e6b106d21606d63e8460cdad4f1a6"
-        const val DEFAULT_SHA256="a4f3e1526c5dc4fcbe342f5c410d83ae202c7a415fcefcbb92e0f93fcd0a87c3"
-        const val DEFAULT_BYTES=2_133_804_992L
-        const val DEFAULT_FILENAME="dreamshaper8-lcm-a4f3e1526c5d.safetensors"
-        const val DEFAULT_URL="https://huggingface.co/$DEFAULT_REPOSITORY/resolve/$DEFAULT_REVISION/DreamShaper8_LCM.safetensors"
+        const val DEFAULT_REPOSITORY=PhoneImageQuality.REPOSITORY
+        const val DEFAULT_REVISION=PhoneImageQuality.REVISION
+        const val DEFAULT_SHA256=PhoneImageQuality.SHA256
+        const val DEFAULT_BYTES=PhoneImageQuality.BYTES
+        const val DEFAULT_FILENAME=PhoneImageQuality.FILENAME
+        const val LEGACY_FILENAME="dreamshaper8-lcm-a4f3e1526c5d.safetensors"
+        const val DEFAULT_URL="https://huggingface.co/$DEFAULT_REPOSITORY/resolve/$DEFAULT_REVISION/sd_xl_base_1.0_0_Q4_K.gguf"
         const val LICENSE="CreativeML OpenRAIL-M"
         const val LICENSE_URL="https://huggingface.co/Lykon/dreamshaper-8-lcm"
         private const val MAX_BYTES=8L*1024*1024*1024

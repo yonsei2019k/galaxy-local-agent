@@ -128,7 +128,7 @@ class OfflineValidation {
 
             save("verify_cached_e2b_integrity_without_network")
             app.models.refresh() // App-private index/hash only; never resolve or download.
-            val model = app.models.models.value.singleOrNull { it.id == "gemma-e2b" && it.runtime == "litertlm" && it.verified }
+            val model = app.models.models.value.singleOrNull { it.id == "gemma-e2b" && it.runtime in setOf("litertlm", "gguf") && it.verified }
                 ?: error("The verified E2B artifact must already be cached before installing the offline APK")
             require(model.sha256.matches(Regex("[a-f0-9]{64}")))
             val file = File(model.path).canonicalFile

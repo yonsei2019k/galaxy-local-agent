@@ -47,7 +47,7 @@ class ModelRoutingTest {
         assertEquals("gemma-e2b", route.modelId)
         assertFalse(route.thinking)
         assertEquals(4096, route.contextSize)
-        assertEquals(192, route.maxOutputTokens)
+        assertEquals(768, route.maxOutputTokens)
     }
     @Test fun warmFastModelWinsOverFasterColdCandidate() {
         val warm = fast("warm", warm = true).copy(ttftMs = 2000.0)
@@ -62,19 +62,19 @@ class ModelRoutingTest {
         val route = selected(request(complexity = 2), listOf(fast(), quality()))
         assertEquals("quality-e4b", route.modelId)
         assertFalse(route.thinking)
-        assertEquals(512, route.maxOutputTokens)
+        assertEquals(1536, route.maxOutputTokens)
     }
-    @Test fun explicitDeepUsesQualityThinkingWith1024Cap() {
+    @Test fun explicitDeepUsesQualityThinkingWith2048Cap() {
         val route = selected(request(deep = true, complexity = 3), listOf(fast(), quality()))
         assertEquals("quality-e4b", route.modelId)
         assertTrue(route.thinking)
-        assertEquals(1024, route.maxOutputTokens)
+        assertEquals(2048, route.maxOutputTokens)
     }
     @Test fun unpassedEnduranceNeverPromotesQuality() {
         val route = selected(request(deep = true), listOf(fast(), quality().copy(endurancePassed = false)))
         assertEquals("gemma-e2b", route.modelId)
         assertFalse(route.thinking)
-        assertEquals(1024, route.maxOutputTokens)
+        assertEquals(2048, route.maxOutputTokens)
     }
     @Test fun powerSaverAndModerateThermalFallBackToFast() {
         listOf(request(deep = true, powerSave = true), request(deep = true, thermal = 2)).forEach {
@@ -113,5 +113,19 @@ class ModelRoutingTest {
     @Test fun invalidComplexityCannotSilentlySelectAnExpensiveRoute() {
         assertTrue(runCatching { request(complexity = 4) }.isFailure)
         assertTrue(runCatching { request(complexity = -1) }.isFailure)
+    }
+    @Test fun outputBudgetDoesNotShrinkWhenTheQualityModelIsIneligible() {
+        val deep=request(deep=true)
+        assertEquals(selected(deep,listOf(fast(),quality())).maxOutputTokens,
+            selected(deep,listOf(fast())).maxOutputTokens)
+        assertEquals(1536,selected(request(complexity=2,powerSave=true),listOf(fast())).maxOutputTokens)
+    }
+    @Test fun responseLengthPolicyIsIndependentOfModelRouting() {
+        assertEquals(768,ResponseOutputPolicy.tokenBudget(false,0))
+        assertEquals(768,ResponseOutputPolicy.tokenBudget(false,1))
+        assertEquals(1536,ResponseOutputPolicy.tokenBudget(false,2))
+        assertEquals(1536,ResponseOutputPolicy.tokenBudget(false,3))
+        assertEquals(2048,ResponseOutputPolicy.tokenBudget(true,0))
+        assertTrue(runCatching {ResponseOutputPolicy.tokenBudget(false,4)}.isFailure)
     }
 }

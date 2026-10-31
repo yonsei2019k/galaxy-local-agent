@@ -1,5 +1,9 @@
 # Device validation
 
+## Current installed1015 (2026-10-31)
+
+The signed normal app is `0.2.0-build1015`, SHA256 `6b070c2906975091b626e4681440fe87651ae99617cbb26b646f0f59f46b9015`. Actual installed app/test hashes match immutable signed artifacts. JVM700, latest device96, real local model/tool/receipt/final-answer/activity-binding1 and no-INTERNET1 passed. The no-INTERNET variant was removed by updating back to the exact normal app, with data/signing identity retained. The real workflow took469.669s; speed remains a material limitation. Native ten-minute evidence is separately attributed to1013, whose native binaries are byte-identical. See [the1015 verification record](settings-validation-1015.ko.md) and PROJECT_STATE.md for scope and remaining work. Older sections below are historical, not the current installed version.
+
 ## Latest validated development build
 
 The current evidence is summarized in PROJECT_STATE.md. Version1003 development APK SHA256:97f22713d56f1cda22adf962a6be198b52587171df60f002c550003e5dbc07f7.

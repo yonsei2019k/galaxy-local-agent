@@ -29,6 +29,7 @@ object AssistantTaskPlanner {
 
     /** previousUserRequests are chronological, oldest first. An intervening topic resets context. */
     fun plan(userText:String,previousUserRequests:List<String> = emptyList(),now:ZonedDateTime):AssistantTaskPlan {
+        if(RequestActionSemantics.explicitLocalWriteTool(userText)!=null||WebTaskPlanner.plan(userText,previousUserRequests) is WebTaskPlan.WebResearch||RequestActionSemantics.nonAnalysisRequest(userText))return AssistantTaskPlan.NoPlan
         val year=now.withZoneSameInstant(ToolRegistry.defaultZone).year
         var inherited:AssistantTaskPlan=AssistantTaskPlan.NoPlan
         previousUserRequests.takeLast(4).forEach {inherited=resolve(it,inherited,year)}
@@ -36,6 +37,7 @@ object AssistantTaskPlanner {
     }
 
     private fun resolve(raw:String,inherited:AssistantTaskPlan,currentYear:Int):AssistantTaskPlan {
+        if(RequestActionSemantics.explicitLocalWriteTool(raw)!=null||RequestActionSemantics.nonAnalysisRequest(raw))return AssistantTaskPlan.NoPlan
         val trusted=directRequest(raw)
         if(trusted.isBlank())return AssistantTaskPlan.NoPlan
         var text=trusted.lowercase(Locale.ROOT).replace(Regex("\\s+"),"")
@@ -43,7 +45,7 @@ object AssistantTaskPlanner {
         val excludedSources=Regex("(?:문자(?:메시지)?|sms|메시지|메세지|카카오톡|카톡|텔레그램|메디통)(?:은|는|을|를)?(?:분석|요약|조회)?(?:하지)?(?:말고|제외하고|빼고)")
         val excludedSms=excludedSources.findAll(text).any {nativeWords.containsMatchIn(it.value)||genericWords.containsMatchIn(it.value)}
         text=text.replace(excludedSources,"")
-        if(text.isBlank()||stopAnalysis.containsMatchIn(text)||noPhoneReadTopic.containsMatchIn(text)||explanation.containsMatchIn(text))return AssistantTaskPlan.NoPlan
+        if(text.isBlank()||stopAnalysis.containsMatchIn(text)||noPhoneReadTopic.containsMatchIn(text)||explanation.containsMatchIn(text)&&!RequestActionSemantics.usesPrivateContent(text))return AssistantTaskPlan.NoPlan
         if(Regex("(?:코드|스크립트|예제|프로그램)(?:를|을)?(?:작성|만들|구현)|앱(?:을|를)?(?:개발|만들|제작)").containsMatchIn(text))return AssistantTaskPlan.NoPlan
         if(text.contains("우리대화")||text.contains("너와나의대화")||text.contains("이앱대화"))return AssistantTaskPlan.NoPlan
         val explicitSms=nativeWords.containsMatchIn(text)

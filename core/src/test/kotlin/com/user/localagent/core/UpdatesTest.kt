@@ -77,7 +77,7 @@ class UpdatesTest {
         versionCode: Long = 11,
         certificate: String = pinnedCertificate,
         capabilities: List<String> = listOf("basic"),
-        databaseSchemaVersion: Int = 1,
+        databaseSchemaVersion: Int = 3,
         apkUrl: String = assetPrefix + "v1/app.apk"
     ) = UpdateManifest(
         packageName = "com.example.app",

@@ -6,6 +6,8 @@ import androidx.annotation.Keep
 import java.io.File
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.Executors
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -18,9 +20,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class ImageSampler(val nativeId:Int) { LCM(0), EULER(1), EULER_A(2) }
+enum class ImageSampler(val nativeId:Int) { LCM(0), EULER(1), EULER_A(2), DPMPP_2M(3) }
 data class ImageGenerationProgress(val phase:String,val step:Int=0,val totalSteps:Int=0,val fraction:Float=0f,val stepSeconds:Float=0f)
-data class ImageGenerationResult(val bitmap:Bitmap,val seed:Long,val width:Int,val height:Int,val elapsedMillis:Long)
+data class ImageGenerationResult(val bitmap:Bitmap,val seed:Long,val width:Int,val height:Int,val elapsedMillis:Long,val samplingSteps:Int=0,val computeLocation:String="phone",val sourceModelId:String?=null,val sourceModelSha256:String?=null)
 
 /**
  * CPU image runtime. The host owns RuntimeGate and unloads LLM inference before load().
@@ -83,12 +85,22 @@ class ImageGenerationEngine(context:Context) {
         height:Int=512,
         guidanceScale:Float=1f,
         sampler:ImageSampler=ImageSampler.LCM,
+        initImage:Bitmap?=null,
+        strength:Float=.65f,
         onProgress:(ImageGenerationProgress)->Unit={},
     ):ImageGenerationResult=withContext(Dispatchers.IO) {
         validatePrompt(prompt,4000,true);validatePrompt(negativePrompt,2000,false)
-        require(width in 256..512 && height in 256..512 && width%64==0 && height%64==0){"초기 이미지 크기는 256–512px이며 64의 배수여야 합니다."}
-        require(steps in 1..8){"초기 이미지 프로필은 1–8단계를 지원합니다."}
+        require(width in 256..1024 && height in 256..1024 && width%64==0 && height%64==0){"이미지 크기는 256–1024px이며 64의 배수여야 합니다."}
+        require(sampler!=ImageSampler.LCM||width<=512&&height<=512){"기존 LCM 프로필은 최대512px를 지원합니다."}
+        require(steps in 1..50&&(sampler!=ImageSampler.LCM||steps<=8)){"SDXL은 최대50단계, LCM은 최대8단계를 지원합니다."}
         require(seed>=-1 && guidanceScale.isFinite() && guidanceScale in 1f..15f){"시드 또는 가이던스 값이 유효하지 않습니다."}
+        require(strength.isFinite()&&strength in .4f..0.85f){"사진 변환 강도는 0.40–0.85여야 합니다."}
+        val referencePixels=initImage?.let {image->
+            require(!image.isRecycled&&width==height&&width in setOf(512,1024)&&image.width==width&&image.height==height){"참고 사진은 생성 크기에 맞춰 정규화해야 합니다."}
+            IntArray(width*height).also {image.getPixels(it,0,width,0,0,width,height)}
+        }
+        // The pinned native pipeline shortens img2img's schedule using floor(steps*strength).
+        val samplingSteps=if(referencePixels!=null)minOf(steps,(steps*strength).toInt()+1)else steps
         val actualSeed=if(seed==-1L)random.nextLong().ushr(1)else seed
         mutex.withLock {
             currentCoroutineContext().ensureActive()
@@ -107,18 +119,17 @@ class ImageGenerationEngine(context:Context) {
             var lastPhase=""
             try {
                 val pixels=nativeCall {
-                    ImageNative.nativeGenerate(active,prompt,negativePrompt,actualSeed,steps,width,height,guidanceScale,sampler.nativeId,
-                        NativeImageProgress {step,total,seconds->
+                    val callback=NativeImageProgress {step,total,seconds->
                             // Upstream uses this callback for both graph-node counts and
                             // denoising steps. Graph nodes are not image completion percent.
                             synchronized(callbackState){
                                 val update:ImageGenerationProgress?=when {
-                                    total==steps && step in 0..steps -> {
+                                    total==samplingSteps && step in 0..samplingSteps -> {
                                         if(step<=lastSamplingStep)null else {
                                             samplingStarted=true;lastSamplingStep=step
-                                            samplingFinished=step==steps
+                                            samplingFinished=step==samplingSteps
                                             ImageGenerationProgress(if(samplingFinished)"샘플링 완료"else "이미지 샘플링 중",
-                                                step,steps,0f,seconds)
+                                                step,samplingSteps,0f,seconds)
                                         }
                                     }
                                     samplingFinished -> if(lastPhase=="이미지 픽셀 복원 중")null else ImageGenerationProgress("이미지 픽셀 복원 중")
@@ -131,13 +142,15 @@ class ImageGenerationEngine(context:Context) {
                                     onProgress(update)
                                 }
                             }
-                        })
+                        }
+                    if(referencePixels==null)ImageNative.nativeGenerate(active,prompt,negativePrompt,actualSeed,steps,width,height,guidanceScale,sampler.nativeId,callback)
+                    else ImageNative.nativeGenerateReference(active,prompt,negativePrompt,actualSeed,steps,width,height,guidanceScale,sampler.nativeId,referencePixels,strength,callback)
                 }
                 currentCoroutineContext().ensureActive();checkCancellation(revision)
                 check(pixels.size==width*height){"이미지 픽셀 크기가 요청과 다릅니다."}
                 val bitmap=Bitmap.createBitmap(pixels,width,height,Bitmap.Config.ARGB_8888)
-                mutableProgress.value=ImageGenerationProgress("완료",steps,steps,1f)
-                ImageGenerationResult(bitmap,actualSeed,width,height,android.os.SystemClock.elapsedRealtime()-started)
+                mutableProgress.value=ImageGenerationProgress("완료",samplingSteps,samplingSteps,1f)
+                ImageGenerationResult(bitmap,actualSeed,width,height,android.os.SystemClock.elapsedRealtime()-started,samplingSteps)
             }catch(cancel:CancellationException){
                 mutableProgress.value=ImageGenerationProgress("취소됨");throw cancel
             }catch(error:Throwable){
@@ -152,6 +165,10 @@ class ImageGenerationEngine(context:Context) {
         cancellationRevision.incrementAndGet()
         synchronized(handleLock){if(handle!=0L)ImageNative.nativeCancel(handle)}
     }
+    fun setThrottle(milliseconds:Int){
+        require(milliseconds in 0..2000)
+        synchronized(handleLock){if(handle!=0L)ImageNative.nativeSetThrottle(handle,milliseconds)}
+    }
     suspend fun unload(){
         cancel()
         withContext(Dispatchers.IO){mutex.withLock {release()}}
@@ -164,12 +181,18 @@ class ImageGenerationEngine(context:Context) {
         mutableProgress.value=ImageGenerationProgress("대기")
     }
     private fun checkCancellation(revision:Long){if(revision!=cancellationRevision.get())throw CancellationException("이미지 작업을 중단했습니다.")}
-    private suspend fun <T> nativeCall(operation:()->T):T=suspendCancellableCoroutine {continuation->
+    private suspend fun <T> nativeCall(operation:()->T):T=withContext(nativeDispatcher){suspendCancellableCoroutine {continuation->
         continuation.invokeOnCancellation {cancel()}
         if(continuation.isActive){
-            try {continuation.resumeWith(Result.success(operation()))}
+            try{continuation.resumeWith(Result.success(operation()))}
             catch(error:Throwable){continuation.resumeWith(Result.failure(error))}
         }
+    }}
+    companion object {
+        /** One background-priority native caller; no pooled UI/IO thread priority is changed. */
+        private val nativeDispatcher by lazy {Executors.newSingleThreadExecutor {operation->
+            Thread({android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);operation.run()},"ziphap-image")
+        }.asCoroutineDispatcher()}
     }
     private fun validatePrompt(value:String,maxChars:Int,required:Boolean){
         require((!required || value.isNotBlank()) && value.length<=maxChars && '\u0000' !in value){"이미지 프롬프트 길이 또는 내용이 유효하지 않습니다."}
@@ -184,12 +207,14 @@ class ImageGenerationEngine(context:Context) {
 
 @Keep private object ImageNative {
     init {System.loadLibrary("ziphap_image")}
+    external fun nativeSetThrottle(handle:Long,milliseconds:Int)
     external fun nativeCreate():Long
     external fun nativeLoad(handle:Long,path:String,threads:Int)
     external fun nativeResetCancellation(handle:Long)
     external fun nativeCancel(handle:Long)
     external fun nativeDestroy(handle:Long)
     external fun nativeGenerate(handle:Long,prompt:String,negativePrompt:String,seed:Long,steps:Int,width:Int,height:Int,guidance:Float,sampler:Int,progress:NativeImageProgress):IntArray
+    external fun nativeGenerateReference(handle:Long,prompt:String,negativePrompt:String,seed:Long,steps:Int,width:Int,height:Int,guidance:Float,sampler:Int,referencePixels:IntArray,strength:Float,progress:NativeImageProgress):IntArray
 }
 @Keep private class NativeImageProgress(private val callback:(Int,Int,Float)->Unit){
     @Keep fun onStep(step:Int,total:Int,seconds:Float)=callback(step,total,seconds)

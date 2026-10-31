@@ -25,11 +25,36 @@ import java.time.ZoneId
 
 class ToolExecutor(private val context:Context,private val repository:LocalRepository,private val scheduler:ReminderScheduler,
     private val conversationImports:ConversationImport,private val phoneRecords:PhoneRecords,
+    private val createDocument:(suspend(ToolCall)->String)?=null,
+    private val researchWeb:(suspend(ToolCall)->String)?=null,
+    private val projectWorkspaceProvider:(()->com.user.localagent.workspace.ProjectWorkspace)?=null,
+    private val privateAnalysis:(suspend(ToolCall)->ToolResult)?=null,
+    private val transcribeRecording:(suspend(ToolCall)->ToolResult)?=null,
+    private val recordingListing:((List<com.user.localagent.audio.RecordingListingItem>)->List<com.user.localagent.audio.ListedRecording>)?=null,
+    private val goalTools:(suspend(ToolCall)->ToolResult?)?=null,
+    private val goalReadContext:((List<JsonObject>,String)->Unit)?=null,
+    private val goalEditPreflight:(suspend(ToolCall)->Unit)?=null,
     private val createImage:(suspend(ToolCall)->String)?=null) {
+    private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
+    private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
+    private val bundledSkills by lazy {com.user.localagent.skills.BundledSkillStore(context)}
+    private val fallbackProjectWorkspace by lazy {com.user.localagent.workspace.ProjectWorkspace(context)}
+    private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace
+    // Production creates a fresh executor for every captured request; UI reads cannot grant it authority.
+    private val projectReadAuthority=java.util.UUID.randomUUID().toString()
+    suspend fun acceptProjectReadContext(evidence:List<JsonObject>,actualModelQuery:String){
+        projectWorkspace.acceptToolReadContext(projectReadAuthority,com.user.localagent.workspace.ProjectReadDelivery.delivered(evidence,actualModelQuery))
+    }
+    suspend fun releaseProjectReadContext(){projectWorkspace.releaseToolReadContext(projectReadAuthority)}
+    fun acceptGoalReadContext(evidence:List<JsonObject>,actualModelQuery:String){goalReadContext?.invoke(evidence,actualModelQuery)}
+    suspend fun validateGoalEditRead(call:ToolCall){
+        if(call.name==GoalToolCatalog.UPDATE)checkNotNull(goalEditPreflight){"현재 요청의 목표 읽기 근거가 연결되지 않았습니다."}.invoke(call)
+    }
     private fun ToolCall.s(key:String,default:String="")=arguments[key]?.jsonPrimitive?.content?:default
     private fun ToolCall.i(key:String,default:Int)=arguments[key]?.jsonPrimitive?.int?:default
     fun prepareIntent(call:ToolCall):Intent? {
         ToolRegistry.validate(call)
+        if(call.name in com.user.localagent.core.connections.ConsumerAppCatalog.names)return com.user.localagent.connections.ConsumerApps(context).prepare(call)
         return when(call.name){
             "prepare_calendar_event"->Intent(Intent.ACTION_INSERT,CalendarContract.Events.CONTENT_URI).putExtra(CalendarContract.Events.TITLE,call.s("title")).putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,OffsetDateTime.parse(call.s("start")).toInstant().toEpochMilli()).putExtra(CalendarContract.EXTRA_EVENT_END_TIME,OffsetDateTime.parse(call.s("end")).toInstant().toEpochMilli()).putExtra(CalendarContract.Events.DESCRIPTION,call.s("description")).putExtra(CalendarContract.Events.EVENT_LOCATION,call.s("location"))
             "create_alarm"->Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR,call.i("hour",0)).putExtra(AlarmClock.EXTRA_MINUTES,call.i("minute",0)).putExtra(AlarmClock.EXTRA_MESSAGE,call.s("label","알람")).putExtra(AlarmClock.EXTRA_SKIP_UI,false).apply {call.arguments["days"]?.jsonArray?.let {putIntegerArrayListExtra(AlarmClock.EXTRA_DAYS,ArrayList(it.map {value->value.jsonPrimitive.int}))}}
@@ -44,9 +69,45 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     suspend fun execute(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
+            if(call.name in GoalToolCatalog.names)return@withContext checkNotNull(goalTools){"현재 대화 요청에 목표 도구가 연결되지 않았습니다."}.invoke(call)
+                ?:error("현재 대화의 목표 도구 결과를 확인하지 못했습니다.")
+            PrivateToolDispatch.execute(call,privateAnalysis,transcribeRecording)?.let {return@withContext it}
+            if(call.name in EvidenceToolCatalog.names)return@withContext scholarly.execute(call)
+            if(call.name in OfficeToolCatalog.names)return@withContext ToolResult(call.id,true,OfficeToolEngine.execute(call),VerificationState.VERIFIED,"기기 내 계산 완료 · 입력한 조건에 한정")
+            if(call.name in SkillToolCatalog.names){
+                val content=when(call.name){
+                    "list_skills"->bundledSkills.listJson(call.arguments["query"]?.jsonPrimitive?.content)
+                    "read_skill"->{val read=bundledSkills.read(call.s("id"));buildJsonObject {
+                        put("id",read.id);put("body",read.body);put("sha256",read.sha256)
+                        put("origin","signed_apk_bundle");put("grantsCapabilities",false);put("contextOnly",true)
+                        put("tools",JsonArray(read.metadata.tools.map(::JsonPrimitive)))
+                    }.toString()}
+                    else->error("지원하지 않는 지침 조회입니다.")
+                }
+                return@withContext ToolResult(call.id,true,content,VerificationState.VERIFIED,"번들 지침 조회·무결성 확인 · 사용자 작업 완료 증거 아님")
+            }
+            if(call.name in com.user.localagent.core.connections.ConnectionCatalog.tools||call.name in com.user.localagent.core.connections.PcToolCatalog.names){
+                val application=context.applicationContext as com.user.localagent.LocalAgentApplication
+                val runId=application.container.runs.activeRunId
+                return@withContext com.user.localagent.connections.ConnectionHub.get(context).execute(call,runId){preview->
+                    runId!=null&&application.container.runs.approveGmailSend(runId,call,preview)
+                }
+            }
             val result=when(call.name){
                 "get_current_datetime"->ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString()
+                "list_project_files"->buildJsonObject {put("project",projectWorkspace.state.value.name);put("entries",buildJsonArray {projectWorkspace.list(call.s("path")).forEach {entry->add(buildJsonObject {put("path",entry.path);put("directory",entry.directory);put("bytes",entry.bytes)})}});put("limit",100);put("untrustedSourceData",true)}.toString()
+                "read_project_file"->{val read=projectWorkspace.readForTool(call.s("path"),projectReadAuthority);buildJsonObject {put("path",read.path);put("text",clip(read.text,8000));put("truncated",read.text.length>8000);put("sha256",read.sha256);put("readToken",read.token);put("untrustedSourceData",true)}.toString()}
+                "write_project_file"->projectWorkspace.writeForTool(call.s("path"),call.s("content"),call.arguments["expectedSha256"]?.jsonPrimitive?.content,projectReadAuthority)
+                "create_document"->checkNotNull(createDocument){"문서 생성 연결이 필요합니다."}.invoke(call)
                 "generate_image"->checkNotNull(createImage){"이미지 생성 연결을 준비해주세요."}.invoke(call)
+                "search_web","search_shopping"->{
+                    val data=checkNotNull(researchWeb){"웹 검색 연결이 필요합니다."}.invoke(call)
+                    check(Json.parseToJsonElement(data).jsonObject["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."};data
+                }
+                "read_webpage"->{
+                    val page=publicWeb.fetchPage(call.s("url"))
+                    buildJsonObject {put("url",page.url);put("title",page.title);put("fetchedAt",page.fetchedAt);put("untrustedSourceData",true);put("text",page.text.take(4000));put("truncated",page.text.length>4000)}.toString()
+                }
                 "search_conversation_history"->{
                     val query=call.s("query");val page=repository.messagePage(limit=call.i("limit",10),query=query)
                     scoped("ziphap_assistant_conversations","bounded_message_excerpts",buildJsonObject {
@@ -62,15 +123,15 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "get_call_log_summary"->phoneJson(phoneRecords.callLogSummary(call.optional("query"),call.epoch("start"),call.epoch("end"),call.i("limit",5)),"android_call_log",call,::summaryJson)
                 "list_audio_recordings"->phoneJson(phoneRecords.recordAudio(call.optional("query"),call.i("limit",20)),"android_recording_metadata",call,::audioJson)
                 "search_audio_transcripts"->searchAudioTranscripts(call)
-                "save_note"->{val note=repository.saveNote(call.s("title","메모"),call.s("content"),call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};"메모 저장·재조회 확인 · id=${note.id}"}
+                "save_note"->{require(call.s("scope","default") !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};val note=repository.saveNote(call.s("title","메모"),call.s("content"),call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};"메모 저장·재조회 확인 · id=${note.id}"}
                 "search_notes"->searchNotesBounded(call)
                 "save_memory"->{val memory=repository.saveMemory(call.s("content"),call.s("kind","fact"));check(repository.getMemory(memory.id)==memory){"기억 저장 후 재조회가 일치하지 않습니다."};"승인한 기억 저장·재조회 확인 · id=${memory.id}"}
                 "search_memories"->repository.searchMemories(call.s("query"),call.i("limit",5)).joinToString("\n"){"${it.id} | ${it.text}"}.ifBlank {"관련 기억이 없습니다."}
                 "delete_memory"->{repository.forgetMemory(call.s("id"));check(repository.getMemory(call.s("id"))==null){"기억 삭제 후에도 레코드가 남아 있습니다."};"기억과 연결된 원문·요약 삭제 확인"}
                 "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 저장 또는 예약 큐 재조회를 확인하지 못했습니다. 중복 생성 전 기존 작업을 확인해주세요."};"${scheduled.message} 저장·예약 큐 확인 · id=${record.id}, 시각=${call.s("datetime")}"}
-                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id);check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};"메모 수정·재조회 확인"}
+                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id);check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};"메모 수정·재조회 확인"}
                 "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());scheduler.cancel(old.id);val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};scheduled.message+" 저장·예약 큐 확인"}
-                "delete_note"->{repository.deleteNote(call.s("id"));check(repository.getNote(call.s("id"))==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
+                "delete_note"->{val old=repository.getNote(call.s("id"));require(old?.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};repository.deleteNote(call.s("id"));check(repository.getNote(call.s("id"))==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
                 "delete_reminder"->{scheduler.cancel(call.s("id"));repository.deleteReminder(call.s("id"));check(repository.getReminder(call.s("id"))==null){"리마인더 삭제를 확인하지 못했습니다."};"리마인더 삭제·재조회 확인"}
                 "list_calendar_events"->listCalendar(call)
                 "search_contacts"->searchContacts(call)
@@ -154,12 +215,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             put("atEpochMillis",item.atEpochMillis);put("text",clip(item.text,500));put("type",item.type);put("maskedAddress",item.maskedAddress);put("durationSeconds",item.durationSeconds)
         })}})
     }
-    private fun audioJson(value:PhoneAudioListing)=buildJsonObject {
-        put("totalCount",value.totalCount);put("limit",minOf(value.limit,20));put("truncated",value.truncated);put("scopeDescription",clip(value.scopeDescription,500))
-        put("recordings",buildJsonArray {value.items.take(20).forEach {item->add(buildJsonObject {
-            put("displayName",clip(item.displayName,200));put("contentUri",item.contentUri);put("durationMillis",item.durationMillis)
-        })}})
-    }
+    private fun audioJson(value:PhoneAudioListing)=recordingListingJson(value,recordingListing)
     private fun <T> phoneJson(result:PhoneRecordResult<T>,dataset:String,call:ToolCall,encode:(T)->JsonObject):String=buildJsonObject {
         put("scope",buildJsonObject {put("dataset",dataset);put("filtered",listOf("query","start","end").any {call.optional(it)!=null});put("completeSemanticAnalysis",false)})
         when(result){

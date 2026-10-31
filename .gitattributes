@@ -2,3 +2,4 @@
 gradlew text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
+app/src/main/assets/skills/** text eol=lf
