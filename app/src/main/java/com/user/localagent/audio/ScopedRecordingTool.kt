@@ -29,6 +29,7 @@ class ScopedRecordingTool(
     private val repository: LocalRepository,
     private val store: ListedRecordingStore,
     private val discardIncompleteNotes: suspend (String, List<IncompleteAudioNote>) -> AudioCleanupResult,
+    private val requestEngine:com.user.localagent.inference.InferenceEngine?=null,
 ) {
     private data class Completed(val rootNoteId: String, val rootSha256: String, val content: JsonObject,
         val pages: List<TranscriptManifestPage>, val chunks: List<AudioTranscriptChunk>)
@@ -55,7 +56,8 @@ class ScopedRecordingTool(
         try {
             RecordingToolCatalog.validate(call)
             failureStage = "runtime_lease_required"
-            check(RuntimeGate.inference.get()) { "현재 요청의 모델 실행 범위가 필요합니다." }
+            // A run-owned engine obtains its PHONE lease when loading ASR; a PC lease is not a phone lease.
+            check(requestEngine is com.user.localagent.inference.ComputeExecutionEngine||RuntimeGate.inference.get()) { "현재 요청의 모델 실행 범위가 필요합니다." }
             failureStage = "source_expired"
             val selection = store.resolve(call.arguments.getValue("recordingId").jsonPrimitive.content)
             fun verifyAccess() {
@@ -93,7 +95,8 @@ class ScopedRecordingTool(
             failureStage = "model_required"
             app.models.asrModel() // Availability only; never resolves/downloads a new model.
             failureStage = "asr_unavailable"
-            worker = LocalAudioTranscriber(app, AudioChunkDecoder(context), repository, ::verifyAccess, discardIncompleteNotes)
+            worker = LocalAudioTranscriber(app, AudioChunkDecoder(context), repository, ::verifyAccess, discardIncompleteNotes,
+                requestEngine=requestEngine?:app.engine)
             transcription = worker.transcribe(Uri.parse(selection.contentUri))
             failureStage = "transcript_verification_failed"
             val result = checkNotNull(transcription)

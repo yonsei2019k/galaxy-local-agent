@@ -2,6 +2,11 @@
 
 Updated 2026-10-31. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Latest host checkpoint: 1022 prepared; phone disconnected by owner
+
+2026-10-31: 1022 image-series consistency UI is integrated, fully built and signed, not installed. core608/app543 JVM tests passed, release lint0errors132warnings,589 frozen input hashes unchanged. App SHA744efe44915423ea0f582c75d4d85d5005d33f1c95fe04970bfb133b14eeb1fc. Private delivery and receipts: .local/delivery-1022. The last verified installed app is1021, SHA1f92e7331bd6ca4534f4dac70826caf368b1c03529ac66bcae08e8b2e98218c9; its5 UI checks passed before disconnection. Owner explicitly deferred phone installation/tests until returning. No ADB/device/model work after that instruction. See docs/image-consistency-design.ko.md and the latest agent-change-log entries. Image identity quality, new PC model native generation and autonomous real-model followup are not newly verified by this build. The older checkpoints below retain their historical evidence only.
+
+
 ## 1019 installed; call route and PC/phone concurrency verification pending
 
 Signed1019 app SHA-256 `878e3e9c62c3d145d694cb905e0e1f65bc537e72af3ddb5bf6fa060ab4956e1b` is installed without data clearing. Full Validate passed core594/app497=1091 JVM tests, failures/errors/skips0, release lint0errors130warnings, and496 frozen input hashes unchanged. Only libziphap_llama.so changed among the six native libraries, adding numerical request-bound progress; ASR native libraries are unchanged. Phone synthetic13 checks and the updated actual native schema-count/progress check passed (59.264seconds).
@@ -82,3 +87,4 @@ Version1015 (`0.2.0-build1015`) signed normal APK is installed and its actual ba
 - General DOCX/XLSX editing, robust OCR, video generation, executable MCP hosting and autonomous source-code self-modification are not established. Development/source upgrades currently run through this PC and signed GitHub CI; routine inference runs on the phone.
 
 Private keys, personal messages/exports, raw device logs, identities, model weights and generated user images remain outside Git. Do not ask for pairing/login/project setup again. See docs/assistant-harness.md and docs/user-guide.ko.md.
+

@@ -15,6 +15,7 @@ class LocalPrivateAnalysisDecider(
     private val app:AppContainer,private val chosen:ChosenInference,private val skill:SkillReadResult,
     private val source:PrivateSourceSnapshot,
     private val selectOverview:Boolean=false,
+    private val requestEngine:InferenceEngine=app.engine,
 ):PrivateAnalysisDecider {
     private val timeIndex=PrivateTimeReferenceIndex(source.timeRefs,source.coreSource.utf8ByteLength)
     override suspend fun decide(input:String,schema:String,repair:Boolean):String {
@@ -49,13 +50,13 @@ class LocalPrivateAnalysisDecider(
         var options=chosen.options.copy(thinking=false,maxOutputTokens=maximumOutput,audioEnabled=false,visionEnabled=false,projectorPath=null)
         try {
             return withTimeout(600_000) {
-                app.engine.load(chosen.model.path,options)
-                val count=app.engine.countChatTokens(user,system,emptyList())?:error("분석 문맥의 실제 토큰 수를 확인하지 못했습니다.")
+                requestEngine.load(chosen.model.path,options)
+                val count=requestEngine.countChatTokens(user,system,emptyList())?:error("분석 문맥의 실제 토큰 수를 확인하지 못했습니다.")
                 val outputBudget=minOf(maximumOutput,options.contextSize-count-256)
                 require(count>=0&&outputBudget>=256){"현재 질문과 원문 조각이 모델 문맥 예산을 넘었습니다. 원문이나 질문을 잘라 분석하지 않았습니다."}
-                if(outputBudget!=options.maxOutputTokens){options=options.copy(maxOutputTokens=outputBudget);app.engine.load(chosen.model.path,options)}
+                if(outputBudget!=options.maxOutputTokens){options=options.copy(maxOutputTokens=outputBudget);requestEngine.load(chosen.model.path,options)}
                 val text=StringBuilder();var terminal:GenerationSummary?=null
-                val events=if(app.engine.supportsStructuredOutput)app.engine.generateStructuredEvents(user,system,schema,emptyList())else app.engine.generateChatEvents(user,system,emptyList())
+                val events=if(requestEngine.supportsStructuredOutput)requestEngine.generateStructuredEvents(user,system,schema,emptyList())else requestEngine.generateChatEvents(user,system,emptyList())
                 events.collect {event->
                     currentCoroutineContext().ensureActive()
                     when(event) {
@@ -70,7 +71,7 @@ class LocalPrivateAnalysisDecider(
                 text.toString()
             }
         }catch(timeout:TimeoutCancellationException) {
-            app.engine.cancel();currentCoroutineContext().ensureActive();error("원문 조각 분석의 제한 시간이 초과되었습니다.")
-        }catch(cancel:CancellationException) {app.engine.cancel();throw cancel}
+            requestEngine.cancel();currentCoroutineContext().ensureActive();error("원문 조각 분석의 제한 시간이 초과되었습니다.")
+        }catch(cancel:CancellationException) {requestEngine.cancel();throw cancel}
     }
 }

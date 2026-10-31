@@ -43,7 +43,8 @@ class InlineRunActivityUiValidation {
         compose.onNodeWithTag("copy_message_assistant-a").assertDoesNotExist()
         compose.onNodeWithTag("message_actions_assistant-a").assertDoesNotExist()
         compose.onNodeWithTag("run_timeline").assertDoesNotExist()
-        compose.onNodeWithTag("toggle_activity_run-a").performClick()
+        // Active work is visible immediately, without a disclosure click.
+        compose.onNodeWithTag("activity_event_plan").assertExists()
         compose.onNodeWithText("도구 3 · 검증 1 · 준비 1 · 실패 1",substring=true).assertExists()
         compose.onNodeWithText("준비됨 · 외부 완료 미확인").assertExists()
         compose.onAllNodesWithText("검증됨",substring=false).assertCountEquals(1)

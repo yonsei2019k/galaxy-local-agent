@@ -605,3 +605,16 @@ file전용 modelResult wrapper는 반환된301~8000자 본문을 그대로 인�
 후보 AutonomousReviewPolicy는 review_next의 공개용 확인 과제 요약+typed tool call 또는 review_complete 요약만 파싱하며 모델 판단을 사용자 발언/새 권한/실제 검증으로 승격하지 않는다. 기존 TaskHarness의 중복 변경/실행 범위/6단계 행동 예산과 독립된 검토2/전체판단12는 실험 후보다. 단계별 작업판 편집·장기 목표 반복·재시작 복구·공개 조사 전용 경로까지 완성됐다고 주장하지 않는다. Co/UI staged는 1019 예시이므로 root1020 위에 그대로 복사하지 말고 최신 run별 engine/trace/status/승인/첨부 계약에 맞춰 재이식해야 한다.
 
 실제 검증: 독립 core 복사본 55 suites/601 JVM PASS(신규7 포함), 실패/오류/skip0. 최초 offline 의존성 캐시 누락 후 정상 해석, 최종 offline28초 PASS. .local/codex-progress-20261031/validation.json에 후보 SHA/검증 상태, STRUCTURE-REVIEW.ko.md에 구조/발견/통합·실기 기준 기록. 앱 후보 컴파일/lint/release APK/서명/설치/실제 모델 및 UI 검증은 미실행이며 제품 개선 완료가 아니다. root1020 source/build 창과 재이식 대기.
+
+## 2026-10-31 — 진행/후속 검토 실제 통합·1020 검증 시작
+담당 codex-progress-root. 사용자 지시로 다른 채팅 메시지 교환은 중단하고 공유 기록으로만 조율한다. root-release의 acd10c1 clean/전체 released를 확인하고 source/build/device 창을 인수했다. 원래 요청의 진행표시·대기수정·후속검토·APK·설치 검증을 계속한다. STOPPED-HANDOFF 및 final-after 64파일을 전부 baseline/after SHA 확인 후 실제 적용했다. 이 단계는 소스 통합이며 새 APK/기기 성공이 아니다. 실제 통화/새보고방/private전사 재개는 이번 회귀의 대상이 아니다. 추가 사용자 지시로 PC 이미지 고품질 모델 Qwen-Image-2512 20B Q4_K_M+전용encoder/VAE 공개 핀 다운로드/검증을 준비하며 기존 모델은 유지한다. 이후 검증 결과를 별도 기록한다.
+
+## 2026-10-31 — 1021 설치 확인 / 휴대폰 연결 중단 / 이미지 일관성 UI 구현
+담당 codex-progress-root. 사용자 명시 지시로 다른 채팅 메시지 교환을 하지 않는다. 1021은 연결 해제 전 데이터 삭제 없이 설치했고 실제 base APK SHA1f92e7331bd6ca4534f4dac70826caf368b1c03529ac66bcae08e8b2e98218c9를 확인했다. core604/app543=1147 JVM 오류·실패·skip0, lint0errors132warnings, 입력586개 빌드 전후 SHA 변화0. UI5 PASS6.29초는 실제 진행 시간순·불변 제한을 유지한 큐 수정/취소·큐 미리보기·취소 CAS·PC 두 모델 선택의 증거다. 실제 모델 자체 후속검증·PC 이미지 새 생성 성공의 증거가 아니다. 이후 사용자가 외출/연결 해제를 알렸으며 ADB·설치·instrumentation·휴대폰 추론을 실행하지 않는다.
+
+휴대폰 없는 작업으로 ImageConsistencyRecipe/Store와 ImageStudioPanel을 수정했다. 기존 미커밋 통합 소스를 보존한다. 시리즈는 유지할 특징/변경할 장면/고정 시드를 분리하고, 기준 사진을 8MB·해상도 한도로 내부 복사/SHA검증하며, 마지막 프리셋1개를 DraftStore 암호화/AAD 경계로 저장한다. 명시 불러오기로만 적용하고 채팅/대기 요청에는 주입하지 않는다. 기준과 결과의 실제 reference SHA가 일치할 때만 비교하며 결과로 기준을 자동 교체하지 않는다. PC 선택 모델 출처의 잔존 FLUX 표시도 SDXL/Qwen 선택과 일치시켰다. 모델 지시에 따른 특징 유지와 실제 인물/제품 동일성 검증을 구분한다. PC 참고 편집은 현재 서버가 거부할 수 있으며 텍스트 생성으로 바꿔 성공을 주장하지 않는다. QwenEdit2511과 vision projector의 고정 revision/전체 SHA 다운로드는 PC 외부 모델 경로에서 완료했으나 실제 편집 런타임 통합/실측 성공은 아니다.
+
+벤치마크 근거와 후속 검증은 docs/image-consistency-design.ko.md에 기록했다. 새4개 core 경계검사 PASS를 확인했고1022 전체 Validate 진행 중. 새 기능 설치/실제 기기/생성 품질 검증은 재연결 뒤 진행한다. signed1021 app/test/검증 영수증은 ignored .local/delivery-1021에 보존했다. 구체적인1022 결과는 빌드 종료 후 추가 기록한다.
+
+### 1022 이미지 시리즈 최종 호스트 검증
+1022 최종 Validate PASS4분37초. core608/app543=1151 JVM 실패·오류·skip0, release lint Fatal0/Error0/Warning132. 최종589 입력 SHA 변화0. 서명 app SHA744efe44915423ea0f582c75d4d85d5005d33f1c95fe04970bfb133b14eeb1fc, test SHAa22550b714edac553eafe10686789c78f62dbde67aa473237260a7158d6785fe. 정상 서명 APK/test·입력 동결·검증 영수증은 .local/delivery-1022에 복사/해시 재대조했다. 새 기능은 실제 소스에 통합되고 installable release가 빌드됐지만1022 휴대폰 설치0/새 실제 이미지 생성0/인물·제품 동일성 검증0이다. 마지막 설치 확인은1021이며 사용자가 외출 중이므로 설치·ADB·모델 검사를 시도하지 않았다. 돌아온 뒤1022 설치/프리셋 복원·기준 사진 접근·결과 비교·취소/실제 자체 후속검증/PC 모델별 실제 결과를 구분해 검증한다. 다른 채팅 메시지 교환0, 기존 private통화 분석 재개0.

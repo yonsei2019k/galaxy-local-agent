@@ -34,10 +34,25 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val goalTools:(suspend(ToolCall)->ToolResult?)?=null,
     private val goalReadContext:((List<JsonObject>,String)->Unit)?=null,
     private val goalEditPreflight:(suspend(ToolCall)->Unit)?=null,
+    private val connectionRunId:String?=null,
+    private val connectionIsRunLive:()->Boolean={false},
+    private val connectionThreadId:String?=null,
+    private val connectionPcDataBinding:String?=null,
+    private val connectionVerifyAccess:suspend()->Unit={},
+    private val connectionComputeEngine:com.user.localagent.inference.ComputeExecutionEngine?=null,
+    private val connectionApproveGmailSend:suspend(String,ToolCall,com.user.localagent.core.connections.GmailSendPreview)->Boolean={_,_,_->false},
     private val createImage:(suspend(ToolCall)->String)?=null) {
     private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
     private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
     private val bundledSkills by lazy {com.user.localagent.skills.BundledSkillStore(context)}
+    private val requestConnections by lazy {com.user.localagent.connections.RequestConnectionExecutor(
+        connectionRunId,connectionIsRunLive,connectionApproveGmailSend,
+        execute={call,runId,approve->
+            suspend fun perform()=com.user.localagent.connections.ConnectionHub.get(context).executeInThread(
+                call,runId,checkNotNull(connectionThreadId),connectionPcDataBinding,connectionVerifyAccess,approve)
+            if(call.name in com.user.localagent.core.connections.PcToolCatalog.names&&connectionComputeEngine!=null)
+                connectionComputeEngine.withPcResource(cleanup={}){perform()}else perform()
+        },verifyAccess=connectionVerifyAccess)}
     private val fallbackProjectWorkspace by lazy {com.user.localagent.workspace.ProjectWorkspace(context)}
     private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace
     // Production creates a fresh executor for every captured request; UI reads cannot grant it authority.
@@ -87,11 +102,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 return@withContext ToolResult(call.id,true,content,VerificationState.VERIFIED,"번들 지침 조회·무결성 확인 · 사용자 작업 완료 증거 아님")
             }
             if(call.name in com.user.localagent.core.connections.ConnectionCatalog.tools||call.name in com.user.localagent.core.connections.PcToolCatalog.names){
-                val application=context.applicationContext as com.user.localagent.LocalAgentApplication
-                val runId=application.container.runs.activeRunId
-                return@withContext com.user.localagent.connections.ConnectionHub.get(context).execute(call,runId){preview->
-                    runId!=null&&application.container.runs.approveGmailSend(runId,call,preview)
-                }
+                return@withContext requestConnections.execute(call)
             }
             val result=when(call.name){
                 "get_current_datetime"->ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString()

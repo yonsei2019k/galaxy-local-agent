@@ -12,8 +12,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 
+data class PcCleanupEvidence(val operation:String,val requestId:String?,val cleanupComplete:Boolean?,val acknowledged:Boolean)
+
 /** The paired PC computes text only. Request state, authority and persistence stay on the phone. */
-class PcInferenceEngine(context:Context):InferenceEngine {
+class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null):InferenceEngine {
     private val context=context.applicationContext
     private val settings=PcComputeSettings.get(this.context)
     private val transport=PcTransport(this.context)
@@ -22,6 +24,9 @@ class PcInferenceEngine(context:Context):InferenceEngine {
     private val status=MutableStateFlow("PC 계산 대기")
     private val metrics=MutableStateFlow<InferenceMetrics?>(null)
     private val generation=MutableStateFlow<GenerationSummary?>(null)
+    private val cleanup=MutableStateFlow<PcCleanupEvidence?>(null)
+    val lastCleanup:StateFlow<PcCleanupEvidence?> = cleanup.asStateFlow()
+    private val lifecycle=AtomicLong()
     private var config:PcConnection?=null
     private var alias:String?=null
     private var options:InferenceOptions?=null
@@ -35,15 +40,19 @@ class PcInferenceEngine(context:Context):InferenceEngine {
     override val lastGeneration:StateFlow<GenerationSummary?> = generation.asStateFlow()
     override val residentModelPath:String? get()=path
     override val supportsStructuredOutput:Boolean get()=structured&&path!=null
-    suspend fun preflight():Boolean=transport.available()!=null
+    private fun requireAuthority(connection:PcConnection){if(!authorityMatches(connection))throw PcUnavailable()}
+    suspend fun preflight():Boolean=transport.available(computeOwner)?.let {authorityMatches(it)}==true
     override suspend fun load(path:String,options:InferenceOptions)=withContext(Dispatchers.IO){mutex.withLock {
+        lifecycle.incrementAndGet();cleanup.value=null
         require(!options.audioEnabled&&!options.visionEnabled&&!options.thinking)
         val file=File(path).canonicalFile
         require(file.parentFile==File(context.filesDir,"models").canonicalFile&&file.isFile)
         val match=Regex("(gemma-e[24]b)-([a-f0-9]{12})\\.gguf").matchEntire(file.name)?:throw PcUnavailable()
-        val connection=transport.available()?:throw PcUnavailable()
+        val connection=transport.available(computeOwner)?:throw PcUnavailable()
+        requireAuthority(connection)
         val body=buildJsonObject{put("modelId",match.groupValues[1]);put("modelShaPrefix",match.groupValues[2]);put("contextSize",options.contextSize)}
-        val reply=transport.json(connection,"/v1/llm/load","POST",body,100_000)
+        val reply=transport.json(connection,"/v1/llm/load","POST",body,100_000,computeOwner)
+        requireAuthority(connection)
         require(reply["modelId"]?.jsonPrimitive?.content==match.groupValues[1])
         require(reply.getValue("modelSha256").jsonPrimitive.content.startsWith(match.groupValues[2]))
         require(reply["contextSize"]?.jsonPrimitive?.int==options.contextSize)
@@ -61,8 +70,10 @@ class PcInferenceEngine(context:Context):InferenceEngine {
     override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int=withContext(Dispatchers.IO){mutex.withLock {
         val revision=cancellation.get()
         val connection=checkNotNull(config)
-        val reply=try{transport.json(connection,"/v1/llm/tokens","POST",buildJsonObject {put("modelId",checkNotNull(alias));put("messages",messages(userText,systemInstruction,history))},60_000)}catch(error:Throwable){if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단");throw error}
+        requireAuthority(connection)
+        val reply=try{transport.json(connection,"/v1/llm/tokens","POST",buildJsonObject {put("modelId",checkNotNull(alias));put("messages",messages(userText,systemInstruction,history))},60_000,computeOwner)}catch(error:Throwable){if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단");throw error}
         if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단")
+        requireAuthority(connection)
         reply.getValue("count").jsonPrimitive.int.also {require(it in 0..100_000)}
     }}
     override fun generate(prompt:String):Flow<String> = generateChat(prompt,"",emptyList())
@@ -75,6 +86,7 @@ class PcInferenceEngine(context:Context):InferenceEngine {
             val id=UUID.randomUUID().toString();activeRequest=id
             val revision=cancellation.get()
             val started=System.nanoTime();val config=checkNotNull(config);val selected=checkNotNull(options)
+            requireAuthority(config)
             require(selected.maxOutputTokens in 1..4096)
             val body=buildJsonObject {
                 put("requestId",id);put("modelId",checkNotNull(alias));put("messages",messages(user,system,history))
@@ -84,13 +96,14 @@ class PcInferenceEngine(context:Context):InferenceEngine {
             status.value="PC에서 계산 중 · 결과는 스마트폰에 저장";metrics.value=null;generation.value=null
             var visible=0
             try {
-                val connection=transport.open(config,"/v1/llm/chat","POST",body,300_000);activeConnection=connection
+                val connection=transport.open(config,"/v1/llm/chat","POST",body,300_000,computeOwner);activeConnection=connection
                 val text=StringBuilder();var finish:String?=null;var promptTokens:Int?=null;var outputTokens:Int?=null;var done=false;var timing:JsonObject?=null
                 transport.cancellable(connection){
                     require(connection.responseCode==200){"PC 계산 응답을 확인하지 못했습니다."}
                     connection.inputStream.bufferedReader(Charsets.UTF_8).use {reader->
-                        var total=0
+                        var total=0;var lastProgress=0L
                         while(true){
+                            requireAuthority(config)
                             val line=reader.readLine()?:break;total+=line.length
                             require(line.length<=131072&&total<=4*1024*1024)
                             if(!line.startsWith("data: "))continue
@@ -104,6 +117,11 @@ class PcInferenceEngine(context:Context):InferenceEngine {
                                 val item=choice.jsonObject
                                 item["delta"]?.jsonObject?.get("content")?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {delta->require(text.length+delta.length<=128000);text.append(delta)}
                                 item["finish_reason"]?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {finish=it}
+                            }
+                            val progressAt=System.nanoTime()
+                            if(text.isNotEmpty()&&(lastProgress==0L||progressAt-lastProgress>=1_000_000_000L)){
+                                status.value="PC에서 답변 작성 중 · ${text.length}자 준비 · 완료 확인 대기"
+                                lastProgress=progressAt
                             }
                         }
                     }
@@ -130,13 +148,22 @@ class PcInferenceEngine(context:Context):InferenceEngine {
         }
     }.flowOn(Dispatchers.IO)
     override fun cancel(){
+        val id=activeRequest;val connection=config;val epoch=lifecycle.get()
         cancellation.incrementAndGet()
         activeConnection?.disconnect();transport.cancel()
-        val id=activeRequest;val connection=config
-        if(id!=null&&connection!=null)scope.launch {runCatching{PcTransport(context).json(connection,"/v1/llm/cancel","POST",buildJsonObject{put("requestId",id)},2000)}}
+        if(id!=null&&connection!=null)scope.launch {
+            val reply=runCatching{PcTransport(context).json(connection,"/v1/llm/cancel","POST",buildJsonObject{put("requestId",id)},2000,computeOwner)}.getOrNull()
+            if(lifecycle.get()==epoch)cleanup.value=PcCleanupEvidence("cancel",id,reply?.get("cleanup_complete")?.jsonPrimitive?.booleanOrNull,reply!=null)
+        }
     }
     override suspend fun unload(){cancel();withContext(Dispatchers.IO){mutex.withLock {
-        config?.let {runCatching{transport.json(it,"/v1/llm/unload","POST",buildJsonObject{},2000)}}
-        path=null;alias=null;options=null;config=null;structured=false;metrics.value=null;generation.value=null;status.value="PC 계산 메모리 해제 요청됨"
+        lifecycle.incrementAndGet() // A late cancel reply cannot replace this unload's evidence.
+        val previous=config
+        if(previous!=null){
+            val reply=runCatching{transport.json(previous,"/v1/llm/unload","POST",buildJsonObject{},2000,computeOwner)}.getOrNull()
+            cleanup.value=PcCleanupEvidence("unload",null,reply?.get("cleanup_complete")?.jsonPrimitive?.booleanOrNull,reply!=null)
+        }
+        path=null;alias=null;options=null;config=null;structured=false;metrics.value=null;generation.value=null
+        status.value=if(cleanup.value?.cleanupComplete==true)"PC 계산 정리 확인됨"else"PC 정리 요청의 완료 여부는 확인이 필요합니다."
     }}}
 }

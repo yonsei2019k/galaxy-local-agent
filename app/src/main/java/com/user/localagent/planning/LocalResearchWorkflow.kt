@@ -52,8 +52,9 @@ class LocalResearchWorkflow internal constructor(
     private val decider: ResearchActionDecider,
     private val now: () -> Instant = { Instant.now() },
 ) {
-    constructor(app: AppContainer, client: PublicWebClient = PublicWebClient()) :
-        this(client, EngineResearchActionDecider(app))
+    constructor(app: AppContainer, client: PublicWebClient = PublicWebClient(),
+        requestEngine:com.user.localagent.inference.InferenceEngine=app.engine) :
+        this(client, EngineResearchActionDecider(app,requestEngine=requestEngine))
 
     suspend fun gather(
         plan: SemanticRequestPlan,
@@ -367,7 +368,8 @@ class LocalResearchWorkflow internal constructor(
 }
 
 /** Uses the already chosen local engine; never loads a second model or executes a tool. */
-internal class EngineResearchActionDecider(private val app: AppContainer,private val actionInstruction:String?=null,private val skillId:String?=null) : ResearchActionDecider {
+internal class EngineResearchActionDecider(private val app: AppContainer,private val actionInstruction:String?=null,private val skillId:String?=null,
+    private val requestEngine:com.user.localagent.inference.InferenceEngine=app.engine) : ResearchActionDecider {
     override suspend fun decide(input: String, schema: String, chosen: ChosenInference, repair: Boolean): String {
         require(chosen.model.verified)
         val options = chosen.options.copy(thinking = false, maxOutputTokens = 384, audioEnabled = false, visionEnabled = false, projectorPath = null)
@@ -397,15 +399,15 @@ internal class EngineResearchActionDecider(private val app: AppContainer,private
         }
         try {
             return withTimeout(90_000L) {
-                app.engine.load(chosen.model.path, options)
+                requestEngine.load(chosen.model.path, options)
                 var boundedInput = input
-                var tokens = app.engine.countChatTokens(boundedInput, instruction, emptyList())
+                var tokens = requestEngine.countChatTokens(boundedInput, instruction, emptyList())
                     ?: error("조사 계획의 문맥 토큰 수를 확인하지 못했습니다.")
                 while (tokens.toLong() + options.maxOutputTokens + 64 > options.contextSize) {
                     val reduced = reduceEvidenceInput(boundedInput)
                     if (reduced == boundedInput) break
                     boundedInput = reduced
-                    tokens = app.engine.countChatTokens(boundedInput, instruction, emptyList())
+                    tokens = requestEngine.countChatTokens(boundedInput, instruction, emptyList())
                         ?: error("조사 계획의 문맥 토큰 수를 확인하지 못했습니다.")
                 }
                 require(tokens >= 0 && tokens.toLong() + options.maxOutputTokens + 64 <= options.contextSize) {
@@ -413,8 +415,8 @@ internal class EngineResearchActionDecider(private val app: AppContainer,private
                 }
                 val output = StringBuilder()
                 var terminal: GenerationSummary? = null
-                val events = if (app.engine.supportsStructuredOutput) app.engine.generateStructuredEvents(boundedInput, instruction, schema, emptyList())
-                    else app.engine.generateChatEvents(boundedInput, instruction, emptyList())
+                val events = if (requestEngine.supportsStructuredOutput) requestEngine.generateStructuredEvents(boundedInput, instruction, schema, emptyList())
+                    else requestEngine.generateChatEvents(boundedInput, instruction, emptyList())
                 events.collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
@@ -432,14 +434,14 @@ internal class EngineResearchActionDecider(private val app: AppContainer,private
                 output.toString()
             }
         } catch (timeout: TimeoutCancellationException) {
-            app.engine.cancel()
+            requestEngine.cancel()
             if (!currentCoroutineContext().isActive) throw timeout
             throw IllegalStateException("로컬 조사 계획 확인 시간이 초과되었습니다.")
         } catch (cancel: CancellationException) {
-            app.engine.cancel()
+            requestEngine.cancel()
             throw cancel
         } catch (_: Exception) {
-            app.engine.cancel()
+            requestEngine.cancel()
             throw IllegalStateException("로컬 조사 계획을 검증하지 못했습니다.")
         }
     }

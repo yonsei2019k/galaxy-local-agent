@@ -37,6 +37,7 @@ class SelectedAudioTranscription(
     private val originSelectionId: String,
     private val checkStillAuthorized: () -> Unit,
     private val discardCallback: suspend (String, List<IncompleteAudioNote>) -> AudioCleanupResult,
+    private val requestEngine:com.user.localagent.inference.InferenceEngine?=null,
 ) {
     private val started = AtomicBoolean(false)
     @Volatile var lastCleanupResult: AudioCleanupResult? = null
@@ -53,7 +54,7 @@ class SelectedAudioTranscription(
         withContext(Dispatchers.IO) {
             check(started.compareAndSet(false, true)) { "이미 처리한 자료 선택 요청입니다. 파일을 다시 선택해주세요." }
             require(uri.scheme == "content" && !uri.authority.isNullOrBlank()) { "시스템 파일 선택으로 고른 오디오가 필요합니다." }
-            check(RuntimeGate.inference.get()) { "현재 음성 작업의 모델 실행 범위가 필요합니다." }
+            check(requestEngine is com.user.localagent.inference.ComputeExecutionEngine||RuntimeGate.inference.get()) { "현재 음성 작업의 모델 실행 범위가 필요합니다." }
             val ownedManifestNotes = mutableListOf<IncompleteAudioNote>()
             var worker: LocalAudioTranscriber? = null
             var transcription: AudioTranscriptionResult? = null
@@ -63,7 +64,8 @@ class SelectedAudioTranscription(
                     currentCoroutineContext().ensureActive(); checkStillAuthorized()
                     val name = displayName(uri)
                     currentCoroutineContext().ensureActive(); checkStillAuthorized()
-                    worker = LocalAudioTranscriber(app, AudioChunkDecoder(context), scopedRepo, checkStillAuthorized, discardCallback)
+                    worker = LocalAudioTranscriber(app, AudioChunkDecoder(context), scopedRepo, checkStillAuthorized, discardCallback,
+                        requestEngine=requestEngine?:app.engine)
                     transcription = checkNotNull(worker).transcribe(uri) { index, start ->
                         checkStillAuthorized(); onProgress(index, start)
                     }

@@ -451,6 +451,15 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     suspend fun getReminder(id:String)=dao.reminderById(id)
     suspend fun getNote(id:String):NoteRecord? {checkResource("note",id);return dao.noteById(id)}
     suspend fun getMemory(id:String):MemoryRecord? {checkResource("memory",id);return dao.memoryById(id)}
+    /** Rollback only the exact image metadata receipt created by this execution. */
+    suspend fun deleteGeneratedImageIfUnchanged(expected:NoteRecord):Boolean=database.withTransaction {
+        require(expected.collection=="generated-images")
+        checkResource("note",expected.id)
+        val current=dao.noteById(expected.id)?:return@withTransaction true
+        if(current!=expected)return@withTransaction false
+        graph.eraseSource(expected.id);dao.deleteNote(expected.id);chatDao.deleteSourceScope("note",expected.id)
+        true
+    }
     suspend fun deleteNote(id:String)=database.withTransaction {checkResource("note",id);if(dao.noteById(id)?.collection!="planning-feedback")graph.eraseSource(id);dao.deleteNote(id);chatDao.deleteSourceScope("note",id)}
     suspend fun deleteReminder(id:String)=dao.deleteReminder(id)
     suspend fun recordToolRun(name:String,success:Boolean,summary:String,runId:String?=null,threadId:String?=null){

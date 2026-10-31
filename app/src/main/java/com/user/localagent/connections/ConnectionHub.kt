@@ -46,8 +46,17 @@ class ConnectionHub private constructor(private val context:Context) {
         override fun saveMutation(key:String,record:MutationRecord)=store.saveMutation(service,key,record)
         override fun reserveRequest(service:ConnectedService)=store.reserve(service)
     })}
-    suspend fun execute(call:ToolCall,hostRunId:String?=null,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?=null):ToolResult=withContext(Dispatchers.IO) {
-        if(call.name in PcToolCatalog.names)return@withContext pc.execute(call)
+    suspend fun execute(call:ToolCall,hostRunId:String?=null,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?=null):ToolResult=
+        executeBound(call,hostRunId,null,null,{},approveGmailSend)
+    suspend fun executeInThread(call:ToolCall,hostRunId:String,hostThreadId:String,pcDataBinding:String?,verifyAccess:suspend()->Unit,
+        approveGmailSend:(suspend(GmailSendPreview)->Boolean)?=null):ToolResult {
+        require(hostThreadId.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        verifyAccess()
+        return executeBound(call,hostRunId,hostThreadId,pcDataBinding,verifyAccess,approveGmailSend)
+    }
+    private suspend fun executeBound(call:ToolCall,hostRunId:String?,hostThreadId:String?,pcDataBinding:String?,verifyAccess:suspend()->Unit,
+        approveGmailSend:(suspend(GmailSendPreview)->Boolean)?):ToolResult=withContext(Dispatchers.IO) {
+        if(call.name in PcToolCatalog.names)return@withContext pc.execute(call,hostThreadId,pcDataBinding,verifyAccess,computeOwner=hostRunId)
         val service=ConnectionCatalog.tools[call.name]?.service?:return@withContext ToolResult(call.id,false,"지원하지 않는 연결 도구",VerificationState.FAILED)
         try {
             val initialAccess=store.connection(service)?.let {ConnectionAccess(it.principal,it.generation,true,it.writeAllowed)}

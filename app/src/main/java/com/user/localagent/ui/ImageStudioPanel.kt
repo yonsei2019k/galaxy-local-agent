@@ -62,10 +62,39 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     var deleteModel by remember{mutableStateOf(false)}
     var transform by rememberSaveable{mutableStateOf(false)}
     var referenceUri by rememberSaveable{mutableStateOf<String?>(null)}
-    var strength by rememberSaveable{mutableFloatStateOf(.65f)}
+    var strength by rememberSaveable{mutableFloatStateOf(.45f)}
+    val consistencyStore=remember(context){com.user.localagent.images.ImageConsistencyStore(context)}
+    var series by rememberSaveable{mutableStateOf(false)}
+    var seriesTitle by rememberSaveable{mutableStateOf("나의 이미지 시리즈")}
+    var preserve by rememberSaveable{mutableStateOf("")}
+    var referenceName by rememberSaveable{mutableStateOf<String?>(null)}
+    var referenceSha by rememberSaveable{mutableStateOf<String?>(null)}
+    var compareReference by rememberSaveable{mutableStateOf(false)}
+    fun recipe()=com.user.localagent.core.ImageConsistencyRecipe(title=seriesTitle,preserve=preserve,scene=prompt,
+        negative=negative,seed=seedText.toLongOrNull()?:-1,strength=strength,phoneSteps=qualitySteps,pcSteps=pcSteps,
+        referenceName=referenceName.takeIf{transform},referenceSha256=referenceSha.takeIf{transform},pcModelId=pc.imageModelId)
+    fun restoreRecipe(){scope.launch {
+        try {
+            val saved=withContext(Dispatchers.IO){consistencyStore.read()}?:run{onStatus("저장한 시리즈가 없습니다.");return@launch}
+            val uri=withContext(Dispatchers.IO){consistencyStore.reference(saved)}
+            seriesTitle=saved.title;preserve=saved.preserve;prompt=saved.scene;negative=saved.negative
+            seedText=saved.seed.toString();strength=saved.strength;qualitySteps=saved.phoneSteps;pcSteps=saved.pcSteps
+            referenceName=saved.referenceName;referenceSha=saved.referenceSha256;referenceUri=uri?.toString();transform=uri!=null;series=true
+            com.user.localagent.compute.PcComputeSettings.get(context).imageModel(saved.pcModelId)
+            onStatus("시리즈의 기준 사진과 생성 조건을 불러왔습니다.")
+        }catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("시리즈를 읽지 못했습니다. 기존 입력은 유지됩니다.")}
+    }}
     var referencePreview by remember{mutableStateOf<ImageBitmap?>(null)}
 
-    val referencePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->if(uri!=null){referenceUri=uri.toString();transform=true}}
+    val referencePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->if(uri!=null)scope.launch {
+        importing=true
+        try {
+            val saved=withContext(Dispatchers.IO){consistencyStore.importReference(uri)}
+            val owned=withContext(Dispatchers.IO){consistencyStore.reference(com.user.localagent.core.ImageConsistencyRecipe(referenceName=saved.first,referenceSha256=saved.second))}
+            referenceName=saved.first;referenceSha=saved.second;referenceUri=owned.toString();transform=true
+        }catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("사진을 가져오지 못했습니다. 8MB 이하의 지원 사진을 선택해주세요.")}
+        finally{importing=false}
+    }}
     LaunchedEffect(referenceUri){
         referencePreview=null
         val uri=referenceUri?.let(Uri::parse)?:return@LaunchedEffect
@@ -107,7 +136,11 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
         val seed=seedText.trim().takeIf{it.isNotEmpty()}?.toLongOrNull()
         if(seedText.isNotBlank()&&(seed==null||seed<0)){onStatus("시드는 0 이상의 정수로 입력하거나 비워주세요.");return}
         if(transform&&referenceUri==null){onStatus("변환할 참고 사진을 먼저 선택해주세요.");return}
-        if(!app.imageStudio.generate(prompt.trim(),steps=if(pc.paired&&pc.preferPcImages)pcSteps else if(model.qualityModel)qualitySteps else steps,seed=seed,negativePrompt=negative.trim(),referenceUri=if(transform)referenceUri?.let(Uri::parse)else null,strength=strength))onStatus("이미지 생성을 시작하지 못했습니다. 현재 작업과 모델 상태를 확인해주세요.")
+        if(series&&seed==null){onStatus("시리즈에서는 고정 시드를 입력해주세요.");return}
+        val generationPrompt=try{if(series)recipe().validate().prompt()else prompt.trim()}
+            catch(_:IllegalArgumentException){onStatus("시리즈 이름·특징·장면 길이와 생성 조건을 확인해주세요.");return}
+        if(generationPrompt.length>2000){onStatus("유지할 특징과 장면 설명을 합쳐 2000자 이내로 줄여주세요.");return}
+        if(!app.imageStudio.generate(generationPrompt,steps=if(pc.paired&&pc.preferPcImages)pcSteps else if(model.qualityModel)qualitySteps else steps,seed=seed,negativePrompt=negative.trim(),referenceUri=if(transform)referenceUri?.let(Uri::parse)else null,strength=strength))onStatus("이미지 생성을 시작하지 못했습니다. 현재 작업과 모델 상태를 확인해주세요.")
     }
     Column(Modifier.fillMaxSize().imePadding()){
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(14.dp),contentPadding=PaddingValues(bottom=16.dp)){
@@ -117,6 +150,28 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
             }}
             item {ZipHapCard {PcComputePanel(state.running,onStatus)}}
             item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    Text("이미지 시리즈",style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
+                    Switch(checked=series,onCheckedChange={series=it;if(it&&seedText.isBlank())seedText="42"},enabled=!state.running&&!importing)
+                }
+                Text("기준 사진은 그대로 두고 장면을 바꿔 이어 만드세요.",style=MaterialTheme.typography.bodySmall)
+                if(series){
+                    OutlinedTextField(value=seriesTitle,onValueChange={if(it.length<=80)seriesTitle=it},label={Text("시리즈 이름")},enabled=!state.running,modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(value=preserve,onValueChange={if(it.length<=700)preserve=it},label={Text("계속 유지할 특징")},placeholder={Text("예: 같은 빨간 머그잔, 흰색 로고, 손잡이 모양, 따뜻한 색감")},minLines=2,enabled=!state.running,modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(value=seedText,onValueChange={if(it.length<=19)seedText=it},label={Text("시리즈 고정 시드")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,enabled=!state.running,modifier=Modifier.fillMaxWidth())
+                    Text("아래 이미지 설명에는 이번에 바꿀 배경·포즈·조명만 적으세요. 특징은 생성 설명에 함께 전달됩니다. 같은 시드도 동일 인물이나 제품을 보장하지 않습니다.",style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        OutlinedButton(enabled=!state.running&&!importing&&seriesTitle.isNotBlank(),onClick={
+                            val snapshot=recipe()
+                            scope.launch {try{withContext(Dispatchers.IO){consistencyStore.save(snapshot)};onStatus("기준 사진·특징·시드·모델·단계 조건을 저장했습니다.")}
+                            catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("조건을 저장하지 못했습니다. 입력 길이와 기준 사진을 확인해주세요.")}}
+                        }){Text("시리즈 조건 저장")}
+                        TextButton(enabled=!state.running&&!importing,onClick={restoreRecipe()}){Text("저장 조건 불러오기")}
+                    }
+                    Text("최근 저장한 시리즈 1개를 보관합니다. 조건은 Image Studio에만 적용되며 채팅이나 기존 대기 요청에는 자동 적용되지 않습니다.",style=MaterialTheme.typography.labelSmall)
+                }
+            }}}
+            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                     FilterChip(selected=!transform,onClick={transform=false},enabled=!state.running,label={Text("새 이미지")})
                     FilterChip(selected=transform,onClick={transform=true},enabled=!state.running,label={Text("사진 변환")})
@@ -124,13 +179,13 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 if(transform){
                     Text("참고 사진을 직접 입력으로 사용해 장면과 스타일을 바꿉니다. 원본 파일은 수정하지 않습니다.",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        OutlinedButton(enabled=!state.running,onClick={referencePicker.launch(arrayOf("image/*"))}){Text(if(referenceUri==null)"참고 사진 선택"else"다른 사진 선택")}
-                        if(referenceUri!=null)TextButton(enabled=!state.running,onClick={referenceUri=null}){Text("사진 제외")}
+                        OutlinedButton(enabled=!state.running&&!importing,onClick={referencePicker.launch(arrayOf("image/*"))}){Text(if(importing)"사진 보관 중"else if(referenceUri==null)"참고 사진 선택"else"다른 사진 선택")}
+                        if(referenceUri!=null)TextButton(enabled=!state.running&&!importing,onClick={referenceUri=null;referenceName=null;referenceSha=null}){Text("사진 제외")}
                     }
                     referencePreview?.let {preview->Image(preview,"사용자가 선택한 참고 사진",Modifier.fillMaxWidth().height(150.dp),contentScale=ContentScale.Fit)}
                     if(referenceUri!=null&&referencePreview==null)Text("선택한 참고 사진 1장",style=MaterialTheme.typography.labelSmall)
                     if(pc.paired&&pc.preferPcImages){
-                        Text("PC 사진 편집은 장면 설명으로 변경할 내용을 지정합니다. 참고 사진은 원본 비율을 유지해 1024px로 준비합니다.",style=MaterialTheme.typography.bodySmall)
+                        Text("PC 참고 사진 편집은 서버의 지원 모델이 필요합니다. 현재 지원하지 않는 서버는 실행 전 거부하며 텍스트 생성으로 바꾸지 않습니다.",style=MaterialTheme.typography.bodySmall)
                     }else{
                         Text("변환 강도 ${(strength*100).roundToInt()}%",style=MaterialTheme.typography.labelLarge)
                         Slider(value=strength,onValueChange={strength=it.coerceIn(.4f,.85f)},valueRange=.4f..0.85f,steps=8,enabled=!state.running)
@@ -139,7 +194,8 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 }
             }}}
             item {Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceContainer),contentAlignment=Alignment.Center){
-                if(output!=null)Image(bitmap=output!!,contentDescription="생성한 이미지",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+                if(compareReference&&referencePreview!=null&&referenceSha==state.referenceSha256)Image(bitmap=referencePreview!!,contentDescription="고정 기준 사진",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+                else if(output!=null)Image(bitmap=output!!,contentDescription="생성한 이미지",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
                 else Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)){
                     StudioPlaceholder(Modifier.size(70.dp),MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else "새로운 장면을 만들어 보세요.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -183,6 +239,14 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
             state.error?.takeIf{it.isNotBlank()}?.let {error->item {ZipHapCard {Text(error.take(700),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)}}}
             if(state.outputPath!=null)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
                 Text("완성한 이미지",style=MaterialTheme.typography.titleMedium)
+                if(referencePreview!=null&&referenceSha==state.referenceSha256){
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        FilterChip(selected=compareReference,onClick={compareReference=true},label={Text("기준 사진 보기")})
+                        FilterChip(selected=!compareReference,onClick={compareReference=false},label={Text("결과 보기")})
+                    }
+                    Text("결과를 비교해 특징이 유지됐는지 확인하세요. 기준 사진은 자동 교체되지 않습니다.",style=MaterialTheme.typography.bodySmall)
+                }
+                state.sourceModelId?.let {Text("실제 결과 모델: $it",style=MaterialTheme.typography.labelSmall)}
                 state.seed?.let {seed->Text("시드 $seed",style=MaterialTheme.typography.labelMedium)}
                 Text(if(state.computeLocation=="pc")"PC에서 계산 · 스마트폰에 저장"else"휴대폰에서 생성·저장",style=MaterialTheme.typography.labelMedium)
                 if(state.mode=="img2img"&&state.referenceWidth!=null&&state.referenceHeight!=null)Text("사진 변환 · 원본 ${state.referenceWidth}×${state.referenceHeight}"+(state.strength?.let{" · 강도 ${(it*100).roundToInt()}%"}?:" · 지시문에 따라 변환"),style=MaterialTheme.typography.labelMedium)
@@ -195,8 +259,8 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 }}){Text(if(saving)"저장 중" else "갤러리에 저장")}
             }}}
             item {Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
-                Text(if(pc.paired&&pc.preferPcImages)"선택 모델: FLUX.2 klein base 4B · Q4\n라이선스: Apache 2.0"else if(model.qualityModel||!model.available)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: 기존 DreamShaper 8 LCM\n라이선스: CreativeML OpenRAIL-M",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick={runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(if(pc.paired&&pc.preferPcImages)"https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B"else if(model.qualityModel||!model.available)"https://huggingface.co/kostakoff/stable-diffusion-xl-base-1.0-GGUF"else"https://huggingface.co/Lykon/dreamshaper-8-lcm")))}.onFailure{onStatus("모델 출처 페이지를 열 앱을 찾지 못했습니다.")}}){Text("모델 출처·라이선스 보기")}
+                Text(if(pc.paired&&pc.preferPcImages)if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: Qwen-Image-2512 · 20B Q4_K_M\n라이선스: Apache 2.0"else if(model.qualityModel||!model.available)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: 기존 DreamShaper 8 LCM\n라이선스: CreativeML OpenRAIL-M",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick={runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(if(pc.paired&&pc.preferPcImages)if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0"else"https://huggingface.co/Qwen/Qwen-Image-2512"else if(model.qualityModel||!model.available)"https://huggingface.co/kostakoff/stable-diffusion-xl-base-1.0-GGUF"else"https://huggingface.co/Lykon/dreamshaper-8-lcm")))}.onFailure{onStatus("모델 출처 페이지를 열 앱을 찾지 못했습니다.")}}){Text("모델 출처·라이선스 보기")}
             }}
         }
         Surface(color=MaterialTheme.colorScheme.background,shadowElevation=0.dp){Column(Modifier.fillMaxWidth().padding(vertical=10.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){

@@ -17,7 +17,7 @@ class DraftStore(context:Context,private val scopeKey:String?=null,private val m
     init {require(scopeKey==null||scopeKey.length in 1..512);require(maxChars in 1..4_000_000)}
     private val identity=scopeKey?.let{key->"chat-draft-"+MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}+".enc"}?:"chat-draft.enc"
     private val file=AtomicFile(File(context.applicationContext.filesDir,identity))
-    private val revisionCounter=REVISIONS.getOrPut(identity){java.util.concurrent.atomic.AtomicLong()}
+    private val revisionCounter=DraftRevisions.forFile(file.baseFile)
     private fun key():SecretKey {
         val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
         val alias="ziphap-chat-draft-v1"
@@ -51,5 +51,5 @@ class DraftStore(context:Context,private val scopeKey:String?=null,private val m
         val stream=file.startWrite()
         try {stream.write(cipher.iv);stream.write(encrypted);file.finishWrite(stream)}catch(error:Throwable){file.failWrite(stream);throw error}
     }
-    companion object {private val LOCK=Any();private val REVISIONS=java.util.concurrent.ConcurrentHashMap<String,java.util.concurrent.atomic.AtomicLong>()}
+    companion object {private val LOCK=Any()}
 }

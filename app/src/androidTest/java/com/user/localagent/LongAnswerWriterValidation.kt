@@ -63,7 +63,7 @@ class LongAnswerWriterValidation {
             val request=QueuedChatRequest(run.id,thread.id,thread.activeBranchId,null,user,model.id,false,emptyList(),userMessage.id,allowTools=false)
             chat.updateRunContext(run.id,request.toJson());chat.startRun(run.id)
             val lastState=AtomicReference<UiAnswerState>()
-            val writer=LongAnswerWriter(app,request,{_,state->lastState.set(state)},{})
+            val writer=LongAnswerWriter(app,request,{_,state->lastState.set(state)},{},limits=AnswerContinuationLimits(maxParts=4))
             stage="initial_write"
             val result=withTimeout(600_000){writer.write(model,options,user,system,emptyList())}
             val messageId=requireNotNull(result.messageId){"A real visible answer is required"}
@@ -84,7 +84,7 @@ class LongAnswerWriterValidation {
             assertEquals(initialParts+1,snapshot.nextPart)
             chat.resumeRun(run.id)
             stage="resume_write"
-            val resumed=withTimeout(600_000){LongAnswerWriter(app,stored,{_,state->lastState.set(state)},{})
+            val resumed=withTimeout(600_000){LongAnswerWriter(app,stored,{_,state->lastState.set(state)},{},limits=AnswerContinuationLimits(maxParts=4))
                 .write(model,snapshot.options,snapshot.user,snapshot.system,snapshot.history,resume=snapshot)}
             val after=chat.segmentsForMessage(messageId);resumedParts=after.size
             assertEquals(messageId,resumed.messageId)

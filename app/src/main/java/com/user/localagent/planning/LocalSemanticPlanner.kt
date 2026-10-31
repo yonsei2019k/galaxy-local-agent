@@ -37,7 +37,9 @@ class SemanticPlanningException(val reasonCode: String, message: String) : Illeg
  * The caller owns the existing inference gate and cancellation scope. This class only plans:
  * it executes no tools, stores no conversation payloads and never falls back to keyword routing.
  */
-class LocalSemanticPlanner(private val app: AppContainer,private val progress:(SemanticPlanningTelemetry)->Unit={}) {
+class LocalSemanticPlanner(private val app: AppContainer,
+    private val requestEngine:com.user.localagent.inference.InferenceEngine=app.engine,
+    private val progress:(SemanticPlanningTelemetry)->Unit={}) {
     suspend fun plan(
         ownerRequest: String,
         history: List<InferenceTurn>,
@@ -70,8 +72,8 @@ class LocalSemanticPlanner(private val app: AppContainer,private val progress:(S
         try {
             return withTimeout(TIMEOUT_MS) {
                 emit("loading")
-                app.engine.load(chosen.model.path, options)
-                val constrained = app.engine.supportsStructuredOutput
+                requestEngine.load(chosen.model.path, options)
+                val constrained = requestEngine.supportsStructuredOutput
                 var retainedHistory = history.toList()
                 var retainedContext = localContext
                 fun reduceContext():Boolean {
@@ -100,7 +102,7 @@ class LocalSemanticPlanner(private val app: AppContainer,private val progress:(S
                             input = envelope(ownerRequest, retainedHistory, retainedContext)
                             continue
                         }
-                        val tokens = app.engine.countChatTokens(input, system, emptyList())
+                        val tokens = requestEngine.countChatTokens(input, system, emptyList())
                             ?: fail(
                                 "token_budget_unverified",
                                 "이 실행 엔진은 작업 계획의 문맥 토큰 수를 확인할 수 없습니다. 현재 요청 원문을 자르지 않고 중단했습니다.",
@@ -135,7 +137,7 @@ class LocalSemanticPlanner(private val app: AppContainer,private val progress:(S
                         )
                     } catch (invalid: InvalidOutput) {
                         emit("repairing_${invalid.code}")
-                        app.engine.cancel()
+                        requestEngine.cancel()
                         failureCode = invalid.code+(invalid.hint?.let {": $it"}?:"")
                         // One new semantic generation repairs format/termination failures.
                         // Rejected output is not promoted into user authority or execution.
@@ -151,16 +153,16 @@ class LocalSemanticPlanner(private val app: AppContainer,private val progress:(S
             }
         } catch (timeout: TimeoutCancellationException) {
             emit("timeout")
-            app.engine.cancel()
+            requestEngine.cancel()
             if (!currentCoroutineContext().isActive) throw timeout
             fail("planning_timeout", "기기 내 작업 계획의 확인 시간이 초과되어 실행하지 않았습니다.")
         } catch (cancel: CancellationException) {
-            app.engine.cancel()
+            requestEngine.cancel()
             throw cancel
         } catch (failure: SemanticPlanningException) {
             throw failure
         } catch (_: Exception) {
-            app.engine.cancel()
+            requestEngine.cancel()
             fail("planning_engine_failed", "기기 내 모델의 작업 계획을 완료하지 못해 실행하지 않았습니다.")
         }
     }
@@ -168,8 +170,8 @@ class LocalSemanticPlanner(private val app: AppContainer,private val progress:(S
     private suspend fun generate(input: String, system: String, schema: String, constrained: Boolean,onDelta:(Int)->Unit): String {
         val output = StringBuilder()
         var terminal: GenerationSummary? = null
-        val events = if (constrained) app.engine.generateStructuredEvents(input, system, schema, emptyList())
-            else app.engine.generateChatEvents(input, system, emptyList())
+        val events = if (constrained) requestEngine.generateStructuredEvents(input, system, schema, emptyList())
+            else requestEngine.generateChatEvents(input, system, emptyList())
         events.collect { event ->
             currentCoroutineContext().ensureActive()
             when (event) {

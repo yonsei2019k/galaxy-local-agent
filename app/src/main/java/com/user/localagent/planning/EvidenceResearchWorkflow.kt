@@ -24,7 +24,8 @@ class EvidenceResearchWorkflow internal constructor(
     private val decider:ResearchActionDecider,
     private val now:()->Instant={Instant.now()},
 ) {
-    constructor(app:AppContainer):this(PublicEvidenceToolRunner(),EngineResearchActionDecider(app,ACTION_INSTRUCTION,"evidence-research"))
+    constructor(app:AppContainer,requestEngine:com.user.localagent.inference.InferenceEngine=app.engine):
+        this(PublicEvidenceToolRunner(),EngineResearchActionDecider(app,ACTION_INSTRUCTION,"evidence-research",requestEngine))
 
     suspend fun gather(plan:SemanticRequestPlan,chosen:ChosenInference,availableTools:Set<String>,progress:(String)->Unit={}):ResearchEvidencePacket {
         SemanticRequestPlanning.allowedTools(plan,availableTools)

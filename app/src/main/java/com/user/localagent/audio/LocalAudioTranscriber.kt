@@ -13,7 +13,8 @@ data class AudioTranscriptionResult(val chunkCount:Int,val noteIds:List<String>,
 /** Caller owns RuntimeGate. Uses one resident audio-capable model; no audio is sent to a server. */
 class LocalAudioTranscriber(private val app:AppContainer,private val decoder:AudioChunkDecoder,
     private val repository:LocalRepository=app.repository,private val verifyAccess:()->Unit={},
-    private val discardIncompleteNotes:(suspend(String,List<IncompleteAudioNote>)->AudioCleanupResult)?=null) {
+    private val discardIncompleteNotes:(suspend(String,List<IncompleteAudioNote>)->AudioCleanupResult)?=null,
+    private val requestEngine:com.user.localagent.inference.InferenceEngine=app.engine) {
     var lastCleanupResult:AudioCleanupResult?=null
         private set
     suspend fun transcribe(uri:Uri,onProgress:(Int,Long)->Unit={_,_->}):AudioTranscriptionResult {
@@ -25,14 +26,14 @@ class LocalAudioTranscriber(private val app:AppContainer,private val decoder:Aud
             verifyAccess()
             app.models.refresh()
             val model=app.models.asrModel()
-            app.engine.load(model.path,app.models.asrOptions(model))
+            requestEngine.load(model.path,app.models.asrOptions(model).copy(deviceOnly=true))
             var chunks=0;var duration=0L
             decoder.decode(uri,chunkSeconds=15) {chunk->
                 currentCoroutineContext().ensureActive()
                 verifyAccess()
                 onProgress(chunk.index,chunk.startMillis)
                 val text=StringBuilder()
-                withTimeout(600_000){app.engine.transcribeAudio(chunk.file).collect {part->
+                withTimeout(600_000){requestEngine.transcribeAudio(chunk.file).collect {part->
                     require(text.length+part.length<=10_000){"전사 조각이 출력 제한을 넘었습니다."}
                     text.append(part)
                 }}
@@ -55,7 +56,7 @@ class LocalAudioTranscriber(private val app:AppContainer,private val decoder:Aud
                     .getOrElse {AudioCleanupResult(retainedUnverified=owned.size)}
             }
             throw error
-        }finally {withContext(NonCancellable){app.engine.unload()}}
+        }finally {withContext(NonCancellable){requestEngine.unload()}}
     }
     private suspend fun cleanupCurrentScope(run:String,notes:List<IncompleteAudioNote>):AudioCleanupResult {
         var result=AudioCleanupResult()

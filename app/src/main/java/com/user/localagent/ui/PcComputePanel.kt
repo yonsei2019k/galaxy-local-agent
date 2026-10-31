@@ -67,7 +67,8 @@ import kotlinx.coroutines.*
                 FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("이미지 · PC 정밀")})
                 FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("이미지 · 휴대폰")})
             }
-            Text("PC: FLUX 정밀 · 휴대폰: 설치한 SDXL 고품질 모델. 설정은 다음 작업부터 적용됩니다.",style=MaterialTheme.typography.bodySmall)
+            PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
+            Text("휴대폰 단독은 설치된 SDXL을 사용합니다. PC 모델 선택은 다음 작업부터 적용됩니다.",style=MaterialTheme.typography.bodySmall)
             TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
         }
     }
@@ -109,4 +110,19 @@ import kotlinx.coroutines.*
         TextButton(enabled=!busy,onClick={scan()}){Text("PC 다시 찾기")}
         TextButton(enabled=!busy,onClick=onImport){Text("연결 파일 가져오기 · 고급")}
     }},confirmButton={TextButton(onClick=onDismiss){Text("닫기")}})
+}
+
+@Composable
+fun PcImageModelSelector(selectedId:String,onSelect:(String)->Unit,enabled:Boolean=true){
+    Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
+        Text("PC 이미지 모델",style=MaterialTheme.typography.labelLarge)
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+            FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID,
+                onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.SDXL_ID)},enabled=enabled,
+                label={Text("SDXL")},modifier=Modifier.testTag("pc_image_model_sdxl"))
+            FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,
+                onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)},enabled=enabled,
+                label={Text("Qwen 2512 · 20B")},modifier=Modifier.testTag("pc_image_model_qwen"))
+        }
+    }
 }

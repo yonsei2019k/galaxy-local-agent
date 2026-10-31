@@ -24,7 +24,7 @@ class PcTransport(context:Context) {
     private val settings=PcComputeSettings.get(context)
     @Volatile private var lastDiscovery=0L
     @Volatile private var current:HttpsURLConnection?=null
-    fun open(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000):HttpsURLConnection {
+    fun open(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000,computeOwner:String?=null):HttpsURLConnection {
         if(!PcLocalNetwork.allowed(context))throw PcUnavailable()
         require(Regex("/v1/[a-z0-9/-]+").matches(path))
         val target=PcComputeContract.endpoint(config.endpoint)
@@ -47,6 +47,10 @@ class PcTransport(context:Context) {
         connection.instanceFollowRedirects=false;connection.useCaches=false
         connection.connectTimeout=minOf(timeout,1500);connection.readTimeout=timeout;connection.requestMethod=method
         connection.setRequestProperty("Authorization","Bearer "+config.token)
+        computeOwner?.let {owner->
+            require(runCatching {java.util.UUID.fromString(owner).toString()==owner}.getOrDefault(false)){"PC 작업의 원래 실행 ID가 필요합니다."}
+            connection.setRequestProperty("X-ZipHap-Compute-Owner",owner)
+        }
         connection.setRequestProperty("Cache-Control","no-store")
         if(body!=null){
             val bytes=body.toString().toByteArray(Charsets.UTF_8);require(bytes.size<=12*1024*1024)
@@ -55,22 +59,23 @@ class PcTransport(context:Context) {
         }
         return connection
     }
-    fun json(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000):JsonObject {
-        val connection=open(config,path,method,body,timeout)
+    fun json(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000,computeOwner:String?=null):JsonObject {
+        val connection=open(config,path,method,body,timeout,computeOwner)
         try {
             if(connection.responseCode !in 200..299)throw PcUnavailable()
             return Json.parseToJsonElement(String(read(connection,1024*1024),Charsets.UTF_8)).jsonObject
         }finally{connection.disconnect();if(current===connection)current=null}
     }
-    suspend fun available():PcConnection?=withContext(Dispatchers.IO){
+    suspend fun available(computeOwner:String?=null):PcConnection?=withContext(Dispatchers.IO){
         var config=settings.snapshot()?:return@withContext null
         if(!PcLocalNetwork.allowed(context)){
             settings.report("PC 사용에 로컬 네트워크 권한이 필요합니다. 지금은 휴대폰에서 처리합니다.")
             return@withContext null
         }
         suspend fun check(candidate:PcConnection):Boolean=try {
-            val result=json(candidate,"/v1/health",timeout=1200)
-            result["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&result["serverId"]?.jsonPrimitive?.content==candidate.serverId
+            val result=json(candidate,"/v1/health",timeout=1200,computeOwner=computeOwner)
+            result["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&result["serverId"]?.jsonPrimitive?.content==candidate.serverId&&
+                (computeOwner==null||result["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1)
         }catch(cancel:CancellationException){throw cancel}catch(_:Exception){false}
         if(check(config)){settings.report("PC 사용 가능 · 작업과 결과는 스마트폰에서 관리");return@withContext config}
         if(System.currentTimeMillis()-lastDiscovery>15_000){

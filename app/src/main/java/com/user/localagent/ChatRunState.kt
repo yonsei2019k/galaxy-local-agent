@@ -13,17 +13,20 @@ data class QueuedChatRequest(
     val userMessageId:String,val continuation:ContinuationSnapshot?=null,val allowTools:Boolean=true,
     val mode:String="act",val previousSteps:List<HarnessStep> = emptyList(),val queueOrder:Long=System.currentTimeMillis(),val workspaceBinding:String?=null,
     val goal:GoalDefinition?=null,val parentGoalStartRunId:String?=null,
+    val pcDataBinding:String?=null,
 ) {
     init {
         AgentWorkMode.parse(mode)
         goal?.let {it.validate();require(it.threadId==threadId&&it.projectId==projectId){"목표 스냅샷의 대화·프로젝트가 실행과 다릅니다."}}
         parentGoalStartRunId?.let {require(goal!=null&&mode in setOf("act","debug")&&it.isNotBlank()&&it.length<=100&&it!=runId&&it.none {c->c.code<32}){"목표 시작 요청의 원래 실행 연결이 올바르지 않습니다."}}
+        pcDataBinding?.let {require(it.matches(Regex("[a-f0-9]{64}"))){"PC 자료 선택의 고정 버전이 올바르지 않습니다."}}
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
         put("projectId",projectId);put("text",text);put("modelId",modelId);put("thinking",thinking);put("userMessageId",userMessageId);put("allowTools",allowTools)
         put("mode",mode);put("queueOrder",queueOrder)
         put("workspaceBinding",workspaceBinding)
+        put("pcDataBinding",pcDataBinding)
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -43,7 +46,8 @@ data class QueuedChatRequest(
                 o["previousSteps"]?.jsonArray.orEmpty().map {element->val step=element.jsonObject;val tool=step.getValue("tool").jsonPrimitive.content;require(tool in ToolRegistry.definitions){"등록되지 않은 도구의 실행 근거는 복원할 수 없습니다."};val args=step.getValue("arguments").jsonObject;ToolRegistry.validate(ToolCall(java.util.UUID.randomUUID().toString(),tool,args));HarnessStep(tool,args,StepEvidence(tool,VerificationState.valueOf(step.getValue("state").jsonPrimitive.content),step.getValue("summary").jsonPrimitive.content,step["continuationId"]?.jsonPrimitive?.contentOrNull))},
                 o["queueOrder"]?.jsonPrimitive?.longOrNull?:0,o["workspaceBinding"]?.jsonPrimitive?.contentOrNull,
                 o["goal"]?.takeUnless {it is JsonNull}?.jsonObject?.let(GoalDefinition::parse),
-                o["parentGoalStartRunId"]?.jsonPrimitive?.contentOrNull)
+                o["parentGoalStartRunId"]?.jsonPrimitive?.contentOrNull,
+                o["pcDataBinding"]?.jsonPrimitive?.contentOrNull)
         }
     }
 }

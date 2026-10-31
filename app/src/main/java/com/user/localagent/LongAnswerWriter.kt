@@ -164,16 +164,18 @@ private fun writerCheckpoint(request:QueuedChatRequest,snapshot:ContinuationSnap
 /** Write-ahead, text-only continuation. Tools are never invoked by this class. */
 internal class LongAnswerWriter(private val app:AppContainer,private val request:QueuedChatRequest,
     private val state:(String,UiAnswerState)->Unit,private val status:(String)->Unit,
-    private val engine:InferenceEngine=app.engine,private val partCharBudget:Int=ANSWER_PART_CHAR_BUDGET) {
+    private val engine:InferenceEngine=app.engine,private val partCharBudget:Int=ANSWER_PART_CHAR_BUDGET,
+    private val limits:AnswerContinuationLimits=AnswerContinuationLimits(),
+    private val clock:()->Long={SystemClock.elapsedRealtime()}) {
     private val chat=app.repository.chat
     private val context=app.applicationContext
 
     @OptIn(FlowPreview::class)
     suspend fun write(model:InstalledModel,initialOptions:InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
         structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null):WrittenAnswer {
-        val started=SystemClock.elapsedRealtime()
+        val started=clock()
         require(partCharBudget in 1..ANSWER_PART_CHAR_BUDGET)
-        val deadline=started+10*60*1000L
+        val deadline=started+limits.maxElapsedMillis
         var messageId=resume?.messageId?:chat.assistantForRun(request.runId)?.id
         // Reuse the reserved row and materialize any legacy fallback body before adding new segments.
         messageId?.let {chat.beginAssistant(request.runId,it)}
@@ -191,10 +193,12 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
         // Public research must not silently inherit a private conversation summary.
         val branchExcerpt=if(request.mode=="research")"" else requestBranchSummary()
         try {
-            for(index in 0 until 4){
+            for(index in 0 until limits.maxParts){
                 currentCoroutineContext().ensureActive()
                 if(paused||index>0&&lastSummary?.mayBeTruncated!=true)break
-                if(resourcePressure()||SystemClock.elapsedRealtime()>=deadline){paused=true;finalDetail="기기 자원 보호를 위해 저장 후 일시정지";break}
+                if(resourcePressure()){paused=true;finalDetail="발열·메모리 상태로 저장 후 일시정지";break}
+                if(clock()>=deadline){paused=true;finalDetail="장시간 작성 내용을 저장했습니다 · 이어쓰기 가능";break}
+                if(entire.length>=limits.maxSavedChars){paused=true;finalDetail="긴 답변의 저장 예산에 도달했습니다 · 본문 저장됨 · 이어쓰기 가능";break}
                 val continuing=resume!=null||index>0
                 var tail=entire.safeTail(2400)
                 val essentialSystem=if(continuing)system+
@@ -235,7 +239,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 var stagedRawOffset=0
                 var summary:GenerationSummary?=null
                 var partText=""
-                var lastFlush=SystemClock.elapsedRealtime()
+                var lastFlush=clock()
                 var lastResourceCheck=lastFlush
                 val previousSummaryId=engine.lastGeneration.value?.requestId
                 suspend fun ensureSegment(){
@@ -257,7 +261,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                         pending.delete(0,delta.length)
                         partText+=delta
                     }
-                    lastFlush=SystemClock.elapsedRealtime()
+                    lastFlush=clock()
                     val visibleParts=parts+UiAnswerPart(partNumber,partText)
                     state(messageId!!,UiAnswerState(if(continuing)UiAnswerPhase.CONTINUING else UiAnswerPhase.STREAMING,visibleParts,"${partNumber}부 작성 중 · 기기에 저장됨"))
                 }
@@ -275,9 +279,9 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     stagedRawOffset=maxOf(stagedRawOffset,start)
                     if(stagedRawOffset<raw.length){pending.append(raw,stagedRawOffset,raw.length);stagedRawOffset=raw.length}
                 }
-                status("${partNumber}부 작성 중 · 자동 이어쓰기")
+                status(if(continuing)"답변을 자동으로 이어 쓰고 있습니다 · ${partNumber}번째 구간" else "답변을 작성하고 있습니다")
                 try {
-                    withTimeout((deadline-SystemClock.elapsedRealtime()).coerceAtLeast(1)) {
+                    withTimeout((deadline-clock()).coerceAtLeast(1)) {
                         coroutineScope {
                             val events=(if(structuredSchema==null)engine.generateChatEvents(prompt,compactSystem,turns)
                                 else engine.generateStructuredEvents(prompt,compactSystem,structuredSchema,turns)).produceIn(this)
@@ -294,7 +298,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                                                 GeneratedResponseKind.UNDECIDED->Unit
                                             }
                                         }
-                                        if(prose==true&&display&&reachesAnswerPartBudget(raw.length,event.text.length,partCharBudget)){
+                                        if(prose==true&&display&&reachesAnswerPartBudget(raw.length,event.text.length,minOf(partCharBudget,limits.maxSavedChars-entire.length))){
                                             // Stop the producer before accepting another delta, but preserve every
                                             // character in the delta already delivered to this consumer. Do not copy
                                             // an overshooting delta into the bounded raw model-output buffer.
@@ -319,7 +323,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                                     }
                                     is GenerationEvent.Finished->{summary=event.summary;stageProse(finished=true);flush()}
                                 }
-                                val tick=SystemClock.elapsedRealtime()
+                                val tick=clock()
                                 if(answerFlushDue(pending.length,tick,lastFlush))flush()
                                 if(tick-lastResourceCheck>=250){lastResourceCheck=tick;if(resourcePressure()){engine.cancel();throw AnswerResourcePause()}}
                             }
@@ -370,13 +374,13 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 if(lastSummary?.mayBeTruncated!=true){finalDetail=if(lastSummary?.reason==GenerationStopReason.EOG)"생성 종료 · 전체 본문 저장됨"else"생성 종료 · 엔진 종료 사유 미제공";return WrittenAnswer(entire.toString(),visibleAnswerMessageId(messageId,hasSavedBody),lastSummary,false)}
                 paused=true
                 if(!madeProgress&&!options.thinking){finalDetail="새 본문 진전이 없어 자동 이어쓰기를 멈췄습니다. 저장 내용을 확인해주세요.";break}
-                finalDetail="다음 부분을 이어 쓸 수 있습니다."
-                if(index<3){paused=false;delay(1)}
+                finalDetail="장문 답변의 자동 작성 예산에 도달했습니다 · 본문 저장됨 · 이어쓰기 가능"
+                if(index+1<limits.maxParts){paused=false;status("출력 구간을 저장했습니다 · 남은 답변을 자동으로 이어 씁니다");delay(1)}
             }
         }catch(error:TimeoutCancellationException){
             engine.cancel();paused=true
             if(!currentCoroutineContext().isActive){failure=error;finalDetail="중단 · 작성 내용 저장됨";throw error}
-            finalDetail="10분 실행 지점에서 저장 후 일시정지"
+            finalDetail="장시간 작성 내용을 저장했습니다 · 이어쓰기 가능"
         }
         catch(error:AnswerOpaquePause){
             paused=true;rawOnly=true;finalDetail="형식이 불확실한 JSON 원문을 보존했습니다 · 자동 이어쓰기·실행 없음"

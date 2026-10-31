@@ -23,6 +23,14 @@ import kotlinx.serialization.json.*
 class PcToolClient(private val context:Context,private val store:ConnectionStore) {
     private val settings=PcComputeSettings.get(context)
     private fun thread()=(context.applicationContext as LocalAgentApplication).container.runs.selectedThreadId.value
+    private fun selectedData(threadId:String):PcDataSelection? {
+        store.read(PcDataSelection.storageKey(threadId))?.let{return PcDataSelection.decode(it).also{require(it.threadId==threadId)}}
+        // Old global metadata is read-only migration input. New selections never overwrite it.
+        if(store.read("pc.data.thread")!=threadId)return null
+        return PcDataSelection(threadId,store.read("pc.data.uri")?:return null,store.read("pc.data.name")?:return null,
+            store.read("pc.data.sha")?:return null,"legacy")
+    }
+    fun selectionBinding(threadId:String):String?=runCatching{selectedData(threadId)?.binding}.getOrNull()
     fun enabled()=store.read("pc.tools.enabled")=="true"
     fun allow(enabled:Boolean){store.write("pc.tools.enabled",enabled.toString());store.write("pc.tools.verified",null)}
     fun authorized()=enabled()&&settings.snapshot()!=null
@@ -53,8 +61,9 @@ class PcToolClient(private val context:Context,private val store:ConnectionStore
         val content=read(uri)
         context.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)
         check(thread()==selected)
-        store.write("pc.data.uri",uri.toString());store.write("pc.data.name",name);store.write("pc.data.thread",selected)
-        store.write("pc.data.sha",sha(content))
+        val selection=PcDataSelection(selected,uri.toString(),name,sha(content),UUID.randomUUID().toString())
+        store.write(PcDataSelection.storageKey(selected),selection.encode())
+        check(selectionBinding(selected)==selection.binding)
         "현재 대화의 분석 파일을 선택했습니다: $name · ${content.size}바이트"
     }
     private suspend fun read(uri:Uri):ByteArray {
@@ -66,13 +75,28 @@ class PcToolClient(private val context:Context,private val store:ConnectionStore
         require(output.size()>0);return output.toByteArray()
     }
     private fun sha(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it.toInt()and 255)}
-    suspend fun execute(call:ToolCall):ToolResult=withContext(Dispatchers.IO) {
+    suspend fun execute(call:ToolCall,hostThreadId:String?=null,expectedSourceBinding:String?=null,verifyAccess:suspend()->Unit={},computeOwner:String?=null):ToolResult=withContext(Dispatchers.IO) {
         try {
             require(call.name in PcToolCatalog.names);ToolRegistry.validate(call)
-            val config=configuration();val selected=thread();require(selected.isNotBlank())
+            verifyAccess()
+            val config=configuration();val selected=hostThreadId?:thread();require(selected.isNotBlank())
+            val transport=PcTransport(context)
+            if(hostThreadId!=null){
+                require(computeOwner!=null&&runCatching{UUID.fromString(computeOwner).toString()==computeOwner}.getOrDefault(false))
+                val health=transport.json(config,"/v1/tools/health",timeout=1500,computeOwner=computeOwner)
+                check(health["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1){"PC 도구 작업기에 실행별 격리 지원이 필요합니다."}
+            }
             val requestId=UUID.randomUUID().toString()
             var sourceHash:String?=null
             val notebook=call.name in setOf("list_notebooklm_notebooks","query_notebooklm")
+            val selection=if(notebook)null else checkNotNull(selectedData(selected)){"이 대화에서 분석할 파일을 먼저 선택해주세요."}
+            if(selection!=null&&hostThreadId!=null)check(selection.binding==expectedSourceBinding){"요청 이후 선택한 파일이 달라졌습니다. 새 요청으로 분석해주세요."}
+            suspend fun verifyOriginalSource(){
+                verifyAccess()
+                check(enabled()&&settings.snapshot()?.let{identity(it)}==identity(config))
+                if(hostThreadId==null)check(thread()==selected)
+                if(selection!=null)check(selectedData(selected)?.binding==selection.binding){"원래 분석 파일 선택이 바뀌었습니다."}
+            }
             val body=buildJsonObject {
                 put("requestId",requestId)
                 if(notebook){
@@ -83,12 +107,12 @@ class PcToolClient(private val context:Context,private val store:ConnectionStore
                         put("notebookId",id);put("question",call.arguments.getValue("question"))
                     }
                 }else{
-                    check(store.read("pc.data.thread")==selected){"이 대화에서 분석할 파일을 도구 화면에서 먼저 선택해주세요."}
-                    val uri=Uri.parse(store.read("pc.data.uri")?:error("분석 파일을 선택해주세요."))
+                    val original=checkNotNull(selection)
+                    val uri=Uri.parse(original.uri)
                     require(uri.scheme=="content")
                     val bytes=read(uri);sourceHash=sha(bytes)
-                    check(sourceHash==store.read("pc.data.sha")){"선택 후 파일이 바뀌었습니다. 파일을 다시 선택해주세요."}
-                    put("filename",store.read("pc.data.name")?:error("파일 선택 필요"));put("sha256",sourceHash)
+                    check(sourceHash==original.sha256){"선택 후 파일이 바뀌었습니다. 파일을 다시 선택해주세요."}
+                    put("filename",original.name);put("sha256",sourceHash)
                     put("contentBase64",Base64.encodeToString(bytes,Base64.NO_WRAP))
                     val mode=if(call.name=="query_selected_data")"query"else call.arguments["mode"]?.jsonPrimitive?.content?:"profile"
                     require(mode in setOf("profile","query","statistics","regression","cluster","chart"));put("mode",mode)
@@ -96,11 +120,10 @@ class PcToolClient(private val context:Context,private val store:ConnectionStore
                     put("options",call.arguments["optionsJson"]?.jsonPrimitive?.content?.let {Json.parseToJsonElement(it).jsonObject}?:buildJsonObject {})
                 }
             }
-            check(enabled()&&settings.snapshot()?.let {identity(it)}==identity(config)&&thread()==selected)
-            val transport=PcTransport(context)
-            val result=transport.json(config,if(notebook)"/v1/tools/notebooklm"else"/v1/tools/analyze","POST",body,80_000)
+            verifyOriginalSource()
+            val result=transport.json(config,if(notebook)"/v1/tools/notebooklm"else"/v1/tools/analyze","POST",body,80_000,computeOwner=computeOwner)
             currentCoroutineContext().ensureActive()
-            check(enabled()&&settings.snapshot()?.let {identity(it)}==identity(config)&&thread()==selected)
+            verifyOriginalSource()
             check(result["requestId"]?.jsonPrimitive?.content==requestId&&result["serverId"]?.jsonPrimitive?.content==config.serverId)
             val success=result["ok"]?.jsonPrimitive?.boolean==true
             if(success&&sourceHash!=null)check(result["sourceSha256"]?.jsonPrimitive?.content==sourceHash)
@@ -113,7 +136,7 @@ class PcToolClient(private val context:Context,private val store:ConnectionStore
                 val directory=File(context.filesDir,"shared/data-analysis").apply {check(isDirectory||mkdirs())}
                 val output=File(directory,"$requestId.png");output.writeBytes(image);check(sha(output.readBytes())==sha(image))
                 val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",output)
-                shown["chartUri"]=JsonPrimitive(uri.toString());store.write("pc.chart.uri",uri.toString());store.write("pc.chart.thread",selected)
+                shown["chartUri"]=JsonPrimitive(uri.toString());store.write("pc.chart."+PcDataSelection.storageKey(selected),uri.toString())
             }
             if(success)store.write("pc.tools.verified",identity(config))
             var content=JsonObject(shown).toString()

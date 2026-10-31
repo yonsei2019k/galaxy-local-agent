@@ -1,85 +1,232 @@
 package com.user.localagent.inference
 
 import android.content.Context
-import com.user.localagent.compute.PcComputeSettings
+import com.user.localagent.benchmark.RuntimeGate
+import com.user.localagent.compute.*
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Phone owns every request. A paired PC is an optional compute backend with one local retry. */
-class AutomaticComputeEngine(context:Context):InferenceEngine {
-    private val local=LocalInferenceEngine(context.applicationContext)
-    private val pc=PcInferenceEngine(context.applicationContext)
-    private val settings=PcComputeSettings.get(context)
-    private val mutex=Mutex()
-    private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
-    @Volatile private var active:InferenceEngine?=null
-    private var observer:Job?=null
-    private var requestedPath:String?=null
-    private var requestedOptions:InferenceOptions?=null
-    private var retryAfter=0L
-    private val status=MutableStateFlow("모델 없음")
-    private val metrics=MutableStateFlow<InferenceMetrics?>(null)
-    private val generation=MutableStateFlow<GenerationSummary?>(null)
-    override val state:StateFlow<String> = status.asStateFlow()
-    override val lastMetrics:StateFlow<InferenceMetrics?> = metrics.asStateFlow()
-    override val lastGeneration:StateFlow<GenerationSummary?> = generation.asStateFlow()
-    override val residentModelPath:String? get()=active?.residentModelPath
-    override val supportsStructuredOutput:Boolean get()=active?.supportsStructuredOutput==true
-    val executionLocation:String get()=if(active===pc)"pc"else"phone"
-    private suspend fun bind(next:InferenceEngine){
-        if(active===next)return
-        active?.unload();observer?.cancelAndJoin();active=next
-        observer=scope.launch {
-            launch{next.state.collect{status.value=it}}
-            launch{next.lastMetrics.collect{metrics.value=it}}
-            launch{next.lastGeneration.collect{generation.value=it}}
+/** A request owns its backend and state. Only its local native work reserves the phone slot. */
+class AutomaticComputeEngine internal constructor(
+    private val local: InferenceEngine,
+    private val pc: InferenceEngine,
+    private val eligibleForPc: (String, InferenceOptions) -> Boolean,
+    private val pcPreflight: suspend () -> Boolean,
+    private val report: (String) -> Unit,
+    private val ownerRunId: String?,
+    broker: ComputeResourceBroker,
+    private val beforePhoneLoad: suspend () -> Unit = {},
+    private val externalPcAuthority: () -> Boolean = { true },
+) : ComputeExecutionEngine {
+    constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {}) :
+        this(components(context.applicationContext, ownerRunId), ownerRunId, beforePhoneLoad)
+    private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit) :
+        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority)
+
+    private val mutex = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val resource = RequestComputeLease(ownerRunId, broker)
+    override val computeLocation: StateFlow<ComputeResource?> = resource.location
+    override val waitingForResource: StateFlow<ComputeResource?> = resource.waiting
+    @Volatile private var active: InferenceEngine? = null
+    private var observer: Job? = null
+    private var requestedPath: String? = null
+    private var requestedOptions: InferenceOptions? = null
+    private var retryAfter = 0L
+    private var phoneOverflowPinned = false
+    private var pendingExternalCleanup: (suspend () -> Unit)? = null
+    private var nativeCleanupUnconfirmed = false
+    private val status = MutableStateFlow("모델 없음")
+    private val metrics = MutableStateFlow<InferenceMetrics?>(null)
+    private val generation = MutableStateFlow<GenerationSummary?>(null)
+    private val unavailablePcCleanup = MutableStateFlow<PcCleanupEvidence?>(null)
+    val lastPcCleanup: StateFlow<PcCleanupEvidence?> get() = (pc as? PcInferenceEngine)?.lastCleanup ?: unavailablePcCleanup.asStateFlow()
+    override val state: StateFlow<String> = status.asStateFlow()
+    override val lastMetrics: StateFlow<InferenceMetrics?> = metrics.asStateFlow()
+    override val lastGeneration: StateFlow<GenerationSummary?> = generation.asStateFlow()
+    override val residentModelPath: String? get() = active?.residentModelPath
+    override val supportsStructuredOutput: Boolean get() = active?.supportsStructuredOutput == true
+    override val executionLocation: String get() = if (computeLocation.value == ComputeResource.PC) "pc" else "phone"
+
+    private suspend fun dropActive() {
+        // A failed native unload retains its lease and backend; another local model must not load.
+        check(active !== pc || resource.location.value == ComputeResource.PC) { "PC 모델을 정리할 원래 계산 사용권이 없습니다." }
+        try { active?.unload() } catch (error: Throwable) { nativeCleanupUnconfirmed = true; throw error }
+        nativeCleanupUnconfirmed = false
+        observer?.cancelAndJoin(); observer = null; active = null
+    }
+    private suspend fun bind(next: InferenceEngine, destination: ComputeResource, wait: Boolean = true): Boolean {
+        val previous = resource.location.value
+        if (previous != destination) status.value = if (destination == ComputeResource.PHONE)
+            "휴대전화 작업 차례를 기다리는 중" else "PC 작업 차례를 확인하는 중"
+        if (!resource.moveTo(destination, wait = wait, cleanupPrevious = ::dropActive)) return false
+        if (active === next) return true
+        if (destination == ComputeResource.PHONE && previous != destination) releaseIdlePhoneModel()
+        active = next
+        observer = scope.launch {
+            launch { next.state.collect { status.value = it } }
+            launch { next.lastMetrics.collect { metrics.value = it } }
+            launch { next.lastGeneration.collect { generation.value = it } }
         }
+        return true
     }
-    override suspend fun load(path:String,options:InferenceOptions)=mutex.withLock {
-        requestedPath=path;requestedOptions=options
-        val eligible=settings.state.value.automaticText&&settings.snapshot()!=null&&!options.deviceOnly&&!options.audioEnabled&&!options.visionEnabled&&!options.thinking&&Regex("gemma-e[24]b-[a-f0-9]{12}\\.gguf").matches(File(path).name)
-        if(eligible&&System.currentTimeMillis()>=retryAfter){
-            try {if(!pc.preflight())throw com.user.localagent.compute.PcUnavailable();currentCoroutineContext().ensureActive();bind(pc);pc.load(path,options);snapshot();return@withLock}
-            catch(cancel:CancellationException){throw cancel}
-            catch(_:Exception){retryAfter=System.currentTimeMillis()+30_000;settings.report("PC 응답 없음 · 휴대폰에서 이어서 처리")}
-        }
-        bind(local);local.load(path,options);snapshot()
-    }
-    private fun snapshot(){status.value=active?.state?.value?:"모델 없음";metrics.value=active?.lastMetrics?.value;generation.value=active?.lastGeneration?.value}
-    private suspend fun fallback(){
-        retryAfter=System.currentTimeMillis()+30_000
-        settings.report("PC 연결이 끊겨 휴대폰에서 다시 계산합니다.")
-        bind(local);local.load(checkNotNull(requestedPath),checkNotNull(requestedOptions))
-    }
-    private fun events(block:(InferenceEngine)->Flow<GenerationEvent>):Flow<GenerationEvent> = flow {
-        mutex.withLock {
-            metrics.value=null;generation.value=null
+
+    override suspend fun load(path: String, options: InferenceOptions) = mutex.withLock {
+        recoverPendingCleanup()
+        requestedPath = path; requestedOptions = options
+        if (ownerRunId != null && !phoneOverflowPinned && eligibleForPc(path, options) && System.currentTimeMillis() >= retryAfter) {
             try {
-                if(active===pc){
-                    val buffered=mutableListOf<GenerationEvent>()
-                    try {block(pc).collect{buffered+=it};currentCoroutineContext().ensureActive()}
-                    catch(cancel:CancellationException){throw cancel}
-                    catch(_:Exception){buffered.clear();fallback()}
-                    if(active===pc)buffered.forEach{emit(it)}else emitAll(block(local))
-                }else emitAll(block(checkNotNull(active)))
-            }finally{metrics.value=active?.lastMetrics?.value;generation.value=active?.lastGeneration?.value;status.value=active?.state?.value?:"모델 없음"}
+                if (!pcPreflight()) throw PcUnavailable()
+                currentCoroutineContext().ensureActive()
+                // A busy PC leaves the second request runnable on the phone, not queued behind it.
+                if (bind(pc, ComputeResource.PC, wait = ownerRunId == null)) {
+                    pc.load(path, options); snapshot(); return@withLock
+                }
+                phoneOverflowPinned = ownerRunId != null
+                report("PC 계산 중 · 이번 요청은 휴대전화에서 병렬 처리합니다.")
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Exception) {
+                if (nativeCleanupUnconfirmed || pendingExternalCleanup != null) throw error
+                retryAfter = System.currentTimeMillis() + 30_000
+                if (ownerRunId != null) phoneOverflowPinned = true
+                report("PC 응답 없음 · 휴대전화 작업 차례를 확인합니다.")
+            }
+        }
+        check(bind(local, ComputeResource.PHONE))
+        local.load(path, options); snapshot()
+    }
+    private fun snapshot() {
+        status.value = active?.state?.value ?: "모델 없음"
+        metrics.value = active?.lastMetrics?.value; generation.value = active?.lastGeneration?.value
+    }
+    private suspend fun releaseIdlePhoneModel() {
+        pendingExternalCleanup = beforePhoneLoad
+        beforePhoneLoad()
+        pendingExternalCleanup = null
+    }
+    private suspend fun recoverPendingCleanup() {
+        pendingExternalCleanup?.invoke(); pendingExternalCleanup = null
+        if (nativeCleanupUnconfirmed) dropActive()
+    }
+    private suspend fun fallback() {
+        retryAfter = System.currentTimeMillis() + 30_000
+        if (ownerRunId != null) phoneOverflowPinned = true
+        report("PC 연결이 끊겼습니다. 휴대전화의 기존 작업 뒤에 이어 계산합니다.")
+        check(bind(local, ComputeResource.PHONE))
+        local.load(checkNotNull(requestedPath), checkNotNull(requestedOptions))
+    }
+    private fun events(block: (InferenceEngine) -> Flow<GenerationEvent>): Flow<GenerationEvent> = flow {
+        mutex.withLock {
+            metrics.value = null; generation.value = null
+            try {
+                if (active === pc) {
+                    val buffered = mutableListOf<GenerationEvent>()
+                    var bufferedCharacters = 0
+                    try {
+                        block(pc).collect { event ->
+                            if (event is GenerationEvent.Delta) {
+                                bufferedCharacters += event.text.length
+                                check(bufferedCharacters <= 4 * 1024 * 1024) { "PC 응답의 저장 예산을 초과했습니다." }
+                            }
+                            buffered += event
+                        }
+                        currentCoroutineContext().ensureActive()
+                    } catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) { buffered.clear(); fallback() }
+                    if (active === pc) buffered.forEach { emit(it) } else emitAll(block(local))
+                } else emitAll(block(checkNotNull(active)))
+            } finally { snapshot() }
         }
     }
-    override fun generate(prompt:String):Flow<String> = generateChat(prompt,"",emptyList())
-    override fun generateChat(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<String> = generateChatEvents(userText,systemInstruction,history).textDeltas()
-    override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<GenerationEvent> = events{it.generateChatEvents(userText,systemInstruction,history)}
-    override fun generateStructured(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<String> = generateStructuredEvents(userText,systemInstruction,schema,history).textDeltas()
-    override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<GenerationEvent> = events{it.generateStructuredEvents(userText,systemInstruction,schema,history)}
-    override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int?=mutex.withLock {
-        try {checkNotNull(active).countChatTokens(userText,systemInstruction,history)}
-        catch(cancel:CancellationException){throw cancel}
-        catch(error:Exception){if(active!==pc)throw error;fallback();local.countChatTokens(userText,systemInstruction,history)}
+    override fun generate(prompt: String): Flow<String> = generateChat(prompt, "", emptyList())
+    override fun generateChat(userText: String, systemInstruction: String, history: List<InferenceTurn>): Flow<String> =
+        generateChatEvents(userText, systemInstruction, history).textDeltas()
+    override fun generateChatEvents(userText: String, systemInstruction: String, history: List<InferenceTurn>): Flow<GenerationEvent> =
+        events { it.generateChatEvents(userText, systemInstruction, history) }
+    override fun generateStructured(userText: String, systemInstruction: String, schema: String, history: List<InferenceTurn>): Flow<String> =
+        generateStructuredEvents(userText, systemInstruction, schema, history).textDeltas()
+    override fun generateStructuredEvents(userText: String, systemInstruction: String, schema: String, history: List<InferenceTurn>): Flow<GenerationEvent> =
+        events { it.generateStructuredEvents(userText, systemInstruction, schema, history) }
+    override suspend fun countChatTokens(userText: String, systemInstruction: String, history: List<InferenceTurn>): Int? = mutex.withLock {
+        try { checkNotNull(active).countChatTokens(userText, systemInstruction, history) }
+        catch (cancel: CancellationException) { throw cancel }
+        catch (error: Exception) { if (active !== pc) throw error; fallback(); local.countChatTokens(userText, systemInstruction, history) }
     }
-    override fun transcribeAudio(wav:File):Flow<String> = flow{mutex.withLock{try{emitAll(checkNotNull(active).transcribeAudio(wav))}finally{snapshot()}}}
-    override fun describeImage(image:File,prompt:String):Flow<String> = flow{mutex.withLock{try{emitAll(checkNotNull(active).describeImage(image,prompt))}finally{snapshot()}}}
-    override fun cancel(){active?.cancel()}
-    override suspend fun unload(){active?.cancel();mutex.withLock{active?.unload();observer?.cancelAndJoin();observer=null;active=null;requestedPath=null;requestedOptions=null;metrics.value=null;generation.value=null;status.value="계산 모델 메모리 해제됨"}}
+    override suspend fun countStructuredChatTokens(userText: String, systemInstruction: String, schema: String, history: List<InferenceTurn>): Int? = mutex.withLock {
+        try { checkNotNull(active).countStructuredChatTokens(userText, systemInstruction, schema, history) }
+        catch (cancel: CancellationException) { throw cancel }
+        catch (error: Exception) { if (active !== pc) throw error; fallback(); local.countStructuredChatTokens(userText, systemInstruction, schema, history) }
+    }
+    override fun transcribeAudio(wav: File): Flow<String> = flow { mutex.withLock { try { emitAll(checkNotNull(active).transcribeAudio(wav)) } finally { snapshot() } } }
+    override fun describeImage(image: File, prompt: String): Flow<String> = flow { mutex.withLock { try { emitAll(checkNotNull(active).describeImage(image, prompt)) } finally { snapshot() } } }
+
+    /** The external block uses its own native/remote engine, never this facade recursively. */
+    override suspend fun <T> withPhoneResource(cleanup: suspend () -> Unit, block: suspend () -> T): T = external(ComputeResource.PHONE, cleanup, block)
+    override suspend fun <T> withPcResource(cleanup: suspend () -> Unit, block: suspend () -> T): T = external(ComputeResource.PC, cleanup, block)
+    private suspend fun <T> external(destination: ComputeResource, cleanup: suspend () -> Unit, block: suspend () -> T): T = mutex.withLock {
+        recoverPendingCleanup()
+        if (destination == ComputeResource.PC && !externalPcAuthority()) throw PcUnavailable()
+        check(resource.moveTo(destination, force = true, cleanupPrevious = ::dropActive))
+        if (destination == ComputeResource.PHONE) releaseIdlePhoneModel()
+        requestedPath = null; requestedOptions = null; metrics.value = null; generation.value = null
+        status.value = if (destination == ComputeResource.PC) "PC에서 작업 중 · 휴대전화 작업 가능" else "휴대전화에서 작업 중"
+        pendingExternalCleanup = cleanup
+        try {
+            if (destination == ComputeResource.PC && !externalPcAuthority()) throw PcUnavailable()
+            block()
+        } finally {
+            withContext(NonCancellable) { resource.releaseAfter { cleanup(); pendingExternalCleanup = null } }
+            status.value = "계산 작업 정리됨"
+        }
+    }
+    override fun cancel() { active?.cancel() }
+    /** Idle phone maintenance must never issue a global remote unload against another PC run. */
+    suspend fun unloadPhoneResidency() = mutex.withLock {
+        if (active !== local && resource.location.value != ComputeResource.PHONE) return@withLock
+        active?.cancel()
+        withContext(NonCancellable) { resource.releaseAfter {
+            pendingExternalCleanup?.invoke(); pendingExternalCleanup = null
+            dropActive()
+        } }
+        metrics.value = null; generation.value = null; status.value = "휴대전화 모델 메모리 해제됨"
+    }
+    override suspend fun unload() {
+        active?.cancel()
+        mutex.withLock {
+            withContext(NonCancellable) { resource.releaseAfter {
+                pendingExternalCleanup?.invoke(); pendingExternalCleanup = null
+                dropActive()
+            } }
+            requestedPath = null; requestedOptions = null; metrics.value = null; generation.value = null
+            status.value = "계산 모델 메모리 해제됨"
+        }
+    }
+
+    private data class Components(val local: InferenceEngine, val pc: InferenceEngine,
+        val eligible: (String, InferenceOptions) -> Boolean, val preflight: suspend () -> Boolean, val report: (String) -> Unit,
+        val externalPcAuthority: () -> Boolean)
+    companion object {
+        private fun components(context: Context, owner: String?): Components {
+            val settings = PcComputeSettings.get(context)
+            val original = settings.snapshot()
+            val originalRevision = settings.authorizationRevision
+            fun samePair(candidate: PcConnection): Boolean = owner == null ||
+                original != null && settings.authorizationRevision == originalRevision &&
+                    candidate.serverId == original.serverId && candidate.token == original.token &&
+                    candidate.certificateSha256 == original.certificateSha256 && settings.snapshot()?.let {
+                        it.serverId == original.serverId && it.token == original.token && it.certificateSha256 == original.certificateSha256
+                    } == true
+            fun sameTextAuthority(candidate: PcConnection) = samePair(candidate) && settings.state.value.automaticText
+            val pc = PcInferenceEngine(context, ::sameTextAuthority, owner)
+            return Components(LocalInferenceEngine(context), pc,
+                eligible = { path, options -> settings.state.value.automaticText && settings.snapshot()?.let(::samePair) == true &&
+                    !options.deviceOnly && !options.audioEnabled && !options.visionEnabled && !options.thinking &&
+                    Regex("gemma-e[24]b-[a-f0-9]{12}\\.gguf").matches(File(path).name) },
+                preflight = pc::preflight, report = settings::report,
+                externalPcAuthority = { settings.snapshot()?.let(::samePair) == true })
+        }
+    }
 }

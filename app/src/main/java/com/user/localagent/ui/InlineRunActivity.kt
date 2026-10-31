@@ -15,6 +15,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -97,22 +99,33 @@ private fun activityTime(at:Long):String=if(at<=0)"시각 미기록"else runCatc
 }.getOrDefault("시각 미기록")
 private fun hashLabel(hash:String?):String=hash?.takeIf{Regex("[a-fA-F0-9]{64}").matches(it)}?.let{it.take(12)+"…"}?:"해시 미기록"
 
+internal fun activityInitiallyExpanded(status:String):Boolean = status in setOf("queued","running","waiting_approval","paused","failed","interrupted")
+
 /** Inside the first assistant list block: no extra LazyList index and no answer-text copies. */
 @Composable
 fun InlineRunActivityCard(activity:UiRunActivity,modifier:Modifier=Modifier,onOpenFileChange:((UiRunFileChange)->Unit)?=null,onLoadOlder:((String)->Unit)?=null,onExpandedChange:((Boolean)->Unit)?=null){
-    var expanded by rememberSaveable(activity.runId){mutableStateOf(false)}
+    var chosenExpansion by rememberSaveable(activity.runId){mutableStateOf<Boolean?>(null)}
+    val expanded=chosenExpansion?:activityInitiallyExpanded(activity.status)
     val events=remember(activity.events){visibleActivityEvents(activity)}
     val counts=remember(events){workEvidenceCounts(events)}
     val status=activityStatusLabel(activity.status)
+    val elapsedSeconds by produceState(0L,activity.runId,activity.status,activity.startedAt){
+        value=0L
+        while(activity.status=="running"&&activity.startedAt>0){
+            value=(System.currentTimeMillis()-activity.startedAt).coerceAtLeast(0)/1000
+            delay(1000)
+        }
+    }
+    val elapsed=if(elapsedSeconds>0)" · ${elapsedSeconds/60}분 ${elapsedSeconds%60}초"else""
     Surface(modifier.fillMaxWidth().padding(bottom=12.dp).testTag("inline_activity_${activity.runId}"),
         shape=RoundedCornerShape(16.dp),color=ZipHapColors.Surface,border=BorderStroke(1.dp,Color(0xFF30383A))){
         Column(Modifier.padding(horizontal=14.dp,vertical=10.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                 Column(Modifier.weight(1f)){
-                    Text("작업 과정 · $status",style=MaterialTheme.typography.labelLarge,color=if(activity.status=="failed")ZipHapColors.Error else ZipHapColors.TextPrimary)
+                    Text("작업 과정 · $status$elapsed",style=MaterialTheme.typography.labelLarge,color=if(activity.status=="failed")ZipHapColors.Error else ZipHapColors.TextPrimary)
                     Text("${activityTime(activity.startedAt)} · 도구 ${counts.tools} · 검증 ${counts.verified} · 준비 ${counts.prepared} · 실패 ${counts.failed}",style=MaterialTheme.typography.labelSmall,color=ZipHapColors.TextSecondary)
                 }
-                TextButton(onClick={expanded=!expanded;onExpandedChange?.invoke(expanded)},modifier=Modifier.testTag("toggle_activity_${activity.runId}")){Text(if(expanded)"접기"else"자세히")}
+                TextButton(onClick={chosenExpansion=!expanded;onExpandedChange?.invoke(!expanded)},modifier=Modifier.testTag("toggle_activity_${activity.runId}")){Text(if(expanded)"접기"else"자세히")}
             }
             if(!expanded){
                 val latest=events.lastOrNull{it.kind!=UiWorkEventKind.CONTEXT}?:events.lastOrNull()
@@ -124,11 +137,9 @@ fun InlineRunActivityCard(activity:UiRunActivity,modifier:Modifier=Modifier,onOp
                     Text("최근 ${activity.events.size}개 기록 표시 · 전체 ${activity.totalEvents}개",style=MaterialTheme.typography.labelSmall,color=ZipHapColors.TextSecondary)
                     TextButton(enabled=onLoadOlder!=null&&!activity.loadingOlder,onClick={onLoadOlder?.invoke(activity.runId)},modifier=Modifier.testTag("load_older_activity_${activity.runId}")){Text(if(activity.loadingOlder)"이전 기록 불러오는 중"else"이전 작업 기록 더 보기")}
                 }
-                val groups=events.groupBy{it.kind}
-                UiWorkEventKind.entries.forEach{kind->groups[kind]?.let{group->
+                events.forEach{event->
                     HorizontalDivider(color=Color(0xFF30383A))
-                    Text(workKindLabel(kind),style=MaterialTheme.typography.labelLarge,color=ZipHapColors.TextPrimary)
-                    group.forEach{event->
+                    Text(workKindLabel(event.kind),style=MaterialTheme.typography.labelLarge,color=ZipHapColors.TextPrimary)
                         Column(Modifier.fillMaxWidth().testTag("activity_event_${event.id}"),verticalArrangement=Arrangement.spacedBy(3.dp)){
                             Text("${activityTime(event.at)} · ${event.label}",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextPrimary)
                             val displayedEvidence=displayedWorkEvidence(event)
@@ -142,8 +153,7 @@ fun InlineRunActivityCard(activity:UiRunActivity,modifier:Modifier=Modifier,onOp
                                 if(!file.diffRef.isNullOrBlank()&&onOpenFileChange!=null)TextButton(onClick={onOpenFileChange(file)}){Text("실제 변경 내용 보기")}
                             }
                         }
-                    }
-                }}
+                }
             }
         }
     }

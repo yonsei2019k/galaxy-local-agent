@@ -19,7 +19,7 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.*
 import com.user.localagent.benchmark.RuntimeGate
 
-class AppContainer(context: Context) {
+class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
     private val appContext=context.applicationContext
     internal val applicationContext get()=appContext
     val hostCodeHash:String by lazy {
@@ -27,7 +27,7 @@ class AppContainer(context: Context) {
         java.io.File(appContext.applicationInfo.sourceDir).inputStream().use {input->val buffer=ByteArray(64*1024);while(true){val n=input.read(buffer);if(n<0)break;digest.update(buffer,0,n)}}
         digest.digest().joinToString(""){"%02x".format(it)}
     }
-    val repository = LocalRepository(context.applicationContext)
+    val repository = repositoryOverride?:LocalRepository(context.applicationContext)
     val models = ModelManager(context.applicationContext)
     val engine = com.user.localagent.inference.AutomaticComputeEngine(context.applicationContext)
     val orchestration = LocalOrchestration(context.applicationContext,models,engine)
@@ -92,13 +92,19 @@ class AppContainer(context: Context) {
         requestRunId:String?=null,requestJob:Job?=null,analysisProgress:(String)->Unit={},
         authorizedGoalTools:()->Set<String> = {emptySet()},
         goalLifecycle:com.user.localagent.automation.GoalToolLifecycle?=null,
+        requestEngine:com.user.localagent.inference.InferenceEngine=engine,
+        isRunLive:()->Boolean={false},
+        approveGmailSend:suspend(String,com.user.localagent.core.ToolCall,com.user.localagent.core.connections.GmailSendPreview)->Boolean={_,_,_->false},
+        goalStore:com.user.localagent.automation.ChatGoalStore=runs.goals,
+        onGoalChanged:suspend(com.user.localagent.core.GoalDefinition?)->Unit={},
+        pcDataBinding:String?=null,
     ):ToolExecutor {
         val scoped=repository.forThread(threadId)
         val capturedAccess=repository.chat.accessScope(threadId)
         val imports=ConversationImport(appContext,scoped,scoped::discardIncompleteConversationNotes)
         suspend fun verifyAnalysisAccess() {
             checkNotNull(requestJob){"진행 중인 대화 요청이 필요합니다."}.ensureActive()
-            check(requestRunId!=null&&runs.activeRunId==requestRunId){"자료 분석의 실행 범위가 끝났습니다."}
+            check(requestRunId!=null&&isRunLive()){"자료 분석의 실행 범위가 끝났습니다."}
             check(repository.chat.accessScope(threadId)==capturedAccess){"자료 분석의 대화·프로젝트·접근 정책이 바뀌었습니다."}
         }
         val sources=com.user.localagent.analysis.LocalPrivateAnalysisSources(appContext,scoped,capturedAccess.scopeKey,
@@ -106,14 +112,16 @@ class AppContainer(context: Context) {
         val journal=com.user.localagent.analysis.RepositoryAnalysisJournal(scoped,capturedAccess.scopeKey,
             com.user.localagent.analysis.AnalysisCheckpointCommit(scoped::commitPrivateAnalysisCheckpoint))
         val analysis=com.user.localagent.analysis.PrivateAnalysisExecutor(appContext,this,scoped,capturedAccess.scopeKey,sources,journal,
-            choose=analysisChoose,progress={detail->checkNotNull(requestJob).ensureActive();analysisProgress(detail)})
+            choose=analysisChoose,progress={detail->checkNotNull(requestJob).ensureActive();analysisProgress(detail)},requestEngine=requestEngine)
         val recordings=com.user.localagent.audio.ListedRecordingStore(threadId){
-            requestRunId?.takeIf {requestJob?.isActive==true&&runs.activeRunId==it}
+            requestRunId?.takeIf {requestJob?.isActive==true&&isRunLive()}
         }
-        val transcription=com.user.localagent.audio.ScopedRecordingTool(appContext,this,scoped,recordings,scoped::discardIncompleteAudioNotes)
+        val transcription=com.user.localagent.audio.ScopedRecordingTool(appContext,this,scoped,recordings,scoped::discardIncompleteAudioNotes,requestEngine=requestEngine)
+        val requestImages by lazy {ImageStudioController(appContext,this,requestEngine=requestEngine,ownerRunId=requestRunId,
+            scopedRepository=scoped,ownerThreadId=threadId,verifyAccess=::verifyAnalysisAccess)}
         val goalReadAuthority=com.user.localagent.automation.GoalReadAuthority()
         val goalTools=goalLifecycle?.let {lifecycle->com.user.localagent.automation.ScopedGoalTools(capturedAccess,
-            com.user.localagent.automation.GuardedChatGoalStore(runs.goals),authorizedGoalTools,requestRunId,lifecycle,
+            com.user.localagent.automation.GuardedChatGoalStore(goalStore),authorizedGoalTools,requestRunId,lifecycle,
             editReadGuard=goalReadAuthority::requireEdit)}
         return ToolExecutor(appContext,scoped,scheduler,imports,phoneRecords,
             createDocument={call->fileTools.createDocument(call.arguments.getValue("format").jsonPrimitive.content,call.arguments.getValue("title").jsonPrimitive.content,call.arguments.getValue("content").jsonPrimitive.content).toolResult()},
@@ -123,18 +131,21 @@ class AppContainer(context: Context) {
             recordingListing=recordings::register,
             goalTools={call->verifyAnalysisAccess();checkNotNull(goalTools){"목표 실행의 원래 요청 연결이 필요합니다."}.execute(call).also {
                 verifyAnalysisAccess()
-                val actual=runs.goals.loadGuarded(capturedAccess)
-                if(runs.selectedThreadId.value==threadId&&runs.selectedProjectId.value==capturedAccess.projectId.orEmpty())runs.goalState.value=actual
+                val actual=goalStore.loadGuarded(capturedAccess)
+                onGoalChanged(actual)
             }},
             goalReadContext=goalReadAuthority::accept,
             goalEditPreflight={call->
                 verifyAnalysisAccess();check(call.name in authorizedGoalTools()){"현재 요청이 목표 수정을 허용하지 않습니다."}
-                val current=checkNotNull(runs.goals.loadGuarded(capturedAccess)){"현재 목표를 먼저 읽어주세요."}
+                val current=checkNotNull(goalStore.loadGuarded(capturedAccess)){"현재 목표를 먼저 읽어주세요."}
                 goalReadAuthority.requireEdit(call,current)
             },
-            projectWorkspaceProvider={workspace}){call->imageStudio.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
+            connectionRunId=requestRunId,connectionIsRunLive={requestJob?.isActive==true&&isRunLive()},connectionApproveGmailSend=approveGmailSend,
+            connectionThreadId=threadId,connectionPcDataBinding=pcDataBinding,connectionVerifyAccess=::verifyAnalysisAccess,
+            connectionComputeEngine=requestEngine as? com.user.localagent.inference.ComputeExecutionEngine,
+            projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
                 call.arguments["negativePrompt"]?.jsonPrimitive?.content.orEmpty(),call.arguments["steps"]?.jsonPrimitive?.intOrNull,
-                call.arguments["seed"]?.jsonPrimitive?.longOrNull?:-1,referenceUri=chatAttachments.currentRequestReferenceUri()).toolResult()}
+                call.arguments["seed"]?.jsonPrimitive?.longOrNull?:-1,referenceUri=chatAttachments.currentRequestReferenceUri(requestRunId)).toolResult()})}
     }
     suspend fun capabilitySnapshot():List<com.user.localagent.core.ToolCapability> = withContext(Dispatchers.IO) {
         val grants=mutableSetOf<String>()
@@ -188,7 +199,8 @@ class AppContainer(context: Context) {
         cancelIdleUnload()
         idleUnload=maintenanceScope.launch {
             delay(120_000)
-            if(RuntimeGate.inference.compareAndSet(false,true))try{engine.unload()}finally{RuntimeGate.inference.set(false)}
+            if(!runs.busy.value&&runs.queued.value.isEmpty()&&RuntimeGate.inference.compareAndSet(false,true))
+                try{engine.unloadPhoneResidency()}finally{RuntimeGate.inference.set(false)}
         }
     }
 }

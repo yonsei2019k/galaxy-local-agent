@@ -13,7 +13,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 object RuntimeGate {
     val benchmark = AtomicBoolean(false)
-    val inference = AtomicBoolean(false)
+    val inference = com.user.localagent.compute.OwnedComputeGate()
+    val pc = com.user.localagent.compute.OwnedComputeGate()
+    val compute = com.user.localagent.compute.ComputeResourceBroker(inference, pc) { benchmark.get() }
     val foreground = AtomicBoolean(false)
 }
 

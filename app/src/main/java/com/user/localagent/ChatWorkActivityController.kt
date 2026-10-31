@@ -189,7 +189,7 @@ private fun activityEvent(record:WorkTraceRecord,run:ChatRunRecord,start:WorkTra
         else->UiWorkEvidence.NONE
     }
     val detail=buildList {
-        event.publicSummary?.takeIf{it.isNotBlank()}?.let{summary->add(when(event.summarySource){WorkSummarySource.MODEL_PLAN->"모델이 정리한 목표: $summary";WorkSummarySource.USER_GOAL->"사용자 목표: $summary";else->summary})}
+        event.publicSummary?.takeIf{it.isNotBlank()}?.let{summary->add(when(event.summarySource){WorkSummarySource.MODEL_PLAN->"모델의 작업 요약: $summary";WorkSummarySource.USER_GOAL->"사용자 목표: $summary";else->summary})}
         event.count?.let{add("관찰 항목 수: $it")};if(event.partial==true)add("일부 범위만 확인한 결과입니다.")
         if(start!=null&&record.event.code==WorkTraceCode.TOOL_RESULT){
             add("도구 시작: "+runCatching{Instant.ofEpochMilli(start.atEpochMillis).toString()}.getOrDefault("시각 미기록"))

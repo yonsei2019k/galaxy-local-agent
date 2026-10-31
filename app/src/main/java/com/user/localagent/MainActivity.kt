@@ -52,6 +52,7 @@ import com.user.localagent.automation.ReflectionController
 import com.user.localagent.inference.InferenceOptions
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import java.time.ZonedDateTime
 import java.time.ZoneId
@@ -129,7 +130,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { runCatching { app.models.refresh() } }
         app.runs.refreshVisibleHistory()
         openCallReport(intent)
-        lifecycleScope.launch {repeatOnLifecycle(Lifecycle.State.STARTED){while(isActive){if(!busy.value && !RuntimeGate.benchmark.get()&&!app.smsAnalysis.state.value.running&&!app.webResearch.state.value.running&&!app.imageStudio.state.value.running)app.updates.checkAndApply();delay(60_000)}}}
+        lifecycleScope.launch {repeatOnLifecycle(Lifecycle.State.STARTED){while(isActive){if(!app.runs.hasActiveRuns.value && !RuntimeGate.benchmark.get()&&!app.smsAnalysis.state.value.running&&!app.webResearch.state.value.running&&!app.imageStudio.state.value.running)app.updates.checkAndApply();delay(60_000)}}}
         setContent { ZipHapTheme { AppScreen() } }
     }
     override fun onStart(){super.onStart();RuntimeGate.foreground.set(true)}
@@ -183,6 +184,8 @@ class MainActivity : ComponentActivity() {
         val roomDraft by chat.draft.collectAsState()
         val answerStates by chat.answerStates.collectAsState()
         val queuedRequests by chat.queued.collectAsState()
+        val activeExecutions by chat.activeExecutions.collectAsState()
+        val auxiliaryExecution by chat.auxiliaryExecution.collectAsState()
         val runMode by chat.runMode.collectAsState()
         val roomGoal by chat.goalState.collectAsState()
         val roomViewport by chat.viewportState.collectAsState()
@@ -230,10 +233,13 @@ class MainActivity : ComponentActivity() {
         val preparingAttachments by attachmentPreparing.collectAsState()
         val steerRunId=chat.activeRunId
         val steerThreadId=chat.activeThreadId
+        val roomAuxiliary=auxiliaryExecution?.takeIf {it.threadId==composerThreadId}
         val navigation=ChatNavigation(
             projects=roomProjects.filterNot{it.archived}.map{UiProject(it.id,it.title,folderLabel=projectFolders[it.id]?:"프로젝트 전용 폴더",instructions=it.settings.instructions,modelId=it.settings.modelId,thinking=it.settings.thinking,contextSize=it.settings.contextSize,memoryMode=it.settings.memoryMode,useOwnerMemory=it.settings.useOwnerMemory,learnOwnerFacts=it.settings.learnOwnerFacts,revision=it.revision,disabledTools=it.settings.disabledTools)},
             threads=roomThreads.map{thread->UiThread(thread.id,thread.projectId.orEmpty(),thread.title,thread.pinned,thread.archived,thread.deletedAt!=null,thread.updatedAt,
-                runStatus=if(working&&steerThreadId==thread.id)"실행 중"else queuedRequests.count{it.threadId==thread.id}.takeIf{it>0}?.let{"대기 ${it}개"}.orEmpty())},
+                runStatus=activeExecutions.firstOrNull {it.threadId==thread.id}?.let {run->
+                    when {run.waitingForApproval->"승인 대기";run.waitingForResource=="PHONE"->"휴대폰 계산 대기";run.waitingForResource=="PC"->"PC 계산 대기";run.computeLocation=="PC"->"PC에서 실행 중";run.computeLocation=="PHONE"->"휴대폰에서 실행 중";else->"작업 준비 중"}
+                }?:queuedRequests.count{it.threadId==thread.id}.takeIf{it>0}?.let{"대기 ${it}개"}.orEmpty())},
             selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
             actions=ChatNavigationActions(
                 onSelectThread=chat::selectThread,onNewThread=chat::newThread,onSelectProject=chat::selectProject,
@@ -245,8 +251,8 @@ class MainActivity : ComponentActivity() {
             ),
         )
         Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
-            if(tab==0)ChatWorkspace(messages,working||imageWork.running||webWork.running||preparingAttachments,if(imageWork.running)imageWork.phase else if(webWork.running)webWork.status else state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chat.chooseModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
-                {app.engine.cancel();app.imageStudio.cancel();app.smsAnalysis.cancel();app.webResearch.cancel();attachmentJob?.cancel();app.runs.stop();approval.value?.decision?.complete(false)},
+            if(tab==0)ChatWorkspace(messages,working||preparingAttachments,state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chat.chooseModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
+                {if(steerRunId!=null)chat.stopRun(steerRunId,composerThreadId)else if(preparingAttachments)attachmentJob?.cancel()else roomAuxiliary?.let {chat.stopAuxiliary(it.operationId,it.threadId)}},
                 {index->if(index==-1){chat.newThread();tab=0}else {tab=index.coerceIn(0,10);if(tab==0)refreshVisibleHistory()}},
                 Modifier.fillMaxSize().padding(padding),projectName=project.name,onProjectClick={tab=10},onAttach={
                     val room=roomThreads.firstOrNull{it.id==composerThreadId}
@@ -256,7 +262,7 @@ class MainActivity : ComponentActivity() {
                 onRemoveAttachment={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)app.chatAttachments.remove(it)},navigation=navigation,composerKey=composerThreadId,
                 draftValue=roomDraft,onDraftChange={value->chat.updateDraft(value,composerThreadId)},
                 messageActions=UiMessageActions(onEdit=chat::editMessage,onRegenerate=chat::regenerate,onFork=chat::forkMessage,onCopy=chat::copyMessage,onExport=chat::exportMessage),
-                answerStates=answerStates,onContinue=chat::continueAnswer,queuedCount=queuedRequests.size,onQueue={text->sendToThread(text,composerThreadId)},
+                answerStates=answerStates,onContinue=chat::continueAnswer,queuedCount=queuedRequests.size,queuedPreview=queuedRequests.take(3).map{request->(roomThreads.firstOrNull{it.id==request.threadId}?.title?:"대화")+" · "+request.text.lineSequence().firstOrNull().orEmpty().ifBlank{"첨부 자료 분석"}.take(100)},onQueue={text->sendToThread(text,composerThreadId)},
                 branches=roomBranches,currentBranchId=currentBranchId,onSelectBranch={branchId->chat.selectBranch(selectedThreadId,branchId)},
                 onShowQueue={queueOpen=true},
                 onManageGoal={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)goalEditorThreadId=composerThreadId},onShowSkills={skillLibraryOpen=true},
@@ -265,7 +271,14 @@ class MainActivity : ComponentActivity() {
                 activeRunKey=steerRunId,viewport=roomViewport,onViewportChange=chat::updateViewport,hasEarlier=roomHasEarlier,onLoadEarlier=chat::loadEarlier,composerReady=composerReady,
                 activityByMessageId=roomActivities,onLoadOlderActivity=chat.workActivityController::loadOlder,
                 activeGoalLabel=roomGoal?.takeIf {it.threadId==composerThreadId&&it.projectId.orEmpty()==selectedProjectId}?.outcome,
-                backgroundWork={CallFollowUpConversationStatus(app,composerThreadId)})
+                backgroundWork={Column {
+                    CallFollowUpConversationStatus(app,composerThreadId)
+                    activeExecutions.filter {it.threadId!=composerThreadId}.forEach {run->
+                        TextButton(onClick={chat.selectThread(run.threadId)}){
+                            Text(if(run.waitingForApproval)"다른 대화에 확인할 작업이 있습니다 · 열기"else if(run.computeLocation=="PC")"다른 대화에서 PC 계산 중 · 열기"else"다른 대화에서 작업 중 · 열기")
+                        }
+                    }
+                }})
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
                 Row(Modifier.fillMaxWidth().height(56.dp),verticalAlignment=Alignment.CenterVertically) {
                     TextButton(onClick={if(tab in setOf(4,7,10)){tab=0;refreshVisibleHistory()}else tab=4}){Text(if(tab in setOf(4,7,10))"‹ 대화"else"‹ 설정·참고")}
@@ -308,7 +321,7 @@ class MainActivity : ComponentActivity() {
         var hashTarget by remember {mutableStateOf<String?>(null)}
         var expectedHash by remember {mutableStateOf("")}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            item { InfoCard("한 번에 하나의 모델","CPU를 기준으로 실측합니다. 모델 파일은 APK에 포함하지 않으며 Wi-Fi에서 별도로 내려받습니다.") }
+            item { InfoCard("PC와 휴대폰에서 나누어 계산","연결한 PC가 계산 중이면 다른 대화의 작업 하나를 휴대폰에서 진행할 수 있습니다. 휴대폰에는 모델 하나씩만 올립니다. 모델 파일은 APK와 별도로 내려받습니다.") }
             item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
             item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});FilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
             item {Row {FilterChip(selected=options.contextSize==4096,onClick={modelOptions.value=options.copy(contextSize=4096)},label={Text("4K 문맥")});Spacer(Modifier.width(8.dp));FilterChip(selected=options.contextSize==8192,onClick={modelOptions.value=options.copy(contextSize=8192)},label={Text("8K 문맥")})}}
@@ -316,7 +329,7 @@ class MainActivity : ComponentActivity() {
             item {Row {Checkbox(endurance,onCheckedChange={endurance=it});Text("10분 연속 안정성 측정")}}
             item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick={importModel.launch(arrayOf("application/octet-stream","*/*"))}) { Text("파일 가져오기") }
-                OutlinedButton(onClick={scope.launch { app.engine.unload(); status.value="모델 메모리를 해제했습니다." }}) {Text("메모리 해제")}
+                OutlinedButton(onClick={scope.launch {maintainModelFiles {status.value="휴대폰 모델 메모리를 해제했습니다."}}}) {Text("메모리 해제")}
             } }
             if(progress!=null) item {val p=progress!!;InfoCard(if(p.phase=="hash")"모델 무결성 검증" else "모델 다운로드","${p.title}\n${p.bytes/1024/1024} / ${p.total/1024/1024} MB");LinearProgressIndicator(progress={if(p.total>0)(p.bytes.toDouble()/p.total).toFloat().coerceIn(0f,1f)else 0f},modifier=Modifier.fillMaxWidth());TextButton(onClick={downloadJob?.cancel()}){Text("중단 · 다음 다운로드에서 이어받기")}}
             items(app.models.candidates.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { candidate -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -341,7 +354,7 @@ class MainActivity : ComponentActivity() {
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("선택")}
                     TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("벤치마크")}
-                    TextButton(onClick={scope.launch {app.engine.unload();app.models.delete(model.id);status.value="모델을 삭제했습니다."}}){Text("삭제")}
+                    TextButton(onClick={scope.launch {maintainModelFiles {app.models.delete(model.id);status.value="모델을 삭제했습니다."}}}){Text("삭제")}
                 }
             } } }
             item {InfoCard("전용 음성 인식", "녹음 전사는 전용 ASR이, 전사 내용의 요약·분석은 선택한 대화 모델이 담당합니다. 모델은 순서대로 메모리에 올립니다.")}
@@ -384,6 +397,27 @@ class MainActivity : ComponentActivity() {
             val report=BenchmarkRunner(this,app.engine).run(path,modelOptions.value,minutes)
             status.value="측정 결과 저장: ${report.name}"
         } catch(cancel:CancellationException){throw cancel}catch(error:Throwable) {status.value="벤치마크 실패: ${error.message}"} finally {app.updates.setBusy(false)}
+    }
+    /** Do not delete a model captured by either room, or clear an unrelated remote backend. */
+    private suspend fun maintainModelFiles(action:suspend()->Unit){
+        try {app.runs.queueMutation.withLock {
+            check(!app.runs.hasActiveRuns.value&&!RuntimeGate.benchmark.get()&&app.models.progress.value==null){"실행·다운로드 중인 작업이 끝난 뒤 모델 파일을 관리해주세요."}
+            val owns=RuntimeGate.inference.compareAndSet(false,true)
+            check(owns){"휴대폰 모델 작업이 끝난 뒤 다시 시도해주세요."}
+            var busyLease:java.io.Closeable?=null
+            var nativeCleanupFailed=false
+            try {
+                busyLease=app.updates.acquireBusy("model-maintenance:${UUID.randomUUID()}")
+                try {app.engine.unloadPhoneResidency()}catch(error:Throwable){nativeCleanupFailed=true;throw error}
+                action()
+            }finally{
+                try {busyLease?.close()}finally{
+                    if(!nativeCleanupFailed)RuntimeGate.inference.set(false)
+                    app.scheduleIdleUnload()
+                }
+            }
+        }}catch(cancel:CancellationException){throw cancel}
+        catch(error:Exception){status.value=error.message?:"모델 파일 변경을 확인하지 못했습니다."}
     }
     @Composable private fun ColumnScope.MemoryScreen() {
         Box(Modifier.weight(1f)) {

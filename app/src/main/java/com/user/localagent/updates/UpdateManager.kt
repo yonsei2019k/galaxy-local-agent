@@ -163,7 +163,12 @@ class UpdateManager(private val context:Context) {
                 // Carry only existing builtin note/reminder scopes to this exact verified APK.
                 // Publisher signature, payload, permission review and file hash have already passed.
                 com.user.localagent.data.LocalRepository(context).carryBuiltinGrants(sha256(File(context.applicationInfo.sourceDir)),manifest.apkSha256.lowercase())
-                session.commit(pending.intentSender)
+                val committed=busyOwners.submitInstallIfIdle {
+                    check(!com.user.localagent.benchmark.RuntimeGate.inference.get()&&!com.user.localagent.benchmark.RuntimeGate.benchmark.get())
+                    session.commit(pending.intentSender)
+                }
+                if(!committed){session.abandon();status("현재 작업이 끝난 뒤 업데이트합니다.",manifest.versionCode,true);return@withContext mutableState.value.message}
+                publishBusy()
             }
             status("업데이트 설치를 요청했습니다.",manifest.versionCode,true)
             mutableState.value.message
@@ -179,8 +184,14 @@ class UpdateManager(private val context:Context) {
             mutableState.value.message
         }
     }}
-    fun setBusy(busy:Boolean){preferences.edit().putBoolean("busy",busy).apply()}
+    private fun publishBusy(){preferences.edit().putBoolean("busy",busyOwners.busy()).apply()}
+    fun acquireBusy(ownerId:String):java.io.Closeable=busyOwners.acquire(ownerId,::publishBusy)
+    fun setBusy(busy:Boolean){busyOwners.setLegacyBusy(busy,::publishBusy)}
     companion object {
+        private val busyOwners=RuntimeBusyOwners()
+        internal fun installationFinished(context:Context){busyOwners.installationFinished{
+            context.getSharedPreferences("updates",Context.MODE_PRIVATE).edit().putBoolean("busy",busyOwners.busy()).apply()
+        }}
         private val updateMutex=Mutex()
         private val downloadHosts=setOf("github.com","objects.githubusercontent.com","release-assets.githubusercontent.com","raw.githubusercontent.com")
         private fun openHttps(url:String):HttpURLConnection {
@@ -230,6 +241,9 @@ class InstallResultReceiver:BroadcastReceiver() {
             val pending=PendingIntent.getActivity(context,901,confirmation.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             if(ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED){manager.notify(901,NotificationCompat.Builder(context,"updates").setSmallIcon(R.drawable.ic_agent).setContentTitle("업데이트 설치 확인").setContentText("Android가 설치 확인을 요청했습니다.").setContentIntent(pending).setAutoCancel(true).build())}
             preferences.edit().putString("status","Android 설치 확인이 필요합니다. 알림을 열어주세요.").apply()
-        } else preferences.edit().putString("status",if(status==PackageInstaller.STATUS_SUCCESS)"업데이트 설치 완료" else "업데이트 설치 실패 · 기존 앱을 유지합니다.").apply()
+        } else {
+            UpdateManager.installationFinished(context)
+            preferences.edit().putString("status",if(status==PackageInstaller.STATUS_SUCCESS)"업데이트 설치 완료" else "업데이트 설치 실패 · 기존 앱을 유지합니다.").apply()
+        }
     }
 }

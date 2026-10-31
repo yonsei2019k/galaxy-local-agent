@@ -23,7 +23,7 @@ internal fun ChatRunCoordinator.handleChatCommand(input:String):String? {
         "/new"->{newThread();return null}
         "/status"->{scope.launch {
             val id=selectedThreadId.value;val thread=app.repository.chat.thread(id)?:return@launch
-            val summary=app.engine.lastGeneration.value
+            val summary=(executionForThread(id)?.executionEngine?:executionEngine).lastGeneration.value
             app.repository.chat.addMessage(id,thread.activeBranchId,"assistant",buildString {
                 append("대기 요청: ${queued.value.count {it.threadId==id}}개\n모델 선택: ${preferredModelId.value}")
                 summary?.let {append("\n최근 생성: ${it.reason} · ${it.evidence}\n출력 토큰: ${it.decodeTokens?:"미제공"} / ${it.configuredMaxOutputTokens}")}
@@ -108,6 +108,8 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
     require(text.isNotBlank()&&text.length<=4000)
     val runId=expectedRunId?:return
     val threadId=expectedThreadId?:return
+    val worker=executionForRun(runId)
+    if(worker!=null&&worker!==this){worker.steer(text,runId,threadId);return}
     scope.launch {
         try{
             if(activeRunId!=runId||activeThreadId!=threadId){
@@ -121,7 +123,7 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
             val running=requestJob
             pendingSteerRunId=runId
             approval.value?.takeIf {it.runId==runId}?.decision?.complete(false)
-            if(!toolInFlight){app.engine.cancel();running?.cancel(CancellationException("사용자 추가 지시"))}
+            if(!toolInFlight){executionEngine.cancel();running?.cancel(CancellationException("사용자 추가 지시"))}
             status.value="현재 실행 결과를 보존한 뒤 추가 지시를 적용합니다."
             running?.join()
             val thread=app.repository.chat.thread(threadId)?:error("대화가 삭제되었습니다.")
@@ -134,12 +136,14 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                 val actual=checkNotNull(goals.loadGuarded(access)){"추가 지시의 목표가 해제되었습니다."}
                 check(actual.status==GoalStatus.ACTIVE&&sameGoalWork(request.goal,actual)){"목표가 중지·변경되어 이전 작업의 추가 지시를 적용하지 않았습니다."}
                 queueBoundedGoalRun(access,actual,request.branchId,request.modelId,request.thinking,request.workspaceBinding,
-                    checkNotNull(currentCoroutineContext()[Job]),ownerInstruction=updated,capturedAllowTools=request.allowTools,capturedMode=request.mode)
+                    checkNotNull(currentCoroutineContext()[Job]),ownerInstruction=updated,capturedAllowTools=request.allowTools,capturedMode=request.mode,
+                    capturedPcDataBinding=request.pcDataBinding)
             }else queueMutation.withLock {
             var submitted:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,updated,request.modelId,request.thinking){user,newRun->
                 QueuedChatRequest(newRun.id,threadId,thread.activeBranchId,thread.projectId,updated,request.modelId,request.thinking,emptyList(),user.id,
-                    allowTools=request.allowTools,mode=request.mode,previousSteps=steps,workspaceBinding=request.workspaceBinding,goal=request.goal).also {submitted=it}.toJson()
+                    allowTools=request.allowTools,mode=request.mode,previousSteps=steps,workspaceBinding=request.workspaceBinding,goal=request.goal,
+                    pcDataBinding=request.pcDataBinding).also {submitted=it}.toJson()
             }
             queued.value=listOf(checkNotNull(submitted))+queued.value
             app.repository.chat.reorderQueuedRuns(queued.value.map {it.runId})

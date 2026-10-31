@@ -31,7 +31,10 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
     private data class ReadEvidence(val hash:String,val complete:Boolean,val binding:String,val token:String?=null)
     private val reads=mutableMapOf<Pair<String,String>,ReadEvidence>()
     private val ownerReader="owner-ui"
-    suspend fun acquireLease():java.io.Closeable=operation.withLock {leases.incrementAndGet();java.io.Closeable {leases.decrementAndGet()}}
+    suspend fun acquireLease():java.io.Closeable=operation.withLock {
+        leases.incrementAndGet();val open=java.util.concurrent.atomic.AtomicBoolean(true)
+        java.io.Closeable {if(open.compareAndSet(true,false))leases.decrementAndGet()}
+    }
     suspend fun bindingFingerprint():String=operation.withLock {sha256("$workspaceId|${tree()?.toString()?:privateRoot.path}")}
     private fun bindingUnlocked()=sha256("$workspaceId|${tree()?.toString()?:privateRoot.path}")
     private fun readKey(reader:String,path:String)=reader to ProjectPaths.segments(path).joinToString("/")
@@ -95,15 +98,15 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
             children(selected,directory).take(100).map {(name,mime,size)->ProjectFile((parts+name).joinToString("/"),mime==DocumentsContract.Document.MIME_TYPE_DIR,size)}
         }
     }}
-    suspend fun read(path:String):String=withContext(Dispatchers.IO) {operation.withLock {
+    suspend fun read(path:String):String=withContext(Dispatchers.IO) {operation.withLock {WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()) {
         readUnlocked(ProjectPaths.segments(path)).also{reads[readKey(ownerReader,path)]=ReadEvidence(sha256(it),true,bindingUnlocked())}
-    }}
-    suspend fun readForTool(path:String,reader:String):ProjectToolRead=withContext(Dispatchers.IO){operation.withLock{
+    }}}
+    suspend fun readForTool(path:String,reader:String):ProjectToolRead=withContext(Dispatchers.IO){operation.withLock{WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()){
         require(reader!=ownerReader&&reader.isNotBlank())
         val content=readUnlocked(ProjectPaths.segments(path));val hash=sha256(content);val token=java.util.UUID.randomUUID().toString()
         reads[readKey(reader,path)]=ReadEvidence(hash,false,bindingUnlocked(),token)
         ProjectToolRead(path,content,hash,token)
-    }}
+    }}}
     suspend fun acceptToolReadContext(reader:String,delivered:List<DeliveredProjectRead>)=withContext(Dispatchers.IO){operation.withLock{
         require(reader!=ownerReader&&reader.isNotBlank())
         reads.keys.filter{it.first==reader}.forEach{key->reads[key]?.let{reads[key]=it.copy(complete=false)}}
@@ -118,7 +121,7 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
     suspend fun writeForTool(path:String,content:String,expectedSha256:String?=null,reader:String):String{
         require(reader!=ownerReader&&reader.isNotBlank());return writeScoped(path,content,expectedSha256,reader)
     }
-    private suspend fun writeScoped(path:String,content:String,expectedSha256:String?,reader:String):String=withContext(Dispatchers.IO) {operation.withLock {
+    private suspend fun writeScoped(path:String,content:String,expectedSha256:String?,reader:String):String=withContext(Dispatchers.IO) {operation.withLock {WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()) {
         require(content.length<=12_000&&'\u0000' !in content)
         val parts=ProjectPaths.segments(path);val selected=tree()
         val previous=runCatching {readUnlocked(parts)}.getOrElse {error->
@@ -148,7 +151,9 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
             reads[readKey(reader,path)]=ReadEvidence(sha256(verified),reader==ownerReader,bindingUnlocked())
             buildJsonObject {put("path",path);put("bytes",verified.toByteArray(Charsets.UTF_8).size);put("sha256",sha256(verified));put("verified",true);put("executed",false)}.toString()
         }
-    }}
+    }}}
+    // Provider-level exclusion also covers a parent tree and an alias/descendant tree in another project.
+    private fun mutationBindingUnlocked()=tree()?.let {"saf-provider:${it.authority}"}?:"private:${privateRoot.path}"
     private fun exists(parts:List<String>):Boolean=tree()?.let {runCatching {resolve(it,parts,false)}.isSuccess}?:local(parts).exists()
     private fun readUnlocked(parts:List<String>):String {
         val selected=tree()

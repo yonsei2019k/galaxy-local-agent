@@ -50,7 +50,7 @@ private fun ChatRunCoordinator.manage(action: suspend ChatRunCoordinator.() -> U
 
 /** Cancel the target scope, including durable queued rows, before changing its revision. */
 private suspend fun ChatRunCoordinator.quiesceThread(id: String) {
-    val running = if (activeThreadId == id) requestJob else null
+    val running = runningJobForThread(id)
     cancelThread(id)
     app.repository.chat.cancelRuns(id, "owner_scope_change")
     running?.join()

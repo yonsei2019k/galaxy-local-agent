@@ -51,7 +51,8 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
 /** Caller holds goalMutation. The persisted envelope is published only after exact link/readback. */
 internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessScope,goal:GoalDefinition,
     branchId:String,modelId:String,thinking:Boolean,expectedWorkspaceBinding:String?,callerJob:Job,parentGoalStartRunId:String?=null,
-    ownerInstruction:String=goal.outcome,capturedAllowTools:Boolean=true,capturedMode:String=ConversationSubmissionPolicy.newRequestMode().wireName):GoalLifecycleReceipt {
+    ownerInstruction:String=goal.outcome,capturedAllowTools:Boolean=true,capturedMode:String=ConversationSubmissionPolicy.newRequestMode().wireName,
+    capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId)):GoalLifecycleReceipt {
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
     val ownedContexts=linkedSetOf<String>()
@@ -79,11 +80,12 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
+            val pcBinding=capturedPcDataBinding
             var captured:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
                     allowTools=capturedAllowTools,mode=capturedMode,previousSteps=priorSteps,
-                    workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId).also {captured=it}.toJson().also {ownedContexts+=it}
+                    workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding).also {captured=it}.toJson().also {ownedContexts+=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val linked=withContext(NonCancellable) {
@@ -150,15 +152,17 @@ internal suspend fun ChatRunCoordinator.quiesceGoalRuns(access:ChatAccessScope,g
             check(app.repository.chat.queuedRuns().none {it.id==run.id}){"목표에 연결된 대기 작업의 취소를 확인하지 못했습니다."}
             queued.value=queued.value.filterNot {it.runId==run.id};goalRunCallerJobs.remove(run.id)
         }
-        val active=capturedActiveRequest
+        val activeHost=executionForThread(access.threadId)
+        val active=activeHost?.capturedActiveRequest
         if(active!=null&&active.runId in goal.linkedRunIds) {
+            val host=checkNotNull(activeHost)
             check(active.threadId==access.threadId&&active.projectId==access.projectId&&active.goal?.id==goal.id){"다른 목표의 진행 작업을 중지하지 않았습니다."}
             if(active.runId==callerRunId) {
-                pendingGoalStopRunId=active.runId;deferCaller=true
+                host.pendingGoalStopRunId=active.runId;deferCaller=true
             } else {
-                runningJob=checkNotNull(requestJob){"목표 실행의 현재 작업을 확인하지 못했습니다."}
+                runningJob=checkNotNull(host.requestJob){"목표 실행의 현재 작업을 확인하지 못했습니다."}
                 runningId=active.runId
-                stop()
+                host.stop()
             }
         }
         check(records.none {it.status in setOf("running","waiting_approval")&&it.id!=active?.runId}){"현재 호스트가 소유하지 않은 목표 실행이 있어 중지를 확인하지 못했습니다."}

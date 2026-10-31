@@ -132,6 +132,7 @@ fun ChatWorkspace(
     answerStates:Map<String,UiAnswerState> = emptyMap(),
     onContinue:(String)->Unit={},
     queuedCount:Int=0,
+    queuedPreview:List<String> = emptyList(),
     onQueue:((String)->Boolean)?=null,
     branches:List<UiChatBranch> = emptyList(),
     currentBranchId:String="",
@@ -416,7 +417,11 @@ fun ChatWorkspace(
         if(busy&&onSteer!=null&&attachments.isNotEmpty())Text("첨부한 요청은 대기열에 추가됩니다.",Modifier.padding(horizontal=20.dp),style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
         if(queuedCount>0)Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){
             Text("대기 중 ${queuedCount}개",Modifier.weight(1f),style=MaterialTheme.typography.labelMedium,color=ZipHapColors.TextSecondary)
-            if(onShowQueue!=null)TextButton(onClick=onShowQueue,modifier=Modifier.testTag("manage_run_queue")){Text("순서 변경·삭제")}
+            if(onShowQueue!=null)TextButton(onClick=onShowQueue,modifier=Modifier.testTag("manage_run_queue")){Text("수정·순서·취소")}
+        }
+        queuedPreview.take(3).forEachIndexed {index,title->
+            Text("${index+1}. $title",Modifier.fillMaxWidth().padding(horizontal=20.dp).testTag("queue_preview_$index"),
+                maxLines=1,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
         }
         if(composerReady&&draftError.isNotEmpty())Text(draftError,
             modifier=Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=4.dp).testTag("chat_input_error"),

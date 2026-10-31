@@ -20,6 +20,7 @@ class PrivateAnalysisExecutor(
     context:Context,private val app:AppContainer,private val repository:LocalRepository,private val scopeId:String,
     private val sources:LocalPrivateAnalysisSources,private val journal:RepositoryAnalysisJournal,
     private val choose:suspend(String)->ChosenInference?,private val progress:(String)->Unit={},
+    private val requestEngine:com.user.localagent.inference.InferenceEngine=app.engine,
 ) {
     private val context=context.applicationContext
     private val skills=BundledSkillStore(this.context)
@@ -56,7 +57,7 @@ class PrivateAnalysisExecutor(
         val question=previous?.question?:call.arguments.getValue("question").jsonPrimitive.content
         val chosen=choose(question)?:error("검증된 분석 모델을 선택해야 합니다.")
         val skill=skills.read(if(expected==PrivateEvidenceKind.AUDIO_TRANSCRIPT)"recording-analysis"else"message-analysis")
-        val workflow=PrivateRecordAnalysisWorkflow(LocalPrivateAnalysisDecider(app,chosen,skill,snapshot),journal)
+        val workflow=PrivateRecordAnalysisWorkflow(LocalPrivateAnalysisDecider(app,chosen,skill,snapshot,requestEngine=requestEngine),journal)
         val locator=snapshot.metadata.getValue("sourceLocator").jsonObject
         progress("원문 범위를 확인했습니다 · ${snapshot.coreSource.utf8ByteLength}바이트")
         val result=workflow.run(snapshot.coreSource,locator,question,chosen.model.sha256,skill.sha256,
@@ -64,7 +65,7 @@ class PrivateAnalysisExecutor(
         val saved=journal.load(result.checkpoint.id)?:error("분석 저장 결과를 다시 읽지 못했습니다.")
         check(saved==result.checkpoint)
         progress("질문에 맞는 저장 근거를 검토 중")
-        val overviewDecider=LocalPrivateAnalysisDecider(app,chosen,skills.read("evidence-synthesis"),snapshot,selectOverview=true)
+        val overviewDecider=LocalPrivateAnalysisDecider(app,chosen,skills.read("evidence-synthesis"),snapshot,selectOverview=true,requestEngine=requestEngine)
         val overview=PrivateAnalysisOverview(PrivateOverviewDecider {input,schema->overviewDecider.decide(input,schema,false)}).select(saved)
         val artifact=writeReport(snapshot,result,overview)
         val findings=allFindings(saved)

@@ -18,7 +18,7 @@ import org.junit.runner.RunWith
 /** Real encrypted chunk storage with synthetic event streams only; no models, providers or network. */
 @RunWith(AndroidJUnit4::class)
 class LongAnswerFinishValidation {
-    private class ScriptedEngine(private val script:List<GenerationEvent>,private val following:List<List<GenerationEvent>> =emptyList()):InferenceEngine {
+    private class ScriptedEngine(private val script:List<GenerationEvent>,private val following:List<List<GenerationEvent>> =emptyList(),private val onCall:(Int)->Unit={}):InferenceEngine {
         override val state=MutableStateFlow("synthetic")
         override val residentModelPath:String?=null
         override val lastMetrics=MutableStateFlow<InferenceMetrics?>(null)
@@ -28,7 +28,7 @@ class LongAnswerFinishValidation {
         override suspend fun load(path:String,options:InferenceOptions){}
         override fun generate(prompt:String):Flow<String> = error("Use typed synthetic events")
         override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<GenerationEvent> = flow {
-            calls++;prompts+=userText
+            calls++;onCall(calls);prompts+=userText
             val current=if(calls==1)script else following.getOrNull(calls-2)?:script
             for(event in current){if(event is GenerationEvent.Finished)lastGeneration.value=event.summary;emit(event)}
         }
@@ -62,6 +62,56 @@ class LongAnswerFinishValidation {
             }
         }
     }
+
+    @Test fun eightCappedPartsCompleteAutomaticallyInOneDurableAnswerWithoutResume()=runBlocking<Unit>{fixture {app,request,model,user->
+        val bodies=(1..8).map {"\n고유 합성 문단 $it: "+"내용 $it 🙂 ".repeat(12)}
+        val scripts=bodies.mapIndexed {index,text->listOf(GenerationEvent.Delta(text),
+            terminal(if(index==bodies.lastIndex)GenerationStopReason.EOG else GenerationStopReason.MAX_OUTPUT,index!=bodies.lastIndex,text.length))}
+        var simulatedElapsed=0L
+        val engine=ScriptedEngine(scripts.first(),scripts.drop(1),onCall={simulatedElapsed+=120_000L})
+        val state=AtomicReference<UiAnswerState>()
+        val statuses=mutableListOf<String>()
+        val result=LongAnswerWriter(app,request,{_,view->state.set(view)},{statuses+=it},engine,clock={simulatedElapsed})
+            .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 본문만 작성",emptyList())
+        val id=requireNotNull(result.messageId)
+        assertEquals(8,engine.calls);assertEquals(0,engine.cancellations)
+        assertTrue("Simulated elapsed time crosses the former ten-minute pause",simulatedElapsed>600_000L)
+        assertFalse(result.paused);assertFalse(result.toolEnvelope)
+        assertEquals(UiAnswerPhase.COMPLETE,state.get().phase);assertFalse(state.get().canContinue)
+        assertEquals(bodies.joinToString(""),result.text)
+        assertEquals(result.text,app.repository.chat.fullMessageText(id))
+        assertEquals((1..8).toList(),app.repository.chat.segmentsForMessage(id).map{it.partNumber})
+        assertEquals(1,app.repository.chat.messages(request.threadId,request.branchId).first().count{it.role=="assistant"})
+        assertTrue(engine.prompts.all{it.contains(user)})
+        assertTrue(statuses.any{it.contains("자동으로 이어")})
+    }}
+
+    @Test fun cancellationDuringFifthAutomaticPartPreservesPriorTextAndStartsNoSixth()=runBlocking<Unit>{fixture {app,request,model,user->
+        val bodies=(1..4).map {"고유 취소검사 문단 $it 🙂\n"}
+        val scripts=bodies.map {listOf(GenerationEvent.Delta(it),terminal(GenerationStopReason.MAX_OUTPUT,true,it.length))}
+        val engine=ScriptedEngine(scripts.first(),scripts.drop(1),onCall={if(it==5)throw CancellationException("synthetic owner stop")})
+        val state=AtomicReference<UiAnswerState>()
+        var cancelled=false
+        try {
+            LongAnswerWriter(app,request,{_,view->state.set(view)},{},engine)
+                .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 본문만 작성",emptyList())
+        }catch(_:CancellationException){cancelled=true}
+        assertTrue(cancelled);assertEquals(5,engine.calls)
+        val id=requireNotNull(app.repository.chat.assistantForRun(request.runId)).id
+        assertEquals(bodies.joinToString(""),app.repository.chat.fullMessageText(id))
+        assertEquals(UiAnswerPhase.CANCELLED,state.get().phase)
+        assertEquals(4,app.repository.chat.segmentsForMessage(id).size)
+    }}
+
+    @Test fun wholeAnswerStorageGuardPreservesReceivedTextWithoutRequestingAnotherPart()=runBlocking<Unit>{fixture {app,request,model,user->
+        val body="전체 저장 예산을 검사하는 합성 본문 🙂 ".repeat(8)
+        val engine=ScriptedEngine(listOf(GenerationEvent.Delta(body),terminal(GenerationStopReason.MAX_OUTPUT,true,body.length)))
+        val result=LongAnswerWriter(app,request,{_,_->},{},engine,limits=AnswerContinuationLimits(maxSavedChars=64))
+            .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 본문만 작성",emptyList())
+        assertTrue(result.paused);assertEquals(1,engine.calls)
+        assertEquals(body,app.repository.chat.fullMessageText(requireNotNull(result.messageId)))
+        assertEquals(GenerationStopReason.RESOURCE_LIMIT,result.summary?.reason)
+    }}
 
     @Test fun unknownFinishPausesOnceAndExplicitSameRunContinuationPreservesLongOwnerRequest()=runBlocking<Unit>{fixture {app,request,model,user->
         val body="종료 근거를 확인하지 못한 합성 답변 🙂"
