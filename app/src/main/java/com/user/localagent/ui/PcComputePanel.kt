@@ -55,7 +55,7 @@ import kotlinx.coroutines.*
     }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
         Text("내 PC의 계산 자원",style=MaterialTheme.typography.titleMedium)
-        Text("작업·대화·기억·완성 파일은 스마트폰에서 관리합니다. 등록한 PC는 계산만 돕고, 응답하지 않으면 휴대폰에서 처리합니다.",style=MaterialTheme.typography.bodySmall)
+        Text("작업·대화·기억·완성 파일은 스마트폰에서 관리합니다. 이미지에서 PC를 선택하면 연결 실패 시 멈추며 휴대폰으로 자동 전환하지 않습니다.",style=MaterialTheme.typography.bodySmall)
         Text(state.status,style=MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
             OutlinedButton(enabled=!busy&&!checking,onClick={connect()},modifier=Modifier.testTag("pc_connect")){Text(if(checking)"확인 중"else if(state.paired)"연결 확인"else"내 PC 연결")}
@@ -68,7 +68,7 @@ import kotlinx.coroutines.*
                 FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("이미지 · 휴대폰")})
             }
             PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
-            Text("휴대폰 단독은 설치된 SDXL을 사용합니다. PC 모델 선택은 다음 작업부터 적용됩니다.",style=MaterialTheme.typography.bodySmall)
+            Text("휴대폰 단독은 설치된 SDXL을 사용합니다. Qwen은 새 이미지에2512, 참고 사진 편집에Edit2511을 사용합니다. PC 모델 선택은 다음 작업부터 적용됩니다.",style=MaterialTheme.typography.bodySmall)
             TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
         }
     }
@@ -122,7 +122,7 @@ fun PcImageModelSelector(selectedId:String,onSelect:(String)->Unit,enabled:Boole
                 label={Text("SDXL")},modifier=Modifier.testTag("pc_image_model_sdxl"))
             FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,
                 onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)},enabled=enabled,
-                label={Text("Qwen 2512 · 20B")},modifier=Modifier.testTag("pc_image_model_qwen"))
+                label={Text("Qwen · 20B")},modifier=Modifier.testTag("pc_image_model_qwen"))
         }
     }
 }

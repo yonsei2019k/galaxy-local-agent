@@ -1,0 +1,9 @@
+{
+  "stableDiffusionCommit": "37bc88b5e97a213821949732ea66c58ae8ffc784",
+  "stableDiffusionArchiveSha256": "a37cbd436bc8706316e3af9773eae0db2ff526e5fdbe100802e7388d90762e42",
+  "ggmlCommit": "7b2b435da087614be772ee6f5ea80e68eca81de6",
+  "ggmlArchiveSha256": "6c9738794baca8e5348e0d27de7751ce2b37581377a33dd7bcaf1bde3389d252",
+  "sampler": "euler",
+  "checkpointSchema": "ZHCP0001",
+  "checkpointInterval": 5
+}

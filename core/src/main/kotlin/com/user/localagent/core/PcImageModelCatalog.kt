@@ -6,10 +6,20 @@ object PcImageModelCatalog {
     const val QUALITY_SHA="134aa66a4cb27b46e7528486a37d87736a03e48cea6ba88e5de2068543ec6bcc"
     const val SDXL_ID="SDXL-1.0-Q4_K"
     const val SDXL_SHA="51ab2be4ec58905b4cbfe5c0d2f3d0cdc5b0192e8e85dbe9a00481858c8389b0"
+    const val EDIT_ID="Qwen-Image-Edit-2511-20B-Q4_K_M"
+    const val EDIT_SHA="07951f61941a81e236cbd4a9b6f250d49626b3ba518f260135bf2e01a87cf1c8"
     private val pins=mapOf(QUALITY_ID to QUALITY_SHA,
-        SDXL_ID to SDXL_SHA)
+        SDXL_ID to SDXL_SHA,EDIT_ID to EDIT_SHA)
     data class Pin internal constructor(val id:String,val sha256:String)
-    fun selection(id:String):Pin=verified(id,pins[id])
+    fun selection(id:String):Pin {
+        require(id==QUALITY_ID||id==SDXL_ID){"PC 기본 선택은 SDXL 또는 Qwen입니다."}
+        return verified(id,pins[id])
+    }
+    /** A real editing model is explicit in preflight, request, result and saved metadata. */
+    fun effectiveSelection(baseId:String,hasReference:Boolean):Pin {
+        val base=selection(baseId)
+        return if(hasReference&&base.id==QUALITY_ID)verified(EDIT_ID,EDIT_SHA)else base
+    }
     fun verified(id:String?,sha256:String?):Pin {
         require(id!=null&&sha256!=null&&pins[id]==sha256){"지원하지 않거나 해시가 다른 PC 이미지 모델입니다."}
         return Pin(id,sha256)

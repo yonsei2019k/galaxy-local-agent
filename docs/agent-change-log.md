@@ -618,3 +618,88 @@ file전용 modelResult wrapper는 반환된301~8000자 본문을 그대로 인�
 
 ### 1022 이미지 시리즈 최종 호스트 검증
 1022 최종 Validate PASS4분37초. core608/app543=1151 JVM 실패·오류·skip0, release lint Fatal0/Error0/Warning132. 최종589 입력 SHA 변화0. 서명 app SHA744efe44915423ea0f582c75d4d85d5005d33f1c95fe04970bfb133b14eeb1fc, test SHAa22550b714edac553eafe10686789c78f62dbde67aa473237260a7158d6785fe. 정상 서명 APK/test·입력 동결·검증 영수증은 .local/delivery-1022에 복사/해시 재대조했다. 새 기능은 실제 소스에 통합되고 installable release가 빌드됐지만1022 휴대폰 설치0/새 실제 이미지 생성0/인물·제품 동일성 검증0이다. 마지막 설치 확인은1021이며 사용자가 외출 중이므로 설치·ADB·모델 검사를 시도하지 않았다. 돌아온 뒤1022 설치/프리셋 복원·기준 사진 접근·결과 비교·취소/실제 자체 후속검증/PC 모델별 실제 결과를 구분해 검증한다. 다른 채팅 메시지 교환0, 기존 private통화 분석 재개0.
+
+## 2026-10-31 — 휴대폰 재연결 /1022 실제 설치·UI 회귀 /1023 후속
+사용자가 복귀하여 재연결 검증을 재개했다.1022 app SHA744efe44915423ea0f582c75d4d85d5005d33f1c95fe04970bfb133b14eeb1fc 실제 설치/base SHA 대조와 기존 데이터 보존, 승인 carry1 PASS, CodexProgressUi5 PASS6.91초를 확인했다. ADB 실제 화면에서 이미지 작업실/시리즈 토글/시리즈 이름·유지 특성·고정 시드42 입력 표시를 확인했다. 실제 화면에서 PC 상세 패널 때문에 시리즈가 아래로 밀리는 UX 문제를 발견해1023에서는 선택 모델 요약+명시 펼치기로 줄였다. 기준 프리셋 실제 Keystore 재시작 복원/원본 접근 제거 후 내부복사 유지/다른 scope 미조회/변조 SHA거부2개 기기 검사를 독립 UUID scope로 추가했다. 소스가 아닌 실제 결과는 실행 뒤 따로 기록한다.
+
+1022 real AutonomousWorkflow 검사는109.021초에 Owner PC routing or pairing changed로 실패했다. 실제 phone residency/live activity는 확인했지만 verified calculation0이며 의미/후속검토 성공이 아니다. fixture cleanup true/error0. 원래 fixture가 endpoint까지 pairing identity hash에 넣어 재연결 후 인증된 주소 재탐색을 신원 변경으로 취급할 수 있음을 발견했다.1023 TEST만 server ID/token/certificate/discovery port의 신원으로 비교하도록 고쳤고 automaticText=false/owner thread/model 가드는 유지한다. 제품 권한 검사/실제 모델 정답 조건을 완화하지 않았다. 새 검사 재실행 전 성공으로 표시하지 않는다. 다른 채팅 메시지 교환0.1023 Validate 진행 중이며 새 APK는 아직 설치하지 않았다.
+
+### 1023 설치·실기 결과와24 준비
+1023 app SHA5b3e1894fd228dfea0c1394132352caaa4b026ced49734735445112251c48154/test SHAe5d7e0bcce62d53880c98092e10d373aeba20a5fa4f2643ab90707ff7f4e5176를 실제 설치하고 app base SHA를 확인했다. 데이터 삭제0. 전체 JVM1151/lint Error0 Warning132 통과, 실행 입력 해시 변경0; 빌드 중 docs/agent-change-log.md 한 건은 검증 기록 추가로 달라졌으며 별도 documentationDrift로 기록했다.590 전체 입력 변화0으로 허위 표기하지 않는다. 실제 image reference/preset2+UI5+폰SDXL핀1=8 PASS7.766초.1023 실제 모델 재검사는220.288초 후 verified calculation0/run failed로 실패했다. 실제 phone/live activity는 확인했고 fixture cleanup true/error0. 후속 검토 성공으로 표시하지 않는다.24 TEST는 실패한 합성 요청의 오류 문구 SHA·길이/typed trace code/error class만 남기도록 진단을 보강한다; owner context/일반 모델 답변은 내보내지 않는다. PC 인증 API의 실제 SDXL1024/50은 별도 공개 합성 입력으로 진행 중이며 아직 완료 PNG 증거가 아니다. PC/폰 현재 검사·source24 대기를 혼동하지 않는다.
+
+## 2026-10-31 — 코드리뷰 상위3건 수정 대기 (별도 워크트리, 정규 소스 미반영)
+담당 claude-review. 1023 소스 동결을 건드리지 않도록 5590f6e 기준 브랜치 fix/review-top3의 별도 워크트리 galaxy-local-agent-fix-top3에 미커밋 상태로 보관했다. 내용: 후속 검토 응답을 쓸 수 없으면 실행 실패 대신 미확인 범위를 구분한 최종 작성으로 진행, 사용자 설치 확인 대기 시 및 10분 경과 시 설치 보류 해제, 전사·영상 작업의 setBusy를 게이트 해제 finally가 있는 try 안으로 이동. executeRequest는 JVM 메서드 크기 한도에 닿아 있어 코드를 더하면 MethodTooLarge가 난다. 실제 검증: 대상 JVM AutonomousReviewPolicyTest8·RuntimeBusyOwnersTest5 PASS, release Kotlin 컴파일 PASS. 전체 Validate·서명·설치·기기 검증은 하지 않았고 1023 APK에는 들어 있지 않다.
+
+### 1023 PC 실제 SDXL 결과 /24 자원·모델·실패 구분 보완
+공개 합성 제품 사진 요청으로 PC 인증 API SDXL1024×1024/50단계 실제 생성 PASS. 전체1160.781초(약19분21초), native1149.125초. 정확 modelSHA/PNG SHA/치수/owner별 native cleanup을 확인했다. 이 검사는 PC API 성공이며 phone_delivery_verified=false다. 육안으로 빨간 머그/파란 유리 물체는 생성됐지만 요청한 좌우 배치가 반대이고 병이 컵에 가까워, 명령 준수/동일성 품질 합격으로 쓰지 않는다. 생성물·영수증은 PC private tools의 codex-progress-1023에 보관하며 Git에는 넣지 않는다.
+
+그 뒤 별도 Qwen2512 작업이 실행되고 휴대폰 이미지 foreground service가 살아 있음을 확인했다. 그 요청의 원문/사적인 생성물은 읽거나 공유하지 않고, 실제 작업을 중단하지 않았다. 해당 작업이 사용자 직접 시작인지 현재 채팅에서만 확인 중이며 다른 채팅 메시지는 보내지 않는다. 작업 중 PC 여유 메모리 약0.3~0.4GiB까지 하락하는 실제 자원 압박을 관찰했다. source24/PC stage에는 다음 native 자식만 제한하는 resident working-set 상한을 준비했다. 사용자 기존 프로세스·실행 중인 생성에는 적용하지 않는다. 별도 실제 자식의 Windows API 적용/readback1개를 포함한 staged26 검사 PASS이며20B 실제 부하에서의 효과는 아직 검증 전이다.
+
+source24는 Qwen 새사진2512/참고편집Edit2511의 실제 핀 구분, 채팅과 이미지 상태 문구 분리, PC 계산 실패와 네트워크 단절 구분을 추가한다. native 실패를 PC 단절로 분류해 자동으로 휴대폰 SDXL에 다시 맡기지 않는다. 현재 PC SDXL의 참고 편집 미지원도 명시적으로 거부한다. 진짜 PC 연결 단절의 기존 폰 fallback은 보존한다. PC 검증 fixture는 기존 owner 이미지 작업을 먼저 확인하고, 임시 routing 변경/복원을 revision CAS로 원자 처리해 새 owner 설정을 덮어쓰지 않는다. reference end-to-end fixture는 개발자가 만든 공개 합성 PNG SHA만 받아 원본 불변/전용Edit모델/정확 갤러리 저장을 검사하며 identity_quality_verified=false를 유지한다. 새모델 실제 결과는 아직 실행 전이다.
+
+### 1024 최종 빌드 / 사용자 생성 보존 / PC 편집 실제 진단
+1024 전체 Validate core610/app545=1155 PASS, failures/errors/skips0, release lint Fatal0/Error0/Warning132,593 동결 입력 SHA 변화0. 서명 app SHA07ea1dcb5a64ba2f866da1b0d76a4a5f378578c0ac505ebed37432c015a3d298/test SHA174a1cb6562d3c3e3dc8e448caf23481aa05b89004c5a911c7c460be265dd189. .local/delivery-1024에 보존했다. 이 기록과 PROJECT_STATE 갱신은 빌드 이후 문서 변경이다.1024 설치0이며 실제 설치는1023이다.
+
+사용자가 추가 이미지 생성은 직접 시작한 작업이므로 유지하라고 명시했고 잠금 해제를 알렸다. 읽기 전용 확인에서 이미지 샘플링15/40으로 진행을 확인했다. 설치·instrumentation·앱 재시작으로 이 작업을 중단하지 않는다. 다른 채팅 메시지 교환0.
+
+공개 합성 사진만 사용한 Edit2511 CUDA 실제3회가 샘플링 전 실패했다. CPU VAE 적용 뒤에도 실제 GPU 여유669MiB가 요구1125MiB보다 작아 segment 용량 검사가 실패했다; 예산 자체 부족과 구별하며 보호 검사를 낮추지 않는다. 같은 공식37bc88b Vulkan 런타임을 별도 설치하고 Qwen 두 프로필만 Vulkan0으로 지정했다. SDXL CUDA와 pairing/모델SHA/원본1024/50단계/CPU clip·VAE/maxVRAM2.5를 보존했다. 변경된 실제 worker26 계약 검사 PASS. 네 번째 공개 참고편집은 PC 여유 RAM1.41GiB로4GiB 시작 조건을 충족하지 않아 waiting_resources다. 새 이미지 성공/동일성/폰 전달 검증으로 표시하지 않는다. 사용자 프로그램 종료0. private tools의 codex-progress-1024에 배포·진단 영수증을 보존하며 표준 worker 복원은 해당 probe와 다른 작업이 모두 idle인 뒤 수행한다.
+
+## 2026-10-31 — 사용자 편의 우선 개선 /1025 준비
+담당 codex-progress-root. 사용자는 실제 앱 반영·APK·설치·실기를 승인했으며 현재 이미지 생성 유지와 다른 채팅 메시지 금지를 재확인했다. 기존 미커밋 통합 전체를 보존한다. 현재 방/현재 요청에 고정된 작업 요약, 실제 기록으로 이동, 다음 예약 수정 진입, 추가 지시와 새 예약의 적용 시점 설명, 목표 큐에서 원래 방 목표 관리 진입을 연결한다. 파일 해시는 명시 상세 보기로 옮기며 실제 변경 보기 연결을 보존한다. 이미지 진행 중임을 채팅에서 확인하고 작업실로 열 수 있게 한다. PC waiting_resources는 원격 typed phase에 따라 RAM 또는 GPU 여유 대기로 설명하며 어느 하나로 단정하지 않는다. 이 단계는 UI/상태 연결이고 범용 작업 재개나 외부 작업 되돌리기의 완성을 뜻하지 않는다. 텍스트 이어쓰기와 도구 작업 재개를 혼동하지 않는다. 현재 폰 owner 생성이 끝나기 전 설치·instrumentation·강제 종료0. 새1025 검증은 종료 뒤 별도 기록한다.
+
+### 1025 최종 호스트 검증 / 설치·실기 안전 대기
+최종 source1025 전체 Validate/sign PASS19분. core610/app547=1157 JVM 실패/오류/skip0, lint Fatal0/Error0/Warning133. 새 Warning1은 ConversationWorkSummary의 optional Modifier 인수 순서이며 실행 오류가 아니다.595 동결 입력의 목록과 전체 SHA가 일치했다. app SHA9e2648f1202f667b7c188686c054edb669e5825af60993a3a429818146b0db91/test SHA3200cb40369e5fcf14d361ad61b434c175fbcfd9862c7cdad56ce7296d0ef279, 실제 APK versionCode1025를 확인했다. .local/delivery-1025에 서명 APK/영수증/입력 동결 목록을 복사하고 해시 재대조했다. 이 기록과 PROJECT_STATE는 검증 이후 문서 변경이다.
+
+첫 전체 검증 뒤 목표 큐 바로가기가 다른 방의 editor를 직접 지정하면 열리지 않는 UI 경계를 발견했다. MainActivity/RunControls 두 파일만 수정해 원래 대화로 이동하고 버튼도 실제 동작과 일치시켰다. 첫 freeze와 최종 freeze의 변경이 정확히 그2파일뿐임을 대조한 뒤 전체 Validate/sign을 다시 통과했다. source1025는 사용자 모드/기존 큐 권한/목표 snapshot을 바꾸지 않는다.
+
+사용자 이미지가 실제 foreground 상태여서 설치·instrumentation·앱 재시작0을 유지했다. private tools codex-progress-1025/continue-after-image.ps1 프로세스를 실행했고, 최종 ready 영수증→사용자 foreground 종료→잠금 해제→기기 lease/현재1023 SHA/준비1025 SHA 검증→기존 범위 승인 이관→데이터 보존 설치/base SHA 대조→기기12개 검사→별도 실제 로컬 자율 진단 순서로 연결했다. 최대4시간 안전 대기하며 다른 기기/소유권/준비 APK 변경과 검사 실패 시 진행하지 않는다. 현재 대기 실행을 실제 설치/기기 PASS로 세지 않는다. 실제 phase는 해당 private deployment-state.json, 설치 증거는 installed.json이며 다음 확인 때 기록을 갱신한다. 다른 채팅 메시지0. 원래 사용자 생성 중단0.
+
+범용 도구 단계 재개는 미완성이다. 기존 텍스트 이어쓰기/읽기 전용 재생성을 도구 재개로 표시하지 않았다. 변경 전후 복구, 결과 중심 완료 카드, 주입 문맥 확인, 복귀 요약/다중 이미지 시리즈도 다음 우선순위로 .local/codex-progress-20261031/ux-1025/priority-status.json에 남겼다. 이번 상태/UI 개선만으로 실제 모델의 자율 후속 검증 성공을 주장하지 않는다.
+
+## 2026-10-31 — 설치 대기 중1026 추가 UX 통합
+사용자 추가 지시로 다중 결과 카드/독립적인 열기·공유·해시 확인 저장, 이름별 이미지 시리즈 최대12개/단일 preset 읽기 호환/명시 선택/확인 후 조건 삭제를 canonical에 통합했다. 기존 사용자 사진은 삭제하지 않고 용량 한도에서 저장된 시리즈를 자동 퇴출하지 않는다. 현재1025 서명 전달물과 device continuation97561/준비 APK lease는 유지한다.1026은 별도 호스트 빌드이며 아직 설치하지 않는다. core library 경계3/app artifact 파싱3/기기 migration·보존2/UI 선택·다중 파일2 회귀를 추가했다. 실제 결과는 실행 후 기록한다. 범용 도구 재개/외부 되돌리기/문맥제외/복귀 cursor 설계와 필수 회귀를 docs/assistant-ux-next-2026-10-31.ko.md에 구체화했으며 설계만으로 구현됐다고 하지 않는다. 다른 채팅 접촉0/사용자 이미지 중단0.
+
+
+### 1026 최종 준비 완료 / 사용자 생성 보존 / 순차 기기 검증
+1026 최종 Validate/sign PASS14분15초, core614/app550=1164 JVM 실패·오류·skip0, release lint Fatal0/Error0/Warning132.601 입력의 목록과 전체 SHA 일치. app SHA1c7c4f3acfa52fa3b7db0dcfbca0fd14f25cc5eaf9dfbc6956d38e5fb38022c2/test SHA987abdefec4dfc0b42ce2f4472e05c2419ad87c18b924a5b59c5f484ff08a31c, actual versionCode1026/서명을 확인하고 .local/delivery-1026에 복사/해시 재대조했다. 이후 이 문서/PROJECT_STATE/device-validation/image-consistency-design 갱신은 빌드 이후 문서 변경이다.
+
+사전 리뷰에서 저장 중 연타/불러오기 설정 저장 실패/오래된 확인창의 새 조건 삭제 경계를 보완했다. 기존 조건과 정확히 같은 snapshot만 지우는 CAS와 실제 Keystore 복원·사진 유지 회귀를 추가했다. 초기 재검토 중 root 자신의 Gradle만 중지했고, 이후 남은 테스트 worker가 classes.jar를 잡은 빌드 실패를 확인했다. worker argument의 canonical 프로젝트 classpath와 죽은 부모를 확인한 그 고아 테스트 프로세스만 정리한 뒤 최종 전체 검증을 통과했다. 사용자 이미지/native/다른 앱 프로세스는 중지하지 않았다.
+
+1025 준비 pin/기기 대기는 유지하고1026은 nextPrepared로 기록했다. private continuation78026은25의 기기12+별도 실제 모델 진단 종료 및 새 진단 스키마/fixture_cleanup_verified를 요구한다. 그 뒤 사용자 foreground 종료/잠금 해제/lease/정확25 설치본을 확인하고26으로 순차 승격·설치/base SHA 대조·기기16개 검사를 수행한다. 이전25 모델 결과는별도 보존하며26 실제 모델 검증으로 세지 않는다. cleanup 불확실/전임 검사 실패/소유권·준비물 변경 시 중단한다. 두 instrumentation을 병렬 실행하지 않는다. 현재 실제 설치 검증은1023이고, user image 최근36/40 유지 중이다. 현재 phase는 각각 private codex-progress-1025/1026 deployment-state.json으로 확인한다.
+
+PC 공개 참고 편집 Vulkan은12/50에서 segment3/62 workspace 검사로 실패했다. 필요613.36MiB 대 실제 GPU 여유603.32MiB이며 budget은 충분했다. 모델/원본/해상도/단계나 보호 기준을 낮춰 성공을 만들지 않았다. native cleanup 확인 후 유휴2회/현재 pairing 동일을 검증해 표준 worker/server.py로 복원했다. 생성 PNG/동일성/폰 전달 합격이 아니다. 다른 채팅 메시지0.
+
+
+## 2026-10-31 — 설치 대기 실제 종료 / 비서 성능 코드 리뷰
+private25/26 순차 continuation 종료를 확인했다.25 실제 설치/base SHA 및 기기12 PASS 뒤 실제 GGUF gemma-e2b 자율 fixture가225868ms에 SemanticPlanningException으로 실패했다. 계산0/후속검토false/최종검토false/fixture cleanup true. 합성 오류35자 SHA를 공개 소스의 고정 문자열과 대조해 LocalSemanticPlanner.kt:158 planning_timeout과 정확히 일치함을 확인했다. 초기180초 계획 단계에서 막힌 실제 실패이며 UI 성공으로 대체하지 않는다. 그 뒤26 설치·데이터 보존/base SHA 대조 및 기기16 PASS를 확인했고, 코드 리뷰 중 실제 폰의 versionCode1026/base SHA도 독립적으로 다시 읽었다.1026 실제 모델 자율 성공은 검증하지 않았다. 사용자 이미지 취소0/다른 채팅 접촉0.
+
+리뷰 지적: (P1) 모든 action 요청의 필수 planner가 load/tokenize/수정시도 전체를180초로 제한해 실제 첫 도구 이전에 실패, (P1) 일반 도구의 success=false를1453에서 throw해 TaskHarness의 안전 복구 판단으로 반환하지 않음, (P1)1445 부근 일반 tool 실행 전체 NonCancellable이 부모 stop/추가지시의 취소를 차단, (P2)758~761 review 완결성/parse 실패가 최종작성 복구 없이 전체 run failed로 연결, (P1 알려진 미완성)ImageStudioController138~145 실제 IOException/PC없음 경로의 폰 자동전환이 남아 명시PC전용 계약 미충족. 권한/범위/중복변경/미확인 효과 검사는 유지한 채 수정해야 한다. 이번 사용자 요청은 리뷰이므로 실행 코드 수정·새 빌드·모델 재실행은 하지 않았다. 위 검증 결과는 기존 실제 기기 영수증과 읽기 전용 재확인이다.
+
+## 2026-10-31 — ACTIVE 1027 / 스마트폰 카카오톡 본문 연결과 리뷰 수정
+사용자는 PC 카카오톡 상시 실행과 수동 내보내기를 원하지 않아 PC MCP 방향을 철회하고 스마트폰 내부 경로로 변경했다. 모든 대화방 조회 범위를 허용했지만 전송은 매번 받는 사람/본문 확인 후만 허용한다. Android 접근성은 사용자가 시스템 화면에서 직접 켰고 읽기 전용 재확인했다. 다른 채팅과 연락하지 않는다.
+현재 source는 버전 고정 Kakao 26.9.1 화면의 별도 본문 허용 binding을 새 요청에 고정하는 read_kakao_screen을 추가 중이다. 접근성 이벤트는 기존 metadata-only 유지, 명시적 요청에서만 visible snapshot을 읽는다. 편집/비밀번호/다른 앱/잠금/업무 프로필 제외, 최대400노드/16000자. 도구는 클릭/입력/전송/삭제/백그라운드 수집이 없다. 전체 방 순회/과거 기록/닫힌 방 조회는 미구현이며 현재 화면 조회를 전체 이력 검증으로 취급하지 않는다. 카카오 기존 고정문구 자동답장은 신규 설정과 기존 실행을 막는다.
+같은 source 수정 중: planner capability별 짧은 지시와 단계별 timeout/진행 표시, 실패 ToolResult의 모델 반환, 일반 도구 부모 취소 연결과 receipt 기록만 NonCancellable, 후속검토 실패의 미검토 표시, 명시 PC 이미지 작업의 폰 자동전환 제거. 아직 새 APK/기기/실제 모델 합격 아님. 기존 설치1026 증거는 그대로다.
+사용자 ImageGenerationService foreground 실행을 확인했으므로 설치/앱 재시작/instrumentation은 대기한다. 현재는 PC 컴파일과 합성 테스트만 수행한다. 실제 카카오 내용/기기 로그/주소/스크린샷은 Git에 넣지 않는다.
+
+## 2026-10-31 — 1027 실제 host 검증 / 설치는 사용자 이미지 보호 대기
+새 스마트폰 카카오톡 화면 연결과 리뷰 수정 소스를 실제 컴파일한 뒤 core619 + app552 =1171 테스트 PASS, lint 오류0/경고132, release 및 androidTest APK 서명 PASS. 빌드 전609개 inventory hash가 완료 시점까지 동일했다. 실제 app SHA 8b9005d494c9546897e798d1e4b61138b86be5bdb8d476ae2fd9a6712df03751, test SHA187f1ad88edf39bea65cb39e5b461ab4e2afb8a4edd2148871bc00a2a60b0a86. private validation-1027.json 및 immutable delivery-1027 보존. 이 문단은 빌드 뒤 문서 기록이다.
+마지막 폰 확인에서 사용자 foreground 작업이 계속 실행 중이므로 설치/기기 검증을 시작하지 않았다. private 1027 continuation은 최대4시간 foreground 종료/잠금 해제/연결/lease를 확인한 뒤 정확1026 base SHA에서 데이터 보존 업데이트, 정확1027 base SHA 재확인, UI11+일관성4+실제 카카오 visible read1, 별도 실제 로컬 자율 fixture 순서다. 실패/소유권 변경 시 중단하며 자동 재전송하지 않는다. 현재 카카오 실제 본문/요약/전체 방·이력 검증 및1027 실제 모델 자율 성공은 모두 미확인이다. 전송0/다른 채팅 연락0/사용자 이미지 취소0. 실제 상태는 private deployment-state.json으로 확인한다.
+
+## 2026-11-01 — ACTIVE PC 이미지 체크포인트 복구
+사용자는 실패 이전 계산을 재사용하는 기능 구현을 요청했다. 이후 ‘계산만 Codex 자원에 맡기고 설치본에서 생성’ 의도를 확인했으나 이 채팅 연산 자원을 설치본 네이티브 엔진에 연결하는 기능은 없음을 설명했다. 이미지 생성 도구 대체 실행/사용자 이미지 취소/다른 채팅 연락은 하지 않는다.
+현재 수정 범위: pc-worker/native의 pinned37bc88b Euler 중간값 DPAPI 저장·검증·재개, opt-in RecoveryEngines/checkpoint_store, 기존 worker에 대한 per-file baseline 기반 surgical patch, Android 원래 작업 ID 재연결·최종 파일 저장 후 ACK. 기존 RAM-only job을 소급 변환하거나 다른 sampler를 지원한다고 주장하지 않는다. 최대24시간/4개 암호화 복구 작업, exact owner/request/model/runtime/sigma/shape 검증, 명시 취소는 파기, 네트워크 중단은 보관 후 재개, 이미지 파일 전달 후 재다운로드와 계산 중간 재개를 분리한다. source candidate이며 아직 배포/실제 모델 재개 합격이 아니다.27 continuation은 실제 private state에서4시간 종료/deferred이며 설치1026 유지였음을 확인했다. 사용자 실행 중 작업은 유지한다.
+
+## 2026-11-01 — 체크포인트 실제 SDXL 단절/재개 비교 PASS
+격리한 pinned37bc88b 네이티브 실행기를 빌드했다. 실제 SDXL 공개 합성512px/8단계 fixture에서5단계 DPAPI checkpoint를 저장하고 중단한 뒤 같은 모델/시드/설정으로 재개했다. 연속8단계 대조와 PNG bytes 및 pixel stream 모두 동일했다. partial30.313s, resume140.390s, uninterrupted170.360s. 로딩·디코딩 시간은 다시 필요하므로 모든 시간을 절약한다고 주장하지 않는다. 생산1024/50단계 설정은 바꾸지 않았고 Qwen 실제 재개/휴대폰 통합 검증으로 확대 해석하지 않는다. 첫 probe는CUDA backend DLL 누락으로 로드 실패했고 양쪽 backend를 보존한 별도 runtime에서 해결했다. 사용자 native작업이 시작되면 probe자체만 중단하는 health guard를 두었다. 사용자 작업/다른 앱 종료0.
+C++ 저장·동일연산재개·디코딩전용 복원·binding/sigma/shape/변조 거부 테스트 PASS, PC 제어 계층4테스트 PASS. Android compile/core+app unit/androidTest compile은 이전 source snapshot에서 PASS이며 최종 추가 수정 후 release 재검증 예정. 네트워크 단절/실패에는 보관, 명시 취소에는 파기, 파일/메타데이터 저장 후 ACK, 오래된 cleanup이 새ticket을 지우지 않는 CAS, 재등록과 권한 변경을 구분한 원래 target cleanup을 추가했다. PC worker는 아직 교체하지 않았다. 새 APK/기기 설치로 세지 않는다.
+
+## 2026-11-01 — 설치 전 기존 요청의 RAM-only 제한 보존 추가
+1028 full host core619/app554=1173, lint0오류132경고, release/sign PASS 뒤 수신 검증용 androidTest만 추가·재빌드/서명했다(main APK 동일). 최종 source receipt623입력/드리프트0. app SHA1402ee5c1a49e5e6e3f44e4408a0dcd7ae0039c09f071040069f5aeff6cab4b2/test SHA62f7a9f7e8d6b4bbb155041698cdd21bf78095d2faf363bccb15cac902d97b79, 설치하지 않았다.
+최종 검토에서 기존 저장 요청이 새 PC 영속 저장 권한을 자동 획득하지 않도록 보완했다. QueuedChatRequest.pcImageRecoveryAllowed는 legacy/goal/기타 생성 factory 기본false, 새 직접 사용자 요청만true를 캡처하고 steer는 원래 값을 보존한다. per-request controller/client에 고정하며 caller 기본값도RAM-only다. standalone새UI는 명시 버튼으로 복구 가능 요청을 만든다. 옛 read-only/도구금지/출처 범위는 그대로다. 이 수정 때문에1028 설치 예약을 해제하고1029를 최종 빌드한다. 1028 continuation의 API검사 자체는 원래 synthetic owner/job에서 계속하며, 그 뒤 device lease 불일치로 설치 없이 멈추게 했다. 기존 사용자 작업 취소0/다른 채팅 연락0.
+PC worker는 새 계층을 실제 배포했고 TLS/owner binding/기존 pairing 유지 검증했다. 현재 공개1024/20단계 API fixture가5단계 중단·재개와 foreign-owner 거부를 통과하고20단계 후 CPU 최종 변환 중이다. 아직 PNG/폰 검증 통과라고 표시하지 않는다. 폰 잠금은 실제 다시 켜져 있어 사용자에게 해제를 요청했다. 새로운 특별 권한을 대신 켜지 않았다.
+
+## 2026-11-01 — 잘린 도구 호출 복구·리뷰 수정 정규 소스 반영
+담당 claude-review. 예약 해제 뒤 정규 소스에 반영(미커밋). 잘린 도구 호출 JSON은 채팅에 저장하지 않고 폐기하며 실행 없이 짧게 1회 재선택, 재차 잘리면 안내 후 paused(tool_call_truncated). 이어붙이기·잘린 호출 실행 없음. 리뷰 수정: 사용자 설치 확인 대기 시 및 10분 경과 시 설치 보류 해제, 전사·영상 작업 setBusy를 try 안으로 이동. 후속 검토 실패 처리는 codex-progress-root의 forFinalization을 유지하고 내 worktree 수정은 버렸다. executeRequest는 메서드 크기 한도에 닿아 finishedRunStatus를 분리했다. 실제 검증: RuntimeBusyOwnersTest5·TruncatedToolRecoveryTest2 PASS, release Kotlin 컴파일 PASS. 전체 Validate·서명·설치·기기 재현 미실행. 재선택 흐름 자체는 단위 테스트가 없다.
+
+## 2026-11-01 — 실패 기억 1단계 (집계)
+담당 claude-review. 소스 반영(미커밋), 1029 APK에는 없음. PlanningToolFeedback에 failureStreak·recoveredAfterFailure 추가(기존 저장본 기본값 디코딩). 취소 제외 연속 실패2회에 avoid_repeat, 미검증 성공에 verify_result를 proposed로 자동 집계하고 문맥 힌트 do_not_repeat_same_failed_call 추가. 자동 승인·권한 없음, 원문 저장 없음. 원인·해결 방법 기록과 승인 UI는 미구현. 검증: PlanningFeedbackStoreTest12 PASS만. 전체 Validate·기기 미실행.

@@ -32,6 +32,29 @@ class PlanningFeedbackStoreTest {
         assertEquals(1L,row.verifiedSuccess);assertEquals(4L,row.attempts)
     }
 
+    @Test fun repeatedFailuresProposeALessonAndALaterVerifiedResultCountsAsRecovery()=runBlocking {
+        val store=PlanningFeedbackStore(MemoryPersistence())
+        val tool="prepare_calendar_event"
+        store.record("calendar",tool,VerificationState.FAILED,false,"cancelled")
+        assertEquals(0L,store.snapshot().stats.single().failureStreak)
+        store.record("calendar",tool,VerificationState.FAILED,false,"execution_failed")
+        assertTrue(store.snapshot().stats.single().proposedLessons.isEmpty())
+        store.record("calendar",tool,VerificationState.FAILED,false,"execution_failed")
+        var row=store.snapshot().stats.single()
+        assertEquals(2L,row.failureStreak);assertEquals(1L,row.proposedLessons["avoid_repeat"])
+        assertTrue(store.contextFor("calendar").contains("do_not_repeat_same_failed_call"))
+        store.record("calendar",tool,VerificationState.VERIFIED,true)
+        row=store.snapshot().stats.single()
+        assertEquals(0L,row.failureStreak);assertEquals(1L,row.recoveredAfterFailure)
+        store.record("calendar",tool,VerificationState.UNVERIFIED,true)
+        assertEquals(1L,store.snapshot().stats.single().proposedLessons["verify_result"])
+    }
+
+    @Test fun aggregatesSavedBeforeTheNewFieldsStillDecode()=runBlocking {
+        val value=kotlinx.serialization.json.Json.decodeFromString<PlanningToolFeedback>("""{"domain":"calendar","tool":"planner"}""")
+        assertEquals(0L,value.failureStreak);assertEquals(0L,value.recoveredAfterFailure)
+    }
+
     @Test fun rejectsCredentialsUnboundedKeysAndRawCorrectionsWithoutPersisting() {
         val backend=MemoryPersistence();val store=PlanningFeedbackStore(backend)
         listOf("sk-synthetic-secret","owner@example.invalid","messages\nrun_command","x".repeat(5000)).forEach {value->

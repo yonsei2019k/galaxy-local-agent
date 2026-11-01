@@ -77,6 +77,10 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
     private var primaryFailure:Throwable?=null
     private val cleanupErrors=mutableListOf<String>()
     private var runStatus:String?=null
+    private var runErrorCode:String?=null
+    private var diagnosticCodes:List<String> = emptyList()
+    private var syntheticHostErrorHash:String?=null
+    private var syntheticHostErrorLength:Int?=null
     private var auditCount=0
     private var traceCount=0
     private var bodyChars=0
@@ -234,8 +238,23 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
 
     private suspend fun capture(){
         val ownRun=runId?:return;val ownThread=threadId?:return
-        runStatus=chat.run(ownRun)?.status
-        traceCount=repo.workTrace.events(ownThread,ownRun).size
+        val run=chat.run(ownRun);runStatus=run?.status;runErrorCode=run?.errorCode
+        val events=repo.workTrace.events(ownThread,ownRun)
+        traceCount=events.size
+        diagnosticCodes=events.map {it.event.code.name}.takeLast(40)
+        // This isolated project disables owner memory and offers only three public tools.
+        // Export only its fingerprint/length so source constants can be matched locally;
+        // exception strings can contain quoted data and are never copied into the report.
+        if(runStatus=="failed"&&projectId?.let {chat.project(it)?.let(::safeProject)}==true){
+            val users=chat.messages(ownThread).first().filter {it.role=="user"}
+            if(users.map {it.text}==listOf(REQUEST)){
+                val body=chat.assistantForRun(ownRun)?.text.orEmpty()
+                if(body.startsWith("작업을 끝내지 못했습니다: ")){
+                    val failure=body.substringAfter(": ").lineSequence().first().take(400)
+                    syntheticHostErrorHash=hash(failure);syntheticHostErrorLength=failure.length
+                }
+            }
+        }
         auditCount=chat.toolRunsForThread(ownThread,ownRun).first().count{it.name=="calculate"&&it.success&&it.summary.startsWith("VERIFIED")}
         bodyChars=chat.assistantForRun(ownRun)?.text?.length?:0
         coordinator.executionForRun(ownRun)?.executionEngine?.lastGeneration?.value?.let {lastSummary=it}
@@ -351,6 +370,8 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
             put("synthetic_project_only",true);put("allowed_tool_count",3);put("default_tool_quality_claim",false)
             put("stage",stage);put("failure_stage",failureStage);put("recovery_only",recoveryOnly);put("elapsed_ms",SystemClock.elapsedRealtime()-started);put("workflow_timeout_ms",timeoutMillis)
             put("run_status",runStatus);put("failure_class",failureClass);put("model_id",chosenModelId);put("model_sha256",chosenModelSha);put("runtime",chosenRuntime)
+            put("run_error_code",runErrorCode);put("trace_codes",buildJsonArray{diagnosticCodes.forEach{add(it)}})
+            put("synthetic_host_failure_sha256",syntheticHostErrorHash);put("synthetic_host_failure_chars",syntheticHostErrorLength)
             put("verified_calculation_audits",auditCount);put("live_activity_seen",liveActivitySeen);put("model_followup_seen",followupSeen);put("final_review_completed",reviewCompleted);put("trace_events",traceCount);put("final_body_chars",bodyChars);put("activity_entries",activityCount)
             put("immutable_receipt_verified",receiptVerified);put("exact_activity_binding_verified",bindingVerified);put("actual_phone_execution_verified",phoneVerified);put("fixture_cleanup_verified",cleanupVerified)
             put("cleanup_error_classes",buildJsonArray{cleanupErrors.take(8).forEach{add(it)}})
@@ -388,8 +409,9 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
 
     private fun currentPairingVersion():String {
         val connection=pc.snapshot()?:return "unpaired"
-        // Only an encrypted hash is retained. Endpoint/token/key material is never copied into the journal/report.
-        return hash(listOf(connection.serverId,connection.endpoint,connection.token,connection.certificateSha256,connection.discoveryPort.toString()).joinToString("\u0000"))
+        // Authenticated discovery may update a LAN address after reconnect. Identity and credentials,
+        // rather than a mutable endpoint, define pairing. No credentials enter the report/journal.
+        return hash(listOf(connection.serverId,connection.token,connection.certificateSha256,connection.discoveryPort.toString()).joinToString("\u0000"))
     }
     private fun draftHash(value:ChatDraftRecord?):String=if(value==null)"absent"else hash(buildJsonObject{
         put("id",value.threadId);put("text",value.text);put("model",value.modelId);put("thinking",value.thinking);put("revision",value.revision);put("at",value.updatedAt);put("anchor",value.scrollMessageId);put("offset",value.scrollOffset)

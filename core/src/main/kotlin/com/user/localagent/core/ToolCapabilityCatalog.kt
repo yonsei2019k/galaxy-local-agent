@@ -42,6 +42,7 @@ object ToolCapabilityCatalog {
                 "list_calendar_events"->"android.permission.READ_CALENDAR"
                 "list_audio_recordings","transcribe_recording"->if(env.apiLevel>=33)"android.permission.READ_MEDIA_AUDIO" else "android.permission.READ_EXTERNAL_STORAGE"
                 "list_messenger_notifications","reply_messenger_notification"->"notification_access"
+                "read_kakao_screen"->"kakao_screen_access"
                 else->null
             }
             val handler=consumer?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url"->"browser";else->null}
@@ -49,6 +50,7 @@ object ToolCapabilityCatalog {
             val messenger=tool.name in setOf("list_messenger_notifications","reply_messenger_notification")
             val state=when {
                 permission!=null&&permission !in env.grantedPermissions->CapabilityAvailability.REQUIRES_PERMISSION
+                tool.name=="read_kakao_screen"&&tool.name !in env.validatedCapabilities->CapabilityAvailability.UNVALIDATED
                 model!=null&&model !in env.installedModels->CapabilityAvailability.REQUIRES_MODEL
                 handler!=null&&handler !in env.installedHandlers->CapabilityAvailability.UNVALIDATED
                 messenger&&env.validatedConnectors.intersect(ToolRegistry.supportedMessengerPackages).isEmpty()->CapabilityAvailability.UNVALIDATED
@@ -61,6 +63,7 @@ object ToolCapabilityCatalog {
                 (if(tool.name in GoalToolCatalog.mutationNames)listOf("사용자가 명시한 목표 관리 요청")else emptyList()),tool.risk!=Risk.LOW,
                 connection==null && !pcTool && consumer==null && tool.name !in EvidenceToolCatalog.names && tool.name !in setOf("search_web","search_shopping","read_webpage","open_url","open_map","prepare_sms","prepare_email","reply_messenger_notification"),
                 when(tool.name){
+                    "read_kakao_screen"->"개별 요청에서 현재 화면만 제한적으로 읽습니다. 전체 대화방·과거 기록·요약 정확도는 별도 실기기 검증이 필요하며 전송·입력·삭제는 지원하지 않습니다."
                     GoalToolCatalog.GET->"이 대화에 저장된 목표와 완료 기준의 일부 페이지를 읽습니다. 목표가 없다는 조회나 지침 읽기는 실제 업무 완료 근거가 아닙니다."
                     GoalToolCatalog.CREATE,GoalToolCatalog.UPDATE->"명시한 요청으로 기기의 대화 목표를 초안으로 저장·수정합니다. 작업 변경은 기존 실행을 정리하고 근거를 초기화하며, 동일한 내용은 실제 근거를 유지합니다. 실행·외부 권한이 추가되지 않습니다."
                     GoalToolCatalog.START,GoalToolCatalog.RESUME->"사용자가 요청한 기존 목표를 한 번의 제한된 실행으로 대기열에 넣습니다. 대기열 저장은 목표 완료·주기 실행·외부 작업 권한이 아닙니다."

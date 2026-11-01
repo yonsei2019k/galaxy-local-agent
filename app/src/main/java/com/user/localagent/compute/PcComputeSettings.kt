@@ -65,6 +65,16 @@ class PcComputeSettings private constructor(private val context:Context) {
     }
     fun automaticText(enabled:Boolean)=synchronized(lock){if(mutable.value.automaticText!=enabled)advanceAuthorization();mutable.value=mutable.value.copy(automaticText=enabled);persist()}
     fun preferPcImages(enabled:Boolean)=synchronized(lock){if(mutable.value.preferPcImages!=enabled)advanceAuthorization();mutable.value=mutable.value.copy(preferPcImages=enabled);persist()}
+    /** Apply/restore a scoped routing override atomically; return its exact revision, or preserve owner edits. */
+    internal fun updateRoutingIfUnchanged(expectedRevision:Long,automaticText:Boolean,preferPcImages:Boolean):Long?=synchronized(lock){
+        if(revision!=expectedRevision)return@synchronized null
+        if(mutable.value.automaticText!=automaticText||mutable.value.preferPcImages!=preferPcImages){
+            advanceAuthorization()
+            mutable.value=mutable.value.copy(automaticText=automaticText,preferPcImages=preferPcImages)
+            persist()
+        }
+        revision
+    }
     /** Choice applies to the next image client; changing it does not revoke an active run. */
     fun imageModel(id:String)=synchronized(lock){
         val pin=PcImageModelCatalog.selection(id)

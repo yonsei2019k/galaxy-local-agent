@@ -82,7 +82,7 @@ object MessengerInbox {
         scheduleExpiryLocked()
         publish()
         // A rule is a fixed, user-approved acknowledgement, never model-authored free-form sending.
-        if(thread!=null&&reply!=null&&auto!=null&&com.user.localagent.automation.AssistantNotificationListener.granted(context)){
+        if(pkg!="com.kakao.talk"&&thread!=null&&reply!=null&&auto!=null&&com.user.localagent.automation.AssistantNotificationListener.granted(context)){
             val rules=readRules(context);val rule=rules.optJSONObject(thread)?:return
             val day=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).toString()
             val count=if(rule.optString("day")==day)rule.optInt("count")else 0
@@ -126,6 +126,7 @@ object MessengerInbox {
     @Synchronized fun approveAcknowledgementRule(context:Context,id:String,text:String){
         require(text.isNotBlank()&&text.length<=500)
         val entry=entries[id]?:error("알림이 만료되었습니다.")
+        require(entry.message.packageName!="com.kakao.talk") {"카카오톡 전송은 매번 받는 사람과 내용을 확인해야 합니다."}
         require(allowed(context,entry.message.packageName)&&entry.message.canReply)
         val thread=entry.thread?:error("이 앱 알림은 안정적인 대화방 ID가 없어 자동 답장을 허용하지 않습니다.")
         require(com.user.localagent.automation.AssistantNotificationListener.granted(context)) {"Android 알림 접근을 허용해야 자동 답장을 사용할 수 있습니다."}

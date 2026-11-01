@@ -310,6 +310,15 @@ fun ChatWorkspace(
             AssistChip(onClick=onProjectClick,label={Text("프로젝트 · ${projectName.take(28)}",maxLines=1,overflow=TextOverflow.Ellipsis)},modifier=Modifier.testTag("project_selector"))
             if(branches.isNotEmpty())WorkspaceBranchSelector(branches,currentBranchId,onSelectBranch)
         }
+        val workSummary=summaryActivity(activityByMessageId.values.filter{activityMatchesMessage(it,composerKey,it.assistantMessageId)&&it.assistantMessageId in activeIds},composerKey,activeRunKey,busy)
+        ConversationWorkSummary(workSummary,busy,status,queuedPreview.firstOrNull(),queuedCount,
+            onDetails=workSummary?.let{activity->{
+                val position=rendered.indexOfFirst{it.first.id==activity.assistantMessageId}
+                if(position>=0){
+                    followBottom=false
+                    scope.launch{listState.animateScrollToItem(leadingItems+rendered.take(position).sumOf{it.second.blocks.size})}
+                }
+            }},onQueue=onShowQueue)
         if (messages.isEmpty()) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
@@ -408,11 +417,15 @@ fun ChatWorkspace(
         }
         if(busy)Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                if(onQueue!=null)FilterChip(enabled=composerReady,selected=!steering,onClick={applyToActiveRun=false},label={Text("대기열에 추가")},modifier=Modifier.testTag("submit_mode_queue"))
+                if(onQueue!=null)FilterChip(enabled=composerReady,selected=!steering,onClick={applyToActiveRun=false},label={Text("다음 작업으로 예약")},modifier=Modifier.testTag("submit_mode_queue"))
                 if(onSteer!=null)FilterChip(selected=steering,onClick={applyToActiveRun=true},enabled=canSteer,label={Text("현재 작업에 반영")},modifier=Modifier.testTag("submit_mode_steer"))
             }
             TextButton(onClick=onStop,modifier=Modifier.testTag("stop_button")){Text("중지",color=ZipHapColors.Error)}
         }
+        if(busy)Text(if(steering)"현재 실행을 안전하게 정리한 뒤 반영합니다. 완료한 결과는 유지합니다."
+            else "현재 요청을 바꾸지 않고 새 작업으로 예약합니다. 대기 순서는 변경할 수 있습니다.",
+            Modifier.fillMaxWidth().padding(horizontal=20.dp).testTag("submission_timing"),
+            style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
         if(steering&&draft.trim().length>4000)Text("추가 지시는 4,000자까지 보낼 수 있습니다. 긴 요청은 대기열에 추가해주세요.",Modifier.padding(horizontal=20.dp),style=MaterialTheme.typography.bodySmall,color=ZipHapColors.Error)
         if(busy&&onSteer!=null&&attachments.isNotEmpty())Text("첨부한 요청은 대기열에 추가됩니다.",Modifier.padding(horizontal=20.dp),style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
         if(queuedCount>0)Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){
@@ -469,7 +482,7 @@ fun ChatWorkspace(
                         .background(if (enabled) ZipHapColors.TextPrimary else Color(0xFF34383D))
                         .testTag("send_button")
                         .clickable(enabled = enabled, role = Role.Button) { submit() }
-                        .semantics { contentDescription = if (steering) "현재 작업에 반영" else if (busy) "대기열에 추가" else "보내기" },
+                        .semantics { contentDescription = if (steering) "현재 작업에 반영" else if (busy) "다음 작업으로 예약" else "보내기" },
                     contentAlignment = Alignment.Center,
                 ) { SendMark(false, Modifier.size(19.dp), if (enabled) ZipHapColors.Background else Color(0xFF70767E)) }
             }

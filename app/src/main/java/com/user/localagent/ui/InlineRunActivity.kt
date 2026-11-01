@@ -104,6 +104,7 @@ internal fun activityInitiallyExpanded(status:String):Boolean = status in setOf(
 /** Inside the first assistant list block: no extra LazyList index and no answer-text copies. */
 @Composable
 fun InlineRunActivityCard(activity:UiRunActivity,modifier:Modifier=Modifier,onOpenFileChange:((UiRunFileChange)->Unit)?=null,onLoadOlder:((String)->Unit)?=null,onExpandedChange:((Boolean)->Unit)?=null){
+    var technicalDetails by rememberSaveable(activity.runId){mutableStateOf(false)}
     var chosenExpansion by rememberSaveable(activity.runId){mutableStateOf<Boolean?>(null)}
     val expanded=chosenExpansion?:activityInitiallyExpanded(activity.status)
     val events=remember(activity.events){visibleActivityEvents(activity)}
@@ -149,10 +150,13 @@ fun InlineRunActivityCard(activity:UiRunActivity,modifier:Modifier=Modifier,onOp
                             event.fileChanges.forEach{file->
                                 val operation=when(file.operation){UiFileChangeOperation.CREATED->"생성";UiFileChangeOperation.UPDATED->"수정";UiFileChangeOperation.DELETED->"삭제"}
                                 Text("$operation · ${file.path}",style=MaterialTheme.typography.bodySmall)
-                                Text("${hashLabel(file.beforeSha256)} → ${hashLabel(file.afterSha256)}",style=MaterialTheme.typography.labelSmall,color=ZipHapColors.TextSecondary)
+                                if(technicalDetails)Text("${hashLabel(file.beforeSha256)} → ${hashLabel(file.afterSha256)}",style=MaterialTheme.typography.labelSmall,color=ZipHapColors.TextSecondary)
                                 if(!file.diffRef.isNullOrBlank()&&onOpenFileChange!=null)TextButton(onClick={onOpenFileChange(file)}){Text("실제 변경 내용 보기")}
                             }
                         }
+                }
+                if(events.any{it.fileChanges.isNotEmpty()})TextButton(onClick={technicalDetails=!technicalDetails},modifier=Modifier.testTag("activity_technical_details_${activity.runId}")){
+                    Text(if(technicalDetails)"파일 무결성 정보 접기"else"파일 무결성 정보 보기")
                 }
             }
         }

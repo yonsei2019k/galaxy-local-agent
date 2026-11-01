@@ -1,6 +1,14 @@
 # Device validation
 
-## Current installed1015 (2026-10-31)
+## Latest actual1026 verification
+
+2026-10-31: Actual installed1026/base SHA1c7c4f3acfa52fa3b7db0dcfbca0fd14f25cc5eaf9dfbc6956d38e5fb38022c2 verified without data clearing. Device16 UI/preset/legacy-migration/reference/model-pin checks passed. Predecessor1025 device12 passed; its separate real phone GGUF gemma-e2b autonomous fixture failed225868ms,0calculation,SemanticPlanningException,cleanup verified. A local static-literal SHA comparison confirms planning_timeout at LocalSemanticPlanner.kt:158. No1026 model-workflow pass is claimed. Below records are preceding/historical checkpoints.
+
+## Current checkpoint: installed1023;1025 and1026 prepared, not yet device-validated
+
+2026-10-31: Last verified installed1023 has8 device checks passed. Its real autonomous workflow failed with0verified calculations and successful fixture cleanup. Signed1025 (1157 JVM) and next1026 (1164 JVM) are built, but build results do not establish installation/device/model success. The owner explicitly requires the active image to continue. Serialized guarded local processes wait for owner foreground completion/unlock, exact installed/prepared hashes and lease;1025 runs12 device checks plus a separate real-model diagnostic, then1026 requires predecessor completion and verified cleanup before installation/device16. Read PROJECT_STATE.md, latest docs/agent-change-log.md and private actual deployment receipts. No current image is cancelled, and no other development chats are contacted. The checkpoints below are historical.
+
+## Historical installed1015 (2026-10-31)
 
 The signed normal app is `0.2.0-build1015`, SHA256 `6b070c2906975091b626e4681440fe87651ae99617cbb26b646f0f59f46b9015`. Actual installed app/test hashes match immutable signed artifacts. JVM700, latest device96, real local model/tool/receipt/final-answer/activity-binding1 and no-INTERNET1 passed. The no-INTERNET variant was removed by updating back to the exact normal app, with data/signing identity retained. The real workflow took469.669s; speed remains a material limitation. Native ten-minute evidence is separately attributed to1013, whose native binaries are byte-identical. See [the1015 verification record](settings-validation-1015.ko.md) and PROJECT_STATE.md for scope and remaining work. Older sections below are historical, not the current installed version.
 

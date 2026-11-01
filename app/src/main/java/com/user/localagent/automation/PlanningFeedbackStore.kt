@@ -27,6 +27,9 @@ data class PlanningToolFeedback(
     /** Enum lessons suggested by explicit owner feedback; never auto-approved or executed. */
     val proposedLessons:Map<String,Long> = emptyMap(),
     val updatedAt:Long=0,
+    /** Consecutive non-cancelled failures, and how often a later verified result ended such a run. */
+    val failureStreak:Long=0,
+    val recoveredAfterFailure:Long=0,
 ) {
     val attempts:Long get()=verifiedSuccess+prepared+unverified+failed
 }
@@ -77,7 +80,13 @@ class PlanningFeedbackStore(
         return update(domain,tool,expectedGeneration){previous->
             val failed=!success||verification==VerificationState.FAILED
             val failures=if(failed&&failureKind!=null)increment(previous.failureCounts,failureKind)else previous.failureCounts
+            val verified=!failed&&verification==VerificationState.VERIFIED
+            val streak=when{failed&&failureKind!="cancelled"->bump(previous.failureStreak);verified->0L;else->previous.failureStreak}
+            val lesson=when{failed&&failureKind!="cancelled"&&streak>=2->"avoid_repeat";!failed&&verification==VerificationState.UNVERIFIED->"verify_result";else->null}
             previous.copy(
+                failureStreak=streak,
+                recoveredAfterFailure=if(verified&&previous.failureStreak>0)bump(previous.recoveredAfterFailure)else previous.recoveredAfterFailure,
+                proposedLessons=lesson?.let {increment(previous.proposedLessons,it)}?:previous.proposedLessons,
                 verifiedSuccess=if(!failed&&verification==VerificationState.VERIFIED)bump(previous.verifiedSuccess)else previous.verifiedSuccess,
                 prepared=if(!failed&&verification==VerificationState.PREPARED)bump(previous.prepared)else previous.prepared,
                 unverified=if(!failed&&verification==VerificationState.UNVERIFIED)bump(previous.unverified)else previous.unverified,
@@ -118,6 +127,8 @@ class PlanningFeedbackStore(
             put("stats",buildJsonArray {rows.forEach {row->add(buildJsonObject {
                 put("tool",row.tool);put("verifiedSuccess",row.verifiedSuccess);put("prepared",row.prepared);put("unverified",row.unverified);put("failed",row.failed)
                 put("failureKinds",buildJsonObject {row.failureCounts.entries.sortedByDescending {it.value}.take(2).forEach {put(it.key,it.value)}})
+                if(row.failureStreak>0)put("failureStreak",row.failureStreak)
+                if(row.recoveredAfterFailure>0)put("recoveredAfterFailure",row.recoveredAfterFailure)
                 put("hints",buildJsonArray {hints(row).take(3).forEach {add(it)}})
                 if(row.proposedLessons.isNotEmpty())put("proposedLessons",buildJsonObject {row.proposedLessons.entries.sortedByDescending {it.value}.take(2).forEach {put(it.key,it.value)}})
             })}})
@@ -210,7 +221,7 @@ class PlanningFeedbackStore(
     }
     private fun validateStats(value:PlanningToolFeedback){
         validateKeys(value.domain,value.tool)
-        require(listOf(value.verifiedSuccess,value.prepared,value.unverified,value.failed).all {it in 0..MAX_COUNT})
+        require(listOf(value.verifiedSuccess,value.prepared,value.unverified,value.failed,value.failureStreak,value.recoveredAfterFailure).all {it in 0..MAX_COUNT})
         require(value.failureCounts.size<=failureKinds.size&&value.failureCounts.all {it.key in failureKinds&&it.value in 1..MAX_COUNT})
         require(value.failureCounts.values.all {it<=value.failed})
         require(value.proposedLessons.size<=lessonKinds.size&&value.proposedLessons.all {it.key in lessonKinds&&it.value in 1..MAX_COUNT})
@@ -240,6 +251,7 @@ class PlanningFeedbackStore(
         private fun validateKeys(domain:String,tool:String){validateDomain(domain);validateTool(tool)}
         private fun validateGeneration(value:Long?){require(value==null||value>=0){"실행 피드백 세대가 유효하지 않습니다."}}
         private fun hints(value:PlanningToolFeedback):List<String> = buildList {
+            if(value.failureStreak>=2)add("do_not_repeat_same_failed_call")
             val invalid=listOf("invalid_json","unknown_tool","invalid_arguments").sumOf {value.failureCounts[it]?:0}
             if(invalid>=2)add("validate_schema_before_execution")
             if(value.prepared>0)add("prepared_is_not_external_completion")

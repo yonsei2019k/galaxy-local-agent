@@ -17,11 +17,22 @@ import java.security.MessageDigest
 
 /** Only a named, already-created private artifact; external opening/export follows a user click. */
 @Composable fun FileArtifactChatPreview(text:String) {
-    val name=Regex("\\[\\[file:(artifact-[a-f0-9-]{36}\\.(?:docx|xlsx|pdf|txt|csv))]]").find(text)?.groupValues?.get(1)?:return
+    val names=remember(text){chatFileNames(text)}
+    if(names.isEmpty())return
+    Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+        if(names.size>1)Text("파일 결과 · ${names.size}개",style=MaterialTheme.typography.labelLarge)
+        names.forEach{name->key(name){FileArtifactCard(name)}}
+        if(names.size==16)Text("한 응답에서 파일 카드는 최대 16개까지 표시합니다.",style=MaterialTheme.typography.bodySmall)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun FileArtifactCard(name:String) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
     val directory=remember(context){File(context.filesDir,"exports").canonicalFile}
     val file=remember(name){File(directory,name).canonicalFile}
-    if(file.parentFile!=directory||!file.isFile)return
+    if(file.parentFile!=directory)return
+    if(!file.isFile){Text("이 응답의 파일을 찾을 수 없습니다. 삭제되었거나 저장이 끝나지 않았을 수 있습니다.",style=MaterialTheme.typography.bodySmall);return}
     val mime=when(file.extension){"docx"->"application/vnd.openxmlformats-officedocument.wordprocessingml.document";"xlsx"->"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";"pdf"->"application/pdf";"csv"->"text/csv";else->"text/plain"}
     var state by remember(name){mutableStateOf("")};var working by remember(name){mutableStateOf(false)}
     val save=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mime)){uri->if(uri!=null)scope.launch {
@@ -33,18 +44,23 @@ import java.security.MessageDigest
             check(expected.contentEquals(actual)){"저장한 파일의 내용 확인이 일치하지 않습니다."}
         };state="저장한 파일을 다시 읽어 확인했습니다."}
         catch(cancel:CancellationException){throw cancel}
-        catch(error:Exception){state=error.message?.take(180)?:"파일 저장을 확인하지 못했습니다."}
+        catch(_:Exception){state="파일 저장을 확인하지 못했습니다. 저장 위치와 여유 공간을 확인해주세요."}
         finally{working=false}
     }}
     Surface(color=ZipHapColors.NavySurface,shape=MaterialTheme.shapes.medium){Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
-        Text("${file.extension.uppercase()} · ${file.length()/1024+1}KiB",style=MaterialTheme.typography.titleSmall)
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+        Text("${file.extension.uppercase()} · ${(file.length()+1023)/1024}KiB",style=MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)){
             TextButton(enabled=!working,onClick={save.launch("ZipHap-document.${file.extension}")}){Text("파일 저장")}
             TextButton(enabled=!working,onClick={
+                try{val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",file)
+                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"파일 열기"))
+                }catch(_:Exception){state="이 파일을 열 수 있는 앱을 확인해주세요."}
+            }){Text("열기")}
+            TextButton(enabled=!working,onClick={
                 try {val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",file)
-                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"파일 열기·공유"))
-                }catch(error:Exception){state=error.message?.take(150)?:"파일을 열 앱을 확인해주세요."}
-            }){Text("열기·공유")}
+                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"파일 공유"))
+                }catch(_:Exception){state="파일을 공유할 앱을 확인해주세요."}
+            }){Text("공유")}
         }
         if(state.isNotBlank())Text(state,style=MaterialTheme.typography.bodySmall)
     }}

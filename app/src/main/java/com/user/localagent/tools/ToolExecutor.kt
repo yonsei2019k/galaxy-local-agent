@@ -41,6 +41,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val connectionVerifyAccess:suspend()->Unit={},
     private val connectionComputeEngine:com.user.localagent.inference.ComputeExecutionEngine?=null,
     private val connectionApproveGmailSend:suspend(String,ToolCall,com.user.localagent.core.connections.GmailSendPreview)->Boolean={_,_,_->false},
+    private val kakaoReadBinding:String?=null,
     private val createImage:(suspend(ToolCall)->String)?=null) {
     private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
     private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
@@ -84,6 +85,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     suspend fun execute(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
+            if(call.name in KakaoScreenToolCatalog.names){
+                check(connectionRunId!=null&&connectionIsRunLive()){"카카오톡 조회의 원래 실행이 끝났습니다."}
+                return@withContext com.user.localagent.integrations.KakaoScreenReader(context).readForRequest(call,kakaoReadBinding,checkNotNull(connectionThreadId)){
+                    connectionVerifyAccess();check(connectionIsRunLive()){"카카오톡 조회 요청이 중단됐습니다."}
+                }
+            }
             if(call.name in GoalToolCatalog.names)return@withContext checkNotNull(goalTools){"현재 대화 요청에 목표 도구가 연결되지 않았습니다."}.invoke(call)
                 ?:error("현재 대화의 목표 도구 결과를 확인하지 못했습니다.")
             PrivateToolDispatch.execute(call,privateAnalysis,transcribeRecording)?.let {return@withContext it}

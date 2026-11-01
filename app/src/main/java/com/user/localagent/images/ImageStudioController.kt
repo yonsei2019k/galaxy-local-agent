@@ -43,7 +43,8 @@ class ImageStudioController(context:Context,private val app:AppContainer,
     private val ownerRunId:String?=null,
     private val scopedRepository:com.user.localagent.data.LocalRepository=app.repository,
     private val ownerThreadId:String?=null,
-    private val verifyAccess:suspend()->Unit={}) {
+    private val verifyAccess:suspend()->Unit={},
+    private val recoveryAllowed:Boolean=ownerRunId==null) {
     private val context=context.applicationContext
     val models=ImageModelManager(this.context)
     private val engine=ImageGenerationEngine(this.context)
@@ -52,13 +53,17 @@ class ImageStudioController(context:Context,private val app:AppContainer,
     private val resourceAware get()=requestEngine!=null||standaloneEngine!=null
     private val operation=java.util.concurrent.atomic.AtomicBoolean(false)
     private val pcSettings=com.user.localagent.compute.PcComputeSettings.get(this.context)
-    private var pcImages=com.user.localagent.compute.RemoteImageClient(this.context,computeOwner=ownerRunId)
+    private val recoveryScope=ownerRunId?:"image-studio"
+    private val pcRecovery=com.user.localagent.compute.PcImageRecoveryStore(this.context,recoveryScope)
+    private var pcImages=com.user.localagent.compute.RemoteImageClient(this.context,computeOwner=ownerRunId,recoveryScope=recoveryScope,allowRecovery=recoveryAllowed)
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val mutableState=MutableStateFlow(ImageStudioState())
     val state:StateFlow<ImageStudioState> = mutableState.asStateFlow()
     val residentImageModelPath:String? get()=engine.loadedModelPath
+    fun refreshPcRecovery(){scope.launch{mutableState.update{it.copy(canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))}}}
     @Volatile private var activeJob:Job?=null
     init {if(ownerRunId==null)scope.launch {
+        mutableState.update{it.copy(canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))}
         runCatching {scopedRepository.latestNote("generated-images")}.getOrNull()?.let {note->
             runCatching {
                 val info=Json.parseToJsonElement(note.body).jsonObject
@@ -72,19 +77,52 @@ class ImageStudioController(context:Context,private val app:AppContainer,
         }
     }}
 
-    fun generate(prompt:String,steps:Int?=null,seed:Long?=null,negativePrompt:String="",referenceUri:Uri?=null,strength:Float=.65f):Boolean {
+    fun generate(prompt:String,steps:Int?=null,seed:Long?=null,negativePrompt:String="",referenceUri:Uri?=null,strength:Float=.65f):Boolean =
+        startGeneration(prompt,steps,seed,negativePrompt,referenceUri,strength,null)
+    fun resumePc():Boolean {
+        val ticket=runCatching{pcRecovery.read()}.getOrNull()?:return false
+        val input=ticket.context
+        val delivered=input["deliveredFile"]?.jsonPrimitive?.contentOrNull
+        if(delivered!=null&&Regex("image-[a-f0-9-]{36}\\.png").matches(delivered)){
+            val file=File(context.filesDir,"generated-images/$delivered")
+            if(file.isFile&&file.length() in 44..32L*1024*1024&&hex(MessageDigest.getInstance("SHA-256").digest(file.readBytes()))==input["deliveredSha256"]?.jsonPrimitive?.contentOrNull){discardPcRecovery();return true}
+        }
+        return startGeneration(input.getValue("originalPrompt").jsonPrimitive.content,ticket.steps,ticket.seed,
+            input.getValue("negativePrompt").jsonPrimitive.content,null,input["strength"]?.jsonPrimitive?.floatOrNull?:.65f,ticket)
+    }
+    fun discardPcRecovery(){
+        if(!operation.compareAndSet(false,true))return
+        scope.launch {
+            try{
+                val ticket=pcRecovery.read()?:return@launch
+                val removed=com.user.localagent.compute.RemoteImageClient(context,ticket.owner,recoveryScope).discardRecovery(ticket)
+                mutableState.update{it.copy(phase=if(removed)"PC 복구 정보를 삭제했습니다"else"이전 PC 연결의 복구 표시를 지웠습니다 · 이전 PC 파일은 보관 만료 때 정리됩니다",error=null)}
+            }catch(cancel:CancellationException){throw cancel}catch(error:Exception){mutableState.update{it.copy(error=error.message?.take(400))}}
+            finally{operation.set(false);mutableState.update{it.copy(canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))}}
+        }
+    }
+    private fun startGeneration(prompt:String,steps:Int?,seed:Long?,negativePrompt:String,referenceUri:Uri?,strength:Float,
+        resume:com.user.localagent.compute.PcImageRecoveryTicket?):Boolean {
         if(prompt.isBlank()||prompt.length>2000||negativePrompt.length>1000||steps?.let {it !in 1..50}==true||seed?.let {it<0}==true)return false
         if(referenceUri!=null&&(referenceUri.scheme!="content"||referenceUri.authority.isNullOrBlank()||!strength.isFinite()||strength !in .4f..0.85f))return false
+        val pending=runCatching{pcRecovery.read()}.getOrElse{mutableState.update{it.copy(error="암호화된 PC 복구 정보를 확인하지 못했습니다. 새 작업으로 덮어쓰지 않았습니다.")};return false}
+        if(resume==null&&pending!=null&&pcSettings.state.value.preferPcImages&&pcSettings.state.value.paired){mutableState.update{it.copy(error="PC 복구 작업을 먼저 이어받거나 복구 정보를 삭제해주세요.",canResumePc=true)};return false}
         if(!operation.compareAndSet(false,true)){mutableState.update {it.copy(error="현재 이미지 작업을 마친 뒤 생성해주세요.")};return false}
-        val computeOwner=UUID.randomUUID().toString()
-        standaloneEngine=com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=computeOwner,beforePhoneLoad={app.engine.unloadPhoneResidency()})
-        pcImages=com.user.localagent.compute.RemoteImageClient(this.context,computeOwner=computeOwner)
+        val computeOwner=resume?.owner?:UUID.randomUUID().toString()
         mutableState.update {it.copy(phase="준비 중",running=true,prompt=prompt,error=null,progress=0f,step=0,totalSteps=steps?:if(pcSettings.state.value.preferPcImages&&pcSettings.state.value.paired)50 else if(models.isQualityModel)PhoneImageQuality.STEPS else 8,mode=if(referenceUri==null)"txt2img"else"img2img",referenceSha256=null,referenceWidth=null,referenceHeight=null,strength=if(referenceUri==null)null else strength)}
         activeJob=scope.launch {
-            try {perform(prompt,negativePrompt,steps,seed?:-1,referenceUri,strength)}
+            try {
+                standaloneEngine?.unload()
+                standaloneEngine=com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=computeOwner,beforePhoneLoad={app.engine.unloadPhoneResidency()})
+                pcImages=com.user.localagent.compute.RemoteImageClient(this@ImageStudioController.context,computeOwner=computeOwner,recoveryScope=recoveryScope,allowRecovery=recoveryAllowed)
+                perform(prompt,negativePrompt,steps,seed?:-1,referenceUri,strength,resume)
+            }
             catch(cancel:CancellationException){mutableState.update {it.copy(phase="중단했습니다",error=null)};throw cancel}
             catch(error:Exception){mutableState.update {it.copy(phase="이미지를 만들지 못했습니다",error=error.message?.take(400))}}
-            finally {activeJob=null;standaloneEngine=null;operation.set(false);mutableState.update{it.copy(running=false)};app.scheduleIdleUnload()}
+            finally {
+                withContext(NonCancellable){runCatching{standaloneEngine?.unload();standaloneEngine=null}.onFailure{error->mutableState.update{it.copy(error=error.message?.take(400))}}}
+                activeJob=null;operation.set(false);mutableState.update{it.copy(running=false,canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))};app.scheduleIdleUnload()
+            }
         }
         return true
     }
@@ -98,8 +136,10 @@ class ImageStudioController(context:Context,private val app:AppContainer,
         mutableState.update {it.copy(phase="준비 중",running=true,prompt=prompt,error=null,progress=0f,step=0,totalSteps=steps?:if(pcSettings.state.value.preferPcImages&&pcSettings.state.value.paired)50 else if(models.isQualityModel)PhoneImageQuality.STEPS else 8,mode=if(referenceUri==null)"txt2img"else"img2img",referenceSha256=null,referenceWidth=null,referenceHeight=null,strength=if(referenceUri==null)null else strength)}
         try{return perform(prompt,negativePrompt,steps,seed,referenceUri,strength)}finally{activeJob=null;operation.set(false);mutableState.update{it.copy(running=false)}}
     }
-    private suspend fun perform(prompt:String,negative:String,requestedSteps:Int?,seed:Long,referenceUri:Uri?=null,strength:Float=.65f):GeneratedImage {
+    private suspend fun perform(prompt:String,negative:String,requestedSteps:Int?,seed:Long,referenceUri:Uri?=null,strength:Float=.65f,
+        resume:com.user.localagent.compute.PcImageRecoveryTicket?=null):GeneratedImage {
         app.cancelIdleUnload()
+        val remoteSession=this.pcImages
         val serviceOwner="image:${ownerRunId?:UUID.randomUUID()}"
         val busyLease=app.updates.acquireBusy(serviceOwner)
         var serviceLease:java.io.Closeable?=null
@@ -110,7 +150,9 @@ class ImageStudioController(context:Context,private val app:AppContainer,
             serviceLease=ImageSessionRegistry.register(serviceOwner,ownerThreadId,state,::cancel,
                 onRegistered={if(RuntimeGate.foreground.get())ContextCompat.startForegroundService(context,Intent(context,ImageGenerationService::class.java))},
                 onLastClosed={context.stopService(Intent(context,ImageGenerationService::class.java));Unit})
-            val remote=if(pcSettings.state.value.preferPcImages&&pcSettings.state.value.paired)pcImages.available()else null
+            val pcRequested=resume!=null||pcSettings.state.value.preferPcImages&&pcSettings.state.value.paired
+            val remote=if(pcRequested)remoteSession.available()else null
+            check(!pcRequested||remote!=null){"PC 전용 이미지 작업입니다. PC 연결·권한·작업기 상태를 확인해주세요. 휴대폰으로 자동 전환하지 않았습니다."}
             models.refresh()
             val quality=models.isQualityModel
             val requested=if(remote==null&&!quality&&pcSettings.state.value.preferPcImages)requestedSteps?.takeIf{it<=8}else requestedSteps
@@ -119,28 +161,38 @@ class ImageStudioController(context:Context,private val app:AppContainer,
             val model=if(remote==null)models.verifiedModelFile()?:error("휴대폰에서 생성할 이미지 모델을 먼저 내려받아주세요.")else null
             mutableState.update {it.copy(totalSteps=steps,phase=if(remote!=null)"PC 정밀 계산 준비"else"휴대폰에서 생성 준비")}
             if(remote==null)waitForPhoneResources(3L*1024*1024*1024)
-            if(referenceUri!=null){
+            if(resume?.context?.get("mode")?.jsonPrimitive?.content=="img2img"){
+                val bitmap=remoteSession.recoveryReference(resume)
+                try{
+                    val saved=resume.context;val hash=pixelHash(bitmap)
+                    check(hash==saved.getValue("referencePixelSha256").jsonPrimitive.content){"복구 참고 사진의 원래 픽셀을 확인하지 못했습니다."}
+                    reference=ReferenceImage(bitmap,saved.getValue("referenceSha256").jsonPrimitive.content,
+                        saved.getValue("referenceWidth").jsonPrimitive.int,saved.getValue("referenceHeight").jsonPrimitive.int,hash)
+                }catch(error:Throwable){bitmap.recycle();throw error}
+            }else if(referenceUri!=null){
                 mutableState.update {it.copy(phase="참고 사진 준비 중")}
                 reference=prepareReference(referenceUri,size)
                 mutableState.update {it.copy(referenceSha256=reference!!.sha256,referenceWidth=reference!!.sourceWidth,referenceHeight=reference!!.sourceHeight)}
             }
-            val effectivePrompt=translateIfNeeded(prompt)
+            reference?.let {source->mutableState.update{it.copy(mode="img2img",referenceSha256=source.sha256,referenceWidth=source.sourceWidth,referenceHeight=source.sourceHeight,strength=strength)}}
+            val effectivePrompt=resume?.context?.getValue("effectivePrompt")?.jsonPrimitive?.content?:translateIfNeeded(prompt)
+            val recoveryContext=buildJsonObject {
+                put("originalPrompt",prompt);put("effectivePrompt",effectivePrompt);put("negativePrompt",negative)
+                put("mode",if(reference==null)"txt2img"else"img2img");put("strength",strength)
+                reference?.let {put("referenceSha256",it.sha256);put("referenceWidth",it.sourceWidth);put("referenceHeight",it.sourceHeight);put("referencePixelSha256",it.pixelSha256)}
+            }
             executionEngine.unload()
             currentCoroutineContext().ensureActive()
             val progress:(com.user.localagent.inference.ImageGenerationProgress)->Unit={value->
                 mutableState.update {it.copy(phase=value.phase,progress=value.fraction,step=value.step,totalSteps=value.totalSteps)}
             }
             val result=if(remote!=null){
-                try{if(resourceAware)ownedCompute().withPcResource(cleanup={pcImages.cancel()}) {
-                    pcImages.generate(remote,effectivePrompt,negative,seed,steps,reference?.bitmap,progress)
-                }else pcImages.generate(remote,effectivePrompt,negative,seed,steps,reference?.bitmap,progress)}
+                try{if(resourceAware)ownedCompute().withPcResource(cleanup={remoteSession.releaseCompute()}) {
+                    remoteSession.generate(remote,effectivePrompt,negative,seed,steps,reference?.bitmap,progress,resume,recoveryContext)
+                }else remoteSession.generate(remote,effectivePrompt,negative,seed,steps,reference?.bitmap,progress,resume,recoveryContext)}
                 catch(cancel:CancellationException){throw cancel}
                 catch(error:java.io.IOException){
-                    pcSettings.report("PC 연결이 끊겨 휴대폰에서 다시 생성합니다.")
-                    models.refresh()
-                    reference?.bitmap?.recycle();reference=referenceUri?.let{prepareReference(it,if(models.isQualityModel)1024 else 512)}
-                    val local=models.verifiedModelFile()?:throw error
-                    runPhone(local,effectivePrompt,negative,seed,if(models.isQualityModel)PhoneImageQuality.STEPS else 8,reference?.bitmap,strength,progress)
+                    throw IllegalStateException("PC 연결을 확인하지 못해 작업을 멈췄습니다. 휴대폰으로 자동 재생성하지 않았습니다. PC 상태를 확인하거나 휴대폰을 직접 선택해주세요.",error)
                 }
             }else runPhone(checkNotNull(model),effectivePrompt,negative,seed,steps,reference?.bitmap,strength,progress)
             try {
@@ -169,6 +221,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
                 val saved=scopedRepository.getNote(metadataId!!)
                 check(saved!=null&&saved.body==metadata&&saved.collection=="generated-images"){"생성 이미지 메타데이터 저장을 확인하지 못했습니다."}
                 currentCoroutineContext().ensureActive();verifyAccess();committed=true;completed=true
+                if(result.computeLocation=="pc")withContext(NonCancellable){runCatching{remoteSession.acknowledgeSavedFile(artifact.file)}}
                 mutableState.update {it.copy(outputPath=artifact.file.path,seed=artifact.seed,progress=1f,step=result.samplingSteps,totalSteps=result.samplingSteps,error=null,computeLocation=result.computeLocation,sourceModelId=result.sourceModelId,strength=if(result.computeLocation=="phone"&&reference!=null)strength else null)}
                 return artifact
             }finally {result.bitmap.recycle()}

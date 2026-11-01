@@ -5,21 +5,38 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.user.localagent.core.ImageConsistencyRecipe
+import com.user.localagent.core.ImageConsistencyLibrary
 import com.user.localagent.data.DraftStore
 import java.io.File
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 
 /** Explicit Studio preset only. Never attached silently to chats or queued requests. */
-class ImageConsistencyStore(context:Context) {
+class ImageConsistencyStore(context:Context,scopeKey:String="image-studio-consistency-v1") {
+    init {require(scopeKey.matches(Regex("[a-zA-Z0-9-]{1,80}")))}
     private val context=context.applicationContext
-    private val store=DraftStore(this.context,"image-studio-consistency-v1",16_000)
-    private val directory=File(this.context.filesDir,"shared/image-series").apply {mkdirs()}
-    fun read():ImageConsistencyRecipe?=store.readStrict().takeIf {it.isNotEmpty()}?.let {
-        Json.decodeFromString<ImageConsistencyRecipe>(it).validate().also {recipe->reference(recipe)}
+    private val store=DraftStore(this.context,scopeKey,256_000)
+    private val directory=File(this.context.filesDir,"shared/image-series"+
+        if(scopeKey=="image-studio-consistency-v1")""else"/scoped/"+hash(scopeKey.toByteArray())).apply {mkdirs()}
+    private fun library():ImageConsistencyLibrary {
+        val raw=store.readStrict()
+        if(raw.isEmpty())return ImageConsistencyLibrary()
+        return if("schemaVersion" in Json.parseToJsonElement(raw).jsonObject)
+            Json.decodeFromString<ImageConsistencyLibrary>(raw).validate()
+        else ImageConsistencyLibrary(recipes=listOf(Json.decodeFromString<ImageConsistencyRecipe>(raw).validate())).validate()
     }
-    fun save(recipe:ImageConsistencyRecipe) {recipe.validate();reference(recipe);store.write(Json.encodeToString(recipe))}
+    fun list():List<ImageConsistencyRecipe> = synchronized(LOCK){library().recipes}
+    fun read():ImageConsistencyRecipe? = synchronized(LOCK){library().recipes.firstOrNull()?.also{reference(it)}}
+    fun save(recipe:ImageConsistencyRecipe) {
+        recipe.validate();reference(recipe)
+        synchronized(LOCK){store.write(CODEC.encodeToString(library().save(recipe)))}
+    }
+    /** Forget only a named recipe, never its reference file or generated photographs. */
+    fun remove(expected:ImageConsistencyRecipe) = synchronized(LOCK){store.write(CODEC.encodeToString(library().remove(expected)))}
+    /** Removes only this scope's preset; source photos and generated outputs remain intact. */
+    fun clearPreset() = synchronized(LOCK){store.write("")}
     fun reference(recipe:ImageConsistencyRecipe):Uri? {
         val name=recipe.validate().referenceName?:return null
         val file=File(directory,name)
@@ -52,4 +69,5 @@ class ImageConsistencyStore(context:Context) {
         return name to sha
     }
     private fun hash(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it.toInt()and 255)}
+    companion object {private val LOCK=Any();private val CODEC=Json{encodeDefaults=true}}
 }

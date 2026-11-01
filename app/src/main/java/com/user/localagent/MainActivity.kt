@@ -173,6 +173,7 @@ class MainActivity : ComponentActivity() {
     private fun actionSummary(action:ToolCall)=app.runs.actionSummary(action)
     @Composable private fun AppScreen() {
         var tab by rememberSaveable {mutableIntStateOf(0)}
+        var imageStudioStatus by rememberSaveable {mutableStateOf("")}
         val requested by requestedTab.collectAsState()
         LaunchedEffect(requested){requested?.let {tab=it;requestedTab.value=null}}
         val state by status.collectAsState()
@@ -272,6 +273,7 @@ class MainActivity : ComponentActivity() {
                 activityByMessageId=roomActivities,onLoadOlderActivity=chat.workActivityController::loadOlder,
                 activeGoalLabel=roomGoal?.takeIf {it.threadId==composerThreadId&&it.projectId.orEmpty()==selectedProjectId}?.outcome,
                 backgroundWork={Column {
+                    if(imageWork.running)TextButton(onClick={tab=7}){Text("이미지 작업 진행 중 · ${imageWork.phase} · 열기")}
                     CallFollowUpConversationStatus(app,composerThreadId)
                     activeExecutions.filter {it.threadId!=composerThreadId}.forEach {run->
                         TextButton(onClick={chat.selectThread(run.threadId)}){
@@ -284,8 +286,9 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick={if(tab in setOf(4,7,10)){tab=0;refreshVisibleHistory()}else tab=4}){Text(if(tab in setOf(4,7,10))"‹ 대화"else"‹ 설정·참고")}
                     Text(listOf("","모델 관리","기억과 작업","문서 작업실","설정·참고","자료 연결과 분석","대화 기록","이미지 작업실","문자·일정 분석","웹·쇼핑 검색","프로젝트 폴더")[tab],style=MaterialTheme.typography.titleMedium)
                 }
-                Text(state,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
-                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen{tab=it};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{status.value=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
+                val panelStatus=if(tab==7)imageStudioStatus else state
+                if(panelStatus.isNotBlank())Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
+                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen{tab=it};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
             }
         }
         if(queueOpen)RunQueueDialog(
@@ -293,6 +296,7 @@ class MainActivity : ComponentActivity() {
                 threadLabel=roomThreads.firstOrNull{it.id==request.threadId}?.title?:"대화",modelLabel=if(request.modelId=="auto")"모델 자동"else installed.firstOrNull{it.id==request.modelId}?.title?:"선택한 모델",
                 modeLabel=com.user.localagent.core.AgentWorkMode.entries.firstOrNull{it.wireName==request.mode}?.label?:request.mode,goalLinked=request.goal!=null,continuation=request.continuation!=null)},
             onDismiss={queueOpen=false},onEdit=chat::editQueued,onMove=chat::reorderQueued,onCancel=chat::cancelQueued,
+            onManageGoal={threadId->queueOpen=false;chat.selectThread(threadId)},
         )
         if(skillLibraryOpen)SkillLibraryDialog(chat.bundledSkills,toolStatuses=skillCapabilities,onDismiss={skillLibraryOpen=false})
         goalEditorThreadId?.takeIf{it==selectedThreadId&&it.isNotBlank()}?.let {goalThread->
@@ -438,7 +442,7 @@ class MainActivity : ComponentActivity() {
             }
             if(section==1)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
             if(section==1)item {CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}}
-            if(section==2)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity){status.value=it}}
+            if(section==2)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}}
             if(section==2)item {com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}}
             if(section==2)item {OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))},modifier=Modifier.fillMaxWidth()){Text("Google·메일·문서 앱 연결 설정")}}
             if(section==2)item {PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get()){status.value=it}}

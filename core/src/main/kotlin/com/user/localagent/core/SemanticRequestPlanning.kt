@@ -34,10 +34,11 @@ object SemanticRequestPlanning {
         "list_imported_conversations", "search_conversation_imports", "search_conversation_history",
         "list_audio_recordings", "search_audio_transcripts", "list_calendar_events", "search_notes",
         "search_memories", "list_project_files", "read_project_file",
-    ) + com.user.localagent.core.connections.ConnectionCatalog.privateReadNames + com.user.localagent.core.connections.PcToolCatalog.names + PrivateAnalysisToolCatalog.privateReadNames + RecordingToolCatalog.names + GoalToolCatalog.names
+    ) + com.user.localagent.core.connections.ConnectionCatalog.privateReadNames + com.user.localagent.core.connections.PcToolCatalog.names + PrivateAnalysisToolCatalog.privateReadNames + RecordingToolCatalog.names + GoalToolCatalog.names + KakaoScreenToolCatalog.names
     private fun contentTools(source: SemanticSourceKind): Set<String> = when (source) {
         SemanticSourceKind.SMS -> setOf("get_sms_summary", "analyze_sms")
-        SemanticSourceKind.KAKAO, SemanticSourceKind.TELEGRAM, SemanticSourceKind.MEDITONG -> setOf("list_messenger_notifications", "search_conversation_imports", "analyze_conversation_import")
+        SemanticSourceKind.KAKAO -> setOf("list_messenger_notifications", "search_conversation_imports", "analyze_conversation_import", "read_kakao_screen")
+        SemanticSourceKind.TELEGRAM, SemanticSourceKind.MEDITONG -> setOf("list_messenger_notifications", "search_conversation_imports", "analyze_conversation_import")
         SemanticSourceKind.ASSISTANT -> setOf("search_conversation_history")
         SemanticSourceKind.NONE -> emptySet()
     }

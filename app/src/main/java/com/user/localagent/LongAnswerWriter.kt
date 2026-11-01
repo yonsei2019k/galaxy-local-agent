@@ -11,9 +11,15 @@ import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 
-internal data class WrittenAnswer(val text:String,val messageId:String?,val summary:GenerationSummary?,val paused:Boolean,val toolEnvelope:Boolean=false,val opaqueOutput:Boolean=false)
+internal data class WrittenAnswer(val text:String,val messageId:String?,val summary:GenerationSummary?,val paused:Boolean,val toolEnvelope:Boolean=false,val opaqueOutput:Boolean=false,val toolTruncated:Boolean=false)
 
 internal enum class GeneratedResponseKind { PROSE, TOOL, UNDECIDED }
+
+internal const val TRUNCATED_TOOL_RETRY="\n직전 도구 호출이 출력 한도에서 잘려 실행하지 않았다. 다음 행동 하나만 인자를 짧게 써서 다시 반환하라."
+
+/** A cut tool call is discarded and re-chosen, never shown, joined with a later pass or executed. */
+internal fun truncatedToolCallRecoverable(kind:GeneratedResponseKind,structured:Boolean,truncated:Boolean?)=
+    truncated==true&&(kind==GeneratedResponseKind.TOOL||structured&&kind==GeneratedResponseKind.UNDECIDED)
 
 /** A bounded JSON protocol probe, not a classifier of the owner's natural-language intent. */
 internal fun generatedResponseKind(text:CharSequence,finished:Boolean=false):GeneratedResponseKind {
@@ -172,7 +178,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
 
     @OptIn(FlowPreview::class)
     suspend fun write(model:InstalledModel,initialOptions:InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
-        structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null):WrittenAnswer {
+        structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false):WrittenAnswer {
         val started=clock()
         require(partCharBudget in 1..ANSWER_PART_CHAR_BUDGET)
         val deadline=started+limits.maxElapsedMillis
@@ -348,6 +354,8 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     rawOnly=true
                     val kind=generatedResponseKind(raw,finished=true)
                     val jsonCandidate=raw.firstOrNull {!it.isWhitespace()}=='{'
+                    if(recoverTruncatedTool&&jsonCandidate&&truncatedToolCallRecoverable(kind,structuredSchema!=null,lastSummary?.mayBeTruncated))
+                        return WrittenAnswer("",null,lastSummary,false,toolTruncated=true)
                     val invalidTool=kind==GeneratedResponseKind.TOOL&&runCatching {com.user.localagent.core.ToolRegistry.parseAndValidate(raw.toString())}.isFailure
                     if(jsonCandidate&&(kind==GeneratedResponseKind.UNDECIDED||lastSummary?.mayBeTruncated==true||invalidTool&&lastSummary?.reason==GenerationStopReason.SDK_DONE_UNKNOWN)){
                         paused=true;finalDetail="형식이 불확실한 JSON 원문을 보존했습니다 · 자동 이어쓰기·실행 없음"

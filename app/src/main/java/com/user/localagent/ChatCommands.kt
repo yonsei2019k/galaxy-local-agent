@@ -143,7 +143,7 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
             app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,updated,request.modelId,request.thinking){user,newRun->
                 QueuedChatRequest(newRun.id,threadId,thread.activeBranchId,thread.projectId,updated,request.modelId,request.thinking,emptyList(),user.id,
                     allowTools=request.allowTools,mode=request.mode,previousSteps=steps,workspaceBinding=request.workspaceBinding,goal=request.goal,
-                    pcDataBinding=request.pcDataBinding).also {submitted=it}.toJson()
+                    pcDataBinding=request.pcDataBinding,kakaoReadBinding=request.kakaoReadBinding,pcImageRecoveryAllowed=request.pcImageRecoveryAllowed).also {submitted=it}.toJson()
             }
             queued.value=listOf(checkNotNull(submitted))+queued.value
             app.repository.chat.reorderQueuedRuns(queued.value.map {it.runId})

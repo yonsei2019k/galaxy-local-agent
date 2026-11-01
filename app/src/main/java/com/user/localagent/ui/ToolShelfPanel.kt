@@ -306,8 +306,7 @@ import kotlinx.serialization.json.JsonPrimitive
     fun execute(block:suspend ()->Unit){if(working)return
         if(!com.user.localagent.benchmark.RuntimeGate.inference.compareAndSet(false,true)){onStatus("현재 모델 작업을 마치거나 중지한 뒤 영상을 처리해주세요.");return}
         working=true;operation=scope.launch(start=CoroutineStart.UNDISPATCHED) {
-        app.cancelIdleUnload();app.updates.setBusy(true)
-        try{app.engine.unload();block()}
+        try{app.cancelIdleUnload();app.updates.setBusy(true);app.engine.unload();block()}
         catch(cancel:CancellationException){onStatus("영상 작업을 중단했습니다.");throw cancel}
         catch(error:Exception){onStatus(error.message?.take(250)?:"영상 작업을 완료하지 못했습니다.")}
         finally{operation=null;working=false;app.updates.setBusy(false);com.user.localagent.benchmark.RuntimeGate.inference.set(false);app.scheduleIdleUnload()}

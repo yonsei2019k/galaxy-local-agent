@@ -7,9 +7,13 @@ object AutonomousReviewPolicy {
     const val MAX_REVIEWS = 2
     const val MAX_ROUNDS = 12
     sealed interface Decision {
-        data class Complete(val summary:String):Decision
-        data class Next(val summary:String,val call:ToolCall):Decision
+        val summary:String
+        data class Complete(override val summary:String):Decision
+        data class Next(override val summary:String,val call:ToolCall):Decision
+        data class Unavailable(override val summary:String="후속 검토 응답을 확인하지 못했습니다. 실제 실행 근거만 사용하고 미검토 범위는 완료로 판단하지 않습니다."):Decision
     }
+    fun forFinalization(raw:String,tools:Set<String>,complete:Boolean):Decision =
+        if(!complete)Decision.Unavailable() else try{parse(raw,tools)}catch(_:IllegalArgumentException){Decision.Unavailable()}catch(_:IllegalStateException){Decision.Unavailable()}
 
     fun schema(tools:Set<String>):String {
         val complete=buildJsonObject {

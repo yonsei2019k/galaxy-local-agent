@@ -14,12 +14,15 @@ data class QueuedChatRequest(
     val mode:String="act",val previousSteps:List<HarnessStep> = emptyList(),val queueOrder:Long=System.currentTimeMillis(),val workspaceBinding:String?=null,
     val goal:GoalDefinition?=null,val parentGoalStartRunId:String?=null,
     val pcDataBinding:String?=null,
+    val kakaoReadBinding:String?=null,
+    val pcImageRecoveryAllowed:Boolean=false,
 ) {
     init {
         AgentWorkMode.parse(mode)
         goal?.let {it.validate();require(it.threadId==threadId&&it.projectId==projectId){"목표 스냅샷의 대화·프로젝트가 실행과 다릅니다."}}
         parentGoalStartRunId?.let {require(goal!=null&&mode in setOf("act","debug")&&it.isNotBlank()&&it.length<=100&&it!=runId&&it.none {c->c.code<32}){"목표 시작 요청의 원래 실행 연결이 올바르지 않습니다."}}
         pcDataBinding?.let {require(it.matches(Regex("[a-f0-9]{64}"))){"PC 자료 선택의 고정 버전이 올바르지 않습니다."}}
+        kakaoReadBinding?.let {require(runCatching{java.util.UUID.fromString(it).toString()==it}.getOrDefault(false))}
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
@@ -27,6 +30,8 @@ data class QueuedChatRequest(
         put("mode",mode);put("queueOrder",queueOrder)
         put("workspaceBinding",workspaceBinding)
         put("pcDataBinding",pcDataBinding)
+        put("kakaoReadBinding",kakaoReadBinding)
+        put("pcImageRecoveryAllowed",pcImageRecoveryAllowed)
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -47,7 +52,8 @@ data class QueuedChatRequest(
                 o["queueOrder"]?.jsonPrimitive?.longOrNull?:0,o["workspaceBinding"]?.jsonPrimitive?.contentOrNull,
                 o["goal"]?.takeUnless {it is JsonNull}?.jsonObject?.let(GoalDefinition::parse),
                 o["parentGoalStartRunId"]?.jsonPrimitive?.contentOrNull,
-                o["pcDataBinding"]?.jsonPrimitive?.contentOrNull)
+                o["pcDataBinding"]?.jsonPrimitive?.contentOrNull,o["kakaoReadBinding"]?.jsonPrimitive?.contentOrNull,
+                o["pcImageRecoveryAllowed"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false)
         }
     }
 }

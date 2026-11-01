@@ -116,9 +116,9 @@ class PcComputeValidation {
         val originalImageModel=imageSettings.state.value.imageModelId
         val selectedImageModel=InstrumentationRegistry.getArguments().getString("pcImageModelId")?:com.user.localagent.core.PcImageModelCatalog.QUALITY_ID
         val imagePin=com.user.localagent.core.PcImageModelCatalog.selection(selectedImageModel)
-        imageSettings.imageModel(selectedImageModel)
         val owned=openOwnedText(app,enableImages=true);val engine=owned.engine
         try {
+            imageSettings.imageModel(selectedImageModel)
             val studio=com.user.localagent.images.ImageStudioController(app.applicationContext,app,requestEngine=engine,ownerRunId=owned.owner)
             assertNotNull(PcTransport(app.applicationContext).available(owned.owner))
             val monitor=launch {
@@ -144,6 +144,57 @@ class PcComputeValidation {
             report("pc-image-"+(if(selectedImageModel==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"sdxl"else"qwen")+"-phone-save.json",buildJsonObject{put("passed",true);put("width",1024);put("height",1024);put("phone_file",result.file.name);put("gallery_readback",true);put("sha256",sha(bytes));put("model_sha256",imagePin.sha256);put("model_id",selectedImageModel)})
             // Keep this owner-requested sample on the phone for viewing; PC scratch must be released.
         }finally{owned.close();if(imageSettings.state.value.imageModelId==selectedImageModel)imageSettings.imageModel(originalImageModel)}
+    }
+    @Test fun pcReferenceEditUsesPinnedEditorAndPreservesSource()=runBlocking {
+        val args=InstrumentationRegistry.getArguments()
+        assumeTrue(args.getString("pcImageApproved")=="true"&&args.getString("pcReferenceImageApproved")=="true")
+        val app=app();val context=app.applicationContext
+        val expected=checkNotNull(args.getString("referenceExpectedSha256"))
+        require(expected.matches(Regex("[a-f0-9]{64}")))
+        fun sha(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it.toInt()and 255)}
+        // The harness supplies only its own public synthetic PNG, never a user's selected photo.
+        val source=File(context.getExternalFilesDir(null),"benchmarks/qa-public-reference.png")
+        require(source.isFile&&source.length() in 1..8*1024*1024)
+        val sourceBytes=source.readBytes();require(sha(sourceBytes)==expected)
+        val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true};BitmapFactory.decodeByteArray(sourceBytes,0,sourceBytes.size,bounds)
+        require(bounds.outMimeType=="image/png"&&bounds.outWidth==1024&&bounds.outHeight==1024)
+        val reference=File(context.filesDir,"shared/qa-reference-${UUID.randomUUID()}.png").apply {parentFile!!.mkdirs();writeBytes(sourceBytes)}
+        val uri=androidx.core.content.FileProvider.getUriForFile(context,"${context.packageName}.files",reference)
+        val settings=PcComputeSettings.get(context);val original=settings.state.value.imageModelId
+        val owned=try{openOwnedText(app,enableImages=true)}catch(error:Throwable){reference.delete();throw error}
+        val pin=com.user.localagent.core.PcImageModelCatalog.effectiveSelection(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,true)
+        try {
+            settings.imageModel(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)
+            val studio=com.user.localagent.images.ImageStudioController(context,app,requestEngine=owned.engine,ownerRunId=owned.owner)
+            assertNotNull(PcTransport(context).available(owned.owner))
+            val monitor=launch {
+                while(isActive){val state=studio.state.value
+                    report("pc-image-qwen-edit-progress.json",buildJsonObject{put("modelId",pin.id);put("phase",state.phase);put("step",state.step);put("steps",state.totalSteps);put("running",state.running)})
+                    delay(5000)
+                }
+            }
+            val started=SystemClock.elapsedRealtime()
+            val result=try {withTimeout(4*60*60_000L){studio.generateInCurrentRequest(
+                "Keep the exact same red ceramic mug and blue glass object, their shapes, handles, colors and positions. Change only the background to a softly lit garden. Preserve the objects and the wooden board. Photorealistic product photography.",
+                steps=50,seed=12345,referenceUri=uri,strength=.45f)}}finally{monitor.cancelAndJoin()}
+            assertEquals(expected,sha(source.readBytes()));assertEquals(expected,sha(reference.readBytes()))
+            val metadata=Json.parseToJsonElement(checkNotNull(app.repository.latestNote("generated-images")).body).jsonObject
+            assertEquals("pc",metadata["computeLocation"]?.jsonPrimitive?.content)
+            assertEquals("img2img",metadata["mode"]?.jsonPrimitive?.content)
+            assertEquals(expected,metadata["referenceSha256"]?.jsonPrimitive?.content)
+            assertEquals(pin.id,metadata["modelFile"]?.jsonPrimitive?.content)
+            assertEquals(pin.sha256,metadata["modelSha256"]?.jsonPrimitive?.content)
+            val gallery=studio.exportToGallery();val exported=context.contentResolver.openInputStream(gallery)!!.use{it.readBytes()}
+            assertEquals(sha(result.file.readBytes()),sha(exported));assertEquals(1024,result.width);assertEquals(1024,result.height)
+            report("pc-image-qwen-edit-phone-save.json",buildJsonObject{
+                put("passed",true);put("reference_sha256",expected);put("source_unchanged",true);put("model_id",pin.id);put("model_sha256",pin.sha256)
+                put("phone_file",result.file.name);put("sha256",sha(exported));put("gallery_readback",true)
+                put("elapsed_ms",SystemClock.elapsedRealtime()-started);put("identity_quality_verified",false)
+            })
+        }finally{
+            owned.close();reference.delete()
+            if(settings.state.value.imageModelId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)settings.imageModel(original)
+        }
     }
     @Test fun actualPcComputationsOverlapOnePhoneGeneration()=runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("pcDualConcurrencyApproved")=="true")
@@ -233,12 +284,12 @@ class PcComputeValidation {
     }
 
     private class OwnedText(val owner:String,val engine:AutomaticComputeEngine,private val app:AppContainer,
-        private val previousText:Boolean,private val previousImages:Boolean,private val busy:java.io.Closeable,private val admission:Any){
+        private val previousText:Boolean,private val previousImages:Boolean,private val routingRevision:Long,private val busy:java.io.Closeable,private val admission:Any){
         suspend fun close()=withContext(NonCancellable){
             try {engine.unload();busy.close()}
             finally {
                 val settings=PcComputeSettings.get(app.applicationContext)
-                try {settings.automaticText(previousText);settings.preferPcImages(previousImages)}
+                try {settings.updateRoutingIfUnchanged(routingRevision,previousText,previousImages)}
                 finally {app.runs.queueMutation.unlock(admission);app.scheduleIdleUnload()}
             }
         }
@@ -246,16 +297,18 @@ class PcComputeValidation {
     private fun openOwnedText(app:AppContainer,enableImages:Boolean=false):OwnedText {
         val owner=UUID.randomUUID().toString();val admission=Any()
         check(app.runs.queueMutation.tryLock(admission)){"A queue change is active"}
-        val settings=PcComputeSettings.get(app.applicationContext);val previous=settings.state.value
+        val settings=PcComputeSettings.get(app.applicationContext);val capturedRevision=settings.authorizationRevision;val previous=settings.state.value
         var busy:java.io.Closeable?=null
+        var appliedRevision:Long?=null
         try {
-            check(!app.runs.hasActiveRuns.value&&app.runs.queued.value.isEmpty()&&!RuntimeGate.benchmark.get()&&!RuntimeGate.inference.get()&&!RuntimeGate.pc.get()){"Existing owner work has priority"}
+            check(!app.runs.hasActiveRuns.value&&app.runs.queued.value.isEmpty()&&!app.imageStudio.state.value.running&&!RuntimeGate.benchmark.get()&&!RuntimeGate.inference.get()&&!RuntimeGate.pc.get()){"Existing owner work has priority"}
             busy=app.updates.acquireBusy(owner);app.cancelIdleUnload()
-            settings.automaticText(true);if(enableImages)settings.preferPcImages(true)
+            val routingRevision=checkNotNull(settings.updateRoutingIfUnchanged(capturedRevision,true,if(enableImages)true else previous.preferPcImages)){"Owner routing changed during fixture admission"}
+            appliedRevision=routingRevision
             val engine=AutomaticComputeEngine(app.applicationContext,owner,beforePhoneLoad={app.engine.unloadPhoneResidency()})
-            return OwnedText(owner,engine,app,previous.automaticText,previous.preferPcImages,busy,admission)
+            return OwnedText(owner,engine,app,previous.automaticText,previous.preferPcImages,routingRevision,busy,admission)
         }catch(error:Throwable){
-            try {busy?.close();settings.automaticText(previous.automaticText);settings.preferPcImages(previous.preferPcImages)}
+            try {busy?.close();appliedRevision?.let {settings.updateRoutingIfUnchanged(it,previous.automaticText,previous.preferPcImages)}}
             finally {app.runs.queueMutation.unlock(admission)}
             throw error
         }

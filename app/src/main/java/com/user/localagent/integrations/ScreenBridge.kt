@@ -157,6 +157,8 @@ class ScreenBridgeService : AccessibilityService() {
         check(window.isActive || ownOverlayIsActive()) { "Target window is not active" }
         return root
     }
+    /** Used only by the separately consented, version-bound Kakao content reader. */
+    internal fun approvedKakaoRoot():AccessibilityNodeInfo = activeRoot(KakaoScreenReader.PACKAGE)
     private fun ownOverlayIsActive(): Boolean = inspector != null && windows.any {
         it.isActive && it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY && it.root?.packageName?.toString() == packageName
     }

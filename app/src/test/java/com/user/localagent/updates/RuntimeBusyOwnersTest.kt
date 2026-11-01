@@ -21,6 +21,17 @@ class RuntimeBusyOwnersTest {
         assertThrows(IllegalStateException::class.java){owners.setLegacyBusy(true)}
         owners.installationFinished();val next=owners.acquire("next-run");next.close();assertFalse(owners.busy())
     }
+    @Test fun lostInstallerCallbackStopsBlockingNewWorkAfterTheHold() {
+        var now=1_000L;val owners=RuntimeBusyOwners{now}
+        assertTrue(owners.submitInstallIfIdle{})
+        now+=RuntimeBusyOwners.INSTALL_HOLD_MILLIS-1
+        assertTrue(owners.busy());assertThrows(IllegalStateException::class.java){owners.acquire("too-early")}
+        now+=1
+        assertFalse(owners.busy())
+        owners.setLegacyBusy(true);owners.setLegacyBusy(false)
+        val run=owners.acquire("next");assertFalse(owners.submitInstallIfIdle{});run.close()
+        assertTrue(owners.submitInstallIfIdle{})
+    }
     @Test fun rejectedCommitAndFailedBusyPublicationLeaveNoPhantomOwner() {
         val owners=RuntimeBusyOwners()
         assertThrows(IllegalStateException::class.java){owners.submitInstallIfIdle{error("synthetic installer rejection")}}

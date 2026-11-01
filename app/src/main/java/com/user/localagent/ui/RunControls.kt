@@ -64,7 +64,7 @@ fun RunModeSelector(mode:String,onModeChange:(String)->Unit,modifier:Modifier=Mo
 }
 
 @Composable
-fun RunQueueDialog(items:List<UiQueuedRun>,onDismiss:()->Unit,onEdit:(String,String)->Unit,onMove:(String,Int)->Unit,onCancel:(String)->Unit){
+fun RunQueueDialog(items:List<UiQueuedRun>,onDismiss:()->Unit,onEdit:(String,String)->Unit,onMove:(String,Int)->Unit,onCancel:(String)->Unit,onManageGoal:((String)->Unit)?=null){
     var editing by remember{mutableStateOf<UiQueuedRun?>(null)}
     var editedText by remember{mutableStateOf("")}
     AlertDialog(onDismissRequest=onDismiss,title={Text("대기 요청 · ${items.size}개")},text={
@@ -82,6 +82,7 @@ fun RunQueueDialog(items:List<UiQueuedRun>,onDismiss:()->Unit,onEdit:(String,Str
                         TextButton(onClick={onCancel(item.id)},modifier=Modifier.testTag("queue_cancel_${item.id}")){Text("취소",color=ZipHapColors.Error)}
                     }
                     if(item.goalLinked)Text("고정된 목표 요청입니다. 취소 후 채팅의 목표 관리에서 수정하고 다시 추진할 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
+                    if(item.goalLinked&&onManageGoal!=null)TextButton(onClick={onManageGoal(item.threadId)},modifier=Modifier.testTag("queue_goal_${item.id}")){Text("목표가 있는 대화 열기")}
                     if(item.continuation)Text("같은 답변에 이어 쓰는 요청입니다. 기존 요청과 출력은 유지됩니다.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
                     HorizontalDivider()
                 }

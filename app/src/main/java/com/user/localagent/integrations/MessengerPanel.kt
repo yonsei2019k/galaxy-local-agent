@@ -11,7 +11,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.user.localagent.automation.AssistantNotificationListener
 
-@Composable fun MessengerPanel(context:Context,report:(String)->Unit) {
+@Composable fun MessengerPanel(context:Context,onAsk:((String)->Unit)?=null,report:(String)->Unit) {
+    KakaoScreenPanel(context,onAsk,report)
     val messages by MessengerInbox.messages.collectAsState()
     val lifecycle=LocalLifecycleOwner.current
     var listenerGranted by remember {mutableStateOf(AssistantNotificationListener.granted(context))}
@@ -42,7 +43,7 @@ import com.user.localagent.automation.AssistantNotificationListener
             Text("${MessengerInbox.supported[message.packageName]} · ${message.conversation?:message.title}",style=MaterialTheme.typography.titleSmall)
             message.sender?.let {Text("보낸 사람 · $it",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
             Text(message.text,maxLines=5)
-            Row {TextButton(enabled=message.canReply,onClick={replyTo=message;draft="";rule=false}){Text("답장 작성")};if(message.canReply&&message.stableThread)TextButton(onClick={replyTo=message;draft="확인했습니다. 내용을 검토한 뒤 답변드리겠습니다.";rule=true}){Text("자동 답장 규칙")}}
+            Row {TextButton(enabled=message.canReply,onClick={replyTo=message;draft="";rule=false}){Text("답장 작성")};if(message.packageName!="com.kakao.talk"&&message.canReply&&message.stableThread)TextButton(onClick={replyTo=message;draft="확인했습니다. 내용을 검토한 뒤 답변드리겠습니다.";rule=true}){Text("자동 답장 규칙")}}
         }}
     }
     OutlinedButton(onClick={MessengerInbox.clear(context);report("알림 세션과 자동 답장 규칙을 삭제했습니다.")}){Text("메시지·답장 규칙 지우기")}

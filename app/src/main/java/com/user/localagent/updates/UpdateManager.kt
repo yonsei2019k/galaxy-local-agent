@@ -235,6 +235,8 @@ class InstallResultReceiver:BroadcastReceiver() {
         val status=intent.getIntExtra(PackageInstaller.EXTRA_STATUS,PackageInstaller.STATUS_FAILURE)
         val preferences=context.getSharedPreferences("updates",Context.MODE_PRIVATE)
         if(status==PackageInstaller.STATUS_PENDING_USER_ACTION){
+            // Android now waits for the owner, possibly forever; new work must not wait with it.
+            UpdateManager.installationFinished(context)
             val confirmation=intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)?:return
             val manager=context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("updates","앱 업데이트",NotificationManager.IMPORTANCE_DEFAULT))

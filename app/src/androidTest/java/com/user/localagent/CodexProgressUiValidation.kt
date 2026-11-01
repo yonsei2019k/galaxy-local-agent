@@ -29,6 +29,94 @@ class CodexProgressUiValidation {
     @get:Rule val compose=createAndroidComposeRule<MainActivity>()
     @Before fun approved(){assumeTrue(InstrumentationRegistry.getArguments().getString("codexProgressUiApproved")=="true")}
 
+    @Test fun multipleFilesHaveSeparateOpenSaveAndShareActions(){
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val dir=java.io.File(context.filesDir,"exports").apply{mkdirs()}
+        val files=(1..2).map{java.io.File(dir,"artifact-${UUID.randomUUID()}.txt")}
+        val created=mutableListOf<java.io.File>()
+        try{
+            files.forEach{check(it.createNewFile());created+=it;it.writeText("SYNTHETIC_PUBLIC_RESULT")}
+            val text=files.joinToString("\n"){"[[file:${it.name}]]"}
+            compose.runOnUiThread{compose.activity.setContent{MaterialTheme{FileArtifactChatPreview(text)}}}
+            compose.onNodeWithText("파일 결과 · 2개").assertIsDisplayed()
+            compose.onAllNodesWithText("열기").assertCountEquals(2)
+            compose.onAllNodesWithText("공유").assertCountEquals(2)
+            compose.onAllNodesWithText("파일 저장").assertCountEquals(2)
+        }finally{created.forEach{it.delete()}}
+    }
+
+    @Test fun seriesPickerLoadsChosenRecipeAndRequiresExplicitDeleteConfirmation(){
+        val first=com.user.localagent.core.ImageConsistencyRecipe(title="SYNTHETIC_FIRST")
+        val second=first.copy(title="SYNTHETIC_SECOND",seed=78)
+        var chosen:com.user.localagent.core.ImageConsistencyRecipe?=null
+        var deleted:com.user.localagent.core.ImageConsistencyRecipe?=null
+        compose.runOnUiThread{compose.activity.setContent{MaterialTheme{
+            ImageSeriesPicker(listOf(first,second),true,onDismiss={},onLoad={chosen=it},onDelete={deleted=it})
+        }}}
+        compose.onNodeWithTag("series_load_1").performClick()
+        compose.runOnIdle{assertEquals(second,chosen)}
+        compose.onNodeWithTag("series_remove_0").performClick()
+        compose.runOnIdle{assertNull(deleted)}
+        compose.onNodeWithTag("confirm_series_remove").performClick()
+        compose.runOnIdle{assertEquals(first,deleted)}
+    }
+
+    @Test fun summaryShowsRealBlockerAndOpensQueueWithoutStartingWork(){
+        var queueOpened=false;var detailsOpened=false
+        compose.runOnUiThread{compose.activity.setContent{MaterialTheme{
+            ConversationWorkSummary(UiRunActivity("summary-run","summary-room","summary-answer","waiting_approval",
+                events=listOf(UiRunActivityEvent("approval",UiWorkEventKind.TOOL,"SYNTHETIC_APPROVAL_REQUIRED"))),
+                busy=true,status="",nextRequest="SYNTHETIC_NEXT",queuedCount=1,
+                onDetails={detailsOpened=true},onQueue={queueOpened=true})
+        }}}
+        compose.onNodeWithText("사용자 확인이 필요합니다").assertIsDisplayed()
+        compose.onNodeWithTag("current_work_detail").assertTextEquals("SYNTHETIC_APPROVAL_REQUIRED")
+        compose.onNodeWithTag("next_work_summary").assertTextContains("SYNTHETIC_NEXT",substring=true)
+        compose.onNodeWithTag("summary_open_activity").performClick()
+        compose.onNodeWithTag("summary_open_queue").performClick()
+        compose.runOnIdle{assertTrue(detailsOpened);assertTrue(queueOpened)}
+    }
+
+    @Test fun goalQueueOpensOriginalRoomGoalAndCannotEditCapturedRequest(){
+        var goalRoom:String?=null
+        compose.runOnUiThread{compose.activity.setContent{MaterialTheme{
+            RunQueueDialog(listOf(UiQueuedRun("goal-queue","original-room","SYNTHETIC_GOAL","SYNTHETIC_GOAL",goalLinked=true)),
+                onDismiss={},onEdit={_,_->error("Captured goal request must stay immutable")},onMove={_,_->},onCancel={},onManageGoal={goalRoom=it})
+        }}}
+        compose.onNodeWithTag("queue_edit_goal-queue").assertIsNotEnabled()
+        compose.onNodeWithTag("queue_goal_goal-queue").performClick()
+        compose.runOnIdle{assertEquals("original-room",goalRoom)}
+    }
+
+    @Test fun busyComposerSendsOnlyToExplicitlySelectedDestination(){
+        var steered:String?=null;var queued:String?=null
+        val draft=mutableStateOf("SYNTHETIC_CHANGE")
+        compose.runOnUiThread{compose.activity.setContent{MaterialTheme{
+            ChatWorkspace(emptyList(),true,"SYNTHETIC_WORK",emptyList(),onModelChange={},onSend={error("Busy composer must not start a fresh direct request")},
+                onStop={},onNavigate={},composerKey="qa-steer-room",activeRunKey="qa-steer-run",
+                draftValue=draft.value,onDraftChange={draft.value=it},onQueue={queued=it;true},onSteer={steered=it})
+        }}}
+        compose.onNodeWithTag("submit_mode_queue").assertIsSelected()
+        compose.onNodeWithTag("submission_timing").assertTextContains("새 작업으로 예약",substring=true)
+        compose.onNodeWithTag("submit_mode_steer").performClick()
+        compose.onNodeWithTag("submission_timing").assertTextContains("안전하게 정리한 뒤",substring=true)
+        compose.onNodeWithTag("send_button").performClick()
+        compose.runOnIdle{assertEquals("SYNTHETIC_CHANGE",steered);assertNull(queued);draft.value="SYNTHETIC_NEXT"}
+        compose.onNodeWithTag("submit_mode_queue").assertIsSelected()
+        compose.onNodeWithTag("send_button").performClick()
+        compose.runOnIdle{assertEquals("SYNTHETIC_NEXT",queued);assertEquals("SYNTHETIC_CHANGE",steered)}
+    }
+
+    @Test fun staleRoutingRestoreCannotOverwriteCurrentOwnerPolicy(){
+        val settings=com.user.localagent.compute.PcComputeSettings.get(InstrumentationRegistry.getInstrumentation().targetContext)
+        val revision=settings.authorizationRevision;val before=settings.state.value
+        assertNull(settings.updateRoutingIfUnchanged(Math.addExact(revision,1L),!before.automaticText,!before.preferPcImages))
+        assertEquals(revision,settings.authorizationRevision)
+        assertEquals(before.automaticText,settings.state.value.automaticText)
+        assertEquals(before.preferPcImages,settings.state.value.preferPcImages)
+        assertEquals(revision,settings.updateRoutingIfUnchanged(revision,before.automaticText,before.preferPcImages))
+    }
+
     @Test fun liveActivityShowsNewChecksInExecutionOrderWithoutOpeningDetails(){
         val events=mutableStateOf(listOf(
             UiRunActivityEvent("plan",UiWorkEventKind.PLAN,"SYNTHETIC_PLAN"),

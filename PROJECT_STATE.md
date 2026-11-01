@@ -2,10 +2,35 @@
 
 Updated 2026-10-31. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Latest host checkpoint: 1022 prepared; phone disconnected by owner
+## Current actual device checkpoint: installed1026; UI16 pass, autonomous planning failure remains
 
-2026-10-31: 1022 image-series consistency UI is integrated, fully built and signed, not installed. core608/app543 JVM tests passed, release lint0errors132warnings,589 frozen input hashes unchanged. App SHA744efe44915423ea0f582c75d4d85d5005d33f1c95fe04970bfb133b14eeb1fc. Private delivery and receipts: .local/delivery-1022. The last verified installed app is1021, SHA1f92e7331bd6ca4534f4dac70826caf368b1c03529ac66bcae08e8b2e98218c9; its5 UI checks passed before disconnection. Owner explicitly deferred phone installation/tests until returning. No ADB/device/model work after that instruction. See docs/image-consistency-design.ko.md and the latest agent-change-log entries. Image identity quality, new PC model native generation and autonomous real-model followup are not newly verified by this build. The older checkpoints below retain their historical evidence only.
+2026-10-31: Guarded continuations completed without cancelling the owner image.1025 was installed/base-SHA verified and passed12 device checks. Its separate real phone GGUF gemma-e2b autonomous fixture failed after225868ms with SemanticPlanningException,0 verified calculations, no followup/review completion and fixture_cleanup_verified=true. The synthetic failure fingerprint exactly matches LocalSemanticPlanner.kt's planning_timeout literal; the180second planning gate is a confirmed blocker, not a guessed cause.
 
+After predecessor completion/cleanup and owner idle/unlock,1026 was installed without data clearing; actual base SHA1c7c4f3acfa52fa3b7db0dcfbca0fd14f25cc5eaf9dfbc6956d38e5fb38022c2 was verified by the installer and independently reread during code review. All16 device UI/preset/migration/model-pin checks passed. The real-model workflow was tested on1025 only and remains failed;1026 UI tests do not establish autonomous agent success. Both private deployment processes are terminal. The preceding prepared-state sections below are history.
+
+Code review identifies planner timeout, tool failures aborting safe recovery, overly broad NonCancellable execution, review-parse failures aborting final writing and remaining PC-to-phone fallback. No production fixes were made in this review. Explicit PC-only semantics promised to the owner are still pending; genuine IOException still triggers phone SDXL in1026.
+
+## Next prepared UX release: 1026; installed1023 retained while owner image runs
+
+2026-10-31: 1026 final Validate/sign passed14m15s, core614/app550=1164 JVM tests with0failure/error/skip. Release lint0errors132warnings. All601 frozen input hashes and inventory matched before this post-build documentation update. Actual APK versionCode1026 and signatures were verified. App SHA1c7c4f3acfa52fa3b7db0dcfbca0fd14f25cc5eaf9dfbc6956d38e5fb38022c2/test SHA987abdefec4dfc0b42ce2f4472e05c2419ad87c18b924a5b59c5f484ff08a31c. Immutable delivery: .local/delivery-1026.
+
+Added multiple distinct file/image result cards (bounded16), separate click-only open/share/save with export readback, named12-series encrypted atomic library with legacy single-preset compatibility, capacity rejection without eviction, explicit selection/deletion and exact-recipe comparison protecting newer owner edits. Core4/app3/device4 new regressions cover capacity/schema/stale deletion, artifact validation/multiplicity, real encrypted legacy migration/photo preservation and picker/file UI. Device tests for1026 are not yet run.
+
+Global prepared1025 and its active continuation remain intact. A second private continuation waits for1025 device12 checks and separate real-model diagnostic to finish, requires fresh diagnostic schema and verified fixture cleanup, waits owner idle/unlock, checks lease/exact1025 baseline, then promotes1026, installs without data clearing, verifies base SHA and runs16 device checks. It retains the1025 model result separately and never claims a1026 model-workflow run. Failures/changed ownership/uncertain cleanup stop safely. Current authoritative state is in private codex-progress-1025 and codex-progress-1026 deployment-state.json/installed.json/device-validation.json, not a prepared APK alone.
+
+The owner image was last observed36/40 and is untouched. No other chats are contacted. General tool-stage recovery, external undo, context exclusion and return delta remain design/test-matrix work in docs/assistant-ux-next-2026-10-31.ko.md. Below is the preceding1025 checkpoint and older history.
+
+## Latest checkpoint: 1023 installed; 1025 signed, owner image preserved
+
+2026-10-31: Installed1023 app SHA5b3e1894fd228dfea0c1394132352caaa4b026ced49734735445112251c48154 was verified without data clearing. Eight device checks passed (UI5, reference/preset2, phone SDXL pin1). The last real autonomous workflow failed with zero verified calculations; it is not an autonomous-followup success.
+
+1025 final Validate/sign passed19minutes: core610/app547=1157 JVM tests, failures/errors/skips0, release lint Fatal0/Error0/Warning133. All595 frozen input hashes and inventory matched before these post-build documentation updates. App SHA9e2648f1202f667b7c188686c054edb669e5825af60993a3a429818146b0db91, test SHA3200cb40369e5fcf14d361ad61b434c175fbcfd9862c7cdad56ce7296d0ef279. The extra warning is the new summary component's optional Modifier parameter ordering, not a runtime error. Immutable APKs/receipts are in .local/delivery-1025.
+
+1025 adds visible-room/run-bound current-work summary, execution-record and queue links, explicit steering/next-request timing, goal queue navigation to the original room, optional file integrity details, image-work navigation and typed PC resource-wait explanation. General tool-stage recovery, reversible external changes, full result cards, context inspection and multiple image-series presets remain pending. Text continuation is not general workflow recovery.
+
+The owner explicitly requires the current image generation to continue. Guarded install/device verification is running as a private local process: it waits for signed artifacts, owner foreground work to end and keyguard to be off, verifies current1023 hash/device lease and prepared1025 pin, carries existing scoped grants, installs without data clearing and verifies the actual base APK. It then runs12 UI/reference/model-pin checks followed by a separate real autonomous diagnostic. It waits at most4hours and stops safely on changed ownership/artifacts, unavailable device or failed checks. This process is not evidence of installation or device success. Current authoritative phase/results: private tools codex-progress-1025/deployment-state.json and installed.json when present.
+
+PC API SDXL1024px/50steps previously succeeded in1160.781seconds; phone delivery and identity quality were not verified. Qwen2512 and Edit2511 assets are separately SHA-verified; three CUDA editor attempts failed before sampling. The same-model Vulkan public-reference probe has reached actual sampling but has no verified final PNG/identity/phone-delivery result yet. Owner images and private conversations are not exported. No other chats are contacted. Historical checkpoints below are not current installation evidence.
 
 ## 1019 installed; call route and PC/phone concurrency verification pending
 

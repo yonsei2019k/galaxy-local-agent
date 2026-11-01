@@ -98,6 +98,8 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
         goalStore:com.user.localagent.automation.ChatGoalStore=runs.goals,
         onGoalChanged:suspend(com.user.localagent.core.GoalDefinition?)->Unit={},
         pcDataBinding:String?=null,
+        kakaoReadBinding:String?=null,
+        pcImageRecoveryAllowed:Boolean=false,
     ):ToolExecutor {
         val scoped=repository.forThread(threadId)
         val capturedAccess=repository.chat.accessScope(threadId)
@@ -117,7 +119,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
             requestRunId?.takeIf {requestJob?.isActive==true&&isRunLive()}
         }
         val transcription=com.user.localagent.audio.ScopedRecordingTool(appContext,this,scoped,recordings,scoped::discardIncompleteAudioNotes,requestEngine=requestEngine)
-        val requestImages by lazy {ImageStudioController(appContext,this,requestEngine=requestEngine,ownerRunId=requestRunId,
+        val requestImages by lazy {ImageStudioController(appContext,this,requestEngine=requestEngine,ownerRunId=requestRunId,recoveryAllowed=pcImageRecoveryAllowed,
             scopedRepository=scoped,ownerThreadId=threadId,verifyAccess=::verifyAnalysisAccess)}
         val goalReadAuthority=com.user.localagent.automation.GoalReadAuthority()
         val goalTools=goalLifecycle?.let {lifecycle->com.user.localagent.automation.ScopedGoalTools(capturedAccess,
@@ -142,6 +144,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
             },
             connectionRunId=requestRunId,connectionIsRunLive={requestJob?.isActive==true&&isRunLive()},connectionApproveGmailSend=approveGmailSend,
             connectionThreadId=threadId,connectionPcDataBinding=pcDataBinding,connectionVerifyAccess=::verifyAnalysisAccess,
+            kakaoReadBinding=kakaoReadBinding,
             connectionComputeEngine=requestEngine as? com.user.localagent.inference.ComputeExecutionEngine,
             projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
                 call.arguments["negativePrompt"]?.jsonPrimitive?.content.orEmpty(),call.arguments["steps"]?.jsonPrimitive?.intOrNull,
@@ -158,6 +161,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
             if(androidx.core.content.ContextCompat.checkSelfPermission(appContext,permission)==android.content.pm.PackageManager.PERMISSION_GRANTED)grants+=permission
         }
         if(com.user.localagent.automation.AssistantNotificationListener.granted(appContext))grants+="notification_access"
+        if(com.user.localagent.integrations.KakaoScreenReader(appContext).binding()!=null&&com.user.localagent.integrations.ScreenBridgeController(appContext).state().let{it.systemEnabled&&it.connected})grants+="kakao_screen_access"
         if(automation.hasUsageAccess())grants+="usage_access"
         if(com.user.localagent.integrations.ScreenBridgeController(appContext).state().systemEnabled)grants+="screen_access"
         val handlers=mutableSetOf<String>()
