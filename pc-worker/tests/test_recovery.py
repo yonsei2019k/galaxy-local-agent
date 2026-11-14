@@ -68,6 +68,9 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(1,len(calls))
         self.assertTrue(restored.cancel_image(key,self.owner)['cleanup_complete'])
         self.assertFalse((store.root/key).exists())
+        for _ in range(5):
+            self.assertEqual('acknowledged',restored.public_job(key,self.owner)['phase'])
+            self.assertFalse((store.root/key).exists(),'Status reads must not consume a recovery slot after ACK')
         restored.suspend_image(key,self.owner)
         self.assertFalse((store.root/key).exists())
         with self.assertRaises((ValueError,FileNotFoundError)):restored.resume_image(key,self.owner)
@@ -78,7 +81,7 @@ class RecoveryTest(unittest.TestCase):
         report=self.engine.public_job(self.key,self.owner)
         self.assertEqual(('suspended',0),(report['phase'],report['checkpointStep']))
     def test_encrypted_binding_tamper_expiry_and_epoch_fail_closed(self):
-        store=self.engine.store;path=store.native(self.key);path.write_bytes(dpapi(checkpoint()))
+        store=self.engine.store;store.folder(self.key);path=store.native(self.key);path.write_bytes(dpapi(checkpoint()))
         self.assertEqual(5,store.native_step(self.key,'a'*64,20))
         with self.assertRaises(ValueError):store.native_step(self.key,'b'*64,20)
         with self.assertRaises(ValueError):store.native_step(self.key,'a'*64,21)
@@ -90,11 +93,21 @@ class RecoveryTest(unittest.TestCase):
         with self.assertRaises(ValueError):CheckpointStore(store.root,'epoch-b').load(self.key)
         with self.assertRaises(ValueError):store.folder('../foreign')
     def test_surgical_worker_patch_preserves_owner_validation_and_routes(self):
-        root=pathlib.Path(os.environ['LOCALAPPDATA'])/'ZipHap/Compute/worker'
+        root=pathlib.Path(os.environ.get('ZIPHAP_TEST_WORKER_BASELINE',str(pathlib.Path(os.environ['LOCALAPPDATA'])/'ZipHap/Compute/worker')))
+        if 'native_environment=None' in (root/'native_memory_image.py').read_text():self.skipTest('Supply original worker baseline for the surgical installation test')
         changes=transformed(root)
         for name,text in changes.items():compile(text,name,'exec')
         self.assertIn('ENGINE.suspend_image(key,owner)',changes['server.py'])
         self.assertIn('ENGINE.reference_bytes(key,owner)',changes['server.py'])
         self.assertIn('native_environment=None',changes['native_memory_image.py'])
+
+    def test_missing_read_does_not_allocate_a_slot_but_four_live_folders_are_bounded(self):
+        store=self.engine.store
+        self.assertEqual(0,store.native_step(self.key,'a'*64,20))
+        self.assertFalse((store.root/self.key).exists())
+        for _ in range(4):store.folder(str(uuid.uuid4()))
+        with self.assertRaises(ValueError):store.folder(self.key)
+        self.assertEqual(0,store.native_step(self.key,'a'*64,20))
+        self.assertFalse((store.root/self.key).exists())
 
 if __name__=='__main__':unittest.main()

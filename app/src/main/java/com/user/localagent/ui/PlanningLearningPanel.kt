@@ -66,7 +66,17 @@ import kotlinx.coroutines.withContext
                 HorizontalDivider()
                 Text("${feedbackDomainLabel(row.domain)} · ${feedbackToolLabel(row.tool)}",style=MaterialTheme.typography.labelLarge)
                 Text("검증 ${row.verifiedSuccess} · 준비 ${row.prepared} · 미검증 ${row.unverified} · 실패 ${row.failed}",style=MaterialTheme.typography.bodySmall)
-                row.proposedLessons.forEach {(kind,count)->Text("제안: ${feedbackLessonLabel(kind)} · ${count}회",style=MaterialTheme.typography.bodySmall)}
+                row.proposedLessons.forEach {(kind,count)->
+                    Text("제안: ${feedbackLessonLabel(kind)} · ${count}회",style=MaterialTheme.typography.bodySmall)
+                    Row {
+                        TextButton(enabled=!loading,onClick={execute {app.planningFeedback.decideLesson(row.domain,row.tool,kind,true);snapshot=app.planningFeedback.snapshot()}}){Text("승인")}
+                        TextButton(enabled=!loading,onClick={execute {app.planningFeedback.decideLesson(row.domain,row.tool,kind,false);snapshot=app.planningFeedback.snapshot()}}){Text("무시")}
+                    }
+                }
+                row.approvedLessons.forEach {kind->Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                    Text("승인됨: ${feedbackLessonLabel(kind)}",Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+                    TextButton(enabled=!loading,onClick={execute {app.planningFeedback.decideLesson(row.domain,row.tool,kind,false);snapshot=app.planningFeedback.snapshot()}}){Text("해제")}
+                }}
                 TextButton(enabled=!loading,onClick={deleteTarget=row}){Text("이 도구 기록 지우기")}
             }
             if(rows.size>8)Text("최근 갱신된 8개 도구를 표시합니다. 전체 ${rows.size}개 집계가 위 합계에 포함됩니다.",style=MaterialTheme.typography.labelSmall)

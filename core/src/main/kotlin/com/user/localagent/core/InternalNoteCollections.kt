@@ -4,5 +4,5 @@ package com.user.localagent.core
 object InternalNoteCollections {
     val protected=setOf("chat-goals","imported-chats","native-sms","audio-transcripts","rawaudio-transcripts",
         "recording-transcription-manifests","private-analysis-sources","private-analysis",
-        "calendar-event-links","sms-schedule-candidates","generated-images","web-research","planning-feedback")
+        "calendar-event-links","sms-schedule-candidates","generated-images","web-research","planning-feedback","codex-briefings")
 }

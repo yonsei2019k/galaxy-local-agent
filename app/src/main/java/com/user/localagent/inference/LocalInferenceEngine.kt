@@ -29,6 +29,7 @@ class LocalInferenceEngine(context:Context):InferenceEngine {
     override val lastMetrics:StateFlow<InferenceMetrics?> = metrics.asStateFlow()
     override val lastGeneration:StateFlow<GenerationSummary?> = generation.asStateFlow()
     override val residentModelPath:String? get()=active?.residentModelPath
+    override val nativeProgressSnapshot:NativeGenerationProgress? get()=active?.nativeProgressSnapshot
     override val supportsStructuredOutput:Boolean get()=active?.supportsStructuredOutput==true
     override suspend fun load(path:String,options:InferenceOptions)=replacement.withLock {
         val next=when(File(path).extension.lowercase()) {"aicore"->deviceAsr;"litertlm"->liteRt;"gguf"->if(File(path).name.startsWith("asr-"))asr else llama;else->error("지원하지 않는 모델 형식입니다.")}

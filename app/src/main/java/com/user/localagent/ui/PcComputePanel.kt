@@ -32,13 +32,13 @@ import kotlinx.coroutines.*
         try {
             val connected=PcTransport(context).available()!=null
             networkAllowed=PcLocalNetwork.allowed(context)
-            onStatus(if(connected)"PC 연결을 확인했습니다. 결과는 스마트폰에 저장합니다."else"PC 연결을 등록했습니다. PC가 응답할 때까지 휴대폰에서 처리합니다.")
-        }catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("PC 연결을 확인하지 못했습니다. 휴대폰에서 처리합니다.")}
+            onStatus(if(connected)"PC 연결을 확인했습니다. 결과는 스마트폰에 저장합니다."else"PC 연결을 등록했습니다. PC가 응답해야 AI 작업을 실행합니다.")
+        }catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("PC 연결을 확인하지 못했습니다. 연결 전에는 AI 작업을 실행하지 않습니다.")}
         finally{checking=false}
     }}
     val networkPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){granted->
         networkAllowed=granted
-        if(granted){if(pendingDiscovery)showPairing=true else checkConnection()}else onStatus("로컬 네트워크 권한을 허용하면 PC를 사용할 수 있습니다. 지금은 휴대폰에서 처리합니다.")
+        if(granted){if(pendingDiscovery)showPairing=true else checkConnection()}else onStatus("로컬 네트워크 권한을 허용해야 AI 작업을 실행할 수 있습니다.")
     }
     fun connect(discover:Boolean=!state.paired){
         pendingDiscovery=discover
@@ -62,7 +62,12 @@ import kotlinx.coroutines.*
             if(state.paired)TextButton(enabled=!busy&&!checking,onClick={connect(true)}){Text("다른 PC 연결")}
         }
         if(state.paired){
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("기본 추론에 PC 자동 활용");Switch(checked=state.automaticText,onCheckedChange={settings.automaticText(it)},enabled=!busy)}
+            Text("대화 엔진",style=MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                FilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("오픈소스 · PC")},modifier=Modifier.testTag("text_engine_local"))
+                FilterChip(selected=state.claudeText,onClick={settings.claudeText(true)},enabled=!busy,label={Text("Claude")},modifier=Modifier.testTag("text_engine_claude"))
+            }
+            if(state.claudeText)Text("Claude를 고르면 대화 내용과 도구 결과가 인터넷을 거쳐 Anthropic으로 전송되고 API 요금이 듭니다. 음성과 사진 분석은 계속 PC에서 처리합니다.",style=MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("이미지 · PC 정밀")})
                 FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("이미지 · 휴대폰")})

@@ -1,6 +1,7 @@
 """Opt-in recovery layered over the installed ownership checks. Legacy RAM-only jobs are unchanged."""
 import base64, hashlib, json, threading, time, uuid
 from pathlib import Path
+from image_progress import mark,acquire_slot,resources_waiting
 from checkpoint_store import CheckpointStore,TTL
 from owned_engines import OwnedEngines,owner_value,request_key,terminate,OwnershipMismatch,_UNSET
 from engines import HOME,TOOLS,profile,verify_file,available_memory,gpu_busy,validate_png,Busy
@@ -73,21 +74,20 @@ class RecoveryEngines(OwnedEngines):
         if not recovery:return super().run_image(key,prompt,negative,reference,strength)
         acquired=False;started=time.monotonic()
         try:
-            while not acquired:
-                if job['cancel'].is_set():raise InterruptedError()
-                acquired=self.lock.acquire(timeout=.1)
+            acquired=acquire_slot(self.lock,job)
             self.stop_llm()
-            while available_memory()<4*1024**3 or gpu_busy():
-                job['phase']='waiting_resources'
+            while resources_waiting(job,available_memory(),gpu_busy()):
                 if job['cancel'].wait(3):raise InterruptedError()
                 if time.time()>job['createdWall']+TTL:raise TimeoutError('RECOVERY_EXPIRED')
+            mark(job,'verifying_models')
             selected=profile(job['modelId'])
             for path,sha in selected['files']:verify_file(path,sha)
+            mark(job,'preparing_runtime')
             runtime=TOOLS/'runtime-checkpoint-37bc88b-v1'
             binding=self._binding(job,runtime,selected)
             if job.get('binding') not in (None,binding):raise ValueError('RECOVERY_RUNTIME_CHANGED')
             job['binding']=binding;job['resumedFrom']=self.store.native_step(key,binding,job['steps'])
-            job['step']=job['resumedFrom'];job['phase']='loading';self._persist(job)
+            job['step']=job['resumedFrom'];mark(job,'loading_model');self._persist(job)
             def launched(process):job['process']=process
             def progress(step):
                 job.update(step=max(job['step'],min(job['steps'],step)),phase='decoding' if step==job['steps'] else 'sampling',updated=time.monotonic())

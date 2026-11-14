@@ -18,6 +18,23 @@ object ModelDecisionContract {
         SemanticSourceKind.ASSISTANT to setOf("search_conversation_history"),
     )
 
+    /** One grammar branch avoids duplicating every field/tool across eight actions.
+     * Action-specific requirements remain enforced by parse(), before any execution. */
+    fun planningSchemaJson(availableTools: Set<String> = ToolRegistry.definitions.keys): String {
+        val branches = Json.parseToJsonElement(schemaJson(availableTools)).jsonObject.getValue("oneOf").jsonArray
+        val properties = linkedMapOf<String, JsonElement>()
+        branches.forEach { branch -> properties.putAll(branch.jsonObject.getValue("properties").jsonObject) }
+        properties["action"] = buildJsonObject {
+            put("type", "string")
+            put("enum", JsonArray(branches.map { it.jsonObject.getValue("properties").jsonObject.getValue("action").jsonObject.getValue("enum").jsonArray.single() }))
+        }
+        return buildJsonObject {
+            put("type", "object"); put("additionalProperties", false)
+            put("properties", JsonObject(properties))
+            put("required", JsonArray(listOf("action", "goal", "targetType").map(::JsonPrimitive)))
+        }.toString()
+    }
+
     fun schemaJson(availableTools: Set<String> = ToolRegistry.definitions.keys): String {
         checkAvailable(availableTools)
         fun text(max: Int, min: Int = 0) = buildJsonObject { put("type", "string"); put("minLength", min); put("maxLength", max) }

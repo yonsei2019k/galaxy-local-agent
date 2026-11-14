@@ -45,7 +45,7 @@ class ChatComputeConcurrencyValidation {
         fun cleanPreferences(){preferences.toList().forEach {baseContext.deleteSharedPreferences(it)}}
     }
     private class FakeEngine(val route:ComputeResource,val text:String,private val awaitRelease:Boolean,
-        private val proposal:Boolean=false):ComputeExecutionEngine {
+        private val proposal:Boolean=false,private val autonomous:Boolean=false,private val reviewAlways:Boolean=false):ComputeExecutionEngine {
         override val state=MutableStateFlow("synthetic idle")
         override val computeLocation=MutableStateFlow<ComputeResource?>(null)
         override val waitingForResource=MutableStateFlow<ComputeResource?>(null)
@@ -57,6 +57,7 @@ class ChatComputeConcurrencyValidation {
         val started=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
         val cancellations=AtomicInteger();val generations=AtomicInteger()
         val prompts=java.util.Collections.synchronizedList(mutableListOf<String>())
+        private val reviews=AtomicInteger()
         private var options=InferenceOptions()
         override suspend fun load(path:String,options:InferenceOptions){this.options=options;computeLocation.value=route;state.value="synthetic ${route.name}"}
         override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int=8
@@ -67,7 +68,11 @@ class ChatComputeConcurrencyValidation {
             state.value="synthetic generation";started.complete(Unit)
             if(awaitRelease&&call==1)release.await()
             currentCoroutineContext().ensureActive()
-            val output=if(proposal)when(call){
+            val output=if(autonomous)when(call){
+                1->"""{"action":"TOOL_TASK","goal":"17 곱하기 19 계산과 다른 식을 사용한 독립 검산","targetType":"GENERAL","requiredTools":["calculate"],"constraints":["다른 식으로 검산 후 최종 결론"]}"""
+                2->"""{"type":"tool_call","tool":"calculate","arguments":{"expression":"17*19"}}"""
+                else->"17×19=323이며 17×20−17=323으로 독립 검산했습니다."
+            }else if(proposal)when(call){
                 1->buildJsonObject {
                     put("action","TOOL_TASK");put("goal","승인한 합성 메모 한 개 저장");put("targetType","GENERAL")
                     put("requiredTools",JsonArray(listOf(JsonPrimitive("save_note"))))
@@ -83,7 +88,17 @@ class ChatComputeConcurrencyValidation {
             lastGeneration.value=summary;emit(GenerationEvent.Finished(summary))
         }
         override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<GenerationEvent> =
-            if(proposal&&schema.contains("review_complete"))flow {
+            if(autonomous&&schema.contains("review_complete"))flow {
+                generations.incrementAndGet();prompts+=userText
+                val reviewNumber=reviews.incrementAndGet()
+                val output=if(reviewNumber==1||reviewAlways)
+                    """{"type":"review_next","summary":"다른 식의 검산이 필요합니다.","call":{"type":"tool_call","tool":"calculate","arguments":{"expression":"${if(reviewNumber==1)"17*20-17"else"17*18+17"}"}}}"""
+                    else """{"type":"review_complete","summary":"두 식의 실제 결과323을 확인했습니다."}"""
+                emit(GenerationEvent.Delta(output))
+                val summary=GenerationSummary(UUID.randomUUID().toString(),GenerationStopReason.EOG,GenerationEvidence.HOST,false,
+                    options.maxOutputTokens,prefillTokens=8,decodeTokens=8,visibleChars=output.length)
+                lastGeneration.value=summary;emit(GenerationEvent.Finished(summary))
+            }else if(proposal&&schema.contains("review_complete"))flow {
                 generations.incrementAndGet();prompts+=userText
                 val output="""{"type":"review_complete","summary":"합성 도구의 실제 저장 근거를 확인했습니다."}"""
                 emit(GenerationEvent.Delta(output))
@@ -103,11 +118,11 @@ class ChatComputeConcurrencyValidation {
         try {
             benchmark=RuntimeGate.benchmark.compareAndSet(false,true)
             check(benchmark&&!RuntimeGate.inference.get()){"An actual runtime task owns the phone"}
-            isolatedFixture(proposals,block)
+            isolatedFixture(proposals,block=block)
         }finally{if(benchmark)RuntimeGate.benchmark.set(false)}
     }
 
-    private suspend fun isolatedFixture(proposals:Boolean,block:suspend(Fixture)->Unit){
+    private suspend fun isolatedFixture(proposals:Boolean,autonomous:Boolean=false,reviewAlways:Boolean=false,block:suspend(Fixture)->Unit){
         val base=InstrumentationRegistry.getInstrumentation().targetContext
         val identity=UUID.randomUUID().toString()
         val root=File(base.cacheDir,"compute-concurrency-qa-$identity").canonicalFile
@@ -125,7 +140,7 @@ class ChatComputeConcurrencyValidation {
             val repository=LocalRepository(db)
             val container=AppContainer(isolated,repositoryOverride=repository).also {app=it}
             val settings=ProjectSettings(modelId="synthetic-no-weights",memoryMode="project",useOwnerMemory=false,learnOwnerFacts=false,
-                disabledTools=ToolRegistry.definitions.keys-setOf("save_note"))
+                disabledTools=ToolRegistry.definitions.keys-(if(autonomous)setOf("calculate","list_skills","read_skill")else setOf("save_note")))
             val projectA=repository.chat.createProject("SYNTHETIC_PROJECT_A",settings)
             val projectB=repository.chat.createProject("SYNTHETIC_PROJECT_B",settings)
             val roomA=repository.chat.createThread(projectA.id,"SYNTHETIC_ROOM_A")
@@ -137,7 +152,7 @@ class ChatComputeConcurrencyValidation {
             val chat=withContext(Dispatchers.Main){ChatRunCoordinator(isolated,container,
                 workerEngineFactory={request->
                     val route=if(request.threadId==roomA.id)ComputeResource.PC else ComputeResource.PHONE
-                    FakeEngine(route,"SYNTHETIC_${route.name}_${request.userMessageId}",awaitRelease=!proposals,proposal=proposals)
+                    FakeEngine(route,"SYNTHETIC_${route.name}_${request.userMessageId}",awaitRelease=!proposals,proposal=proposals,autonomous=autonomous,reviewAlways=reviewAlways)
                         .also {engines[request.runId]=it}
                 },restorePersistedQueue=false,inferenceChoiceOverride={choice})}.also {coordinator=it}
             block(Fixture(isolated,container,chat,roomA,roomB,engines))
@@ -192,6 +207,42 @@ class ChatComputeConcurrencyValidation {
         assertTrue(aText.contains(f.engines.getValue(a).text));assertFalse(aText.contains("SYNTHETIC_OWNER_B_ONLY"))
         assertFalse(bText.contains("SYNTHETIC_OWNER_A_ONLY"));assertFalse(bText.contains(f.engines.getValue(a).text))
     }}
+
+    @Test fun scriptedNextActionRunsIndependentCalculationAndFinalReview()=runBlocking(Dispatchers.IO){
+        scriptedAutonomousRun(false)
+    }
+    @Test fun reviewLimitStillWritesVerifiedResultsWithoutAdditionalActions()=runBlocking(Dispatchers.IO){
+        scriptedAutonomousRun(true)
+    }
+    private suspend fun scriptedAutonomousRun(reviewAlways:Boolean){
+        assumeTrue("computeConcurrencyValidationApproved=true required",InstrumentationRegistry.getArguments().getString("computeConcurrencyValidationApproved")=="true")
+        val owns=RuntimeGate.benchmark.compareAndSet(false,true)
+        try {
+            check(owns&&!RuntimeGate.inference.get()){"An actual runtime task owns the phone"}
+            isolatedFixture(proposals=true,autonomous=true,reviewAlways=reviewAlways){f->
+                val request="계산 도구로17 곱하기19를 구하고 다른 식으로 독립 검산한 뒤 최종 결론을 알려줘."
+                val id=enqueue(f,f.roomA,request,true)
+                awaitCondition{f.app.repository.chat.run(id)?.status in ChatStore.TERMINAL||f.app.repository.chat.run(id)?.status=="paused"}
+                awaitCondition{!f.chat.hasActiveRuns.value}
+                val rows=f.app.repository.chat.toolRunsForThread(f.roomA.id,id).first()
+                val primary=f.app.repository.chat.assistantForRun(id)
+                val body=primary?.let{f.app.repository.chat.fullMessageText(it.id)}.orEmpty()
+                val calculations=rows.count{it.name=="calculate"&&it.success&&it.summary.startsWith("VERIFIED")}
+                assertEquals("Scripted host flow ended with: $body",if(reviewAlways)3 else 2,calculations)
+                assertEquals("completed",f.app.repository.chat.run(id)?.status)
+                val events=f.app.repository.workTrace.events(f.roomA.id,id)
+                assertTrue(events.any{it.event.code==WorkTraceCode.PLAN_READY&&it.event.publicSummary?.startsWith("발견한 확인 과제:")==true})
+                if(reviewAlways){
+                    assertTrue(body.contains(com.user.localagent.core.AutonomousReviewPolicy.LIMITED_FINAL_NOTICE))
+                    val context=Json.parseToJsonElement(checkNotNull(f.app.repository.chat.run(id)).contextJson).jsonObject
+                    assertEquals(true,context["reviewBudgetFinalization"]?.jsonPrimitive?.booleanOrNull)
+                    assertEquals(5,f.engines.getValue(id).generations.get())
+                }else assertTrue(events.any{it.event.code==WorkTraceCode.PLAN_READY&&it.event.publicSummary?.startsWith("후속 검토 요약:")==true})
+                assertTrue(body.contains("323"))
+                assertEquals(listOf(request),f.app.repository.chat.messages(f.roomA.id).first().filter{it.role=="user"}.map{it.text})
+            }
+        }finally{if(owns)RuntimeGate.benchmark.set(false)}
+    }
 
     @Test fun concurrentApprovalsStayBoundToTheirOriginalRoomAndProject()=runBlocking(Dispatchers.IO){fixture(proposals=true){f->
         val a=enqueue(f,f.roomA,"합성 업무 문구 A를 검토 후 메모에 정리해주세요.",true)

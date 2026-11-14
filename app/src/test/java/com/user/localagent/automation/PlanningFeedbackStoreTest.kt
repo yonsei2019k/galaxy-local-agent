@@ -50,6 +50,19 @@ class PlanningFeedbackStoreTest {
         assertEquals(1L,store.snapshot().stats.single().proposedLessons["verify_result"])
     }
 
+    @Test fun onlyOwnerDecisionMovesAProposalIntoApprovedGuidance()=runBlocking {
+        val store=PlanningFeedbackStore(MemoryPersistence());val tool="prepare_calendar_event"
+        store.proposeLesson("calendar",tool,"verify_result")
+        assertFalse(store.contextFor("calendar").contains("ownerApprovedLessons"))
+        store.decideLesson("calendar",tool,"verify_result",approve=true)
+        var row=store.snapshot().stats.single()
+        assertEquals(setOf("verify_result"),row.approvedLessons);assertTrue(row.proposedLessons.isEmpty())
+        assertTrue(store.contextFor("calendar").contains("ownerApprovedLessons"))
+        store.decideLesson("calendar",tool,"verify_result",approve=false)
+        row=store.snapshot().stats.single()
+        assertTrue(row.approvedLessons.isEmpty());assertEquals(0L,row.attempts)
+    }
+
     @Test fun aggregatesSavedBeforeTheNewFieldsStillDecode()=runBlocking {
         val value=kotlinx.serialization.json.Json.decodeFromString<PlanningToolFeedback>("""{"domain":"calendar","tool":"planner"}""")
         assertEquals(0L,value.failureStreak);assertEquals(0L,value.recoveredAfterFailure)

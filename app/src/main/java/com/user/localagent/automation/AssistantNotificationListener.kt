@@ -11,6 +11,8 @@ import androidx.core.app.NotificationManagerCompat
 /** Counts opted-in notification events and forwards only per-app-consented messages to the session inbox. */
 class AssistantNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(notification: StatusBarNotification) {
+        // Separate explicitly enabled encrypted backlog; no reply actions are retained here.
+        com.user.localagent.briefing.BriefingSources.enqueue(this,notification)
         runCatching {com.user.localagent.integrations.MessengerInbox.receive(this,notification)}
         if (notification.packageName == packageName || notification.isOngoing) return
         val prefs = getSharedPreferences("notification-events", Context.MODE_PRIVATE)

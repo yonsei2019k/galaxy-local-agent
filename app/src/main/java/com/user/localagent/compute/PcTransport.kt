@@ -16,13 +16,18 @@ import javax.net.ssl.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 
-class PcUnavailable:java.io.IOException("PC 연결을 사용할 수 없어 휴대폰에서 처리합니다.")
+open class PcUnavailable(message:String="PC에 연결되지 않아 실행하지 않았습니다. PC를 켜고 연결한 뒤 다시 요청해주세요."):java.io.IOException(message)
+class PcBusy:PcUnavailable("PC가 다른 작업을 처리 중입니다. 끝난 뒤 다시 요청해주세요.")
 
 /** No public endpoint, redirect, cleartext credential or system-wide trust override. */
 class PcTransport(context:Context) {
     private val context=context.applicationContext
     private val settings=PcComputeSettings.get(context)
     @Volatile private var lastDiscovery=0L
+    private companion object {
+        /** Shared by every transport instance: when this phone last saw the paired PC answer. */
+        @Volatile var lastReachableAt=0L
+    }
     @Volatile private var current:HttpsURLConnection?=null
     fun open(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000,computeOwner:String?=null):HttpsURLConnection {
         if(!PcLocalNetwork.allowed(context))throw PcUnavailable()
@@ -45,7 +50,7 @@ class PcTransport(context:Context) {
         connection.sslSocketFactory=tls.socketFactory
         connection.hostnameVerifier=HostnameVerifier {host,_->host==target.host}
         connection.instanceFollowRedirects=false;connection.useCaches=false
-        connection.connectTimeout=minOf(timeout,1500);connection.readTimeout=timeout;connection.requestMethod=method
+        connection.connectTimeout=minOf(timeout,4000);connection.readTimeout=timeout;connection.requestMethod=method
         connection.setRequestProperty("Authorization","Bearer "+config.token)
         computeOwner?.let {owner->
             require(runCatching {java.util.UUID.fromString(owner).toString()==owner}.getOrDefault(false)){"PC 작업의 원래 실행 ID가 필요합니다."}
@@ -62,20 +67,41 @@ class PcTransport(context:Context) {
     fun json(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000,computeOwner:String?=null):JsonObject {
         val connection=open(config,path,method,body,timeout,computeOwner)
         try {
-            if(connection.responseCode !in 200..299)throw PcUnavailable()
+            if(connection.responseCode !in 200..299){
+                val status=connection.responseCode
+                val code=runCatching{Json.parseToJsonElement(connection.errorStream.bufferedReader().use{it.readText()}).jsonObject["error"]?.jsonPrimitive?.content}.getOrNull()
+                com.user.localagent.FailureLog.record(context,"pc_http $path",null,"$status ${code.orEmpty()}")
+                throw if(code=="PC_BUSY")PcBusy() else PcUnavailable()
+            }
             return Json.parseToJsonElement(String(read(connection,1024*1024),Charsets.UTF_8)).jsonObject
         }finally{connection.disconnect();if(current===connection)current=null}
     }
-    suspend fun available(computeOwner:String?=null):PcConnection?=withContext(Dispatchers.IO){
+    /**
+     * [waitForRestart]: when the PC answered recently, a failed check is most likely a worker restart
+     * (the supervisor brings it back within ~15 s), so wait and retry instead of failing the request.
+     */
+    suspend fun available(computeOwner:String?=null,waitForRestart:Boolean=false):PcConnection?{
+        probe(computeOwner)?.let{return it}
+        val delays=com.user.localagent.core.PcReconnectPolicy.retryDelays(waitForRestart,System.currentTimeMillis()-lastReachableAt)
+        delays.forEachIndexed {index,wait->
+            settings.report("PC 응답 대기 · 작업기 재시작 중일 수 있어 다시 확인합니다 (${index+1}/${delays.size})")
+            delay(wait)
+            probe(computeOwner)?.let{return it}
+        }
+        if(delays.isNotEmpty())settings.report("PC가 ${delays.sum()/1000}초 동안 응답하지 않았습니다 · PC 전원과 네트워크를 확인해주세요")
+        return null
+    }
+    private suspend fun probe(computeOwner:String?):PcConnection?=withContext(Dispatchers.IO){
         var config=settings.snapshot()?:return@withContext null
         if(!PcLocalNetwork.allowed(context)){
-            settings.report("PC 사용에 로컬 네트워크 권한이 필요합니다. 지금은 휴대폰에서 처리합니다.")
+            settings.report("PC 사용에 로컬 네트워크 권한이 필요합니다. 허용 전에는 AI 작업을 실행하지 않습니다.")
             return@withContext null
         }
         suspend fun check(candidate:PcConnection):Boolean=try {
-            val result=json(candidate,"/v1/health",timeout=1200,computeOwner=computeOwner)
-            result["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&result["serverId"]?.jsonPrimitive?.content==candidate.serverId&&
-                (computeOwner==null||result["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1)
+            val result=json(candidate,"/v1/health",timeout=4000,computeOwner=computeOwner)
+            result["overlayEndpoint"]?.jsonPrimitive?.contentOrNull?.let {overlay->runCatching{settings.updateOverlay(overlay)}}
+            (result["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&result["serverId"]?.jsonPrimitive?.content==candidate.serverId&&
+                (computeOwner==null||result["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1)).also{if(it)lastReachableAt=System.currentTimeMillis()}
         }catch(cancel:CancellationException){throw cancel}catch(_:Exception){false}
         if(check(config)){settings.report("PC 사용 가능 · 작업과 결과는 스마트폰에서 관리");return@withContext config}
         if(System.currentTimeMillis()-lastDiscovery>15_000){
@@ -83,7 +109,11 @@ class PcTransport(context:Context) {
             val found=discover(config)
             if(found!=null&&check(found)){settings.updateEndpoint(found.endpoint);settings.report("PC 연결 확인됨");return@withContext found}
         }
-        settings.report("PC 응답 없음 · 휴대폰 단독 처리")
+        settings.snapshot()?.overlayEndpoint?.takeIf{it!=config.endpoint}?.let {overlay->
+            val remote=config.copy(endpoint=overlay)
+            if(check(remote)){settings.updateEndpoint(overlay);settings.report("PC 연결 확인됨 · Tailscale");return@withContext remote}
+        }
+        settings.report("PC 응답 없음 · 집 밖이면 휴대폰의 Tailscale을 켜주세요")
         null
     }
     private fun discover(config:PcConnection):PcConnection?=runCatching {

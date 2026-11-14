@@ -118,7 +118,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
                 perform(prompt,negativePrompt,steps,seed?:-1,referenceUri,strength,resume)
             }
             catch(cancel:CancellationException){mutableState.update {it.copy(phase="중단했습니다",error=null)};throw cancel}
-            catch(error:Exception){mutableState.update {it.copy(phase="이미지를 만들지 못했습니다",error=error.message?.take(400))}}
+            catch(error:Exception){com.user.localagent.FailureLog.record(this@ImageStudioController.context,"image_generate",error);mutableState.update {it.copy(phase="이미지를 만들지 못했습니다",error=error.message?.take(400))}}
             finally {
                 withContext(NonCancellable){runCatching{standaloneEngine?.unload();standaloneEngine=null}.onFailure{error->mutableState.update{it.copy(error=error.message?.take(400))}}}
                 activeJob=null;operation.set(false);mutableState.update{it.copy(running=false,canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))};app.scheduleIdleUnload()
@@ -354,9 +354,10 @@ class ImageStudioController(context:Context,private val app:AppContainer,
         if(!prompt.any {it in '\uAC00'..'\uD7A3'})return prompt
         mutableState.update {it.copy(phase="한국어 장면 설명 정리 중")}
         app.models.refresh()
-        val translator=app.models.models.value.firstOrNull {it.id=="gemma-e2b"&&it.verified}
-            ?:error("한국어 설명을 정리할 E2B 모델이 필요합니다. 영어 설명으로도 바로 생성할 수 있습니다.")
-        executionEngine.load(translator.path,InferenceOptions(maxOutputTokens=256))
+        val selected=app.models.mediaSelection.value.vision
+        val translator=app.models.models.value.firstOrNull {it.id==selected&&it.verified}
+            ?:error("이미지 보조용으로 선택한 Gemma E2B/E4B 모델이 필요합니다.")
+        executionEngine.load(translator.path,InferenceOptions(maxOutputTokens=256,imagePreparation=true))
         val text=StringBuilder()
         withTimeout(90_000){executionEngine.generateChat(prompt,com.user.localagent.core.ClinicalImagePrompt.translationInstruction(prompt)).collect {text.append(it);require(text.length<=3000)}}
         return com.user.localagent.core.ClinicalImagePrompt.validateTranslation(prompt,text.toString())

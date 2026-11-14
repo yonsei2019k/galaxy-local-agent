@@ -20,6 +20,7 @@ data class InferenceOptions(
     val projectorPath:String? = null,
     val cpuThreads:Int = 4,
     val deviceOnly:Boolean = false,
+    val imagePreparation:Boolean = false,
 )
 
 data class InferenceMetrics(val timeToFirstTokenSeconds: Double, val prefillTokens: Int, val decodeTokens: Int, val prefillTokensPerSecond: Double, val decodeTokensPerSecond: Double) {
@@ -28,6 +29,10 @@ data class InferenceMetrics(val timeToFirstTokenSeconds: Double, val prefillToke
 }
 data class InferenceTurn(val role:String,val text:String)
 interface InferenceEngine {
+    /** Numerical metadata from this engine's active generation only; never prompt/token text. */
+    val nativeProgressSnapshot:NativeGenerationProgress? get()=null
+    /** The model's reasoning text from the last generation, when the engine exposes it. */
+    val lastReasoning:String? get()=null
     val state:StateFlow<String>
     val residentModelPath:String?
     val lastMetrics:StateFlow<InferenceMetrics?>

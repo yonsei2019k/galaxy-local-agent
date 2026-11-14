@@ -239,6 +239,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+        item { com.user.localagent.briefing.BriefingPanel(app) }
         item {
             ZipHapHeader("자료 분석", if (busy) progress.ifBlank { "작업 중" } else status, busy)
         }

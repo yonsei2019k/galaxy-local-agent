@@ -53,6 +53,8 @@ class LlamaCppEngine(context: Context) : InferenceEngine {
     override val lastGeneration:StateFlow<GenerationSummary?> = mutableGeneration.asStateFlow()
     private val mutableNativeProgress=MutableStateFlow<NativeGenerationProgress?>(null)
     val nativeProgress:StateFlow<NativeGenerationProgress?> = mutableNativeProgress.asStateFlow()
+    @Volatile private var generationActive=false
+    override val nativeProgressSnapshot:NativeGenerationProgress? get()=if(generationActive)mutableNativeProgress.value else null
     @Volatile private var nativeProgressRequestId:String?=null
     override val supportsStructuredOutput:Boolean get()=true
 
@@ -159,6 +161,7 @@ class LlamaCppEngine(context: Context) : InferenceEngine {
             mutableGeneration.value = null
             nativeProgressRequestId=requestId
             mutableNativeProgress.value=null
+            generationActive=true
             val progressTracker=NativeProgressTracker(requestId)
             mutableState.value = "GGUF 답변 생성 중 · CPU"
             LlamaNative.nativeResetCancellation(handle)
@@ -200,11 +203,13 @@ class LlamaCppEngine(context: Context) : InferenceEngine {
                 if(pressure.get())throw IllegalStateException("과열 또는 메모리 부족으로 작업을 중단했습니다. 기기가 안정된 뒤 다시 시도해주세요.",error)
                 throw error
             } finally {
+                generationActive=false
                 withContext(NonCancellable){watcher?.cancelAndJoin()}
                 mutableState.value = if (loadedPath == null) "모델 없음" else "준비됨 · GGUF CPU"
             }
         }
         } catch(error:Throwable) {
+            generationActive=false
             val reason=failureStopReason(error,pressure.get())
             terminal.finish(GenerationSummary(requestId,reason,GenerationEvidence.HOST,null,cap,
                 prefillTokens=requestMetrics?.prefillTokens,decodeTokens=requestMetrics?.decodeTokens,
@@ -266,6 +271,7 @@ class LlamaCppEngine(context: Context) : InferenceEngine {
         mutableMetrics.value = null
         mutableGeneration.value = null
         nativeProgressRequestId=null
+        generationActive=false
         mutableNativeProgress.value=null
         if (previous != 0L) LlamaNative.nativeDestroy(previous)
         mutableState.value = "모델 메모리 해제됨"

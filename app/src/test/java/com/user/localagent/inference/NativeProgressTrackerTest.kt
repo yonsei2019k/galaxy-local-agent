@@ -6,6 +6,11 @@ import org.junit.Test
 
 /** Metadata-only synthetic lifecycle proof. No native/model/Android/provider access. */
 class NativeProgressTrackerTest {
+    @org.junit.Test fun displayDescribesActualPrefillAndHiddenOnlySamplingWithoutInventingAnswerProgress(){
+        val value=NativeGenerationProgress(java.util.UUID.randomUUID().toString(),NativeGenerationPhase.PREFILL,128,640,0,0,0,1000)
+        org.junit.Assert.assertEquals("입력 계산 128/640 토큰",value.publicDescription())
+        org.junit.Assert.assertEquals("출력 계산 24 토큰 · 화면 전달 0 바이트",value.copy(phase=NativeGenerationPhase.DECODE,processedPromptTokens=640,sampledTokens=24,rawUtf8Bytes=100).publicDescription())
+    }
     @Test fun separatesPreparationSamplingPrefillAndInvisibleDecodeWithoutClaimingNoTokens() {
         val id=UUID.randomUUID().toString();val t=NativeProgressTracker(id)
         assertEquals(NativeGenerationPhase.PREPARE,t.accept(1,0,0,0,0,0,0)!!.phase)

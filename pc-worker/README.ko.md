@@ -13,3 +13,8 @@
 네이티브 기반: stable-diffusion.cpp `37bc88b5e97a213821949732ea66c58ae8ffc784`, GGML `7b2b435da087614be772ee6f5ea80e68eca81de6`. `native/prepare_native.py`는 이 소스의 Euler 함수만 수정한다. 새 shared runtime은 동일 GGML revision의 CUDA/Vulkan backend와 함께 별도 경로에 설치한다. GPU/RAM 부족 자체가 해결되는 것은 아니며, 저장 이전 실패를 저장 이후 재개라고 표시하지 않는다.
 
 검증 경계: 네이티브 저장·복원/동일 연산/변조 거부 테스트와 제어 계층 테스트는 실제 모델 생성·의미 품질·휴대폰 설치 검증을 대체하지 않는다. 실제 상태는 공유 change log에 따로 기록한다.
+
+### 이미지 진행 상태 계약 (2026-11-01 소스 준비, 미배포)
+`phase`는 기존 값(queued/waiting_resources/loading/sampling/decoding/terminal)을 보존한다. 별도 `stage`는 실제 실행 지점에서만 기록한다: admitting, waiting_compute(연산 잠금 획득 실패), releasing_model, verifying_models(모델 SHA 검사), preparing_runtime(실행/복구 환경 확인), loading_model, waiting_memory, waiting_gpu. 샘플링/완료 등 현재 phase와 맞지 않는 오래된 stage는 응답에서 제외한다. 다른 사용자의 요청/내용/ID는 상태 응답에 추가하지 않는다.
+
+`patch_image_progress.transformed(workerRoot)`는 기준선과 맞는 원본만 좁게 변환하며 코드/재시작을 적용하지 않는다. `image_progress.py`, 변환된 engines.py/owned_engines.py/recovery_engines.py를 함께 준비해야 한다. 실제 배포는 현재 이미지 생성·결과 수신·정리 및 다른 연산이 끝난 것을 확인하고 파일별 기준선을 재대조한 뒤 수행한다. 앱도 새 PcImageProgressPolicy가 포함된 릴리스가 필요하다. 구형 작업기의 queued에 대해서 새 앱은 'PC 실행 상태 확인 중 · 준비 또는 대기'로 표시하며 다른 작업 존재를 추측하지 않는다. 현재 실행 중 작업기에는 적용하지 않았다.

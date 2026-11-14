@@ -703,3 +703,126 @@ PC worker는 새 계층을 실제 배포했고 TLS/owner binding/기존 pairing 
 
 ## 2026-11-01 — 실패 기억 1단계 (집계)
 담당 claude-review. 소스 반영(미커밋), 1029 APK에는 없음. PlanningToolFeedback에 failureStreak·recoveredAfterFailure 추가(기존 저장본 기본값 디코딩). 취소 제외 연속 실패2회에 avoid_repeat, 미검증 성공에 verify_result를 proposed로 자동 집계하고 문맥 힌트 do_not_repeat_same_failed_call 추가. 자동 승인·권한 없음, 원문 저장 없음. 원인·해결 방법 기록과 승인 UI는 미구현. 검증: PlanningFeedbackStoreTest12 PASS만. 전체 Validate·기기 미실행.
+
+## 2026-11-01 — 교훈 승인·단계별 판단 표시
+담당 claude-review. 소스 반영(미커밋), 설치본 없음. PlanningToolFeedback.approvedLessons와 decideLesson, 설정 패널 승인/무시/해제 추가. 승인 코드는 ownerApprovedLessons로 계획 문맥에 전달하며 권한·실행 없음. 도구 실행 직전 DecisionStepSummary를 작업 기록에 남긴다. 이는 호스트 사실 기반 요약이며 모델 내부 사고 원문이 아니다. 실패 원인은 여전히 execution_failed 위주이고 해결 방법 기록은 미구현. 검증: core621·app562 JVM 실패0, lintRelease·release Kotlin 컴파일 PASS. APK 서명·설치·실제 UI 확인 미실행. sherpa-onnx·PC 상급 모델 측정 미착수(기기 예약 중).
+
+## 2026-11-01 — 1029 실제 설치·SDXL 중간 재개·폰 수신 검증 완료
+담당 codex-progress-root. 1029를 데이터 초기화 없이 설치하고 실제 base SHA bb1c25b65b8852b846521fbbe0c3937cc7abb91a4edf3360b601924b219384e1를 독립 재확인했다. test APK SHA a05dd2f4bd1f0e17860fec3ecd07bb00cbc933d461ec3c989a4d9238598d7ec8. host core619/app559=1178 PASS, lint0오류132경고, release/test 서명 PASS. 1028은 설치하지 않았다. 1029 최초 컴파일의 JVM 메서드 크기 문제는 bounded review 처리를 분리해 해결하고 전체 빌드를 다시 통과했다. 빌드 입력625개 동결과 대조했고 당시 공유 변경 기록의 추가만 차이였다. 이후 다른 담당자의 실패 기억/승인 UI 소스는 이 설치본에 포함되지 않는다.
+실제 PC SDXL512/8단계: 5단계 저장 후 중단·재개 결과가 연속 계산 PNG와 동일. 실제 paired API SDXL1024/20단계: 5단계 정지·같은 작업 ID 재개, 다른 owner409 거부, 완료 PNG 두 번 수신에도 계산 attempts2 유지 PASS. PC worker는 기존 pairing/모델/품질 설정을 유지한 채 배포했다. 휴대폰 암호화 ticket/CAS1 및 완료 PC 결과 수신·파일 저장 후 ACK1, 기존 UI11+이미지 일관성4를 합쳐 기기17 PASS. 실패 작업의 새 복구 버튼을 실제 시각 검증했다고 확대 해석하지 않는다.
+APK 빌드 뒤 PC 전용 checkpoint_store 조회가 ACK 후 빈 폴더를 재생성하던 문제를 고쳤다. 읽기/삭제는 생성하지 않고 쓰기만 생성한다. 제어·저장5테스트와 실제 TLS 자체 fixture 취소/상태5회 조회/물리 폴더 미생성 검증 PASS. Android APK는 변경하지 않았다. 실제 사용자 이미지 취소0, 다른 채팅 연락0. root 빌드/기기/native 예약은 모두 해제했다. 상세 private receipt는 외부 도구 디렉터리 및 ignored .local에 보관한다.
+별도 카카오 visible-read1은 일반 capture 오류로 실패했다. 접근성 활성/지원 버전은 확인했지만 검사 후 잠금 관찰만으로 원인을 단정하지 않는다. 읽기·요약 성공/전체 기록 접근/전송 성공으로 보고하지 않는다. Qwen 실제 중간 재개 및 전체 생성, 1029 실제 로컬 모델 자율 작업은 미검증이다. 이 채팅의 연산 자원을 설치본 엔진에 연결하지 않았으며 클라우드 이미지 생성으로 대체하지 않았다.
+
+## 2026-11-01 — ACTIVE 계획 시간 초과 원인 분리·복구
+담당 codex-progress-root. 사용자 반복 시간 초과 수정 요청. 소유 범위 LocalSemanticPlanner.kt, 새 planning budget/test, ModelDecisionContract의 별도 compact planning schema, coordinator 오류·진행 요약 helper. 현재 타 담당자의 실패 기억/승인 UI 변경은 보존한다. 다른 채팅 연락 없이 공유 기록으로 범위를 남긴다. 단계별 만료 원인, 생성 시간 초과 1회 의미 재계획, 현재 요청·goal·권한 보존, 구조화 입력 실제 토큰 확인을 검증한다. 아직 새 빌드/실제 모델 성공 아님. 사용자 실행 중 이미지 작업은 중단하지 않는다.
+
+## 2026-11-01 — 1030 설치 및 실제 지연 관찰 / 후속 보완 ACTIVE
+1030 host core622/app568=1190, lint0오류132경고, release/test 서명 PASS. 입력630개 동결·드리프트0. main SHA b86ffc3eb0a7b173841380baf81771a6f0a7ec92040f9ff7fae5291b33d07347/test3201c894d4359ead0f82c3a32079dbcb7b5449e9e4cc8f87db1c3a2ee22cec38. 데이터 초기화 없이 실제 설치/base SHA 확인. 실제 E2B 합성 자율 fixture는 계획 통과 후 첫 도구 선택 생성에서 장시간 진행 중이다. 전체 작업 성공은 아직 아니다. 사용자 잠금 해제 답변 수신. 실행 중인 이 자체 fixture는 그대로 두고 PC에서 후속 보완 준비: 구조화 도구 선택 단계의 짧은 지침(현재 원문 목표/제약·권한 경계 유지), 기존 native 수치 진행의 facade 전달·진행 기록, 초기 생성 제한은 기존420초를 보존하고 재시도300초/전체900초 상한 유지. 원래 사용자 이미지/PC작업은 중단하지 않는다. 담당 codex-progress-root 추가 파일 범위 AssistantPolicy, InferenceEngine/Local/Llama/Automatic snapshot getter, 해당 회귀 및 자체 fixture 진단. 다른 채팅 연락 없음.
+
+## 2026-11-01 — 1030 E2B 실제 자율 fixture 실패·복원 확인
+합성 계산·독립 검산 요청에서 E2B 계획 단계는 통과했으나 총1081499ms 뒤 run completed/계산 VERIFIED0/모델 후속 검토 false로 끝났다. 전체 자율 작업 성공 아님. 도구 실행 없는 완료가 확인되어 단순 timeout 제거만으로 해결 완료라 하지 않는다. fixture cleanup true, 원래 모델/PC정책/대화 복원 확인. 사용자 이미지 취소0. 같은 APK1030에서 이미 캐시된 E4B를 동일 합성 요청으로 비교 중이며 영구 모델 선택은 바꾸지 않는다. PC에서는1031 짧은 도구 선택 지침·실제 native 수치 진행 전달을 빌드 중이다.
+검증 harness 자체의 events() 조회가 최근128개 창이라는 한계도 발견했다. 진행 로그가 늘면 오래된 SEMANTIC_STARTED/실행 영수증이 창 밖으로 나가므로 실제 검증에서는 bounded pagination을 써야 한다. 제품의128개 창/이전 기록 페이지는 유지한다.1031 full build 완료 뒤 이 androidTest 파일만 추가 수정·재빌드/서명하고 main APK 동일 SHA를 확인할 예정이다. 아직 이 후속 test revision/APK/기기 검증이 끝났다고 주장하지 않는다.
+
+## 2026-11-01 — 1031 실제 재현: 검토 한도 뒤 최종 답변 누락 / 1032 ACTIVE
+1031 installed/base SHA c548565e53fb2d21c10be57a9146a2c220a3a364170b2cfe1fc20d576f811583. AndroidTest rev2 SHA a88e99b69b48a4e7877e86de30a1a87de6754a0b6b2d4fb7de6526ae30417e94; main APK 동일 확인. core623/app570=1193 및 lint0오류132경고, 서명 PASS. 실제 기기 scripted 판단+실제 계산2회+후속검토+최종본문1 PASS(실제 모델 아님). 실제 E4B는 계획59457ms에 TOOL_TASK를 선택했고 계산3회 VERIFIED/후속 검산 선택까지 수행했으나377093ms에 review_budget_exhausted로 paused, 최종본문 미완성. fixture cleanup true. 따라서 전체 실제 모델 성공은 아직 아니다.
+실제 한도 재현에 따라1032는 이미 FinalSynthesisPolicy가 완결된 현재 호스트 실행 근거를 확인한 경우에만 검토 한도 뒤 새 도구 없이 최종 정리한다. 검토가 완전히 끝났다고 승격하지 않고 HOST 출처의 제한 고지와 reviewBudgetFinalization 표시를 남긴다. 필수 근거 미완결/부분 출처/실패 상태는 우회하지 않는다. 완료되지 않은 영속 목표를 자동 완료하지 않는다. 모델 검토에는 이미 충족된 기준을 단순히 다시 확인하려는 반복 제안을 줄이는 지침을 추가한다. 실제 검증은 독립 계산2회 이상·서로 다른 인자·영수증·최종323·원래 사용자발화1개를 유지하며, 모델 검토 완료와 한도 명시 최종정리를 별도 지표로 기록한다. 기존0/1계산 실패를 합격으로 바꾸지 않는다.
+함께 확인한 첫 표시 전 자원 일시정지의 상태 저장 누락도 보완한다. 답변 메시지가 없어도 paused를 영속 저장하고 검토 단계의 writer pause도 중지로 처리한다. 실행 종료가 completed로 바뀌거나 빈 답변에 이어쓰기 가능을 약속하지 않게 한다. 실제 native 입력/샘플 수치 표시 검증 중이며 내부 사고 원문을 노출하지 않는다. 다른 채팅 연락/사용자 이미지 취소0.
+
+## 2026-11-01 — 1032 실제 설치·제어3/UI15/실제 E4B1 PASS
+최종 main SHA b72547a78614946790ddbc3a52443d9b298f06c0636877ba24ea98d5d4609a64, 현재 test rev2 SHA ebb3cb0f7b540534ddacd7ab83ccd881480584aa9758402406a50e846e200c68. 실제 설치된 두 base APK SHA와 versionCode1032를 독립 재확인했고 데이터 초기화0. core626/app570=1196 PASS, release lint0오류132경고, release/test 서명 PASS. 첫32 컴파일 범위 오류는 설치 전 수정 후 전체 재검증했다.630입력 동결·코드 드리프트0. AndroidTest 숫자 재조회 추가는 해당 컴파일 전에 별도 해시로 동결했다. 이후 자원 정지 검사가 정상 빈 진행 행까지 금지하던 잘못된 기대만 수정해 test rev2를 재빌드·서명했다. 본 APK는 동일 SHA이며 원래 검증 APK도 보존한다.
+실제 단말 제어3 PASS: 정해진 모델 판단+실제 계산2회/모델검토/최종작성, 반복 검토 제안2회 뒤 실제 계산3회에서 더 실행하지 않고 제한 고지와 최종작성, 첫 화면 표시 전 자원 정지의 durable paused/생성 본문 없음. 이3개는 실제 모델 검증으로 세지 않는다. 화면15(CodexProgress11+ImageConsistency4) PASS.
+실제 cached phone E4B 합성1 PASS: planning64885ms, total561502ms, TOOL_TASK, VERIFIED 계산3회·서로 다른 인자, 모델이 후속 검산 선택, 원래 사용자발화1개, 실제폰 실행·활동 연결·immutable receipt readback·scope 확인, 기대값을 포함한 최종본문과 검토 한도 고지, 원래 모델/PC정책/선택대화 복원·fixture cleanup true. model final review completed=false, host-limited finalization=true로 별도 기록했다. 중간 검산식 선택 오류가 관측됐고 이후 다른 식으로 원래 값을 다시 확인했으므로 일반 수학 추론·의미 품질 검증이라 하지 않는다. Native 검증은 원래32 test SHA2bf6c464fea1c51578476a0d41c02ace6862f310bfe82c0097773a79625d41c0, 제어/UI는rev2 사용; Native fixture 소스와 본 APK는 동일하다. 단말 총19 PASS.
+검토 한도가 필수 근거 미완결·부분 자료·실패를 우회하지 않음을 core 회귀로 확인했다. 첫 표시 전 pause도영속 상태를 저장하며, 검토 중 writer pause는 새 작성으로 이어가지 않는다. 최종 작성이 요청 스냅샷을 저장할 때 지워지는 HOST 제한 표시는 작성 후 복원하고 명시 고지를 남긴다. 기존 읽기 전용·권한·출처·취소·원래 목표는 보존한다. 제한 표시로 미완료 영속 목표를 자동 완료하지 않는다.
+E2B의1032 실제 자율 성공/일반 목표 달성률/PC Qwen native resume·전체 생성/카카오 본문·요약 성공은 이번 합격 범위가 아니다. 사용자 이미지 취소0/다른 채팅 연락0/클라우드 추론0/모델 다운로드0/영구 모델 선호 변경0. 상세 영수증·raw 로그·숫자 재조회는 외부 도구 디렉터리와 ignored .local에 보관한다. 이후 변경한 PROJECT_STATE/device-validation/conversation-workflow는 검증 뒤 문서 갱신이며 APK 소스 코드 변경이 아니다. root 빌드·소스 동결·기기 예약을 해제한다. 커밋/푸시는 요청받지 않아 하지 않았다.
+
+## 2026-11-01 — ACTIVE 연결 후 미분석 자료 분석 / 주기적 Codex 호출 중지
+사용자는 허용 자료의 전체 문맥을 Codex로 전달하는 것을 명시 승인했다. 기존 로컬 일상 추론과 별개 선택 기능이다. 다른 채팅 연락 없이 작업한다. 초기30분 heartbeat는 토큰 낭비 지적 후 automation 도구로 PAUSED 확인. LLM 없는 연결/신규 자료 검사 뒤 필요한 배치만 분석하는 방향으로 변경한다. 추가 범위 docs/incremental-personal-briefing.ko.md, 신규 BriefingLedger 및 회귀, 신규 briefing/BriefingArchive. 아직 앱 전달 연결/새 APK/실제 원문 분석/일정 등록은 완료 아님. 기존1032 설치 근거와 구분한다. 기존 타 파일 미커밋 변경은 보존한다.
+추가 준비: BriefingSources/Provider/Panel 및 manifest·notification listener·자료분석화면 연결, InternalNoteCollections 보호 항목 추가. 개발 ADB용 provider는 DUMP와 shell UID를 함께 검사하며 네트워크 공개 API가 아니다. 공급자 스캔은 ID 페이지·내용 버전 기반이며 알림/통화기록의 부분 범위를 명시한다. 최초 core:test 및 compileDebugKotlin PASS(1m8s). 뒤의 잠금 분리·보관함 삭제 시 커서 삭제·전체본문 해시 보완은 아직 재검증 전이다. 이 소스는 새 release/APK/설치 성공 근거가 아니고1032 설치본은 그대로다. 연결 이벤트로 현재 채팅을 자동 깨우는 경로는 아직 구현·확인하지 않았다. 임의 외부 Codex 세션/다른 채팅/하위 에이전트/우회 cron을 만들지 않는다. 사용자 질문에 따라30분 heartbeat PAUSED 유지; 반복 AI 호출 없음.
+
+## 2026-11-01 — ACTIVE 새 자료만 분석·휴대폰 일정 보고/등록
+사용자 실제 구현·APK 설치·단말 검증 요청. 담당 codex-progress-root. 다른 채팅/하위 에이전트 연락 없음. 기존 미커밋 전부 보존. 추가 소유 briefing 패키지/새 순수 정책·회귀/알림 진입 Activity/manifest/PC 감시 런타임 scripts/briefing_companion 및 검증. 기존30분 Codex heartbeat PAUSED 유지. 비모델 연결/새자료 검사와 실제 신규 배치의 명시승인 Codex 분석을 분리한다. 수집·원문버전·저장재조회 뒤 완료, 불명확/정정/취소/부분 자료는 자동등록 금지, 실제 폰 알림→수정→선택 캘린더 저장 경로 검증. 기존 이미지 연산은 중지하지 않는다.
+
+## 2026-11-01 — 1035 실제 설치·새자료 보고/등록 검증 완료
+담당 codex-progress-root. main SHA a4e9f60222ed5c8ea9b111c895230533ab595764ad835807a03b7489ca3cbe00/test6bbb9d2c0c07706253ae43fc652222efe6595da228bb4236d626ddbf80066ac4. 실제 설치된 두 base APK SHA 독립 재확인/데이터 초기화0. core631/app570=1201 PASS, PC 제어/보안/재연결/캐시/무호출9 PASS, release lint0오류137경고, 서명 PASS.580개 Android 입력 동결·최종 코드 드리프트0. 이후 공유 문서 수정은 APK 소스 변경이 아니다.
+최종1035 단말19 PASS/skip0: 암호화 보관 재시작·내용버전 중복제외·ACK 저장확인·권한 세대, 실제 CalendarContract 자동 삽입/재조회/재시도 중복제외/애매한 항목 수정등록/검증용 일정 정리, 실제 알림 PendingIntent 실행과 확인 Activity, 보고UI, 기존 진행/이미지일관성15. 전경 발신자가 실제 불변 PendingIntent를 보내는 검증과 실제 관찰 화면에서 알림을 눌러 Activity를 연 검증을 구분한다. 과거 SystemUI 접근성 트리 탐색 실패와 비동기 게시 직후 중복 단언 실패는 실패 그대로 보존했다.1034 본 APK는 테스트 단독 개정 동안 동일했고,1035는 최신자료 우선/48건 제한을 포함해 전체 재빌드·재검증했다. 기존 개인 일정을 삭제하지 않았고 합성 QA 일정만 정리했다.
+사용자 승인한 전체 문맥 Codex 분석은 별도 선택 기능이다. 실자료60원문버전이2회 모델 호출로 폰에 저장·재조회·ACK됨.1033의12건 +1035의48건이며 두 번째는 실제 최신 시각 우선 선택을 확인했다. 검증용 두 번째 호출만 정상 cooldown 안에서 명시적으로 실행했고 일일 계수에 포함했다. 해당 검증 동안 자체 감시기만 멈추고 영속 계수2로 재시작해 동시 호출을 막았다. 후속 일반 감시에서도2회 유지. 평상시 최소1시간/하루4회·48건/48KB이며1분 연결/신규 점검 및 결과 재전달은 LLM 없음.30분 Codex heartbeat는 PAUSED. Windows 원 사용자 시작프로그램 등록·원래 단말 식별 해시 확인·실제 ChatGPT 로그인 확인. 새 API키/가중치 다운로드/다른 채팅 연락/새 메시지·서류 전송0. 이미지 작업은 초기 검사에서 사용 중이면 보류했고, 사용자 중단 지시 시에는 이미 종료돼 추가 취소하지 않았다. 임시 화면 설정은 원래 값으로 복원했다.
+새 알림의 별도 암호화 누적함(세션30개/10분 수신함과 분리), 기존 앱별 읽기 스위치의 수집/전달 재검사,64개 비동기 저장 대기와 부분 수집 이력, 공식 SMS/통화기록 페이지·최근12개 우선 포착·최신 자료 우선 배치, 저장/재조회 후 버전 ACK, 불명확·부분·정정·취소·충돌의 폰 검토, 선택 캘린더·근거·시각 검증과 중복 표식, 날짜/시각 선택기, 보고 알림/별도 확인 화면/접힌 목적 캘린더/위젯 제공자를 연결했다. 기존 채팅의 읽기 전용/권한·영속 목표를 해제하지 않는다. 등록 사실은 호스트 읽기 근거이며 모델 보고를 일반 의미 검증 완료로 바꾸지 않는다.
+Codex 합성 의미4사례(확정/애매/같은 대화의 뒤 취소) PASS는 작은 고정 검수다. 실자료60건은 전송·보관 왕복 증거이고 전체 정확도 점수가 아니다. 카톡/메일은 허용된 알림 범위이며 닫힌 방/전체 메일함/새 경로의 녹음전사·사용패턴/Google 서버 동기화/기존 일정 자동 수정·삭제·초대/위젯 자동 배치는 완료 범위가 아니다. 원문·개인 화면·출력·단말/주소는 Git에 넣지 않았다. 상세 영수증은 외부 도구 폴더와 ignored .local에 보관. 기존 미커밋 보존/커밋·푸시0. root 빌드·소스 동결·기기 예약 해제.
+
+## 2026-11-01 — 사용자 지시: PC 전용 실행 구조로 전환 (ACTIVE, 진행 중)
+담당 claude-reasoning-eval. 역할: 휴대폰은 조작·상태 표시·자료 수집·OS 동작 실행, PC는 추론·도구 계산·판단. 휴대폰 추론 폴백 없음. 사진·생성 이미지 원본은 휴대폰 저장, PC DB는 D:\ZipHap\Data SQLite(WAL, 필드 DPAPI, 검색어 HMAC)이며 미디어 본문 금지. AGENTS.md의 휴대폰 로컬 추론 전제는 이 지시로 대체 예정(유료 API 금지 유지).
+소스: AutomaticComputeEngine pcOnly + PcRequired, 단위 테스트 통과. pc-worker/data_store.py 및 test_data_store. **미적용:** APK 빌드/설치, 작업기 배포, 앱-DB 연결, 음성/이미지 이해/도구의 PC 경로. 현재 소스로 빌드하면 음성 인식·통화 후속·이미지 이해·thinking 요청은 PcRequired로 멈춘다.
+1035 합성 평가(휴대폰 E4B, 발열 전): R2 도구 JSON 본문 노출+completed+계산 0회, R5 숨은 지시를 선택지로 제시. R1/R3/R4는 thermal SEVERE 일시정지로 품질 미평가, errorCode 없음. `generatedResponseKind`는 첫 글자만 보아 산문 뒤 도구 JSON을 산문으로 저장한다.
+PC 측정(llama-bench p512/n128, 1회): 현 설정 E4B ngl18/t2/b64 생성 5.2 t/s, E4B ngl24/t6 10.4, E2B 전체 GPU 67.2, Qwen3 4B Q5 전체 GPU 36.4. 도구 없는 직접 비교 5건: Qwen R2·R3-1·R4·R5 통과, R3 정정 산술 오류, R1 제약 위반. E2B·E4B는 R4 지어냄, R5 숨은 지시 추종 또는 잘림. 앱 하네스 경유 결과가 아니며 표본이 작다. 선정: Qwen3 4B Q5 전체 GPU, t6, b512.
+
+### 2026-11-01 PC 전용 전환 2차 (소스, 미설치)
+PcInferenceEngine은 휴대폰 모델과 무관하게 작업기 별칭 pc-text(Qwen3 4B Q5, SHA 37edbd37f5b7a4d4e7a766400c57def1f790e809de03513b86bf11bb06979695)를 요청한다. deviceOnly 텍스트와 thinking 옵션도 PC로 보낸다. 오디오/비전은 PC 경로가 없어 PcRequired로 멈춘다. 작업기 원본 engines.py: ngl99/t6/b512/ub256/ctx8192/--jinja, 스키마 없는 요청은 thinking+1500토큰, 유휴 해제 300초. 배포는 앱 격리로 이 세션에서 불가, 사용자가 일반 PowerShell에서 .local/pc-engine-bench-20261101/deploy-worker.ps1 실행 필요. LongAnswerWriter: 산문 뒤 도구 JSON을 화면에 내보내지 않고 검증 후 도구로 처리, PC 실행 중에는 휴대폰 발열/메모리로 멈추지 않음. core+app JVM 및 androidTest 컴파일 통과. 기기 검증 없음. 미구현: 음성·이미지 이해 PC 경로, 도구 PC 실행, SQLite 앱 연결·이전.
+
+### 2026-11-01 작업기 이전
+사용자 지시로 작업기를 Codex 패키지 폴더에서 D:\ZipHap\Compute로 복사 이전(LOCALAPPDATA=D:\ 로 실행, 페어링·인증서 유지). 시작 프로그램 ZipHap Compute가 D:\ZipHap\Compute\supervisor.py를 실행. 모델 로드 재시도 99/24/0층. PC 직접 호출과 휴대폰 포트 연결 확인. 재부팅, 앱 경유 요청은 미확인. 기존 Codex 폴더 사본은 삭제하지 않음.
+
+### 2026-11-01 음성·이미지 PC 경로
+D:\ZipHap\Compute에 whisper.cpp v1.9.2 + large-v3-turbo-q5_0, Gemma 3 4B + mmproj. 작업기 /v1/media/transcribe, /v1/media/describe(입력은 요청별 임시 폴더, 사용 후 삭제). 앱 PcInferenceEngine 연결, 통화 후속 전사·분석도 PC 엔진 사용. whisper 실행 파일은 CPU로 동작(GPU 미검출). 합성 음성 1문장·합성 이미지 1장만 시험. 앱 경유, 실제 녹음, 통화 후속, PC 꺼짐 처리 미검증.
+
+### 2026-11-01 PC 모델 확정
+대화·판단 Qwen3 4B Q5(직접 비교 5건 최선), 사진 이해 Qwen2.5-VL 7B Q4(합성 1장), 음성 whisper large-v3-turbo. E2B, E4B, Gemma 3는 휴지통으로 이동(사용자 비움 필요). 7B는 대화 R1,R3,R5 실패로 대화용 탈락. 1037 앱 평가 2/5 통과, 계획 단계가 주요 실패.
+
+### 2026-11-01 1038 계획 구조 A/B
+1038 설치. 문맥 8192. 합성 R1~R5 1회씩: A(사전 계획) R1 통과, R2 부분, R3 첫 답변 빈 일시정지·정정 후 결론 정답, R4 도구 검증 실패 문구, R5 판단 없음. B(direct-next-action) R1 빈 일시정지, R2 증가율 오답, R3 첫 답변 빈 일시정지·정정 후 결론 정답, R4 통과, R5 중단 문구. 어느 쪽도 우세 판정 불가, 기본값 A 유지. 빈 일시정지 원인은 thinking 토큰 소진으로 추정(미확인), 작업기 여유분 3500으로 상향, 재평가 전. 표본 작음.
+
+### 2026-11-01 1039 Claude ?좏깮怨?Tailscale
+?ъ슜??吏?? ????붿쭊 ?좏깮(?ㅽ뵂?뚯뒪/Claude, 湲곕낯 ?ㅽ뵂?뚯뒪), ?ㅻ뒗 PC DPAPI, ?묒뾽湲?/v1/cloud/chat(claude-opus-5-5). 100.64.0.0/10 ?덉슜, ?묒뾽湲곌? ?몄쬆??health濡??ㅻ쾭?덉씠 二쇱냼 ?꾨떖, ?깆씠 LAN ?ㅽ뙣 ???쒕룄. ?ㅼ젣 Claude ?몄텧怨??몃?留??묒냽 誘멸?利??ㅒ룻쑕???Tailscale ?꾩슂).
+
+### 2026-11-01 대화 모델 Qwen3.5 9B 결정
+사용자 결정. 비교 중단(9B·14B 측정값 없음), 14B 휴지통. 1040 앱 SHA 접두사 변경, 작업기 pc-text를 9B(GPU 30/20/0층)로 교체. 앱 경유 R1~R5 진행. Qwen3 4B는 검증 후 정리.
+
+## 2026-11-01 — ACTIVE Gemma 이미지 보조 모델 복구/연결
+담당 codex-gemma-restore. 사용자 지정 HauhauCS E2B IQ3_M/E4B Q4_K_M + 각각 f16 mmproj 재다운로드 및 SHA검증 완료. 용도는 사진 이해/생성 프롬프트 준비이며 확산 생성기 아님. Qwen3.5 9B 기본 대화 별칭/옵션/설정은 보존한다. 추가 범위 PC media_engine 모델 식별·무결성, PcInferenceEngine의 media 선택/명시 이미지프롬프트 역할, InferenceOptions 역할 필드, ImageStudio 번역 준비 역할, 관련 회귀/단말 검증. 다른 채팅 연락 없이 좁은 파일 기준선을 보존한다. PC는 유휴 확인 뒤 작업기 코드만 배포하며 모델은 Git/APK에 포함하지 않는다. 현재 설치본1040, 새 APK 아직 아님.
+
+### Gemma 이미지 보조 연결 중간 검증
+- PC 모델/프로젝터 4개(9.73GiB)를 원본 SHA-256으로 확인하여 D:\ZipHap\Compute\Models에 복구했다. 모델은 Git/APK에 포함하지 않는다.
+- PC 작업기에 명시적 gemma-e2b/e4b 사진 분석과 기존 native admission lock을 연결했다. Python 3.12 RLock에 locked()가 없는 호환성 오류를 확인하여 health는 기존 ENGINE.health()의 busy 증거를 보존하도록 수정하고 정상 응답을 재검증했다. 두 Gemma 별칭 인식, busy=false/cleanup=false, pc-text Qwen3.5 9B SHA prefix 03b74727a860a563 유지 확인.
+- PC 회귀 4개 PASS(모델/프로젝터 선택, SHA 변경 차단, 자원 부족·busy 차단, 입력 임시파일 정리). 아직 실제 Gemma 추론 성공 증거는 아님.
+- 사용자 최신 지시에 따라 1041 APK 설치를 먼저 진행한다. 현재 빌드 중이며 설치 완료로 주장하지 않는다.
+
+### 2026-11-01 — COMPLETE Gemma 이미지 보조 연결, 설치1041
+- 소스: 사진 분석 요청에 선택한 Gemma ID를 명시하고 응답 엔진을 대조한다. 한국어 이미지 프롬프트 준비는 현재 '사진용' E2B/E4B 선택을 사용한다. imagePreparation 옵션일 때만 해당 Gemma를 명시하며 일반 pc-text Qwen3.5 9B 기본값과 선택적 기존 클라우드 설정을 보존한다. 입력/프로젝터 SHA 및 단일 native admission/메모리 경계를 검증한다.
+- PC 실측 실패/수정: 초기 mtmd 호출이 Jinja 옵션 누락으로 native 종료하여 실제 앱 E2B 검사 1회 실패했다. Gemma의 검증된 GGUF 내 chat_template를 읽어 Jinja로 실행하고 이미지 보조 답변에는 enable_thinking=false를 적용한 뒤 재검증했다. PC 작업기에 최종 media_engine.py와 소스가 동일한 것을 확인했다. pc-text Qwen3.5 9B SHA prefix 03b74727a860a563 유지.
+- 빌드: core633 + app575 = JVM1208 PASS, lintRelease/assembleRelease/assembleDebugAndroidTest PASS. PC 회귀5 PASS. 보안 관련 기존 core 테스트 포함. APK 서명 및 설치 전 개발자 업데이트 권한 승계1 PASS.
+- 설치: 1041 릴리스와 테스트 APK를 실제 휴대폰에 데이터 삭제 없이 업데이트했다. 릴리스 설치 base SHA-256 f1534e6550aefb07a4f9d398a5163c3f5df1ff27a0eaedc7bcbf67287c39b71e 대조 PASS. 실제 버전1041 및 MainActivity 시작 확인. 이후 추가한 Gemma 실기기 검증용 테스트 APK도 재서명·설치·base SHA 대조했다. 상세 해시는 ignored .local/gemma-restore-20261101/completed.json 및 helper-test-installed.json.
+- 실기기: GemmaImageHelperDeviceValidation을 모델별로 명시 호출했다. E2B 1 PASS(68.461초), E4B 1 PASS(93.144초). 시간은 모델 파일 검증·연결·로드·사진 분석·문장 생성·정리를 포함하므로 순수 추론 벤치마크가 아니다. 각 모델이 합성 이미지의 빨간 원을 인식하고 한국어 파란 컵 장면을 유효한 영어 프롬프트로 변환했다. 기존 기본 모델/사진용 선택값 유지 assertion PASS. 임시 사진 삭제 및 모델 정리 후 PC busy=false/cleanup=false 확인.
+- 사용: 모델 관리에서 E2B 또는 E4B의 '사진용'을 선택하면 다음 사진 분석/한국어 이미지 프롬프트 준비에 적용된다. 실제 diffusion 모델 SDXL/Qwen 선택과 구별한다. 이번 검증은 PC 연산을 사용한 두 보조 경로이며 새 diffusion 이미지 결과나 휴대폰 단독 Gemma 추론을 검증했다고 주장하지 않는다.
+- 다른 채팅에 연락하지 않았다. 원래 미커밋 변경을 보존했고 커밋/푸시는 하지 않았다. codex-gemma-restore 빌드/기기 lease 해제.
+
+## 2026-11-01 — ACTIVE 실제 이미지 진행 단계 표시
+Owner codex-image-progress. 현재 사용자 이미지 생성 작업은 보존한다. 소스 소유 범위 RemoteImageClient.kt, 새 core/PcImageProgressPolicy와 테스트, pc-worker/image_progress.py/patch_image_progress.py 및 관련 테스트, recovery_engines.py의 상태 기록만. 실행/복구/권한/모델 설정을 바꾸지 않는다. 진행 중 작업기의 파일 교체·재시작·폰 설치 및 무거운 Gradle 실행은 하지 않는다. 배포 전후 증거를 구별하며 다른 채팅 연락 금지 지시를 따른다.
+
+### 2026-11-01 — SOURCE READY 이미지 진행 표시, 현 작업 보존
+- `RemoteImageClient`의 queued→'앞선 작업 대기' 단정을 제거하고 core `PcImageProgressPolicy`로 분리했다. 명시적 waiting_compute에만 다른 PC 연산 대기를 표시한다. 파일 SHA 검사/실행 환경 준비/기존 모델 정리/모델 로딩/메모리 대기/GPU 대기를 각각 표시하며 sampling/decoding 등 현재 phase가 오래된 stage보다 우선한다. 구형 작업기/알 수 없는 stage는 중립적 상태 안내로 처리한다.
+- 작업기 `phase` 호환성·실행·모델·owner·취소·복구 설정을 유지하고 선택적 `stage`만 추가했다. 연산 잠금이 실제 획득되지 않을 때 waiting_compute를 기록한다. 자원 여유를 확보한 뒤 검사/준비로 이동하면 waiting_resources를 해제한다. terminal/sampling에서 stale stage는 공개하지 않는다.
+- 검증: 새 JVM 정책2 PASS(독립 컴파일, heap192MiB/CPU1), Python 진행 상태4 PASS. 준비된 engines/owned + 새 recovery 소스 조합의 복구 회귀4 PASS/1 SKIP(원본 설치패치 기준선 미제공, 기존 skip). 취소·체크포인트 재개·동일 작업/설정·권한 회귀 유지. 변환 소스 컴파일·재적용 동일성·실행 중 원본3파일 기준선 불변 확인. 전체 core 보안/Android APK 빌드 및 설치·화면 검증은 이번 변경에 대해 아직 수행하지 않았다.
+- 배포 경계: 현재 사용자 이미지 생성은 PC busy=true/cleanup=false로 계속 중이다. 실행 중 PC 파일 교체·재시작, 모델 해제, 생성 취소/재시작, APK 재설치, 무거운 Gradle 실행을 하지 않았다. 설치본은1041이며 이번 표시 수정은 아직 포함하지 않는다. ignored `.local/image-progress-20261101/prepared-worker`에 파일별 기준선과 변환 결과를 준비했다. 현 이미지 결과 수신·정리 이후 유휴 확인/기준선 재확인→전체 테스트·릴리스 빌드→PC/앱 업데이트·실제 상태 전환 검증이 남는다. 소스 준비까지만 완료했으며 실제 적용 성공으로 보고하지 않는다. 다른 채팅 연락 없음. codex-image-progress 소스 편집 종료, 빌드/기기 lease 취득 없음.
+
+### 2026-11-14 반복 행동 단계적 대응과 실패 로그 (소스, 미설치)
+TaskHarness 반복 감지를 즉시 종료 대신 상기 → 방향 전환 → 중단(paused, errorCode stuck_repeated_action)으로 변경. 아이디어 출처 PokeClaw(Apache-2.0), docs/third-party-references.md. FailureLog(휴대폰 diagnostics/failures.log, 내용 없이 단계·코드·예외), PC 사용 중이면 PcBusy 문구. core·app JVM 테스트와 release 컴파일 통과. 작업기 실패 로그 패치(log_detail.py)와 1041 설치는 미적용.
+
+### 2026-11-14 1042~1044
+작업 과정을 Claude Code 형 한 줄 표시로 변경(매초 진행 기록 제거, 모델 판단 과정 표시, 중국어 위주 사고는 숨김). 작업기 pc-text 요청에 한국어 강제 지시. 단계 예산 경고(RoundBudget, PokeClaw 참고). 화면 확인은 1042 캡처 1장뿐.
+
+### 2026-11-14 1045 도구 우선 정책·검증 게이트·마크다운 (소스·빌드, 설치 전)
+- 정책: AssistantPolicy의 "도구 실행이 꼭 필요할 때만"을 도구 우선 문구(core `ToolUsePolicy.promptLines`)로 교체. 플래너에 "도구로 계산·검증·조회 가능하면 TOOL_TASK" 지시 추가. 계산·날짜·현재 시각 도구(읽기 전용, 개인 자료 없음)는 CLARIFY/CANCEL/연결 동작을 뺀 모든 계획에 추가로 제공(`planTools`). 그 밖의 도구는 여전히 의미 계획과 호스트 검증이 필요하다.
+- 검증 게이트: 도구를 한 번도 쓰지 않은 최종 답변 초안에 숫자가 있으면, 실행당 한 번 모델이 구조화 출력(AutonomousReviewPolicy 스키마)으로 계산 도구 확인 여부를 고른다. 선택 시 호스트가 검증·실행한 뒤 "검증:" 짧은 확인을 같은 답변에 덧붙인다. 숫자 검사는 사용자 요청 해석이 아니라 모델 초안의 비용 필터다.
+- 스킬: read_skill이 제공되면 번들 스킬 ID 목록을 시스템 문맥에 넣는다(`BundledSkillStore.idIndexForPrompt`). 확장(extensions)은 여전히 검사 전용이며 도구 권한이 아니다.
+- 답변 표시: `MarkdownLite`/`MarkdownText`로 제목·굵게·기울임·인라인 코드·목록·인용·코드 블록·표를 렌더링. 저장·복사 텍스트는 그대로.
+- 검증: core 전체 + ToolUsePolicyTest4, MarkdownLiteTest4, BundledSkillDiscoveryTest3 PASS. 실제 모델 동작(게이트 호출률, 계산 도구 선택)과 기기 화면은 미검증.
+
+### 2026-11-14 1046 PC 기록 보완·이미지 확인 간격
+- PC 작업기(`D:\ZipHap\Compute\worker\server.py`, 백업 server.before-chatlog-20261114.py, 패치 .local/pc-engine-bench-20261101/patch_log_chat.py): 기록에 날짜 추가, 2MB 초과 시 requests.1.log로 1개 교체, 성공한 이미지 진행 조회(전체의 약 95%)는 기록 생략. `/v1/llm/chat`은 이전에 기록이 전혀 없었고 스트림 중 오류를 조용히 삼켰다 → 성공 시 소요 시간, 실패 시 예외 종류·코드형 메시지(대문자 코드만, 내용 없음)·발생 시점(before-stream/stream)을 기록.
+- 적용: 작업기 유휴(모델 미실행, 최근 요청 없음) 확인 후 작업기만 재시작, supervisor가 재기동. 날짜 기록 동작 확인. 대화 성공/실패 기록은 실제 대화 요청으로 아직 확인하지 않았다.
+- 앱: 이미지 진행 조회를 고정 1초에서 변화 없을 때 0.5초씩 늘려 최대 5초로(`PcImageProgressPolicy.pollDelayMillis`). 단계·상태가 바뀌면 1초로 복귀. core 테스트 1개 추가.
+
+### 2026-11-14 1047 PC 왕복 줄이기·재시작 대기·작업기 소스 정리
+- `PcInferenceEngine.load`: 같은 텍스트 모델·같은 설정·같은 경로이고 60초 안에 PC가 상주를 확인(load 응답 또는 완료된 대화)했으면 health+load 왕복을 생략(`PcResidency`). 실패·해제 시 즉시 무효화. PC 유휴 해제는 300초라 그 안쪽만 재사용.
+- `PcTransport.available(waitForRestart=true)`(모델 불러오기 경로만): 최근 10분 안에 응답한 PC가 실패하면 작업기 재시작으로 보고 5·5·10초 대기하며 재확인, 상태 문구 표시(`PcReconnectPolicy`). 오래 꺼진 PC나 상태 표시용 확인은 바로 실패.
+- `pc-worker/deployed/`: D 드라이브에서 실행 중인 작업기 파일 스냅샷(백업·모델·설정·토큰·인증서 제외)과 배포 방법. 상위 pc-worker 소스는 미배포 다음 버전임을 README에 명시.
+- 검증: core·app JVM(PcResidencyTest2, PcReconnectPolicyTest2 포함)·릴리스 빌드. 실제 집 밖 왕복 시간 감소와 재시작 중 자동 재시도는 기기에서 미검증.

@@ -28,7 +28,8 @@ data class SemanticPlanningResult(
     val elapsedMs: Long,
     val constrainedDecoding: Boolean = false,
 )
-data class SemanticPlanningTelemetry(val stage:String,val elapsedMs:Long,val inputTokens:Int?=null,val visibleChars:Int=0,val attempt:Int=0)
+data class SemanticPlanningTelemetry(val stage:String,val elapsedMs:Long,val inputTokens:Int?=null,val visibleChars:Int=0,val attempt:Int=0,
+    val nativeProgress:com.user.localagent.inference.NativeGenerationProgress?=null)
 
 /** Safe diagnostics only: no request, history, generated plan or parser payload in errors. */
 class SemanticPlanningException(val reasonCode: String, message: String) : IllegalStateException(message)
@@ -37,9 +38,12 @@ class SemanticPlanningException(val reasonCode: String, message: String) : Illeg
  * The caller owns the existing inference gate and cancellation scope. This class only plans:
  * it executes no tools, stores no conversation payloads and never falls back to keyword routing.
  */
-class LocalSemanticPlanner(private val app: AppContainer,
-    private val requestEngine:com.user.localagent.inference.InferenceEngine=app.engine,
-    private val progress:(SemanticPlanningTelemetry)->Unit={}) {
+class LocalSemanticPlanner internal constructor(
+    private val requestEngine:com.user.localagent.inference.InferenceEngine,
+    private val progress:(SemanticPlanningTelemetry)->Unit={},
+    private val budget:PlanningBudget=PlanningBudget()) {
+    constructor(app:AppContainer,requestEngine:com.user.localagent.inference.InferenceEngine=app.engine,
+        progress:(SemanticPlanningTelemetry)->Unit={}) : this(requestEngine,progress,PlanningBudget())
     suspend fun plan(
         ownerRequest: String,
         history: List<InferenceTurn>,
@@ -59,9 +63,10 @@ class LocalSemanticPlanner(private val app: AppContainer,
         var lastProgress=0L
         fun emit(stage:String,force:Boolean=true){
             val elapsed=(System.nanoTime()-started)/1_000_000L
-            if(force||elapsed-lastProgress>=1000){lastProgress=elapsed;progress(SemanticPlanningTelemetry(stage,elapsed,inputTokens,visibleChars,activeAttempt))}
+            if(force||elapsed-lastProgress>=1000){lastProgress=elapsed;progress(SemanticPlanningTelemetry(stage,elapsed,inputTokens,visibleChars,activeAttempt,
+                if(stage=="generating")requestEngine.nativeProgressSnapshot else null))}
         }
-        val schema = com.user.localagent.core.ModelDecisionContract.schemaJson(availableTools)
+        val schema = com.user.localagent.core.ModelDecisionContract.planningSchemaJson(availableTools)
         val options = chosen.options.copy(
             thinking = false,
             maxOutputTokens = OUTPUT_TOKENS,
@@ -70,10 +75,10 @@ class LocalSemanticPlanner(private val app: AppContainer,
             projectorPath = null,
         )
         try {
-            return withTimeout(TIMEOUT_MS) {
+            return withTimeout(budget.totalMs) {
                 emit("loading")
-                withTimeout(90_000){requestEngine.load(chosen.model.path, options)}
-                val constrained = requestEngine.supportsStructuredOutput
+                planningStage("loading",budget.loadMs,budget.heartbeatMs,{emit("loading")}){requestEngine.load(chosen.model.path, options)}
+                var constrained = requestEngine.supportsStructuredOutput
                 var retainedHistory = history.toList()
                 var retainedContext = localContext
                 fun reduceContext():Boolean {
@@ -102,11 +107,22 @@ class LocalSemanticPlanner(private val app: AppContainer,
                             input = envelope(ownerRequest, retainedHistory, retainedContext)
                             continue
                         }
-                        val tokens = withTimeout(90_000){requestEngine.countChatTokens(input, system, emptyList())}
-                            ?: fail(
+                        val tokens = planningStage("tokenizing",budget.tokenizeMs,budget.heartbeatMs,{emit("tokenizing")}) {
+                            // The grammar-rendered prompt may differ from plain chat. Never
+                            // silently let native trimming change the owner's recent context.
+                            var counted = if(constrained) requestEngine.countStructuredChatTokens(input,system,schema,emptyList())
+                                else requestEngine.countChatTokens(input,system,emptyList())
+                            if(counted==null&&constrained){
+                                // Older paired runtimes lack exact schema counting. Use a
+                                // counted plain generation instead, with the same strict parser.
+                                constrained=false
+                                counted=requestEngine.countChatTokens(input,system,emptyList())
+                            }
+                            counted ?: fail(
                                 "token_budget_unverified",
                                 "이 실행 엔진은 작업 계획의 문맥 토큰 수를 확인할 수 없습니다. 현재 요청 원문을 자르지 않고 중단했습니다.",
                             )
+                        }
                         inputTokens=tokens;emit("budget_checked")
                         if (tokens >= 0 && tokens.toLong() + OUTPUT_TOKENS + CONTEXT_MARGIN <= options.contextSize) break
                         if (!reduceContext()) {
@@ -121,7 +137,10 @@ class LocalSemanticPlanner(private val app: AppContainer,
                     }
                     try {
                         emit("generating")
-                        val raw = withTimeout(420_000){generate(input, system, schema, constrained){count->val first=visibleChars==0&&count>0;visibleChars=count;emit("generating",first)}}
+                        val raw = planningStage("generating",if(attempt==1)budget.firstGenerationMs else budget.retryGenerationMs,
+                            budget.heartbeatMs,{emit("generating")}) {
+                            generate(input, system, schema, constrained){count->val first=visibleChars==0&&count>0;visibleChars=count;emit("generating",first)}
+                        }
                         emit("validating")
                         val parsed = try {
                             com.user.localagent.core.ModelDecisionContract.parse(raw, availableTools)
@@ -135,6 +154,17 @@ class LocalSemanticPlanner(private val app: AppContainer,
                             parsed, chosen.model.id, attempt,
                             (System.nanoTime() - started) / 1_000_000L, constrained,
                         )
+                    } catch (timeout:PlanningStageTimeout) {
+                        requestEngine.cancel()
+                        currentCoroutineContext().ensureActive()
+                        if(attempt==MAX_ATTEMPTS)throw timeout
+                        // A fresh model decision, never a partial JSON/tool execution. Preserve
+                        // the full current request, explicit goal and all authority bindings.
+                        retainedHistory=retainedHistory.takeLast(4)
+                        retainedContext=JsonObject(retainedContext.filterKeys {it!="approvedProfileContext"}+
+                            mapOf("profileOmittedForBudget" to kotlinx.serialization.json.JsonPrimitive(true)))
+                        failureCode="generation_deadline; return only the minimum valid decision"
+                        emit("retrying_timeout")
                     } catch (invalid: InvalidOutput) {
                         emit("repairing_${invalid.code}")
                         requestEngine.cancel()
@@ -151,11 +181,17 @@ class LocalSemanticPlanner(private val app: AppContainer,
                 }
                 fail("plan_unavailable", "기기 내 작업 계획을 확인하지 못해 실행하지 않았습니다.")
             }
+        } catch (timeout:PlanningStageTimeout) {
+            emit("timeout_${timeout.stage}")
+            requestEngine.cancel()
+            currentCoroutineContext().ensureActive()
+            val label=when(timeout.stage){"loading"->"모델 준비";"tokenizing"->"입력 확인";else->"계획 생성"}
+            fail("planning_${timeout.stage}_timeout", "$label 단계가 제한 시간 안에 끝나지 않았습니다. 요청을 보존해 일시 정지했으며 도구는 실행하지 않았습니다.")
         } catch (timeout: TimeoutCancellationException) {
             emit("timeout")
             requestEngine.cancel()
             if (!currentCoroutineContext().isActive) throw timeout
-            fail("planning_timeout", "기기 내 작업 계획의 확인 시간이 초과되어 실행하지 않았습니다.")
+            fail("planning_total_timeout", "계획의 전체 시간 한도에 도달했습니다. 요청을 보존해 일시 정지했으며 도구는 실행하지 않았습니다.")
         } catch (cancel: CancellationException) {
             requestEngine.cancel()
             throw cancel
@@ -220,6 +256,5 @@ class LocalSemanticPlanner(private val app: AppContainer,
         private const val MAX_OUTPUT_CHARS = 8192
         private const val MAX_INPUT_BYTES = 256 * 1024
         private const val MAX_ATTEMPTS = 2
-        private const val TIMEOUT_MS = 900_000L
     }
 }

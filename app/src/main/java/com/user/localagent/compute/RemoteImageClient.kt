@@ -140,6 +140,8 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
             }
             var networkFailures=0
             var resumeAttempts=0
+            var unchangedPolls=0
+            var lastProgressKey=""
             withTimeout(4*60*60_000L){
                 while(true){
                     currentCoroutineContext().ensureActive()
@@ -162,7 +164,8 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         transport.json(config,"/v1/images/$id/resume","POST",buildJsonObject{},15_000,computeOwner=computeOwner)
                         continue
                     }
-                    val label=when(phase){"queued"->"앞선 PC 작업이 끝나기를 기다리는 중";"waiting_resources"->"PC 메모리 또는 GPU 여유 대기 · 다른 작업을 마치면 자동으로 시작합니다";"loading"->"PC 이미지 모델 준비 중";"sampling"->"PC에서 장면을 정교하게 만드는 중";"decoding"->"PC에서 이미지 디코딩 중";"completed"->"완성 이미지를 스마트폰으로 받는 중";"failed","cancelled","acknowledged"->throw PcImageComputationFailure.fromReport(phase,report["error"]?.jsonPrimitive?.contentOrNull);else->error("알 수 없는 PC 작업 상태")}
+                    if(phase in setOf("failed","cancelled","acknowledged"))throw PcImageComputationFailure.fromReport(phase,report["error"]?.jsonPrimitive?.contentOrNull)
+                    val label=com.user.localagent.core.PcImageProgressPolicy.label(phase,report["stage"]?.jsonPrimitive?.contentOrNull)
                     onProgress(ImageGenerationProgress("${modelPin.id} · $label",step,total,if(total>0)step.toFloat()/total else 0f))
                     if(phase=="completed"){
                         PcImageModelCatalog.verifyResult(modelPin,report["modelId"]?.jsonPrimitive?.content,report["modelSha256"]?.jsonPrimitive?.content)
@@ -182,7 +185,10 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         val result=ImageGenerationResult(bitmap,report.getValue("seed").jsonPrimitive.long,1024,1024,report.getValue("elapsedMillis").jsonPrimitive.long,steps,computeLocation="pc",sourceModelId=modelPin.id,sourceModelSha256=modelPin.sha256)
                         return@withTimeout result
                     }
-                    delay(1000)
+                    val progressKey="$phase:$step:${report["stage"]?.jsonPrimitive?.contentOrNull}"
+                    unchangedPolls=if(progressKey==lastProgressKey)unchangedPolls+1 else 0
+                    lastProgressKey=progressKey
+                    delay(com.user.localagent.core.PcImageProgressPolicy.pollDelayMillis(unchangedPolls))
                 }
                 @Suppress("UNREACHABLE_CODE") error("unreachable")
             }

@@ -30,6 +30,8 @@ data class PlanningToolFeedback(
     /** Consecutive non-cancelled failures, and how often a later verified result ended such a run. */
     val failureStreak:Long=0,
     val recoveredAfterFailure:Long=0,
+    /** Taxonomy codes the owner approved as planner guidance; still no permission or execution. */
+    val approvedLessons:Set<String> = emptySet(),
 ) {
     val attempts:Long get()=verifiedSuccess+prepared+unverified+failed
 }
@@ -104,6 +106,16 @@ class PlanningFeedbackStore(
             proposedLessons=increment(previous.proposedLessons,lessonKind),updatedAt=timestamp())}
     }
 
+    /** Owner decision from the feedback panel. A dismissed proposal can be proposed again by new failures. */
+    suspend fun decideLesson(domain:String,tool:String,lessonKind:String,approve:Boolean):Boolean {
+        validateKeys(domain,tool)
+        require(lessonKind in lessonKinds){"지원하는 제안 분류 코드가 필요합니다."}
+        return update(domain,tool,null){previous->previous.copy(
+            proposedLessons=previous.proposedLessons-lessonKind,
+            approvedLessons=if(approve)previous.approvedLessons+lessonKind else previous.approvedLessons-lessonKind,
+            updatedAt=timestamp())}
+    }
+
     suspend fun snapshot(domain:String?=null):PlanningFeedbackSnapshot {
         if(domain!=null)validateDomain(domain)
         return processMutex.withLock {
@@ -127,6 +139,7 @@ class PlanningFeedbackStore(
             put("stats",buildJsonArray {rows.forEach {row->add(buildJsonObject {
                 put("tool",row.tool);put("verifiedSuccess",row.verifiedSuccess);put("prepared",row.prepared);put("unverified",row.unverified);put("failed",row.failed)
                 put("failureKinds",buildJsonObject {row.failureCounts.entries.sortedByDescending {it.value}.take(2).forEach {put(it.key,it.value)}})
+                if(row.approvedLessons.isNotEmpty())put("ownerApprovedLessons",buildJsonArray {row.approvedLessons.sorted().forEach {add(it)}})
                 if(row.failureStreak>0)put("failureStreak",row.failureStreak)
                 if(row.recoveredAfterFailure>0)put("recoveredAfterFailure",row.recoveredAfterFailure)
                 put("hints",buildJsonArray {hints(row).take(3).forEach {add(it)}})
@@ -225,6 +238,7 @@ class PlanningFeedbackStore(
         require(value.failureCounts.size<=failureKinds.size&&value.failureCounts.all {it.key in failureKinds&&it.value in 1..MAX_COUNT})
         require(value.failureCounts.values.all {it<=value.failed})
         require(value.proposedLessons.size<=lessonKinds.size&&value.proposedLessons.all {it.key in lessonKinds&&it.value in 1..MAX_COUNT})
+        require(value.approvedLessons.all {it in lessonKinds})
         require(value.updatedAt>=0)
     }
     private fun timestamp()=now().coerceAtLeast(0)

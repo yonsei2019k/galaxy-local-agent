@@ -162,7 +162,7 @@ fun ZipHapChatBubble(text: String, fromUser: Boolean, modifier: Modifier = Modif
         }
     } else {
         SelectionContainer(modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-            Text(text, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge, color = ZipHapColors.TextPrimary)
+            MarkdownText(text, Modifier.fillMaxWidth())
         }
     }
 }

@@ -35,7 +35,38 @@ class HarnessStep(tool:String,arguments:JsonObject,val evidence:StepEvidence) {
 sealed interface HarnessDecision {
     data class Advance(val reason:String):HarnessDecision
     data class Finish(val summary:String):HarnessDecision
-    data class Stop(val reason:String,val pendingExternalCompletion:Boolean=false):HarnessDecision
+    data class Stop(val reason:String,val pendingExternalCompletion:Boolean=false,val repeated:Boolean=false):HarnessDecision
+}
+
+/**
+ * Soft limit before the hard round limit: the model is told to wrap up instead of being cut off.
+ * Soft/hard budget idea follows PokeClaw's token budgets (agents-io/PokeClaw, Apache-2.0); independent implementation.
+ */
+object RoundBudget {
+    fun hint(round:Int,maxRounds:Int):String {
+        val left=maxRounds-round-1
+        return when{
+            left<=0->"\n이번이 마지막 단계다. 새 도구를 부르지 말고 지금까지의 근거로 최종 답변을 써라. 확인하지 못한 부분은 그렇다고 밝혀라."
+            round+1>=maxRounds*3/4->"\n남은 단계가 ${left}번뿐이다. 꼭 필요한 확인만 하고 마무리를 준비하라."
+            else->""
+        }
+    }
+}
+
+/**
+ * Escalating response to a repeated call: remind, then redirect, then stop for the owner.
+ * The escalation idea follows PokeClaw's stuck detection (agents-io/PokeClaw, Apache-2.0); this is an independent implementation.
+ */
+class StuckRecovery {
+    enum class Action { REMIND, REDIRECT, STOP }
+    private var repeats=0
+    fun onRepeat():Action=when(++repeats){1->Action.REMIND;2->Action.REDIRECT;else->Action.STOP}
+    fun prompt(action:Action,tool:String):String=when(action){
+        Action.REMIND->"직전과 같은 $tool 호출이라 실행하지 않았다. 이미 받은 결과를 다시 읽고, 그 결과로 답하거나 아직 확인하지 않은 다른 단계를 골라라."
+        Action.REDIRECT->"같은 호출을 두 번 반복했다. $tool 은 다시 쓰지 말고 다른 도구를 쓰거나, 지금까지의 근거로 최종 답변을 작성하라. 확인하지 못한 부분은 확인하지 못했다고 밝혀라."
+        Action.STOP->""
+    }
+    companion object {const val STOP_CODE="stuck_repeated_action"}
 }
 
 /** Decisions consume host-generated verification only, never assertions from the model or source data. */
@@ -159,7 +190,7 @@ object TaskHarness {
         if(goal.requiredTools.isEmpty()&&!safeRead)return HarnessDecision.Stop("확인된 사용자 작업 목표에 포함되지 않은 변경·외부 행동입니다.")
         if(call.name !in goal.requiredTools&&!safeRead)return HarnessDecision.Stop("요청한 목표에 포함되지 않은 변경·외부 행동입니다.")
         val proposed=HarnessStep(call,StepEvidence(call.name,VerificationState.UNVERIFIED,"실행 전 검사"))
-        loopReason(steps+proposed)?.let {return HarnessDecision.Stop(it)}
+        loopReason(steps+proposed)?.let {return HarnessDecision.Stop(it,repeated=true)}
         return HarnessDecision.Advance("목표에 필요한 단계이며 실행 결과는 이후 별도로 검증합니다.")
     }
     private fun loopReason(steps:List<HarnessStep>):String? {

@@ -21,6 +21,8 @@ class AutomaticComputeConcurrencyTest {
         override val lastMetrics = MutableStateFlow<InferenceMetrics?>(null)
         override val lastGeneration = MutableStateFlow<GenerationSummary?>(null)
         override val residentModelPath: String? get() = path
+        var progress:NativeGenerationProgress?=null
+        override val nativeProgressSnapshot:NativeGenerationProgress? get()=if(path!=null)progress else null
         var path: String? = null
         var loadedOptions: InferenceOptions? = null
         var loads = 0
@@ -57,6 +59,37 @@ class AutomaticComputeConcurrencyTest {
             AutomaticComputeEngine(local, remote, { _, options -> eligible && !options.deviceOnly }, { true }, {}, owner, broker)
     }
     private val path = "/synthetic/gemma-e2b-aaaaaaaaaaaa.gguf"
+    private fun pcOnly(fixture: Fixture, local: Fake, remote: Fake, reachable: Boolean = true, eligible: Boolean = true) =
+        AutomaticComputeEngine(local, remote, { _, _ -> eligible }, { reachable }, {}, UUID.randomUUID().toString(), fixture.broker, pcOnly = true)
+    @Test fun pcOnlyRefusesInsteadOfLoadingThePhoneModel()=runBlocking {
+        for ((reachable, eligible) in listOf(false to true, true to false)) {
+            val fixture=Fixture();val local=fixture.local("phone");val remote=Fake("pc")
+            val engine=pcOnly(fixture,local,remote,reachable,eligible)
+            try {engine.load(path,options);fail("Phone fallback must not run")}catch(expected:PcRequired){/* stopped */}
+            assertEquals(0,local.loads);assertEquals(0,remote.loads)
+        }
+    }
+    @Test fun pcOnlyStopsWhenTheConnectionDropsMidGeneration()=runBlocking {
+        val fixture=Fixture();val local=fixture.local("phone");val remote=Fake("pc")
+        remote.produce={throw IOException("synthetic disconnect")}
+        val engine=pcOnly(fixture,local,remote)
+        try {
+            engine.load(path,options)
+            try {engine.generateChatEvents("q","",emptyList()).collect();fail("Phone fallback must not run")}catch(expected:PcRequired){/* stopped */}
+            assertEquals(0,local.loads)
+            try {engine.withPhoneResource({}){fail("Phone work must not start")};fail("Phone work must be refused")}catch(expected:PcRequired){/* stopped */}
+        } finally {engine.unload()}
+    }
+    @Test fun numericProgressComesOnlyFromThisRequestsActiveBackend()=runBlocking {
+        val fixture=Fixture();val local=fixture.local("phone");val remote=Fake("pc")
+        val measured=NativeGenerationProgress(UUID.randomUUID().toString(),NativeGenerationPhase.PREFILL,64,256,0,0,0,1000)
+        local.progress=measured;remote.progress=measured.copy(requestId=UUID.randomUUID().toString(),processedPromptTokens=128)
+        val engine=fixture.engine(UUID.randomUUID().toString(),local,remote,eligible=false)
+        assertNull(engine.nativeProgressSnapshot)
+        try {engine.load(path,options);assertEquals(measured,engine.nativeProgressSnapshot)}
+        finally {engine.unload()}
+        assertNull(engine.nativeProgressSnapshot)
+    }
     private val options = InferenceOptions(contextSize = 4096, maxOutputTokens = 768)
     private suspend fun waitForPhone(engine: AutomaticComputeEngine) = withTimeout(2000) {
         engine.waitingForResource.first { it == ComputeResource.PHONE }

@@ -48,6 +48,13 @@ class BundledSkillStore internal constructor(private val reader:(String)->ByteAr
         else->""
     }
 
+    /**
+     * IDs only (no descriptions or bodies) so the model can pick a fitting skill without a
+     * list_skills round. Empty when read_skill is not offered; a skill still grants no permissions.
+     */
+    fun idIndexForPrompt(availableTools:Set<String>):String =
+        if("read_skill" !in availableTools)"" else "Skill ids for read_skill: "+entries.joinToString(","){it.id}
+
     /** Entire metadata descriptions or an explicit size error; never silently clips a skill. */
     fun summaryForPrompt(maxChars:Int=4000):String {
         require(maxChars in 64..MAX_CATALOG_BYTES)

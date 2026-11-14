@@ -63,6 +63,19 @@ class LongAnswerFinishValidation {
         }
     }
 
+    @Test fun resourcePauseBeforeFirstVisibleMessagePersistsTheRunPause()=runBlocking<Unit>{fixture {app,request,model,user->
+        val engine=ScriptedEngine(emptyList())
+        val answer=LongAnswerWriter(app,request,{_,_->},{},engine,resourcePressureOverride={true})
+            .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 일시정지 검증",emptyList())
+        assertTrue(answer.paused);assertNull(answer.messageId);assertEquals(0,engine.calls)
+        assertEquals("paused",app.repository.chat.run(request.runId)?.status)
+        // A reserved empty progress row is legitimate; no generated body or segment is.
+        app.repository.chat.assistantForRun(request.runId)?.let{placeholder->
+            assertEquals("",app.repository.chat.fullMessageText(placeholder.id))
+            assertTrue(app.repository.chat.segmentsForMessage(placeholder.id).isEmpty())
+        }
+    }}
+
     @Test fun eightCappedPartsCompleteAutomaticallyInOneDurableAnswerWithoutResume()=runBlocking<Unit>{fixture {app,request,model,user->
         val bodies=(1..8).map {"\n고유 합성 문단 $it: "+"내용 $it 🙂 ".repeat(12)}
         val scripts=bodies.mapIndexed {index,text->listOf(GenerationEvent.Delta(text),

@@ -53,6 +53,12 @@
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" /></provider>
+        <provider android:name=".briefing.BriefingProvider" android:authorities="${applicationId}.briefing" android:exported="true" android:permission="android.permission.DUMP" />
+        <activity android:name=".briefing.BriefingReviewActivity" android:exported="false" />
+        <receiver android:name=".briefing.BriefingWidget" android:exported="false" android:label="ZipHap.Agent 일정·업무">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/briefing_widget_info" />
+        </receiver>
         <activity android:name=".connections.ConnectionsActivity" android:exported="false" />
         <activity android:name=".connections.SharedSourceActivity" android:exported="true">
             <intent-filter>

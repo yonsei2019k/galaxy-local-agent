@@ -14,8 +14,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
-data class PcConnection(val serverId:String,val endpoint:String,val token:String,val certificateSha256:String,val discoveryPort:Int=18435){override fun toString()="PcConnection(paired local compute)"}
-data class PcComputeState(val paired:Boolean=false,val automaticText:Boolean=true,val preferPcImages:Boolean=true,val status:String="PC 연결 등록 필요",val imageModelId:String=PcImageModelCatalog.QUALITY_ID)
+data class PcConnection(val serverId:String,val endpoint:String,val token:String,val certificateSha256:String,val discoveryPort:Int=18435,val overlayEndpoint:String?=null){override fun toString()="PcConnection(paired local compute)"}
+data class PcComputeState(val paired:Boolean=false,val automaticText:Boolean=true,val preferPcImages:Boolean=true,val status:String="PC 연결 등록 필요",val imageModelId:String=PcImageModelCatalog.QUALITY_ID,val claudeText:Boolean=false)
 
 /** Pairing credentials stay in the phone's Keystore-backed encrypted store. */
 class PcComputeSettings private constructor(private val context:Context) {
@@ -32,7 +32,7 @@ class PcComputeSettings private constructor(private val context:Context) {
         if(raw.isNotEmpty())runCatching {
             val json=Json.parseToJsonElement(raw).jsonObject
             connection=parse(json.getValue("connection").jsonObject)
-            mutable.value=PcComputeState(true,json["automaticText"]?.jsonPrimitive?.boolean?:true,json["preferPcImages"]?.jsonPrimitive?.boolean?:true,"등록한 PC를 작업 전에 확인합니다.").copy(imageModelId=runCatching {PcImageModelCatalog.selection(json["imageModelId"]?.jsonPrimitive?.content?:PcImageModelCatalog.QUALITY_ID).id}.getOrDefault(PcImageModelCatalog.QUALITY_ID))
+            mutable.value=PcComputeState(true,json["automaticText"]?.jsonPrimitive?.boolean?:true,json["preferPcImages"]?.jsonPrimitive?.boolean?:true,"등록한 PC를 작업 전에 확인합니다.").copy(imageModelId=runCatching {PcImageModelCatalog.selection(json["imageModelId"]?.jsonPrimitive?.content?:PcImageModelCatalog.QUALITY_ID).id}.getOrDefault(PcImageModelCatalog.QUALITY_ID),claudeText=json["claudeText"]?.jsonPrimitive?.boolean?:false)
         }.onFailure{mutable.value=PcComputeState(status="PC 연결 설정을 다시 등록해주세요.")}
     }}
     fun snapshot():PcConnection?=connection
@@ -57,11 +57,17 @@ class PcComputeSettings private constructor(private val context:Context) {
         val token=json.getValue("token").jsonPrimitive.content;require(Regex("[a-f0-9]{64}").matches(token))
         val certificate=json.getValue("certificateSha256").jsonPrimitive.content;require(Regex("[a-f0-9]{64}").matches(certificate))
         val port=json["discoveryPort"]?.jsonPrimitive?.int?:18435;require(port in 1024..65535)
-        return PcConnection(id,endpoint,token,certificate,port)
+        val overlay=json["overlayEndpoint"]?.jsonPrimitive?.contentOrNull?.also{PcComputeContract.endpoint(it)}
+        return PcConnection(id,endpoint,token,certificate,port,overlay)
     }
     fun updateEndpoint(endpoint:String)=synchronized(lock){
         PcComputeContract.endpoint(endpoint)
         connection=connection?.copy(endpoint=endpoint);persist()
+    }
+    /** Learned from the authenticated PC while reachable, so the phone can reach it away from home. */
+    fun updateOverlay(endpoint:String)=synchronized(lock){
+        PcComputeContract.endpoint(endpoint)
+        if(connection?.overlayEndpoint!=endpoint){connection=connection?.copy(overlayEndpoint=endpoint);persist()}
     }
     fun automaticText(enabled:Boolean)=synchronized(lock){if(mutable.value.automaticText!=enabled)advanceAuthorization();mutable.value=mutable.value.copy(automaticText=enabled);persist()}
     fun preferPcImages(enabled:Boolean)=synchronized(lock){if(mutable.value.preferPcImages!=enabled)advanceAuthorization();mutable.value=mutable.value.copy(preferPcImages=enabled);persist()}
@@ -80,6 +86,8 @@ class PcComputeSettings private constructor(private val context:Context) {
         val pin=PcImageModelCatalog.selection(id)
         mutable.value=mutable.value.copy(imageModelId=pin.id);persist()
     }
+    /** Owner choice of text engine; applies from the next model load. Claude sends the request off the PC. */
+    fun claudeText(enabled:Boolean)=synchronized(lock){mutable.value=mutable.value.copy(claudeText=enabled);persist()}
     fun report(status:String){mutable.update {it.copy(status=status)}}
     fun forget()=synchronized(lock){advanceAuthorization();connection=null;store.write("");mutable.value=PcComputeState()}
     private fun advanceAuthorization(){
@@ -89,8 +97,8 @@ class PcComputeSettings private constructor(private val context:Context) {
     private fun persist(){
         val config=connection?:return
         store.write(buildJsonObject {
-            put("automaticText",mutable.value.automaticText);put("preferPcImages",mutable.value.preferPcImages);put("imageModelId",mutable.value.imageModelId)
-            put("connection",buildJsonObject {put("serverId",config.serverId);put("endpoint",config.endpoint);put("token",config.token);put("certificateSha256",config.certificateSha256);put("discoveryPort",config.discoveryPort)})
+            put("automaticText",mutable.value.automaticText);put("preferPcImages",mutable.value.preferPcImages);put("imageModelId",mutable.value.imageModelId);put("claudeText",mutable.value.claudeText)
+            put("connection",buildJsonObject {put("serverId",config.serverId);put("endpoint",config.endpoint);put("token",config.token);put("certificateSha256",config.certificateSha256);put("discoveryPort",config.discoveryPort);config.overlayEndpoint?.let{put("overlayEndpoint",it)}})
         }.toString())
     }
     companion object {

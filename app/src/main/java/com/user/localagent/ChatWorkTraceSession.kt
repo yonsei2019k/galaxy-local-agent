@@ -30,14 +30,14 @@ internal class ChatWorkTraceSession private constructor(
     private var progressJob:Job?=null
     private var progressClosed=false
 
-    /** A captured workflow callback; never samples another request's global status. */
-    fun progress(summary:String,scope:CoroutineScope)=synchronized(progressLock){
-        if(progressClosed)return@synchronized
-        if(progressJob==null)progressJob=scope.launch {
-            var prior:String?=null
-            for(value in progress)if(value!=prior){prior=value;stage(WorkTraceCode.CONTEXT_READY,value)}
-        }
-        if(progress.trySend(summary).isFailure)unavailable()
+    /** Live status ticks (seconds, token counters) belong in the status line, not the reasoning record. */
+    @Suppress("UNUSED_PARAMETER")
+    fun progress(summary:String,scope:CoroutineScope){}
+
+    /** The model's own reasoning for one decision, shown as the step's thought process. */
+    suspend fun reasoning(text:String?){
+        val value=text?.trim()?.takeIf {it.isNotEmpty()}?:return
+        stage(WorkTraceCode.PLAN_READY,"판단 과정: "+value.take(900),WorkSummarySource.MODEL_PLAN)
     }
     suspend fun closeProgress(){
         val job=synchronized(progressLock){progressClosed=true;progress.close();progressJob}

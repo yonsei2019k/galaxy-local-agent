@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+/** Stops work instead of computing on the phone; the phone never acts as a fallback in PC-only operation. */
+class PcRequired(message: String = "PC에 연결되어 있지 않아 실행하지 않았습니다. PC를 켜고 연결한 뒤 다시 요청해주세요.") : IllegalStateException(message)
+
 /** A request owns its backend and state. Only its local native work reserves the phone slot. */
 class AutomaticComputeEngine internal constructor(
     private val local: InferenceEngine,
@@ -20,11 +23,12 @@ class AutomaticComputeEngine internal constructor(
     broker: ComputeResourceBroker,
     private val beforePhoneLoad: suspend () -> Unit = {},
     private val externalPcAuthority: () -> Boolean = { true },
+    private val pcOnly: Boolean = false,
 ) : ComputeExecutionEngine {
     constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {}) :
         this(components(context.applicationContext, ownerRunId), ownerRunId, beforePhoneLoad)
     private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit) :
-        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority)
+        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = true)
 
     private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -39,6 +43,7 @@ class AutomaticComputeEngine internal constructor(
     private var phoneOverflowPinned = false
     private var pendingExternalCleanup: (suspend () -> Unit)? = null
     private var nativeCleanupUnconfirmed = false
+    private var lastPcFailure: Exception? = null
     private val status = MutableStateFlow("모델 없음")
     private val metrics = MutableStateFlow<InferenceMetrics?>(null)
     private val generation = MutableStateFlow<GenerationSummary?>(null)
@@ -48,6 +53,8 @@ class AutomaticComputeEngine internal constructor(
     override val lastMetrics: StateFlow<InferenceMetrics?> = metrics.asStateFlow()
     override val lastGeneration: StateFlow<GenerationSummary?> = generation.asStateFlow()
     override val residentModelPath: String? get() = active?.residentModelPath
+    override val nativeProgressSnapshot:NativeGenerationProgress? get()=active?.nativeProgressSnapshot
+    override val lastReasoning:String? get()=active?.lastReasoning
     override val supportsStructuredOutput: Boolean get() = active?.supportsStructuredOutput == true
     override val executionLocation: String get() = if (computeLocation.value == ComputeResource.PC) "pc" else "phone"
 
@@ -77,6 +84,14 @@ class AutomaticComputeEngine internal constructor(
     override suspend fun load(path: String, options: InferenceOptions) = mutex.withLock {
         recoverPendingCleanup()
         requestedPath = path; requestedOptions = options
+        if (pcOnly) {
+            if (!eligibleForPc(path, options)) throw PcRequired("이 작업은 아직 PC에서 처리할 수 없어 실행하지 않았습니다. 휴대폰에서는 계산하지 않습니다.")
+            val reachable = try { pcPreflight() } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { false }
+            if (!reachable) throw PcRequired()
+            currentCoroutineContext().ensureActive()
+            check(bind(pc, ComputeResource.PC))
+            pc.load(path, options); snapshot(); return@withLock
+        }
         if (ownerRunId != null && !phoneOverflowPinned && eligibleForPc(path, options) && System.currentTimeMillis() >= retryAfter) {
             try {
                 if (!pcPreflight()) throw PcUnavailable()
@@ -112,6 +127,7 @@ class AutomaticComputeEngine internal constructor(
         if (nativeCleanupUnconfirmed) dropActive()
     }
     private suspend fun fallback() {
+        if (pcOnly) throw PcRequired(if (lastPcFailure is PcBusy) lastPcFailure!!.message!! else"작업 중 PC 연결이 끊겼습니다. 휴대폰으로 넘기지 않고 멈췄습니다.")
         retryAfter = System.currentTimeMillis() + 30_000
         if (ownerRunId != null) phoneOverflowPinned = true
         report("PC 연결이 끊겼습니다. 휴대전화의 기존 작업 뒤에 이어 계산합니다.")
@@ -135,7 +151,7 @@ class AutomaticComputeEngine internal constructor(
                         }
                         currentCoroutineContext().ensureActive()
                     } catch (cancel: CancellationException) { throw cancel }
-                    catch (_: Exception) { buffered.clear(); fallback() }
+                    catch (error: Exception) { lastPcFailure = error; buffered.clear(); fallback() }
                     if (active === pc) buffered.forEach { emit(it) } else emitAll(block(local))
                 } else emitAll(block(checkNotNull(active)))
             } finally { snapshot() }
@@ -153,12 +169,12 @@ class AutomaticComputeEngine internal constructor(
     override suspend fun countChatTokens(userText: String, systemInstruction: String, history: List<InferenceTurn>): Int? = mutex.withLock {
         try { checkNotNull(active).countChatTokens(userText, systemInstruction, history) }
         catch (cancel: CancellationException) { throw cancel }
-        catch (error: Exception) { if (active !== pc) throw error; fallback(); local.countChatTokens(userText, systemInstruction, history) }
+        catch (error: Exception) { if (active !== pc) throw error; lastPcFailure = error; fallback(); local.countChatTokens(userText, systemInstruction, history) }
     }
     override suspend fun countStructuredChatTokens(userText: String, systemInstruction: String, schema: String, history: List<InferenceTurn>): Int? = mutex.withLock {
         try { checkNotNull(active).countStructuredChatTokens(userText, systemInstruction, schema, history) }
         catch (cancel: CancellationException) { throw cancel }
-        catch (error: Exception) { if (active !== pc) throw error; fallback(); local.countStructuredChatTokens(userText, systemInstruction, schema, history) }
+        catch (error: Exception) { if (active !== pc) throw error; lastPcFailure = error; fallback(); local.countStructuredChatTokens(userText, systemInstruction, schema, history) }
     }
     override fun transcribeAudio(wav: File): Flow<String> = flow { mutex.withLock { try { emitAll(checkNotNull(active).transcribeAudio(wav)) } finally { snapshot() } } }
     override fun describeImage(image: File, prompt: String): Flow<String> = flow { mutex.withLock { try { emitAll(checkNotNull(active).describeImage(image, prompt)) } finally { snapshot() } } }
@@ -168,6 +184,7 @@ class AutomaticComputeEngine internal constructor(
     override suspend fun <T> withPcResource(cleanup: suspend () -> Unit, block: suspend () -> T): T = external(ComputeResource.PC, cleanup, block)
     private suspend fun <T> external(destination: ComputeResource, cleanup: suspend () -> Unit, block: suspend () -> T): T = mutex.withLock {
         recoverPendingCleanup()
+        if (pcOnly && destination == ComputeResource.PHONE) throw PcRequired("이 작업은 휴대폰에서 계산하지 않습니다. PC에서 처리할 수 있을 때 실행합니다.")
         if (destination == ComputeResource.PC && !externalPcAuthority()) throw PcUnavailable()
         check(resource.moveTo(destination, force = true, cleanupPrevious = ::dropActive))
         if (destination == ComputeResource.PHONE) releaseIdlePhoneModel()
@@ -219,12 +236,9 @@ class AutomaticComputeEngine internal constructor(
                     candidate.certificateSha256 == original.certificateSha256 && settings.snapshot()?.let {
                         it.serverId == original.serverId && it.token == original.token && it.certificateSha256 == original.certificateSha256
                     } == true
-            fun sameTextAuthority(candidate: PcConnection) = samePair(candidate) && settings.state.value.automaticText
-            val pc = PcInferenceEngine(context, ::sameTextAuthority, owner)
+            val pc = PcInferenceEngine(context, ::samePair, owner)
             return Components(LocalInferenceEngine(context), pc,
-                eligible = { path, options -> settings.state.value.automaticText && settings.snapshot()?.let(::samePair) == true &&
-                    !options.deviceOnly && !options.audioEnabled && !options.visionEnabled && !options.thinking &&
-                    Regex("gemma-e[24]b-[a-f0-9]{12}\\.gguf").matches(File(path).name) },
+                eligible = { _, _ -> settings.snapshot()?.let(::samePair) == true },
                 preflight = pc::preflight, report = settings::report,
                 externalPcAuthority = { settings.snapshot()?.let(::samePair) == true })
         }

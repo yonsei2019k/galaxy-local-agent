@@ -8,6 +8,15 @@ data class NativeGenerationProgress(
     val sampledTokens:Int,val rawUtf8Bytes:Long,val visibleUtf8Bytes:Long,val elapsedMillis:Long,
 )
 
+/** Labels measured counters only; sampled tokens need not be visible answer text. */
+fun NativeGenerationProgress.publicDescription():String=when(phase){
+    NativeGenerationPhase.PREPARE->"모델 입력 준비"
+    NativeGenerationPhase.SAMPLER_INIT->"출력 형식 준비"
+    NativeGenerationPhase.PREFILL->"입력 계산 $processedPromptTokens/$totalPromptTokens 토큰"
+    NativeGenerationPhase.DECODE->"출력 계산 $sampledTokens 토큰 · 화면 전달 $visibleUtf8Bytes 바이트"
+    NativeGenerationPhase.FINISHED->"모델 계산 종료"
+}
+
 /** Rejects stale/invalid/decreasing diagnostic snapshots without changing inference control or options. */
 internal class NativeProgressTracker(private val requestId:String) {
     init {require(runCatching {java.util.UUID.fromString(requestId)}.isSuccess)}

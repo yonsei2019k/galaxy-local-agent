@@ -21,6 +21,16 @@ internal const val TRUNCATED_TOOL_RETRY="\n직전 도구 호출이 출력 한도
 internal fun truncatedToolCallRecoverable(kind:GeneratedResponseKind,structured:Boolean,truncated:Boolean?)=
     truncated==true&&(kind==GeneratedResponseKind.TOOL||structured&&kind==GeneratedResponseKind.UNDECIDED)
 
+private val EMBEDDED_TOOL_CALL=Regex("\\{\\s*\"type\"\\s*:\\s*\"tool_call\"")
+/** Start of a tool envelope after lead-in prose. Protocol shape only; the call is still validated before execution. */
+internal fun embeddedToolCallStart(text:CharSequence):Int?=EMBEDDED_TOOL_CALL.find(text)?.range?.first?.takeIf {it>0}
+/** Streaming limit that keeps a possible envelope, including a partial opening, out of the visible body. */
+internal fun proseVisibleLimit(text:CharSequence):Int {
+    embeddedToolCallStart(text)?.let {return it}
+    val brace=text.lastIndexOf('{')
+    return if(brace>=0&&text.length-brace<=24&&'}' !in text.subSequence(brace,text.length))brace else text.length
+}
+
 /** A bounded JSON protocol probe, not a classifier of the owner's natural-language intent. */
 internal fun generatedResponseKind(text:CharSequence,finished:Boolean=false):GeneratedResponseKind {
     val prefix=text.safeHead(4096);var at=0
@@ -172,7 +182,8 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
     private val state:(String,UiAnswerState)->Unit,private val status:(String)->Unit,
     private val engine:InferenceEngine=app.engine,private val partCharBudget:Int=ANSWER_PART_CHAR_BUDGET,
     private val limits:AnswerContinuationLimits=AnswerContinuationLimits(),
-    private val clock:()->Long={SystemClock.elapsedRealtime()}) {
+    private val clock:()->Long={SystemClock.elapsedRealtime()},
+    private val resourcePressureOverride:(()->Boolean)?=null) {
     private val chat=app.repository.chat
     private val context=app.applicationContext
 
@@ -283,7 +294,10 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     if(prose!=true||!display)return
                     val start=if(overlap==null)0 else overlap.visibleStart(raw,finished)?:return
                     stagedRawOffset=maxOf(stagedRawOffset,start)
-                    if(stagedRawOffset<raw.length){pending.append(raw,stagedRawOffset,raw.length);stagedRawOffset=raw.length}
+                    val embedded=if(overlap==null&&structuredSchema==null)embeddedToolCallStart(raw)else null
+                    val keepEmbedded=embedded!=null&&(summary?.mayBeTruncated==true||runCatching {com.user.localagent.core.ToolRegistry.parseAndValidate(raw.substring(embedded).trim())}.isSuccess)
+                    val limit=when{overlap!=null||structuredSchema!=null->raw.length;!finished->proseVisibleLimit(raw);keepEmbedded->embedded!!;else->raw.length}
+                    if(stagedRawOffset<limit){pending.append(raw,stagedRawOffset,limit);stagedRawOffset=limit}
                 }
                 status(if(continuing)"답변을 자동으로 이어 쓰고 있습니다 · ${partNumber}번째 구간" else "답변을 작성하고 있습니다")
                 try {
@@ -350,6 +364,17 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 stageProse(finished=true);flush()
                 lastSummary=summary?:engine.lastGeneration.value?.takeIf {it.requestId!=previousSummaryId}
                 check(lastSummary!=null){"엔진 종료 상태를 확인하지 못했습니다. 작성 내용을 저장했습니다."}
+                if(prose==true&&display&&!continuing&&structuredSchema==null)embeddedToolCallStart(raw)?.let {start->
+                    val cut=lastSummary?.mayBeTruncated==true
+                    val json=raw.substring(start).trim()
+                    if(cut||runCatching {com.user.localagent.core.ToolRegistry.parseAndValidate(json)}.isSuccess){
+                        segmentId?.let {chat.finishSegment(it,"completed")}
+                        if(partText.isNotEmpty()){entire.append(partText);parts+=UiAnswerPart(partNumber,partText)}
+                        return if(cut&&recoverTruncatedTool)WrittenAnswer("",null,lastSummary,false,toolTruncated=true)
+                            else if(cut){paused=true;finalDetail="출력 한도에서 잘린 도구 호출을 실행하지 않았습니다";WrittenAnswer(entire.toString(),visibleAnswerMessageId(messageId,hasSavedBody),lastSummary,true)}
+                            else WrittenAnswer(json,null,lastSummary,false,toolEnvelope=true)
+                    }
+                }
                 if(structuredSchema!=null||prose==false||!display){
                     rawOnly=true
                     val kind=generatedResponseKind(raw,finished=true)
@@ -417,13 +442,19 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     val phase=when {failure is CancellationException->UiAnswerPhase.CANCELLED;failure!=null->UiAnswerPhase.FAILED;paused->UiAnswerPhase.PAUSED;else->UiAnswerPhase.COMPLETE}
                     state(id,UiAnswerState(phase,parts.toList(),finalDetail,canContinue=paused&&checkpoint!=null))
                     // The coordinator owns whole-run completion and all tool outcomes.
-                    if(paused&&failure==null)chat.updateRun(request.runId,"paused")
                 }catch(cleanup:Throwable){val original=failure;if(original!=null)original.addSuppressed(cleanup)else throw cleanup}
-            };if(paused)status(finalDetail)}
+            }
+            // A pause before the first visible message still belongs to this run. Otherwise
+            // the coordinator's finally would turn the still-running row into completed.
+            if(paused&&failure==null&&chat.run(request.runId)?.status=="running")chat.updateRun(request.runId,"paused")
+            if(paused)status(finalDetail)}
         }
         return WrittenAnswer(entire.toString(),visibleAnswerMessageId(messageId,hasSavedBody),lastSummary,paused)
     }
     private fun resourcePressure():Boolean {
+        resourcePressureOverride?.let{return it()}
+        // Phone heat or memory says nothing about inference running on the PC.
+        if((engine as? ComputeExecutionEngine)?.executionLocation=="pc")return false
         val power=context.getSystemService(PowerManager::class.java)
         if(power.currentThermalStatus>=PowerManager.THERMAL_STATUS_SEVERE)return true
         return ActivityManager.MemoryInfo().also {context.getSystemService(ActivityManager::class.java).getMemoryInfo(it)}.lowMemory

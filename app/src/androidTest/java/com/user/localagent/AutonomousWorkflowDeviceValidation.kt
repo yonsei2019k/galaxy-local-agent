@@ -91,8 +91,14 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
     private var liveActivitySeen=false
     private var followupSeen=false
     private var reviewCompleted=false
+    private var reviewBudgetFinalized=false
     private var cleanupVerified=false
     private var lastSummary:GenerationSummary?=null
+    private var lastNativeProgress:com.user.localagent.inference.NativeGenerationProgress?=null
+    private var planningElapsedMs:Long?=null
+    private var semanticStartedAt:Long?=null
+    private var semanticAction:String?=null
+    private var calculationReadback:JsonArray=JsonArray(emptyList())
     private val allowed=setOf("calculate","list_skills","read_skill")
     private val projectTitle get()="Synthetic autonomous project $token"
     private val threadTitle get()="Synthetic autonomous chat $token"
@@ -195,13 +201,25 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
         assertTrue("No live exact-run activity projection was observed",liveActivitySeen)
         assertTrue("The actual inference route was not phone",phoneVerified)
         val ownThread=requireNotNull(threadId);val ownRun=requireNotNull(runId)
-        val trace=repo.workTrace.events(ownThread,ownRun)
+        waitUntil(120000){coordinator.executionForRun(ownRun)==null}
+        val trace=allTraceEvents(ownThread,ownRun)
         assertTrue("No independent calculation was actually executed",auditCount>=2)
+        assertTrue("The calculations did not use independent arguments",trace.filter{it.event.code==WorkTraceCode.TOOL_RESULT&&it.event.toolName=="calculate"&&it.event.evidence==VerificationState.VERIFIED}.map{it.event.argsHash}.distinct().size>=2)
+        val storedCalculations=QueuedChatRequest.fromJson(checkNotNull(chat.run(ownRun)).contextJson).previousSteps
+            .filter{it.tool=="calculate"&&it.evidence.state==VerificationState.VERIFIED}
+        assertEquals("Stored execution evidence differs from actual calculation audits",auditCount,storedCalculations.size)
+        // This fixed public fixture allows numeric arithmetic only. Pure readback is not
+        // another model-selected tool execution and does not add an execution receipt.
+        calculationReadback=buildJsonArray{storedCalculations.forEach{step->
+            val value=Json.parseToJsonElement(OfficeToolEngine.execute(ToolCall("synthetic-readback","calculate",step.arguments))).jsonObject
+            add(buildJsonObject{put("expression",step.arguments.getValue("expression"));put("value",value.getValue("value"))})
+        }}
         val result=checkNotNull(trace.firstOrNull{it.event.code==WorkTraceCode.TOOL_RESULT&&it.event.toolName=="calculate"&&it.event.evidence==VerificationState.VERIFIED}){"No actual verified clock trace result was produced"}
         followupSeen=trace.any {it.event.code==WorkTraceCode.PLAN_READY&&it.event.summarySource==WorkSummarySource.MODEL_PLAN&&it.event.publicSummary?.startsWith("발견한 확인 과제:")==true}
         reviewCompleted=trace.any {it.event.code==WorkTraceCode.PLAN_READY&&it.event.summarySource==WorkSummarySource.MODEL_PLAN&&it.event.publicSummary?.startsWith("후속 검토 요약:")==true}
         assertTrue("The local model did not select a followup during the review",followupSeen)
-        assertTrue("The local model did not complete its final review",reviewCompleted)
+        reviewBudgetFinalized=Json.parseToJsonElement(checkNotNull(chat.run(ownRun)).contextJson).jsonObject["reviewBudgetFinalization"]?.jsonPrimitive?.booleanOrNull==true
+        assertTrue("Neither model review nor explicitly limited final writing completed",reviewCompleted||reviewBudgetFinalized)
         trace.filter {it.event.code==WorkTraceCode.TOOL_RESULT&&it.event.toolName=="calculate"&&it.event.evidence==VerificationState.VERIFIED}.forEach {verifyReceipt(it,trace)}
         val userMessages=chat.messages(ownThread).first().filter {it.role=="user"}
         assertEquals("Model followup became invented owner speech",listOf(REQUEST),userMessages.map {it.text})
@@ -212,6 +230,7 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
         val assistant=checkNotNull(chat.assistantForRun(ownRun))
         val body=chat.fullMessageText(assistant.id);bodyChars=body.length
         assertTrue("The final body is empty or an unexecuted tool envelope",body.trim().length>=10&&body.contains("323")&&!body.trimStart().startsWith("{\"type\":\"tool_call\""))
+        if(reviewBudgetFinalized)assertTrue("Limited review was hidden from the owner",body.contains(AutonomousReviewPolicy.LIMITED_FINAL_NOTICE))
         verifyActivity(assistant)
         checkpoint("completed")
     }
@@ -224,7 +243,7 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
         val count=trace.size
         val receipt=repo.workTrace.recordOutcome(repo.workTrace.open(ownRun,ownThread),start.id,true,VerificationState.VERIFIED,audit.summary.substringAfter(" · "))
         assertTrue("Immutable receipt readback failed",receipt.audit==audit&&receipt.receiptId==WorkTraceReceiptCodec.receiptId(audit.id))
-        assertEquals(count,repo.workTrace.events(ownThread,ownRun).size)
+        assertEquals(count,allTraceEvents(ownThread,ownRun).size)
         receiptVerified=true
     }
 
@@ -240,6 +259,12 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
         val ownRun=runId?:return;val ownThread=threadId?:return
         val run=chat.run(ownRun);runStatus=run?.status;runErrorCode=run?.errorCode
         val events=repo.workTrace.events(ownThread,ownRun)
+        val semanticStart=events.firstOrNull{it.event.code==WorkTraceCode.SEMANTIC_STARTED}
+        val firstPlan=events.firstOrNull{it.event.code==WorkTraceCode.PLAN_READY&&it.event.summarySource==WorkSummarySource.MODEL_PLAN}
+        if(semanticStartedAt==null&&semanticStart!=null)semanticStartedAt=semanticStart.atEpochMillis
+        if(semanticStartedAt!=null&&firstPlan!=null&&planningElapsedMs==null)planningElapsedMs=(firstPlan.atEpochMillis-requireNotNull(semanticStartedAt)).coerceAtLeast(0)
+        coordinator.executionForRun(ownRun)?.lastSemanticAction?.value?.let{semanticAction=it}
+        coordinator.executionForRun(ownRun)?.executionEngine?.nativeProgressSnapshot?.let{lastNativeProgress=it}
         traceCount=events.size
         diagnosticCodes=events.map {it.event.code.name}.takeLast(40)
         // This isolated project disables owner memory and offers only three public tools.
@@ -260,6 +285,18 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
         coordinator.executionForRun(ownRun)?.executionEngine?.lastGeneration?.value?.let {lastSummary=it}
     }
     private suspend fun captureSafely(){try{capture()}catch(_:Exception){}}
+    private suspend fun allTraceEvents(thread:String,run:String):List<WorkTraceRecord>{
+        val found=linkedMapOf<String,WorkTraceRecord>()
+        var cursor:WorkTraceCursor?=null
+        repeat(64){
+            currentCoroutineContext().ensureActive()
+            val page=repo.workTrace.page(thread,run,cursor)
+            page.events.forEach{found[it.id]=it}
+            val next=page.nextCursor?:return found.values.sortedBy{it.sequence}
+            check(next!=cursor){"Synthetic trace cursor did not advance"};cursor=next
+        }
+        error("Synthetic trace exceeds bounded verification window")
+    }
 
     private suspend fun cleanup(){
         cleanupStep{checkpoint("cleanup_started")}
@@ -374,8 +411,16 @@ private class AutonomousWorkflowFixture(private val context:Context,private val 
             put("synthetic_host_failure_sha256",syntheticHostErrorHash);put("synthetic_host_failure_chars",syntheticHostErrorLength)
             put("verified_calculation_audits",auditCount);put("live_activity_seen",liveActivitySeen);put("model_followup_seen",followupSeen);put("final_review_completed",reviewCompleted);put("trace_events",traceCount);put("final_body_chars",bodyChars);put("activity_entries",activityCount)
             put("immutable_receipt_verified",receiptVerified);put("exact_activity_binding_verified",bindingVerified);put("actual_phone_execution_verified",phoneVerified);put("fixture_cleanup_verified",cleanupVerified)
+            put("review_budget_finalized",reviewBudgetFinalized)
+            put("calculation_readback",calculationReadback)
             put("cleanup_error_classes",buildJsonArray{cleanupErrors.take(8).forEach{add(it)}})
             put("last_generation",lastSummary?.let{summary->buildJsonObject{put("reason",summary.reason.name);put("evidence",summary.evidence.name);summary.decodeTokens?.let{put("decode_tokens",it)}}}?:JsonNull)
+            put("planning_elapsed_ms",planningElapsedMs?.let(::JsonPrimitive)?:JsonNull)
+            put("semantic_action",semanticAction)
+            put("native_progress",lastNativeProgress?.let{measured->buildJsonObject{
+                put("phase",measured.phase.name);put("processed",measured.processedPromptTokens);put("total",measured.totalPromptTokens)
+                put("sampled",measured.sampledTokens);put("visible_bytes",measured.visibleUtf8Bytes);put("elapsed_ms",measured.elapsedMillis)
+            }}?:JsonNull)
             put("raw_owner_context_exported",false);put("raw_answer_exported",false)
         }.toString()
         val parent=checkNotNull(report.baseFile.parentFile);check(parent.isDirectory||parent.mkdirs())

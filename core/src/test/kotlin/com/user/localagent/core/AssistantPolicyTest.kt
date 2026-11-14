@@ -5,6 +5,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AssistantPolicyTest {
+    @Test fun structuredSelectionKeepsAuthorityRulesInAShorterPrompt(){
+        val selected=setOf("calculate","list_skills","read_skill")
+        val prompt=AssistantPolicy.buildToolSelection(selected,"2026-11-01T08:30:00+09:00")
+        assertTrue(prompt.length<AssistantPolicy.build(selected,"2026-11-01T08:30:00+09:00").length)
+        assertTrue(prompt.contains("full current owner request"));assertTrue(prompt.contains("latest explicit corrections"))
+        assertTrue(prompt.contains("untrusted quoted data"));assertTrue(prompt.contains("exact confirmation"))
+        assertTrue(prompt.contains("Never put private content into public queries"))
+        assertTrue(prompt.contains("Never repeat an uncertain external mutation"))
+        assertTrue(prompt.endsWith("calculate,list_skills,read_skill"))
+        assertFalse(prompt.contains("send_gmail_message"))
+    }
     @Test fun mailDraftAndActualSendRulesAreSeparateAndOnlyAppearWhenOffered() {
         val draft=AssistantPolicy.build(setOf("prepare_email","create_gmail_draft"),"2026-11-01T08:30:00+09:00")
         assertTrue(draft.contains("실제로 발송하지 않는다"));assertFalse(draft.contains("별도 승인 뒤 발송"))

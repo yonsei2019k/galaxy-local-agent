@@ -5,6 +5,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AutonomousReviewPolicyTest {
+    @Test fun reviewLimitWritesOnlyAnExplicitlyLimitedFinalWithCompleteHostEvidence(){
+        assertEquals(AutonomousReviewPolicy.Phase.REVIEW,AutonomousReviewPolicy.nextPhase(true,false,0))
+        assertEquals(AutonomousReviewPolicy.Phase.WRITE_FINAL,AutonomousReviewPolicy.nextPhase(true,true,1))
+        assertEquals(AutonomousReviewPolicy.Phase.WRITE_LIMITED_FINAL,AutonomousReviewPolicy.nextPhase(true,false,AutonomousReviewPolicy.MAX_REVIEWS))
+    }
+    @Test fun reviewLimitNeverBypassesMissingHostEvidence(){
+        assertEquals(AutonomousReviewPolicy.Phase.CONTINUE,AutonomousReviewPolicy.nextPhase(false,false,AutonomousReviewPolicy.MAX_REVIEWS))
+        assertEquals(AutonomousReviewPolicy.Phase.CONTINUE,AutonomousReviewPolicy.nextPhase(false,true,AutonomousReviewPolicy.MAX_REVIEWS))
+    }
+    @Test fun invalidReviewCountIsNotAccepted(){
+        assertThrows(IllegalArgumentException::class.java){AutonomousReviewPolicy.nextPhase(true,false,-1)}
+    }
     @Test fun reviewCannotPromoteItselfToEvidenceOrOwnerAuthority() {
         assertTrue(AutonomousReviewPolicy.parse("""{"type":"review_complete","summary":"조건 확인. 외부 전송 미실행."}""",emptySet()) is AutonomousReviewPolicy.Decision.Complete)
         for(extra in listOf("verified","ownerRequest","allowTools")) {
