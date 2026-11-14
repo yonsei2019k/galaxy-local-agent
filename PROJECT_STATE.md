@@ -2,7 +2,13 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1066; controlled59/59 pass
+## Current actual device checkpoint: installed1067;1503 JVM and controlled59/59 pass
+
+1067 main SHA `6e6f27832e44800be78046b59ca1f61d4712f30d9cd0dc86ae61c35bd4ebb4d8` and test SHA `fa3fef003bc022ecbe68ba05b3d58ed4f75e6612d04c35490e2ee51902c361f3` independently match installed bytes, with data retained. Core811/app692=1503 JVM tests pass with zero failures/errors/skips; release/test4m47/signatures pass, lint0 errors/144 warnings/1 hint. Original cold cancellation and1MiB guard plus two further cancellation repeats pass. Controlled59/59 phone tests pass, zero skipped;650 source+10 public+6 build input hashes and installed artifacts were rechecked afterward.
+
+General metadata now distinguishes note headings, complete bodies/composed reports and complete quoted-body copies, and explains phone-project relative paths without inventing roots or permissions. Calendar approval binds the actual account/generation/calendar selector and call before the existing single confirmation; actual created/get IDs, active status and times are checked. Mock/contract tests pass and Android wiring compiles, but actual Calendar approval/account/OAuth execution remains untested. An opt-in exact-body actual-model regression was added while retaining all original six workflow criteria. Actual1067 comparison has not run yet;1066's3/6 result remains below. Registry102; new long-note tools are staged only. This is an internal validation candidate, not general distribution approval.
+
+## Historical actual device checkpoint: installed1066; controlled59/59 pass
 
 1066 main SHA `2113fddd2aa797ecbda134b3e3c1d4cf83bee6c07ae0870236688af3b237ddb8` and test SHA `0acde604a3423e1a705adcc0e6e060d4b0071d3512ac4aba703701bb427c2b95` independently match installed bytes, without clearing data. Core791/app685=1476 JVM tests pass with failures/errors/skips0; release/test build3m51 and signing pass, lint0 errors/144 warnings/1 hint. The original cold fifth-part cancellation and1MiB storage guard both pass on the phone; cancellation passes two further fresh-process repeats. All59 unique controlled phone tests pass, zero skipped: existing42, readback4 and full writer17 with four overlapping existing cases counted once. The new exact-review count-unavailable pause and EOG success tests use real Room plus a synthetic engine; these are not actual PC inference results.
 

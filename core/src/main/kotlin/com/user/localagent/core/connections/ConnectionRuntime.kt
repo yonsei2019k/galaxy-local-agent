@@ -35,10 +35,18 @@ class ConnectionRuntime(private val host:ConnectionHost) {
     private val cache=linkedMapOf<String,Cached>()
     fun clearCache(){synchronized(cache){cache.clear()}}
     private fun digest(text:String)=MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString(""){"%02x".format(it)}
-    suspend fun execute(call:ToolCall,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?=null):ConnectionOutcome=lane.withLock {
+    suspend fun execute(call:ToolCall,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?=null):ConnectionOutcome=executeBound(call,approveGmailSend,null)
+    suspend fun executeApprovedCalendar(call:ToolCall,approval:ApprovedCalendarTarget):ConnectionOutcome {
+        require(call.name==CalendarTargetIntegrity.CREATE);return executeBound(call,null,approval)
+    }
+    private suspend fun executeBound(call:ToolCall,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?,calendarApproval:ApprovedCalendarTarget?):ConnectionOutcome=lane.withLock {
         val plan=ConnectionRequests.build(call)
         val access=host.access(plan.service)?:return@withLock fail("connection_required")
         if(!access.readAllowed || (plan.writes&&!access.writeAllowed))return@withLock fail("scope_required")
+        if(call.name==CalendarTargetIntegrity.CREATE){
+            if(calendarApproval==null)return@withLock fail("calendar_target_approval_required")
+            if(!CalendarTargetIntegrity.matches(calendarApproval,call,access))return@withLock fail("calendar_target_changed_since_approval")
+        }
         val principalKey="${plan.service.id}:${access.principal}:${access.generation}"
         val fingerprint=digest(call.name+"\n"+JsonObject(call.arguments.toSortedMap()).toString())
         // Revocation/re-authorization changes cache authority, never the identity of an uncertain write.
@@ -77,7 +85,11 @@ class ConnectionRuntime(private val host:ConnectionHost) {
                 if(response.status !in 200..299) {
                     if(response.status==409&&plan.knownId!=null)remoteId=plan.knownId
                     else return@withLock httpFailure(response.status,true)
-                }else remoteId=plan.knownId?:plan.createdIdField?.let {Json.parseToJsonElement(response.body).jsonObject[it]?.jsonPrimitive?.content}
+                }else {
+                    val returned=plan.createdIdField?.let {Json.parseToJsonElement(response.body).jsonObject[it]}
+                    if(plan.knownId!=null&&plan.createdIdField!=null&&(returned !is JsonPrimitive||!returned.isString||returned.content!=plan.knownId))return@withLock uncertain("created_id_mismatch",plan.knownId)
+                    remoteId=plan.knownId?:returned?.jsonPrimitive?.content
+                }
                 if(remoteId.isNullOrBlank())return@withLock uncertain("missing_remote_id")
                 ConnectionRequests.key(remoteId!!)
                 host.saveMutation(operation,MutationRecord(fingerprint,remoteId,"created"))
@@ -94,7 +106,17 @@ class ConnectionRuntime(private val host:ConnectionHost) {
             val proof=checkNotNull(plan.verify).invoke(observed.body)
             if(!proof.verified)return@withLock uncertain("readback_mismatch",remoteId)
             host.saveMutation(operation,MutationRecord(fingerprint,remoteId,"verified"))
-            ConnectionOutcome(true,VerificationState.VERIFIED,buildJsonObject {put("service",plan.service.id);put("remoteId",remoteId);put("verified",true);put("verification",proof.summary);put("sentToOthers",false)}.toString(),"verified")
+            ConnectionOutcome(true,VerificationState.VERIFIED,buildJsonObject {put("service",plan.service.id);put("remoteId",remoteId);put("verified",true);put("verification",proof.summary);put("sentToOthers",false)
+                if(call.name==CalendarTargetIntegrity.CREATE){
+                    put("calendarSelector",checkNotNull(calendarApproval).review.calendarSelector)
+                    put("accountBindingSha256",digest(access.principal+"\n"+access.generation))
+                    put("eventActive",true);put("attendeeDeliveryConfirmed",false);put("attendeeAcceptanceConfirmed",false)
+                    val event=Json.parseToJsonElement(observed.body).jsonObject
+                    put("event",buildJsonObject{
+                        put("id",event.getValue("id"));put("status",event.getValue("status"));put("title",event.getValue("summary"))
+                        put("start",event.getValue("start").jsonObject.getValue("dateTime"));put("end",event.getValue("end").jsonObject.getValue("dateTime"))
+                    })
+                }}.toString(),"verified")
         }catch(cancel:CancellationException){clearCache();throw cancel}
         catch(_:Exception){clearCache();if(plan.writes)uncertain("write_requires_reconciliation")else fail("read_failed_or_access_changed")}
     }

@@ -6,7 +6,7 @@ import kotlinx.serialization.json.*
 data class ObservedToolOutcome(val call:ToolCall,val result:ToolResult)
 
 object ActionCompletionReport {
-    val managedTools=setOf("save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
+    val managedTools=setOf("create_google_calendar_event","save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
         "prepare_sms","prepare_email","prepare_calendar_event","create_alarm","get_current_datetime","search_contacts",
         "inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")+
         com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")
@@ -41,6 +41,24 @@ object ActionCompletionReport {
                     else->listOf("query","name","label","url").forEach{key->if(value(key).isNotBlank())append("\n요청 값: ").append(value(key))}
                 }
             }else when(call.name){
+                "create_google_calendar_event"->{
+                    val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
+                    val event=receipt?.get("event") as? JsonObject
+                    val proven=runCatching{
+                        require(receipt?.text("service")=="calendar"&&receipt.flag("verified")==true&&receipt.flag("eventActive")==true)
+                        require(receipt.flag("attendeeDeliveryConfirmed")==false&&receipt.flag("attendeeAcceptanceConfirmed")==false)
+                        require(receipt.text("calendarSelector")==value("calendarId").ifEmpty{"primary"}&&receipt.text("accountBindingSha256")?.matches(Regex("[a-f0-9]{64}"))==true)
+                        require(event!=null&&event.text("id")==receipt.text("remoteId")&&event.text("id")?.matches(Regex("[a-f0-9]{64}"))==true)
+                        require(event.text("status") in setOf("confirmed","tentative")&&event.text("title")==value("title"))
+                        require(java.time.OffsetDateTime.parse(event.text("start")).toInstant()==java.time.OffsetDateTime.parse(value("start")).toInstant()&&
+                            java.time.OffsetDateTime.parse(event.text("end")).toInstant()==java.time.OffsetDateTime.parse(value("end")).toInstant())
+                    }.isSuccess
+                    if(proven){
+                        append("일정 생성 후 실제 ID·활성 상태·제목·시각 재조회를 확인했습니다.")
+                        append("\n일정: ").append(event?.text("title"));append("\n시작: ").append(event?.text("start"));append("\n종료: ").append(event?.text("end"))
+                        append("\n참석자 수신·수락은 확인하지 않았습니다.")
+                    }else{append("일정 생성의 대상·활성 상태·저장 근거를 확인하지 못했습니다.");observationIncomplete=true}
+                }
                 "save_note","update_note"->{append("메모 ").append(if(call.name=="save_note")"저장"else"수정").append(" 후 재조회를 확인했습니다.");if(value("title").isNotEmpty())append("\n제목: ").append(value("title"));append("\n본문:\n").append(value("content"))}
                 "create_reminder","update_reminder"->{
                     val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()

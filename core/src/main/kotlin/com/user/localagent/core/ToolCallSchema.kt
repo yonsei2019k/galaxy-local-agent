@@ -56,7 +56,10 @@ object ToolCallSchema {
             fun variant(payload:String)=buildJsonObject{
                 put("type","object");put("additionalProperties",false)
                 put("properties",JsonObject(properties.filterKeys{it !in setOf("content","contentQuoteId")||it==payload}.toMutableMap().apply {
-                    if(payload=="contentQuoteId")put(payload,buildJsonObject{put("type","string");put("enum",JsonArray(quotes.map{JsonPrimitive(it.id)}))})
+                    if(payload=="contentQuoteId")put(payload,buildJsonObject{
+                        put("type","string");put("enum",JsonArray(quotes.map{JsonPrimitive(it.id)}))
+                        properties.getValue(payload).jsonObject["description"]?.let{put("description",it)}
+                    })
                     else put(payload,JsonObject(getValue(payload).jsonObject+mapOf("minLength" to JsonPrimitive(1))))
                 }))
                 put("required",buildJsonArray{add(payload)})

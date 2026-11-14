@@ -1,3 +1,17 @@
+## 2026-11-15 — 1067 설치·1503JVM·59기기 PASS / 실모델비교 전
+
+main6e6f27832e44800be78046b59ca1f61d4712f30d9cd0dc86ae61c35bd4ebb4d8/testfa3fef003bc022ecbe68ba05b3d58ed4f75e6612d04c35490e2ee51902c361f3 독립설치해시·데이터유지·pinned directoverlay PASS. core811/app692=1503JVM 실패/오류/skip0,release/test4m47/sign PASS,lint0/144/1. 원래cold취소·1MiB와추가취소2회PASS,전체59고유기기/skip0. 종료후650+10+6입력·설치바이트재검일치. 새로운actualmodel/exact_quote효과는아직없고1066의3/6·storage0/2 FAIL유지.
+
+Calendar13source Androidcompile는통과했으나실제계정의PendingAction→Hub→Runtime/OAuth검증은아니다. 배포실V1설계는testable run-scoped hub/authorizedsender 주입지점추가가필요함을확인해별도stage만허용했고ownerstore/singleton반사교체/실credential/realfallback을금지했다. root실모델4종2회비교동안source/model/worker/install lease는root만유지한다.
+
+## 2026-11-15 — 1067 역할·상대경로 metadata / calendar대상고정 / exact_quote 회귀 소스 통합
+
+Root가3동결후보를각각해시확인/별도diff로통합했다. NOTE-ROLE13(diff42319d01)은title/body/completequotedBODY 역할설명과quotevariant의description전달만수정,PROJECT-PATH14(diff4a9265c1)는폰boundproject에서barefilename이root-relative라는metadata만수정했다. 전체Tools파일덮기없이두hunk병합SHA6045ba4b…정합을확인한다. Model의의미선택·titleoptional·원문resolver·scope/SHA/SAF/자연어router·기존count/contextbudget은그대로다. 9개새core계약검사는아직미실행이며효과검증은동일실모델재평가로분리한다.
+
+Tool실calendar대상후보(diff8620b6e5,13src/84standalone)도root와배포실독립읽기에서정적blocker0을확인후통합했다. 승인preview전에실제account principal/generation/selector+hostcall/args를고정,기존승인1회후일회marker소비,실행직전불일치면HTTP0. POSTcreatedid/GETexpectedid·활성status·title/time를검증하고unknown effect의POST재시도금지를유지한다. 참석자수신/수락확인과생성확인을구분. 실제계정표시는ownerpreview만. Calendar는기존에도preapprove불가이며새질문/Grant확장0. 실제PendingAction→ToolExecutor→Hub Android배선/실OAuth계정검증은아직없으며pure84로대체하지않는다.
+
+exact_quote opt-in TEST후보(diff06c60f62)와PSallowlist를통합했다. 원래기본6/JUnitselector/각6prompt·조건은유지하며새case만전체본문/별도제목/짧은방해인용/두공백·LF·emoji·조합문자·명령DATA를실제모델로저장후같은id/version/hash로조회하게한다. quoteId사용을강제하지않고원문동일성과다른메모보존·실제hostledger를검증한다. 정적25확인은미compile이며현재650app/core+10public+6config를고정해1067전체검사/릴리스/폰59및실모델비교를시작한다. registry102,새note read/patch도구미설치. 외부GoogleCalendar event/id/status/primary 의미는공식Events/Event.get 문서와대조했으며실제OAuth실행을주장하지않는다.
+
 ## 2026-11-15 — 1066 실모델3of6 종료 / payload역할·불필요경로질문 실패 보존
 
 Source6002fed/installed1066에서실모델cap128237·correctnote257752·reminder282489 PASS,calc92191·file62106·storage121657/105588 FAIL. 유형3/6,storage0/2,전체시도3/7;모두QAcleanup확인. calc실제제안본문은계산숫자없이접미사만,storage는요청제목을본문에넣고첫시도title도없음. QA필드guard가실행전차단했다. file은boundworkspace+명시상대파일에도root입력을다시물어steps0/paused. 실패시running기록은QA취소전snapshot이며완료로집계하지않는다. 실제숫자·제안·nonce원문은ignored private만보존한다.

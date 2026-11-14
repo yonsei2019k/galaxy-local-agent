@@ -46,6 +46,15 @@ class ConnectionHub private constructor(private val context:Context) {
         override fun saveMutation(key:String,record:MutationRecord)=store.saveMutation(service,key,record)
         override fun reserveRequest(service:ConnectedService)=store.reserve(service)
     })}
+    /** Local encrypted connection metadata only. No OAuth, API or model request is started to prepare this review. */
+    suspend fun calendarTargetForApproval(call:ToolCall,hostRunId:String,verifyAccess:suspend()->Unit):CalendarTargetReview=withContext(Dispatchers.IO){
+        verifyAccess()
+        val state=checkNotNull(store.connection(ConnectedService.CALENDAR)){"calendar_connection_required"}
+        val access=ConnectionAccess(state.principal,state.generation,true,state.writeAllowed)
+        val review=CalendarTargetIntegrity.review(ConnectionExecutionScope.bind(call,hostRunId),access,state.accountName)
+        verifyAccess();check(store.connection(ConnectedService.CALENDAR)?.let{ConnectionAccess(it.principal,it.generation,true,it.writeAllowed)}==access){"calendar_target_changed_before_preview"}
+        review
+    }
     suspend fun execute(call:ToolCall,hostRunId:String?=null,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?=null):ToolResult=
         executeBound(call,hostRunId,null,null,{},approveGmailSend)
     suspend fun executeInThread(call:ToolCall,hostRunId:String,hostThreadId:String,pcDataBinding:String?,verifyAccess:suspend()->Unit,
@@ -54,14 +63,19 @@ class ConnectionHub private constructor(private val context:Context) {
         verifyAccess()
         return executeBound(call,hostRunId,hostThreadId,pcDataBinding,verifyAccess,approveGmailSend)
     }
+    suspend fun executeApprovedCalendarInThread(call:ToolCall,hostRunId:String,hostThreadId:String,pcDataBinding:String?,verifyAccess:suspend()->Unit,
+        approval:ApprovedCalendarTarget):ToolResult {
+        require(hostThreadId.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        verifyAccess();return executeBound(call,hostRunId,hostThreadId,pcDataBinding,verifyAccess,null,approval)
+    }
     private suspend fun executeBound(call:ToolCall,hostRunId:String?,hostThreadId:String?,pcDataBinding:String?,verifyAccess:suspend()->Unit,
-        approveGmailSend:(suspend(GmailSendPreview)->Boolean)?):ToolResult=withContext(Dispatchers.IO) {
+        approveGmailSend:(suspend(GmailSendPreview)->Boolean)?,calendarApproval:ApprovedCalendarTarget?=null):ToolResult=withContext(Dispatchers.IO) {
         if(call.name in PcToolCatalog.names)return@withContext pc.execute(call,hostThreadId,pcDataBinding,verifyAccess,computeOwner=hostRunId)
         val service=ConnectionCatalog.tools[call.name]?.service?:return@withContext ToolResult(call.id,false,"지원하지 않는 연결 도구",VerificationState.FAILED)
         try {
             val initialAccess=store.connection(service)?.let {ConnectionAccess(it.principal,it.generation,true,it.writeAllowed)}
             val scopedCall=ConnectionExecutionScope.bind(call,hostRunId)
-            val outcome=runtime(service).execute(scopedCall,approveGmailSend)
+            val outcome=if(calendarApproval!=null)runtime(service).executeApprovedCalendar(scopedCall,calendarApproval)else runtime(service).execute(scopedCall,approveGmailSend)
             if(outcome.success&&initialAccess!=null)store.markVerified(service,initialAccess)
             ToolResult(call.id,outcome.success,outcome.data,outcome.state,outcome.code)
         }catch(cancel:CancellationException){throw cancel}catch(_:Exception){ToolResult(call.id,false,"연결 인자 또는 계정 설정을 확인해주세요.",VerificationState.FAILED,"connection_failed")}

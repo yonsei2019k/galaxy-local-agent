@@ -59,7 +59,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 call,runId,checkNotNull(connectionThreadId),connectionPcDataBinding,connectionVerifyAccess,approve)
             if(call.name in com.user.localagent.core.connections.PcToolCatalog.names&&connectionComputeEngine!=null)
                 connectionComputeEngine.withPcResource(cleanup={}){perform()}else perform()
-        },verifyAccess=connectionVerifyAccess)}
+        },verifyAccess=connectionVerifyAccess,
+        captureCalendar={call,run->com.user.localagent.connections.ConnectionHub.get(context).calendarTargetForApproval(call,run,connectionVerifyAccess)},
+        executeCalendar={call,run,approved->com.user.localagent.connections.ConnectionHub.get(context).executeApprovedCalendarInThread(
+            call,run,checkNotNull(connectionThreadId),connectionPcDataBinding,connectionVerifyAccess,approved)})}
     private val fallbackProjectWorkspace by lazy {com.user.localagent.workspace.ProjectWorkspace(context)}
     private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace
     private var capturedAvailableTools:Set<String> = emptySet()
@@ -69,6 +72,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     /** The approval names a real scoped record, and its revision must still match at the mutation. */
     suspend fun reviewForAction(call:ToolCall):String? {
         ToolRegistry.validate(call)
+        if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)return requestConnections.reviewForAction(call)
         val target=when(call.name){
             "update_note","delete_note"->{val note=repository.getNote(call.s("id"))?:error("대상 메모가 없어 변경·삭제하지 않았습니다.");Triple(note.toString(),note.updatedAt,"메모: ${note.title}\n범위: ${note.collection}\n현재 본문:\n${note.body.take(1200)}")}
             "update_reminder","delete_reminder"->{val item=repository.getReminder(call.s("id"))?:error("대상 알림이 없어 변경·삭제하지 않았습니다.");Triple(item.toString(),item.updatedAt,"알림: ${item.title}\n범위: ${item.group}\n예약 시각: ${java.time.Instant.ofEpochMilli(item.atEpochMillis)}\n상태: ${item.status}")}
@@ -77,6 +81,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         reviewedTargets[reviewKey(call)]=target.first to target.second
         return target.third+"\n\n요청 내용:\n"+call.arguments.toString()
     }
+    fun confirmCalendarOwner(call:ToolCall,actuallyDisplayedPreview:String?){requestConnections.confirmCalendarOwner(call,actuallyDisplayedPreview)}
     private suspend fun verifyActionReview(call:ToolCall){
         val expected=reviewedTargets[reviewKey(call)]?:return
         val current=when(call.name){"update_note","delete_note"->repository.getNote(call.s("id"))?.toString();"update_reminder","delete_reminder"->repository.getReminder(call.s("id"))?.toString();else->return}

@@ -1,0 +1,53 @@
+package com.user.localagent.core.connections
+
+import com.user.localagent.core.ToolCall
+import com.user.localagent.core.ToolRegistry
+import java.security.MessageDigest
+import java.time.OffsetDateTime
+import kotlinx.serialization.json.*
+
+/** Host-selected credential snapshot and account-qualified calendar selector. Never decoded from model JSON. */
+class CalendarTargetReview internal constructor(val access:ConnectionAccess,val callId:String,val argumentsSha256:String,
+    val calendarSelector:String,private val ownerAccountLabel:String?,private val title:String,private val start:String,private val end:String) {
+    fun approvalText():String=buildString {
+        append("Google Calendar 일정 생성\n계정: ").append(ownerAccountLabel?:"표시 이름 미확인 · "+access.principal.take(12))
+        append("\n캘린더: ").append(if(calendarSelector=="primary")"이 계정의 기본 캘린더 (primary)"else calendarSelector)
+        append("\n연결 버전: ").append(access.generation).append("\n제목: ").append(JsonPrimitive(title).toString())
+        append("\n시작: ").append(start).append("\n종료: ").append(end)
+        append("\n생성 후 실제 일정 ID·활성 상태·시각을 재조회합니다. 참석자 수신·수락 확인은 포함하지 않습니다.")
+    }
+    override fun toString()="CalendarTargetReview(private owner preview)"
+}
+class ApprovedCalendarTarget internal constructor(val review:CalendarTargetReview) {
+    override fun toString()="ApprovedCalendarTarget(host-only exact approval)"
+}
+object CalendarTargetIntegrity {
+    const val CREATE="create_google_calendar_event"
+    private fun sha(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it.toInt()and 255)}
+    private fun arguments(call:ToolCall)=sha(buildJsonObject{put("tool",call.name);put("arguments",JsonObject(call.arguments.toSortedMap()))}.toString())
+    fun review(scopedCall:ToolCall,actualAccess:ConnectionAccess,ownerAccountLabel:String?):CalendarTargetReview {
+        ToolRegistry.validate(scopedCall);require(scopedCall.name==CREATE)
+        require(actualAccess.principal.isNotBlank()&&actualAccess.principal.length<=256&&actualAccess.generation>=0&&actualAccess.readAllowed&&actualAccess.writeAllowed)
+        require(ownerAccountLabel==null||ownerAccountLabel.length<=320&&ownerAccountLabel.none{it.code<32})
+        val a=scopedCall.arguments
+        val selector=a["calendarId"]?.jsonPrimitive?.content?:"primary";ConnectionRequests.key(selector)
+        return CalendarTargetReview(actualAccess,scopedCall.id,arguments(scopedCall),selector,ownerAccountLabel,
+            a.getValue("title").jsonPrimitive.content,a.getValue("start").jsonPrimitive.content,a.getValue("end").jsonPrimitive.content)
+    }
+    /** Invoke only after actual owner UI confirmation of this exact preview; no tool API exposes this factory. */
+    fun ownerConfirmed(review:CalendarTargetReview,actuallyDisplayedPreview:String):ApprovedCalendarTarget {
+        require(actuallyDisplayedPreview==review.approvalText());return ApprovedCalendarTarget(review)
+    }
+    fun matches(approved:ApprovedCalendarTarget,scopedCall:ToolCall,currentAccess:ConnectionAccess):Boolean {
+        val r=approved.review
+        return scopedCall.name==CREATE&&currentAccess==r.access&&scopedCall.id==r.callId&&arguments(scopedCall)==r.argumentsSha256&&
+            (scopedCall.arguments["calendarId"]?.jsonPrimitive?.content?:"primary")==r.calendarSelector
+    }
+    fun readback(expectedId:String,title:String,start:OffsetDateTime,end:OffsetDateTime,body:String):ResponseProof=ResponseProof(runCatching {
+        val data=Json.parseToJsonElement(body).jsonObject
+        fun text(key:String)=data.getValue(key).jsonPrimitive.also{require(it.isString)}.content
+        text("id")==expectedId&&text("status") in setOf("confirmed","tentative")&&text("summary")==title&&
+            OffsetDateTime.parse(data.getValue("start").jsonObject.getValue("dateTime").jsonPrimitive.content).toInstant()==start.toInstant()&&
+            OffsetDateTime.parse(data.getValue("end").jsonObject.getValue("dateTime").jsonPrimitive.content).toInstant()==end.toInstant()
+    }.getOrDefault(false),"활성 일정 ID·제목·시작·종료 실제 재조회 · 참석자 수신·수락 미확인")
+}

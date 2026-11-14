@@ -1,5 +1,11 @@
 # Device validation
 
+## 2026-11-15 checkpoint1067 / compiled role and calendar guards, controlled59/59 pass
+
+Main SHA `6e6f27832e44800be78046b59ca1f61d4712f30d9cd0dc86ae61c35bd4ebb4d8`, test SHA `fa3fef003bc022ecbe68ba05b3d58ed4f75e6612d04c35490e2ee51902c361f3`, independently matched after installation without resetting data. Core811/app692=1503 JVM tests pass, failures/errors/skips0; release/test4m47 and signing pass; lint0 errors/144 warnings/1 hint; pinned direct-overlay health passes. All650+10+6 frozen inputs and main/test artifacts match after controlled59/59 phone checks, zero skipped. Original cold cancellation/1MiB guard and two further cancellation repeats pass without adding their repeats to the59 unique count.
+
+Note/project-path changes are metadata and schema-description annotations; validation, quote resolution, optional headings, workspace selection, access, SHA and existing budgets are unchanged. Calendar tests cover captured account/generation/call/selector, exact approval, wrong POST/GET IDs/status and no unsafe POST retry using mocks. Android code compiles, but actual PendingAction/ToolExecutor/Hub/Runtime account flow and real OAuth/provider effects are untested. The new exact_quote model case is opt-in, compiled and not yet run. Critical calculation/storage/file/exact-quote model comparisons will use unchanged old criteria plus the new exact-body case;1066 failures are not regraded.
+
 ## 2026-11-15 checkpoint1066 / controlled59/59 pass, actual-model reevaluation pending
 
 Main SHA `2113fddd2aa797ecbda134b3e3c1d4cf83bee6c07ae0870236688af3b237ddb8`, test SHA `0acde604a3423e1a705adcc0e6e060d4b0071d3512ac4aba703701bb427c2b95`, independent installed-byte match and no reset.1476 JVM tests (core791/app685) pass with zero failures/errors/skips; release/test build3m51 and signatures pass; lint0 errors/144 warnings/1 hint; pinned direct-overlay health passes.642 app/core+10 public+6 build inputs were frozen before device checks.
