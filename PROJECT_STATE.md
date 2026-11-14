@@ -2,13 +2,23 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Latest test-only checkpoint: storage goal v2 passes1/2
+## Latest installed checkpoint1070:1560 JVM,73 phone checks and actual PC cancellation pass
+
+Main `be82cf31423781f7df7622ebecde868cdc15eec31b6d4b24ec9bbbdd8db1da20` and test `c6059b24299ca5e8e57447323d10610fd7ee1f6c949e5d6e75076cb619943964` are installed without resetting data and independently matched. Core828/app732=1560 JVM tests pass with0 failures/errors/skips; final release/test build3m55, signatures and lint0 errors/144 warnings/1 hint pass. Direct Tailscale overlay authenticates the original pinned PC identity without LAN fallback158ms; external-network handoff remains untested.
+
+Controlled73/73 unique phone checks pass: Calendar8, file-binding6 and original59; cold cancellation/1MiB controls also pass but overlap. Actual paired-PC cancellation passes112109ms with a request-matched HTTP200 ACK_CLEANED, actual acceptance and cleanup, preserved231 acknowledged characters, phone/UI cancellation and calls2→2. Owner unload, final idle and fixture cleanup pass. The parsed-SSE window does not prove native decoder activity. Historical1068/1069 failures remain unchanged. All664 source+10 public+6 build inputs and installed bytes/pinned overlay match afterward; the PC is idle before the next model batch.
+
+1070 preserves request-bound cancellation outcomes independently of the latest cleanup UI, allows one cancel POST per captured session with an original12-second deadline, and checks actual acceptance plus cleanup. Unknown/409/unload-only is not cancellation success. Completed SSE states no longer display positive writing progress. General model instructions discourage reasking conditions already specified or satisfied; no question is removed by keyword and no completion evidence is upgraded.
+
+Actual storage goal-v2 passes2/2 (241098/193124ms), both completed with one exact report, unchanged three-file inventory/hashes and verified cleanup; every attempt is recorded. One uses find→save and the other inspect→find→save. The earlier1069 paused result remains FAIL, and this small repeat is not a general accuracy estimate. Inputs/artifacts/overlay and idle PC are reverified afterward. Paired-PC startup without phone weights and long-note tools remain separate staged candidates.
+
+## Historical test-only1069: storage goal v2 passes1/2
 
 Production1069 is unchanged. A separate opt-in storage goal-v2 test APK `c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d` is installed and independently matched. Core828/app717=1545 JVM tests pass with zero failures/errors/skips; Android-test assembly passes. All662 source,10 public and6 build inputs and installed bytes/pinned direct-overlay health match after the actual model batch. Earlier controlled73/73 belongs to the preceding test APK, not a new run of this test-only phase.
 
 Actual goal-v2 storage repeats pass1/2: round0 completes in253935ms; round1 pauses in152439ms with awaiting_owner_input after an unnecessary format question. Both independently contain exactly one correctly titled, exact four-line report note, unchanged three-file inventories/hashes and verified fixture cleanup. Both use actual find_project_duplicates→save_note, without redundant inspect. The paused round remains FAIL despite its correct stored artifact. All2 attempts are recorded, none unstarted; original v1 failures are unchanged. PC is idle afterward. No internal-distribution approval is implied.
 
-## Current actual device checkpoint: installed1069;1533 JVM and controlled73/73 pass
+## Historical actual device checkpoint: installed1069;1533 JVM and controlled73/73 pass
 
 Main SHA `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`, test SHA `29791c77a50b7bb6c918215a2ed9f8dfa9ce8e55af59da8682779fe12f75e83a`, independently matched on the phone without data reset. Final build3m20/signing/lint0 errors/144 warnings/1 hint PASS; core828/app705=1533 JVM tests pass with zero failures/errors/skips. All660 source+10 public+6 build inputs and installed hashes/pinned overlay match after controlled73/73 phone tests: old59, Calendar8, read/hash binding6. Cold cancellation/1MiB also pass and their overlaps are not added.
 

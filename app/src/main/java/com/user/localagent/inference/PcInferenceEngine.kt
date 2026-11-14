@@ -31,6 +31,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     private val cleanup=MutableStateFlow<PcCleanupEvidence?>(null)
     val lastCleanup:StateFlow<PcCleanupEvidence?> = cleanup.asStateFlow()
     private val lifecycle=AtomicLong()
+    private val lifecycleLock=Any()
     private var config:PcConnection?=null
     private var alias:String?=null
     private var options:InferenceOptions?=null
@@ -39,6 +40,14 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     @Volatile private var activeRequest:String?=null
     private var structured=false
     private val cancellation=AtomicLong()
+    private val cancelHandshake=PcCancelHandshake<PcConnection>(scope,
+        send={session,remaining->sendCancel(session,remaining)},onOutcome={outcome->
+            synchronized(lifecycleLock){
+                if(lifecycle.get()==outcome.key.epoch&&outcome.key.owner==computeOwner)
+                    cleanup.value=PcCleanupEvidence("cancel",outcome.key.requestId,outcome.reply.cleanupComplete,outcome.reply.acknowledged)
+            }
+        })
+    internal fun cancelOutcome(requestId:String):PcCancelOutcome?=cancelHandshake.outcome(requestId,computeOwner)
     override val state:StateFlow<String> = status.asStateFlow()
     override val lastMetrics:StateFlow<InferenceMetrics?> = metrics.asStateFlow()
     override val lastGeneration:StateFlow<GenerationSummary?> = generation.asStateFlow()
@@ -49,7 +58,10 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     private fun requireAuthority(connection:PcConnection){if(!authorityMatches(connection))throw PcUnavailable()}
     suspend fun preflight():Boolean=transport.available(computeOwner)?.let {authorityMatches(it)}==true
     override suspend fun load(path:String,options:InferenceOptions)=withContext(Dispatchers.IO){mutex.withLock {
-        lifecycle.incrementAndGet();cleanup.value=null
+        val previousEpoch=synchronized(lifecycleLock){
+            val previous=lifecycle.get();lifecycle.incrementAndGet();cleanup.value=null;previous
+        }
+        cancelHandshake.releaseEpoch(previousEpoch)
         // The PC owns the engine choice; the phone path only labels the request and picks the Gemma helper.
         val file=File(path).canonicalFile
         require(file.parentFile==File(context.filesDir,"models").canonicalFile){"휴대폰 모델 폴더 밖의 모델 경로는 사용하지 않습니다."}
@@ -146,7 +158,12 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             }
             status.value="PC에서 계산 중 · 결과는 스마트폰에 저장";metrics.value=null;generation.value=null
             var visible=0
+            var cancelSession:PcCancelHandshake.Session<PcConnection>?=null
             try {
+                if(alias!=PC_CLAUDE_MODEL)cancelSession=cancelHandshake.activate(
+                    PcCancelKey(id,lifecycle.get(),computeOwner,textAuthority.revision),config)
+                currentCoroutineContext().ensureActive()
+                if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단")
                 val connection=transport.open(config,if(alias==PC_CLAUDE_MODEL)"/v1/cloud/chat" else "/v1/llm/chat","POST",body,300_000,computeOwner);activeConnection=connection
                 reasoning=null
                 val thought=StringBuilder()
@@ -173,7 +190,9 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                                 item["finish_reason"]?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {finish=it}
                             }
                             val progressAt=System.nanoTime()
-                            if(text.isNotEmpty()&&(lastProgress==0L||progressAt-lastProgress>=1_000_000_000L)){
+                            if(finish!=null){
+                                status.value="PC 응답 종료 신호 수신 · 완료 확인 대기"
+                            }else if(text.isNotEmpty()&&(lastProgress==0L||progressAt-lastProgress>=1_000_000_000L)){
                                 status.value="PC에서 답변 작성 중 · ${text.length}자 준비 · 완료 확인 대기"
                                 lastProgress=progressAt
                             }
@@ -200,20 +219,50 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                 val failure=if(cancellation.get()!=revision&&error !is CancellationException)CancellationException("PC 계산 중단").apply{initCause(error)}else error
                 generation.value=GenerationSummary(id,if(failure is CancellationException)GenerationStopReason.CANCELLED else GenerationStopReason.ENGINE_ERROR,GenerationEvidence.HOST,null,selected.maxOutputTokens,visibleChars=visible,errorCode=if(failure is CancellationException)"CANCELLED"else"PC_CONNECTION_OR_COMPLETION_FAILED",elapsedMillis=(System.nanoTime()-started)/1_000_000)
                 throw failure
-            }finally{activeConnection?.disconnect();activeConnection=null;activeRequest=null}
+            }finally{
+                activeConnection?.disconnect();activeConnection=null
+                cancelSession?.let{cancelHandshake.end(it)}
+                activeRequest=null
+            }
         }
     }.flowOn(Dispatchers.IO)
+    private suspend fun sendCancel(session:PcCancelHandshake.Session<PcConnection>,remainingMillis:Long):PcCancelReply {
+        val wire=PcTransport(context);var opened:HttpsURLConnection?=null
+        try {
+            currentCoroutineContext().ensureActive()
+            // No body means open configures the pinned connection without network I/O.
+            val connection=wire.open(session.binding,"/v1/llm/cancel","POST",
+                timeout=remainingMillis.coerceIn(1,PcCancelHandshake.DEADLINE_MILLIS).toInt(),computeOwner=session.key.owner)
+            opened=connection
+            currentCoroutineContext().ensureActive()
+            return wire.cancellable(connection){
+                val bytes=buildJsonObject{put("requestId",session.key.requestId)}.toString().toByteArray(Charsets.UTF_8)
+                connection.doOutput=true;connection.setRequestProperty("Content-Type","application/json")
+                connection.setFixedLengthStreamingMode(bytes.size)
+                connection.outputStream.use{it.write(bytes)}
+                val status=connection.responseCode
+                val input=if(status in 200..299)connection.inputStream else connection.errorStream
+                input.use{PcCancelReply.read(status,it)}
+            }
+        }finally{opened?.disconnect();wire.cancel()}
+    }
     override fun cancel(){
-        val id=activeRequest;val connection=config;val epoch=lifecycle.get()
+        val id=activeRequest;val connection=config;val epoch=lifecycle.get();val cloud=alias==PC_CLAUDE_MODEL
         cancellation.incrementAndGet()
+        if(!cloud)cancelHandshake.requestCancel(epoch)
         activeConnection?.disconnect();transport.cancel()
-        if(id!=null&&connection!=null)scope.launch {
+        // Keep the optional cloud route's existing cancellation behavior separate.
+        if(cloud&&id!=null&&connection!=null)scope.launch {
             val reply=runCatching{PcTransport(context).json(connection,"/v1/llm/cancel","POST",buildJsonObject{put("requestId",id)},2000,computeOwner)}.getOrNull()
             if(lifecycle.get()==epoch)cleanup.value=PcCleanupEvidence("cancel",id,reply?.get("cleanup_complete")?.jsonPrimitive?.booleanOrNull,reply!=null)
         }
     }
     override suspend fun unload(){cancel();withContext(Dispatchers.IO){mutex.withLock {
-        lifecycle.incrementAndGet() // A late cancel reply cannot replace this unload's evidence.
+        val endingEpoch=lifecycle.get()
+        // The HTTP ticket never takes this generation mutex. Its original deadline is not restarted.
+        withContext(NonCancellable){cancelHandshake.awaitPending(endingEpoch)}
+        synchronized(lifecycleLock){lifecycle.incrementAndGet()}
+        cancelHandshake.releaseEpoch(endingEpoch)
         val previous=config
         if(previous!=null){
             val reply=runCatching{transport.json(previous,"/v1/llm/unload","POST",buildJsonObject{},2000,computeOwner)}.getOrNull()

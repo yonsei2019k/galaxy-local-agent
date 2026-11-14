@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-15 checkpoint1070 /73 controlled and actual PC cancellation PASS
+
+Main `be82cf31423781f7df7622ebecde868cdc15eec31b6d4b24ec9bbbdd8db1da20`, test `c6059b24299ca5e8e57447323d10610fd7ee1f6c949e5d6e75076cb619943964`: signed, installed without data reset and independently matched. Full build3m55, core828/app732=1560 JVM0 failures/errors/skips, lint0 errors/144 warnings/1 hint. The two earlier builds failed the existing shorter-selection-prompt regression; wording was shortened and the test was retained. New cancellation15 JVM regressions pass. Original pinned direct-overlay transport authenticates the intended PC without LAN fallback158ms; external-network handoff is untested.
+
+Controlled73 unique checks PASS: old59+Calendar8+file-binding6; overlapping cold cancellation/1MiB controls pass separately. Actual PC cancellation PASS112109ms: same-request HTTP200 ACK_CLEANED with actual acknowledged/accepted/cleanup booleans, prior231 characters preserved, phone/UI cancelled and generation calls2→2. Owner unload ACK, final idle and fixture cleanup pass. nativeDecoderActiveProven remains false; positive parsed SSE is not native decoder activity proof. Previous1068/1069 failures are not regraded.
+
+Actual storage goal-v2 PASS2/2:241098/193124ms, both completed/cleanup verified, one exact four-line report and unchanged three-file bytes. Round0 uses find→save; round1 inspect→find→save. Batch planned/started/recorded2, unstarted0, no boundary failure and normal all-attempts-recorded termination. The prior1069 paused case stays FAIL and these two successes do not establish general accuracy. Post-cancellation and post-storage664+10+6 inputs, installed bytes/pinned overlay and idle PC health are reverified.
+
 ## 2026-11-15 test-only1069 / storage goal v2 passes1/2
 
 Main remains `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`; new test-only APK `c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d` is signed, installed and independently matched with data retained. Core828/app717=1545 JVM tests have0 failures/errors/skips and Android-test assembly passes. The previous controlled73 tests were not rerun for this test-only phase.

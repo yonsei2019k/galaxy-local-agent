@@ -27,7 +27,8 @@ import org.junit.runner.RunWith
 
 /**
  * Actual PC + actual coordinator; synthetic public prompt, no tools, private owner data or cloud.
- * Positive cases require pre-existing durable text AND a later in-flight PC generation.
+ * Requires durable text, a later parsed-SSE window and a request-matched real cancel ACK.
+ * The window is not proof of native decoder activity; that needs a stronger backend receipt.
  */
 @RunWith(AndroidJUnit4::class)
 class ActualPcCancellationDeviceValidation {
@@ -68,6 +69,7 @@ class ActualPcCancellationDeviceValidation {
         }
         fun count():Int=synchronized(lock){serial}
         fun cleanup():List<PcCleanupEvidence> = synchronized(lock){receipts.toList()}
+        fun cancelOutcome(requestId:String):PcCancelOutcome?=actual.pcCancelOutcome(requestId)
         private fun snapshotCurrentCleanup(){
             // StateFlow may conflate cancel -> unload. Preserve only an actually published value;
             // this cannot recover a late reply rejected by the PC engine's lifecycle guard.
@@ -162,12 +164,19 @@ class ActualPcCancellationDeviceValidation {
             put("stage",stage);put("passed",validated&&caught==null&&cleanupVerified&&cleanupFailure==null)
             put("actualModel",true);put("allowCloudText",false);put("toolsEnabled",false)
             put("projectId",project?.id);put("threadId",room?.id);put("runId",runId);put("userMessageId",originalUserId);put("ownerRequestSha256",sha(owner))
-            put("inflightSignal","version_bound_new_generation_start_then_positive_parsed_SSE_chars_AND_owner_health")
+            put("inflightSignal","positive_parsed_SSE_progress_AND_owner_health_NOT_native_active_proof")
             put("inflightObserved",window!=null);put("inflightGenerationSerial",window?.serial);put("preparedChars",window?.preparedChars)
             put("acknowledgedCharsBeforeStop",beforeText.length);put("acknowledgedPartsBeforeStop",beforeParts.size)
             put("acknowledgedTextPreserved",beforeText.isNotEmpty()&&afterText.startsWith(beforeText))
             put("generationCallsAtStop",countAtStop);put("generationCallsFinal",probe.get()?.count())
             put("backendCancelledSummary",probe.get()?.cancellation?.reason==GenerationStopReason.CANCELLED)
+            val outcome=probe.get()?.let{p->p.cancellation?.requestId?.let{p.cancelOutcome(it)}}
+            put("cancelHandshakeStage",outcome?.reply?.stage?.name?:"UNKNOWN")
+            put("cancelHttpStatus",outcome?.reply?.httpStatus?.let{JsonPrimitive(it)}?:JsonNull)
+            put("cancelReplyAcknowledged",outcome?.reply?.acknowledged?:false)
+            put("cancelReplyAccepted",outcome?.reply?.cancelled?.let{JsonPrimitive(it)}?:JsonNull)
+            put("cancelReplyCleanupComplete",outcome?.reply?.cleanupComplete?.let{JsonPrimitive(it)}?:JsonNull)
+            put("nativeDecoderActiveProven",false)
             put("cancelAckMatchedGeneration",cancelAck);put("ownerScopedUnloadAck",unloadAck);put("postStopIdleHealth",finalIdle)
             put("phoneStopAndAcknowledgedTextVerified",phoneStopVerified)
             put("ownerInterrupted",interrupted.get());put("cleanupVerified",cleanupVerified)
@@ -284,7 +293,9 @@ class ActualPcCancellationDeviceValidation {
             withTimeoutOrNull(5_000){
                 while(true){
                     val receipts=recorded.cleanup()
-                    cancelAck=receipts.any{it.operation=="cancel"&&it.requestId==stoppedSummary.requestId&&it.acknowledged&&it.cleanupComplete==true}
+                    val outcome=recorded.cancelOutcome(stoppedSummary.requestId)
+                    cancelAck=outcome?.let{it.key.requestId==stoppedSummary.requestId&&it.reply.acknowledged&&
+                        it.reply.cancelled==true&&it.reply.cleanupComplete==true&&it.confirmed}==true
                     unloadAck=receipts.any{it.operation=="unload"&&it.acknowledged&&it.cleanupComplete==true}
                     if(cancelAck)break
                     delay(25)

@@ -1,3 +1,25 @@
+## 2026-11-15 — 1070 저장공간 goal-v2 실제2of2 PASS
+
+실제 PC/휴대폰 V2 저장공간2회가241098/193124ms PASS·completed·cleanuptrue다. 첫 회차find→save, 둘째inspect→find→save이며 두 회차 모두정확한4줄보고메모1/독립readback/파일3및원본해시유지/최종본문을확인했다. planned/started/recorded2·startedWithoutRow0·unstarted0·boundaryFailurefalse·all_attempts_recorded를확인했으며 원래1069의paused FAIL과과거v1실패는바꾸지않는다. 일반지침보완이포함된작은실제반복관찰이지일반정확도/단독원인증명이아니다. 종료후664source+10public+6build/설치mainbe82·testc605/directoverlay와workerbusyfalse/cleanupfalse/residentnull을재확인했다.
+
+## 2026-11-15 — 1070 실제PC 취소확인 PASS / 1560JVM·73통제기기 PASS
+
+최종 full build3m55/core828app732=1560 JVM0fail/error/skip/lint0errors144warnings1hint/release+androidTest/sign PASS. 앞선 두 빌드는 selection prompt가 기존 간결성 회귀를 넘겨FAIL했고 지침을 압축해 원래 검사를 유지했다. 설치1070 mainbe82cf31423781f7df7622ebecde868cdc15eec31b6d4b24ec9bbbdd8db1da20/testc6059b24299ca5e8e57447323d10610fd7ee1f6c949e5d6e75076cb619943964 독립바이트/데이터유지/기존PIN 직접overlay PASS. 통제73고유=old59+Calendar8+filebinding6 PASS, cold취소/MiB도PASS이나 중복 합산하지 않는다.
+
+실제PC취소는112109ms strictPASS다. 동일request ACK_CLEANED/HTTP200/실제acknowledged+cancelled+cleanuptrue, 기존231자보존/phoneUIcancel/calls2→2/HOSTCANCELLED/ownerunloadACK/idle/fixturecleanuptrue를 확인했다. nativeDecoderActiveProven=false는 유지하며 parsed SSE 관측을 decoder동작 증명으로 확대하지 않는다. 원래1068/69FAIL재등급0. 종료후664source+10public+6build/설치바이트/directoverlay 재검과 PCbusyfalse/cleanupfalse/residentnull 확인. 현재 storage goal-v2 actual2를 새로 시작했고 아직 결과를 주장하지 않는다. 다른 채팅은 ignored 후보만 작성하며 실행창의 canonical/worker/APK는 동결한다.
+
+## 2026-11-15 — 1070 취소확인·불필요 재질문 지침 통합 / 검증 전
+
+Root가 독립 검토한 취소 후보85c87376의 기준3파일과 후보5파일 SHA를 대조하고 exact patch를 통합했다. 원래 owner/request/epoch/revision과 연결 snapshot에 묶인 ticket을 disconnect 전에 등록하며 동일 ticket POST1회, 최초 등록부터12초, 실제 ACK/수락/cleanup의 최근4개 결과를 RAM에 보존한다. unload는 해당 pending의 남은 시간만 기다린 뒤 epoch를 바꾸며 generation mutex를 sender가 잡지 않는다. 409/시간초과/확인불가는 성공이 아니고 단순 unload로 대체하지 않는다. 실제 terminal finish 신호 뒤 작성중 문구를 중립 완료확인 상태로 바꾼다. 새 순수15검사와 실제PC 검사 관측도 포함했지만 아직 실행하지 않았다. generic transport·worker·API·모델·권한·cap128·기존 실패기록은 유지한다. 실제 decoder 중단 증거를 새로 만들지 않는다.
+
+실제 storage-v2 둘째 회차의 불필요 질문에 대해 AssistantPolicy와 AutonomousReviewPolicy의 일반 지침만 보강했다. 원래 요청과 관찰로 결정되는 조건은 다시 묻지 않고, 안전한 다음 행동을 바꿀 정말 빠진 owner 선택만 질문하며, 충족된 기준은 review_complete로 정리하도록 한다. 질문을 코드로 삭제하거나 강제완료·키워드 분기·새 권한을 추가하지 않는다. planner/target/장문note 후보는 별도 ignored 작업 중이다. 1070 JVM/보안/릴리스/설치/실제 모델 효과는 아직 검증 전이다.
+
+## 2026-11-15 — 저장공간 goal-v2 실제1of2 / 정확한 저장 뒤 불필요 질문 발견
+
+Root가 별도 opt-in 시험 경로와 순수12회귀를 통합했다. 기존 v1 selector/요청/fixture/83assert와 과거 실패는 그대로이며, v2는 find 결과로 충분한 경우 redundant inspect 순서를 강제하지 않는다. 실제 PC·VERIFIED find→save·정확한4줄/메모1/승인1/독립 readback·파일3과원본해시·최종상태/본문·정리는 유지한다. production1069 main1cadc61b 불변, 새 test c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d 서명/설치/독립해시/directoverlay PASS. core828/app717=1545 JVM0fail/error/skip 및 androidTest assemble PASS, 원래73통제검사는 이번 test-only phase에서 재실행하지 않았다.
+
+실제2회는 round0 PASS253935ms/completed, round1 FAIL152439ms/paused(awaiting_owner_input)다. 두 회차 모두 실제 find→save/정확한보고메모1개/파일3개·해시불변/cleanuptrue를 독립 확인했지만, 두 번째는 이미 요청·저장된 형식을 다시 묻고 멈췄다. 정확한 artifact를 전체 성공으로 승격하지 않는다. planned/started/recorded2·unstarted0·all_attempts_recorded, 과거v1재등급0. 종료 후662source+10public+6build/설치바이트/directoverlay와 PC idle·cleanup 재확인. 세 채팅의 cancel handshake·typed paired-PC target·장문 note 후보는 ignored에서만 작성 중이며 아직 설치되지 않았다.
+
 ## 2026-11-15 — 1069 실모델file2of2 PASS / 취소ACK 재검FAIL 보존
 
 실제PC/file_typo2회는266307/258716msPASS·각cleanuptrue,원래read/write/read·정확path/body/원본SHA·단일write·보존파일불변기준을그대로통과했다. batchplanned2/started2/recorded2/unstarted0/all_attempts_recorded. OBS-V2 actualPCcancel은93361ms strictFAIL(matchingACK미관찰),ACK257문자보존/phoneUIcancel/calls2→2/unloadACK/idle/cleanuptrue를그대로구분한다. source660+public10+config6/설치main·test/directoverlay끝재검일치. 취소요청dispatch·2s대8s budget/epoch/StateFlow/DONErace는소스진단후보이며아직서버원인확정0/기준완화0이다.
@@ -1048,9 +1070,3 @@ Tailscale: 기준 실행 완료·compute_busy=false/cleanup_pending=false·모�
 ### 2026-11-14 상용화 준비 분석 보고서 (문서만, 소스·빌드·설치 변경 없음)
 
 `docs/commercial-readiness-2026-11-14.ko.md`를 추가했다. 기준은 커밋 8c3ed07과 설치 1059의 기존 기록이며, 저장소 문서·빌드 설정·매니페스트·CI·lint 결과·평가 기록을 읽어 정리했다. 새 빌드, 기기 검사, 모델 평가는 실행하지 않았다. 에이전트 품질, PC 의존 구조, 보안·개인정보, 배포·스토어 정책, 코드 구조, 사용자 경험, 운영·지원, 법무, 검증 체계의 간격과 단계별 통과 기준을 담는다. 스토어 정책·법률 항목은 최신 문서와 대조하지 않은 검토 필요 지적이다. 계약·도구·프롬프트 변경은 없다. 배포 경로, 추론 위치, 지원 범위의 소유자 결정이 남아 있다.
-## 2026-11-15 — 저장공간 goal-v2 실제1of2 / 정확한 저장 뒤 불필요 질문 발견
-
-Root가 별도 opt-in 시험 경로와 순수12회귀를 통합했다. 기존 v1 selector/요청/fixture/83assert와 과거 실패는 그대로이며, v2는 find 결과로 충분한 경우 redundant inspect 순서를 강제하지 않는다. 실제 PC·VERIFIED find→save·정확한4줄/메모1/승인1/독립 readback·파일3과원본해시·최종상태/본문·정리는 유지한다. production1069 main1cadc61b 불변, 새 test c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d 서명/설치/독립해시/directoverlay PASS. core828/app717=1545 JVM0fail/error/skip 및 androidTest assemble PASS, 원래73통제검사는 이번 test-only phase에서 재실행하지 않았다.
-
-실제2회는 round0 PASS253935ms/completed, round1 FAIL152439ms/paused(awaiting_owner_input)다. 두 회차 모두 실제 find→save/정확한보고메모1개/파일3개·해시불변/cleanuptrue를 독립 확인했지만, 두 번째는 이미 요청·저장된 형식을 다시 묻고 멈췄다. 정확한 artifact를 전체 성공으로 승격하지 않는다. planned/started/recorded2·unstarted0·all_attempts_recorded, 과거v1재등급0. 종료 후662source+10public+6build/설치바이트/directoverlay와 PC idle·cleanup 재확인. 세 채팅의 cancel handshake·typed paired-PC target·장문 note 후보는 ignored에서만 작성 중이며 아직 설치되지 않았다.
-

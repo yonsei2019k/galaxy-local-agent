@@ -52,6 +52,8 @@ class AutomaticComputeEngine internal constructor(
     private val generation = MutableStateFlow<GenerationSummary?>(null)
     private val unavailablePcCleanup = MutableStateFlow<PcCleanupEvidence?>(null)
     val lastPcCleanup: StateFlow<PcCleanupEvidence?> get() = (pc as? PcInferenceEngine)?.lastCleanup ?: unavailablePcCleanup.asStateFlow()
+    internal fun pcCancelOutcome(requestId:String):PcCancelOutcome? =
+        (pc as? PcInferenceEngine)?.cancelOutcome(requestId)?.takeIf{it.key.owner==ownerRunId}
     override val state: StateFlow<String> = status.asStateFlow()
     override val lastMetrics: StateFlow<InferenceMetrics?> = metrics.asStateFlow()
     override val lastGeneration: StateFlow<GenerationSummary?> = generation.asStateFlow()
