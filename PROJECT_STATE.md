@@ -2,7 +2,17 @@
 
 Updated 2026-11-14. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1054; blank-note compatibility preserved
+## Current actual device checkpoint: installed1059; recipient and completion-evidence guards
+
+1059 is installed without resetting owner data and preserves c09b574's project-deletion feature. Independently reread main SHA `d27b5ade1d08a2788fab01cf0bb510f01e99ba39b8bda78fa0274a2004e48159` and test SHA `7d755b4265ef8c4cbb50de45c20e06ba2b8d69c1bfe38569708c17cb191a83a0` match the signed artifacts. All599 frozen app/core source and asset inputs match, with no inventory drift. Core687/app581=1268 JVM tests passed with zero failures/errors/skips; release/test assembly and signatures passed, release lint0 errors/138 warnings/1 hint.
+
+SMS recipients must come from the immutable current owner request or contacts actually observed in that request. Multiple candidates require an independent owner selection with no default, bound to the exact message body. Managed action results are rendered from host-observed execution/readback; external Intent delivery remains PREPARED and paused, with screen/save/send/navigation completion unverified. Post-read plan repair offers a missing SMS step only within originally captured capabilities; disabled/read-only scopes and exact confirmation remain enforced. Unobserved TMAP coordinates are rejected. This does not establish general target correctness or semantic quality across all98 tools.
+
+Phone controlled checks passed: production recipient UI1, scripted misbehavior10 repetitions, post-read repair/scope6 repetitions, existing literal-storage/writer5, concurrency/approval4 and isolated chat/project data12. These use synthetic model events where stated. Actual paired-PC local-model/phone tests passed10/10 with zero skipped: two repetitions each of ambiguous contacts, explicit-number SMS preparation, contacts-only listing, exact note storage and actual clock reads. Listing/note/clock6 completed; ambiguous2 paused for an owner question after reading both candidates; explicit SMS2 each delivered exactly one ACTION_SENDTO request and paused with actual screen/save/send unverified. No SMS was sent. Test contacts/notes/threads were removed and empty QA projects archived; other-app unsent draft removal is unverified. These project-whitelisted QA cases do not establish all98-tool/open-world quality. The earlier1057 engine failures did not recur with ordinary app identity, but their cause is not proven.
+
+Main/test installed bytes and all599 source/assets were rechecked after the final run. Actual pinned direct-Tailscale health passed208ms before and53ms after the batch with VPN/original identity and pin/no LAN fallback; external-network handoff and model throughput are separate. See docs/recipient-completion-validation-2026-11-14.ko.md for intermediate failures and validation boundaries. Worker/model/pairing settings and weights are unchanged. Unobserved-coordinate rejection is source/build evidence; actual TMAP behavior was not tested in this batch.
+
+## Historical actual device checkpoint: installed1054; blank-note compatibility preserved
 
 1054 is installed without data reset. Independently reread main SHA `6549167a16eb0e65fd1175f4d1d122639041035f3bbc76d0d6b90bd2ea1810a8` and test SHA `5bf08125c0eb4d6a1db54e2113172631cfc5a94629883e4eaa98a8ca327beafe` match signed outputs. All596 frozen Android inputs match. Final review of1053 found that making content optional had weakened its previous blank-string rejection;1054 restores nonblank validation for provided content and adds empty/whitespace regression assertions. No planner/prompt/worker/model/pairing settings changed after1053.
 

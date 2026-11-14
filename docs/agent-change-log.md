@@ -38,6 +38,19 @@ ML Kit Advanced 한국어와 현재 Qwen3-ASR1.7B/0.6B를 동일 비개인 합�
 
 # 에이전트 공통 변경 기록
 
+## 2026-11-14 — 1059 대상 선택/완료 근거 강화: 설치 검증 종료
+담당 codex-recipient-evidence. 기준5e039ed/설치1054, 시작 미커밋 없음. 소유 core 연락처 선택 근거/실행 결과 표시 및 회귀, app ToolExecutor/ChatRunCoordinator/PendingAction 확인 UI, 신규 Android 반복 검사. 모델은 의도를 해석하고 도구를 선택하며, 호스트는 실제 조회 대상·사용자 선택·실행 근거를 검사한다. 임의 수신자/미관찰 좌표를 실행하기 전에 막고, 완료 문장은 실행 후 검사를 통과한 결과로 표시한다. 기존 읽기 전용·취소·승인과 PC 로컬 추론 경로를 유지한다. 개인 자료/기기 로그는 ignored .local에만 보관하고 실제 폰·실제 모델·합성 입력·외부 실행의 경계를 구분한다.
+
+중간1055/1056 설치·실제 폰 검사를 진행했다.1056에서 UI1 및 모의추론/실제 coordinator·Room10회 PASS, PREPARED 즉시 일시정지로 중복 초안 요청을 막았다. 실제 PC 모델/폰 경로에서는 연락처 조회만 계획하고 문자 초안을 누락한 사례를 확인했다.1057은 검증된 연락처 조회 후 같은 요청·원래 허용 도구 범위 안에서 문자 준비를 후속 검토 후보로만 제시하고, 모델이 선택한 경우에만 계획에 연결한다. 직접 수신자 선택/기존 승인은 그대로 필요하며 읽기 전용·비활성 도구에는 후보를 제공하지 않는다. 후속 검토도 clarification 질문을 선택할 수 있다. Core PostReadActions/NextActionQuestion/AutonomousReviewPolicy와 관련 회귀도 현재 소유 범위에 포함한다. 기존 실제 모델 요청을 중단하거나 실행 중 설치하지 않는다.
+
+22:10 이후 통합1059 빌드/기기 검증 창은 codex-recipient-evidence가 소유한다. 다른 작업의 c09b574/설치1058 프로젝트 삭제 변경을 확인하고 보존한다. 현재 앱 프로젝트의 다른 활성 채팅은 목록에서 확인되지 않았다. 이 창 동안 공유 소스·설치·instrumentation을 병행하지 말 것.1057 실제 모델 반복은4/10 통과, 나머지6건 planning_engine_failed로 도구까지 도달하지 못했다. 별도 실제 PC tokenize/structured smoke는 통과했다. 원인을 확정하지 않고 테스트 연락처의 shell 권한을 생성/정리 구간으로 제한하고 실제 엔진 예외 관찰기를 추가해 일반 앱 권한으로 다시 검증한다. 모델/worker 설정은 변경하지 않는다.
+
+최종1059: c09b574 프로젝트 삭제를 보존해 서명·업데이트 설치, 데이터 초기화0. Main 설치 base SHA `d27b5ade1d08a2788fab01cf0bb510f01e99ba39b8bda78fa0274a2004e48159`, test `7d755b4265ef8c4cbb50de45c20e06ba2b8d69c1bfe38569708c17cb191a83a0` 독립 대조 PASS. 최종 검사 후 같은 바이트 및 app/core 소스·asset599개 해시·목록 불변을 재확인했다. Core687/app581=1268 실패·오류·skip0, release/test 빌드·서명 PASS, lint0오류138경고1hint.
+
+실제 폰 생산 UI1, 모의 추론/실제 coordinator·Room 오류 주입10회, 후속 계획 연결·비활성/읽기 전용6회 모두 PASS. 기존 원문/writer5, 동시 실행/승인4, 격리 대화/프로젝트 DB12도 PASS/skip0. 실제 PC 로컬 모델·일반 앱 권한의 폰5시나리오×2회=10/10 PASS: 동명이인2회는 실제 두 번호 조회 후 사용자 질문·paused·Intent0; 명시 가짜 번호2회는 정확히1회씩 ACTION_SENDTO·PREPARED/paused; 목록만2회는 문자 요청0; 메모2회는 원문/재조회/최종본문 일치; 시각2회는 실제 도구 근거다. 완료6/정상 확인 대기4이며 실제 SMS 발송0. 제한된 QA 프로젝트의 결과를98개 전체 도구/실계정 워크플로우 성공으로 확대하지 않는다.1057 엔진 오류는 재현되지 않았으나 최초 원인 미확정이다. 직접 Tailscale 폰 pinned health208ms/최종53ms PASS; 외부망 전환·전체 모델 경로·순수 모델 속도 증거는 아니다. TMAP 좌표 거부는 소스/빌드 증거로 실제 앱 화면 검증은 하지 않았다.
+
+미관찰/동명이인 수신자·정확한 본문·단일 사용 승인을 호스트에서 검사하며, 관리 대상의 미실행 완료 문장은 표시/영속 저장하지 않는다. PREPARED는 즉시 외부 확인 대기, 짧은 등록 명령의 실패도 paused다. 후속 후보는 원래 캡처한 허용 범위에만 연결하고 실제 사용자 선택·승인 및 실행 직전 scope/분기 재검증을 유지한다. 일반 대화/조사, 현재 PC 전용 로컬 추론 및 기존 취소/읽기 전용은 보존한다. QA 연락처/메모/대화는 제거하고 빈 프로젝트는 archive, 다른 SMS 앱 미발송 초안 정리는 미검증. 개인 자료·원문·기기/주소·로그는 ignored .local에만 보관했다. 검사 종료 뒤 앱 launch를 요청했다. 검증 중 새로 나타난 미추적 .codex-attachments 디렉터리는 보존하고 커밋에 넣지 않았다. 상세 docs/recipient-completion-validation-2026-11-14.ko.md. 소스·빌드·기기 창 소유 해제; 로컬 커밋으로 인계한다.
+
 ## 2026-11-14 — 1054 빈 메모 거부 호환성 마감: 설치 검증 종료
 동일 담당 codex-smartphone-scenarios. 아래1053 설치·6개 기기 검증은 실제 완료다. 최종 diff 검토에서 save_note.content를 선택 인자로 바꾸며 종전 required 문자열의 blank 거부가 약해진 것을 발견했다. Tools.kt에 제공된 content의 nonblank 검사를 복구하고 OwnerTextSourcesTest에 빈 문자열/공백 회귀를 추가했다. 나머지1053 실행 경로는 바꾸지 않았다. 1054 최종 main SHA `6549167a16eb0e65fd1175f4d1d122639041035f3bbc76d0d6b90bd2ea1810a8`, test SHA `5bf08125c0eb4d6a1db54e2113172631cfc5a94629883e4eaa98a8ca327beafe`로 실제 업데이트 설치 후 base 해시를 독립 대조했다.596개 Android 입력 해시 동일, core671/app581=1252 및 평가기11 PASS, release/test 빌드·서명 PASS, lint0 errors/137 warnings/1 hint. 같은 기기6개도 다시 PASS/skip0, 실제 직접 Tailscale252ms/VPN/원래 인증 핀·서버ID/LAN fallback 없음. 이후 앱 열기 요청을 전달했다. 실제 모델20회는1053 변형의 증거이며1054 새 모델 실행으로 주장하지 않는다. 소유 해제; 동명이인·계획·최종 인용 등 아래 의미 품질 실패는 그대로 미해결이다.
 

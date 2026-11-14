@@ -77,6 +77,9 @@ object AutonomousReviewPolicy {
 
     val instruction="""
         Review the ORIGINAL owner request against the host-observed results before final writing.
+        requiredTools is the initial plan, not proof that every owner action was included. Preserve compound requests.
+        Do not invent an action simply because a related tool is offered. A read-only listing can finish with multiple matches.
+        If an essential owner choice is missing, return {"type":"clarification","question":"one concise Korean question"}.
         Check missing conditions, unsupported conclusions and contradictions. If a useful verification
         or repair remains WITHIN the original request and offered tools, return
         {"type":"review_next","summary":"brief Korean issue and next check","call":tool_call JSON}.

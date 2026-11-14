@@ -43,8 +43,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val connectionApproveGmailSend:suspend(String,ToolCall,com.user.localagent.core.connections.GmailSendPreview)->Boolean={_,_,_->false},
     private val kakaoReadBinding:String?=null,
     private val ownerRequest:String?=null,
+    private val contactLookup:((String,Int)->List<ContactCandidate>)?=null,
     private val createImage:(suspend(ToolCall)->String)?=null) {
     fun resolveOwnerText(call:ToolCall):ToolCall=OwnerTextSources.resolve(call,ownerRequest)
+    private val recipients=RecipientEvidence(ownerRequest.orEmpty())
+    fun recipientChoices(call:ToolCall)=recipients.choices(call)
+    fun approveRecipient(call:ToolCall,selected:String)=recipients.approve(call,selected)
     private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
     private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
     private val bundledSkills by lazy {com.user.localagent.skills.BundledSkillStore(context)}
@@ -72,6 +76,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private fun ToolCall.i(key:String,default:Int)=arguments[key]?.jsonPrimitive?.int?:default
     fun prepareIntent(call:ToolCall):Intent? {
         ToolRegistry.validate(call)
+        recipients.consume(call)
+        if(call.name=="open_tmap_destination"){
+            val supplied=Regex("[-+]?[0-9]+(?:\\.[0-9]+)?").findAll(ownerRequest.orEmpty()).mapNotNull{it.value.toBigDecimalOrNull()?.stripTrailingZeros()}.toSet()
+            require(listOf("latitude","longitude").all{call.s(it).toBigDecimalOrNull()?.stripTrailingZeros() in supplied}){"사용자가 제공한 좌표를 확인하지 못해 목적지를 열지 않았습니다. 장소 이름 검색에는 open_tmap의 query를 사용해주세요."}
+        }
         if(call.name in com.user.localagent.core.connections.ConsumerAppCatalog.names)return com.user.localagent.connections.ConsumerApps(context).prepare(call)
         return when(call.name){
             "prepare_calendar_event"->Intent(Intent.ACTION_INSERT,CalendarContract.Events.CONTENT_URI).putExtra(CalendarContract.Events.TITLE,call.s("title")).putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,OffsetDateTime.parse(call.s("start")).toInstant().toEpochMilli()).putExtra(CalendarContract.EXTRA_EVENT_END_TIME,OffsetDateTime.parse(call.s("end")).toInstant().toEpochMilli()).putExtra(CalendarContract.Events.DESCRIPTION,call.s("description")).putExtra(CalendarContract.Events.EVENT_LOCATION,call.s("location"))
@@ -257,9 +266,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private fun searchContacts(call:ToolCall):String {
         require(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED){"연락처 읽기 권한을 먼저 허용해주세요."}
         val uri=Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,Uri.encode(call.s("query")))
-        val result=mutableListOf<String>()
-        context.contentResolver.query(uri,arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER),null,null,null)?.use {cursor->while(cursor.moveToNext()&&result.size<call.i("limit",10))result+="${cursor.getString(0)} | ${cursor.getString(1)}"}
-        return result.distinct().joinToString("\n").ifBlank {"일치하는 연락처가 없습니다."}
+        val result=contactLookup?.invoke(call.s("query"),101)?:mutableListOf<ContactCandidate>().also{items->
+            context.contentResolver.query(uri,arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER),null,null,null)?.use {cursor->while(items.size<101&&cursor.moveToNext())items+=ContactCandidate(cursor.getString(0).orEmpty(),cursor.getString(1).orEmpty())}
+        }
+        recipients.observe(result,result.size>=101)
+        return result.distinctBy{RecipientEvidence.normalize(it.phoneNumber)}.take(call.i("limit",10)).joinToString("\n"){"${it.name} | ${it.phoneNumber}"}.ifBlank {"일치하는 연락처가 없습니다."}+
+            if(result.mapNotNull{RecipientEvidence.normalize(it.phoneNumber)}.distinct().size>1)"\n여러 번호가 있습니다. 초안을 열기 전 사용자 수신자 선택이 필요합니다."else ""
     }
     private fun listMessengerNotifications(call:ToolCall):String {
         require(AssistantNotificationListener.granted(context)){"Android 알림 접근을 먼저 허용해주세요."}

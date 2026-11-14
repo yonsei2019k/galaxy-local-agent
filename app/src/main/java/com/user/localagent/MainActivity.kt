@@ -64,7 +64,8 @@ private val Panel = ZipHapColors.NavySurface
 private val Accent = ZipHapColors.Periwinkle
 private val Mint = ZipHapColors.Mint
 data class ChatLine(val id:String = UUID.randomUUID().toString(), val role:String, val text:String,val requestText:String?=null)
-data class PendingAction(val call:ToolCall, val decision:CompletableDeferred<Boolean>,val remember:MutableStateFlow<Boolean> = MutableStateFlow(false),val runId:String="",val threadId:String="",val projectId:String?=null,val reviewText:String?=null)
+data class PendingAction(val call:ToolCall, val decision:CompletableDeferred<Boolean>,val remember:MutableStateFlow<Boolean> = MutableStateFlow(false),val runId:String="",val threadId:String="",val projectId:String?=null,val reviewText:String?=null,
+    val recipientChoices:List<com.user.localagent.core.ContactCandidate> =emptyList(),val selectedRecipient:MutableStateFlow<String?> = MutableStateFlow(null))
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { (application as LocalAgentApplication).container }
@@ -308,7 +309,7 @@ class MainActivity : ComponentActivity() {
                 onDismiss={goalEditorThreadId=null},feedback=state,
                 onDeleteVersioned={snapshot->chat.deleteGoal(goalThread,snapshot){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}})
         }
-        pending?.let { action -> val remember by action.remember.collectAsState();AlertDialog(onDismissRequest={action.decision.complete(false)},title={Text("실행 내용을 확인해주세요")},text={Column(Modifier.heightIn(max=460.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {Text(action.call.name);Text(action.reviewText?:actionSummary(action.call),style=MaterialTheme.typography.bodySmall);Spacer(Modifier.height(8.dp));Text("승인한 이 작업만 실행합니다.");if(CapabilityPolicy.canPreapprove(action.call.name))Row {Checkbox(remember,onCheckedChange={action.remember.value=it});Text("같은 범위의 반복 생성·수정을 허용")}}},confirmButton={TextButton(onClick={action.decision.complete(true)}){Text("실행")}},dismissButton={TextButton(onClick={action.decision.complete(false)}){Text("취소")}}) }
+        pending?.let { action -> ActionApprovalDialog(action,action.reviewText?:actionSummary(action.call)) }
     }
     @Composable private fun ColumnScope.ModelsScreen() {
         val installed by app.models.models.collectAsState()

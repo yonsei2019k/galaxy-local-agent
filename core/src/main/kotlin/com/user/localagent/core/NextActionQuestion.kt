@@ -6,7 +6,10 @@ import kotlinx.serialization.json.*
 object NextActionQuestion {
     const val PAUSE_CODE="awaiting_owner_input"
     fun schema(tools:Set<String>,ownerRequest:String?=null):String {
-        val original=Json.parseToJsonElement(ToolCallSchema.forTools(tools,ownerRequest)).jsonObject
+        return extend(ToolCallSchema.forTools(tools,ownerRequest))
+    }
+    fun extend(schema:String):String {
+        val original=Json.parseToJsonElement(schema).jsonObject
         return JsonObject(original+mapOf("oneOf" to JsonArray(original.getValue("oneOf").jsonArray+buildJsonObject {
             put("type","object");put("additionalProperties",false)
             put("properties",buildJsonObject {

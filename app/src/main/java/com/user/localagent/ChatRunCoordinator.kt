@@ -71,7 +71,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private val workerBinding:ChatRequestWorkerBinding?=null,
     private val workerEngineFactory:((QueuedChatRequest)->com.user.localagent.inference.ComputeExecutionEngine)?=null,
     private val restorePersistedQueue:Boolean=true,
-    private val inferenceChoiceOverride:(suspend(QueuedChatRequest)->ChosenInference?)?=null) {
+    private val inferenceChoiceOverride:(suspend(QueuedChatRequest)->ChosenInference?)?=null,
+    private val contactLookup:((String,Int)->List<com.user.localagent.core.ContactCandidate>)?=null,
+    private val externalIntentLauncher:(suspend(Intent)->Unit)?=null) {
     internal val executionEngine:com.user.localagent.inference.ComputeExecutionEngine=workerBinding?.engine?:app.engine
     internal val executionOrchestration:com.user.localagent.models.LocalOrchestration=if(workerBinding==null)app.orchestration else
         com.user.localagent.models.LocalOrchestration(context,app.models,executionEngine)
@@ -151,6 +153,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         set(value){ownedRequestJob=value}
     private val attachmentPreparing=MutableStateFlow(false)
     private val requestSteps=mutableListOf<HarnessStep>()
+    private val observedOutcomes=mutableListOf<com.user.localagent.core.ObservedToolOutcome>()
     val modelOptions=MutableStateFlow(InferenceOptions())
     val preferredModelId=MutableStateFlow("auto")
 
@@ -465,7 +468,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val engine=workerEngineFactory?.invoke(request)?:com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=request.runId,
                             beforePhoneLoad={app.engine.unloadPhoneResidency()})
                         ChatRunCoordinator(context,app,ChatRequestWorkerBinding(this@ChatRunCoordinator,request,engine),
-                            inferenceChoiceOverride=inferenceChoiceOverride)
+                            inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,externalIntentLauncher=externalIntentLauncher)
                     }catch(cancel:CancellationException){throw cancel}
                     catch(_:Exception){
                         app.repository.chat.updateRun(request.runId,"failed","EXECUTION_INITIALIZATION_FAILED")
@@ -561,7 +564,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return scope.launch(start=CoroutineStart.LAZY) {
             app.cancelIdleUnload()
             busy.value=true
-            requestSteps.clear();requestSteps.addAll(request.previousSteps)
+            requestSteps.clear();requestSteps.addAll(request.previousSteps);observedOutcomes.clear()
             requestGuidance.clear();contextCalls.clear();omittedGuidance.clear()
             requestSemanticPlan=null;requestAuthorizedTools=emptySet();lastSemanticAction.value=null;lastSemanticModelId.value=null;lastResearchSourceUrls.value=emptySet()
             var lease:java.io.Closeable?=null
@@ -602,7 +605,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val semanticChoice=if(request.allowTools)chooseInference(request)?.withPcContext()else null
                 if(request.allowTools&&semanticChoice==null){answer("문맥을 해석할 로컬 모델이 준비되지 않았습니다. 모델 설정에서 준비 상태를 확인해주세요.");return@launch}
                 val directLoop=directNextActionLoop()
-                val semantic=if(request.allowTools&&actionMode&&!directLoop){
+                var semantic=if(request.allowTools&&actionMode&&!directLoop){
                     workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.SEMANTIC_STARTED,"최근 대화와 이번 요청의 목표·범위를 해석합니다.")
                     workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.INFERENCE_STARTED,"요청 해석 모델 ${semanticChoice!!.model.id}")
                     status.value="최근 대화와 요청의 의미를 기기에서 해석 중"
@@ -623,11 +626,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }else null
                 requestSemanticPlan=semantic
                 semantic?.let{workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,it.goal,com.user.localagent.data.WorkSummarySource.MODEL_PLAN)}
-                if(semantic!=null)taskGoal=com.user.localagent.core.SemanticRequestPlanning.toTaskGoal(semantic)
+                semantic?.let{taskGoal=com.user.localagent.core.SemanticRequestPlanning.toTaskGoal(it)}
                 val intentPlan=semantic?.let {com.user.localagent.core.SemanticRequestPlanning.toIntentPlan(it,intentCapabilities(usableAttachments.isNotEmpty()).copy(availableTools=semanticOfferedTools))}
                     ?:IntentPlanning.plan("일반 대화")
                 if(request.allowTools&&intentPlan.missingEssentialSlots.isNotEmpty()){
-                    answer(intentPlan.missingEssentialSlots.first().question)
+                    publishOwnerQuestion(request,intentPlan.missingEssentialSlots.first().question)
                     status.value="실행에 필요한 정보 한 가지 확인"
                     return@launch
                 }
@@ -642,9 +645,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if(hostHandled)responsePaused=executeSemanticResearch(semantic!!,semanticChoice!!,request,semanticOfferedTools)
                 if(hostHandled) {
                     // The local meaning plan selects research; lexical routes never override its action.
-                } else if(request.goal==null&&semantic?.action==com.user.localagent.core.SemanticAction.TOOL_TASK&&direct!=null&&semantic.requiredTools==setOf(direct.name)&&usableAttachments.isEmpty()&&!projectFileRequest) {
+                } else if(request.goal==null&&semantic?.action==com.user.localagent.core.SemanticAction.TOOL_TASK&&direct!=null&&semantic?.requiredTools==setOf(direct.name)&&usableAttachments.isEmpty()&&!projectFileRequest) {
                     val result=runTool(direct)
-                    answer(toolAnswer(direct,result.content))
+                    answer(if(com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(taskGoal.requiredTools,observedOutcomes)else toolAnswer(direct,result.content))
+                    if(!result.success||result.verification!=VerificationState.VERIFIED){
+                        persistStepEvidence()
+                        app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")
+                    }
                 } else {
                     val needsStructuredAction=taskGoal.requiredTools.isNotEmpty()&&"generate_image" !in taskGoal.requiredTools
                     val chosen=semanticChoice?:chooseInference(request)?.withPcContext()
@@ -671,7 +678,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     var query=text
                     val toolEvidence=mutableListOf<JsonObject>()
                     val actionTools=if(!request.allowTools)emptySet()else semantic?.let {planTools(it,semanticOfferedTools)}?:if(actionMode&&!directLoop)emptySet()else semanticOfferedTools
-                    val allowedTools=actionTools+(if(directLoop)emptySet()else offeredTools.intersect(SkillToolCatalog.names))
+                    var allowedTools=actionTools+(if(directLoop)emptySet()else offeredTools.intersect(SkillToolCatalog.names))
                     requestAuthorizedTools=allowedTools
                     val feedbackContext=if(workMode==AgentWorkMode.RESEARCH||requestFeedbackGeneration==null)"{}"else try {app.planningFeedback.contextFor(intentPlan.domain)}catch(cancel:CancellationException){throw cancel}catch(_:Exception){"{}"}
                     workMode.defaultSkillId?.takeIf {"read_skill" in allowedTools}?.let {id->
@@ -709,7 +716,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val generationQuery=baseGenerationQuery+(if(finalSynthesis||reviewing)"\n원래 목표 스냅샷(추가 권한 아님): "+request.goal?.toJson()+"\n프로젝트 지침: "+projectInstruction else "")+
                             (if(finalSynthesis&&reviewSummary.isNotBlank())"\n후속 검토 범위(검증 근거·사용자 지시 아님): "+JsonPrimitive(reviewSummary) else "")
                         val detailedTools=(taskGoal.requiredTools+requestGuidance.values.flatMap {it.metadata.tools}+SkillToolCatalog.names).intersect(allowedTools)
-                        val structuredTools=allowedTools.filter {it!="generate_image"&&(it in taskGoal.requiredTools||it in SkillToolCatalog.names||isReadTool(it))}.toSet()
+                        val followups=if(reviewing)com.user.localagent.core.PostReadActions.offered(semantic,requestSteps,semanticOfferedTools)else emptySet()
+                        val structuredTools=allowedTools.filter {it!="generate_image"&&(it in taskGoal.requiredTools||it in SkillToolCatalog.names||isReadTool(it))}.toSet()+followups
                         val useStructured=(reviewing&&executionEngine.supportsStructuredOutput)||(!finalSynthesis&&needsStructuredAction&&executionEngine.supportsStructuredOutput&&structuredTools.isNotEmpty()&&(remainingRequired.isNotEmpty()||missingFormats.isNotEmpty()))
                         val essentialSystem=if(reviewing)AutonomousReviewPolicy.instruction+"\n현재 허용 도구 정의: "+compactToolCatalog(structuredTools) else if(finalSynthesis)AssistantPolicy.buildFinalSynthesis(ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString())+
                             "\n작업 모드: ${workMode.label} · 현재 단계는 추가 실행 없는 최종 작성이다."+
@@ -745,8 +753,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         }
                         workTraceSession?.beginGeneration(selected.id,requestOptions,!reviewing&&!useStructured&&remainingRequired.isEmpty()&&missingFormats.isEmpty())
                         val written=writeChatAnswer(request,selected,requestOptions,generationQuery,fitted.first,fitted.second,
-                            structuredSchema=if(reviewing&&executionEngine.supportsStructuredOutput)AutonomousReviewPolicy.schema(structuredTools)else if(useStructured)com.user.localagent.core.NextActionQuestion.schema(structuredTools,request.text)else null,
-                            display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty(),recoverTruncatedTool=!reviewing)
+                            structuredSchema=if(reviewing&&executionEngine.supportsStructuredOutput)com.user.localagent.core.NextActionQuestion.extend(AutonomousReviewPolicy.schema(structuredTools))else if(useStructured)com.user.localagent.core.NextActionQuestion.schema(structuredTools,request.text)else null,
+                            display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty()&&!com.user.localagent.core.ActionCompletionReport.manages(taskGoal.requiredTools,observedOutcomes),recoverTruncatedTool=!reviewing)
                         workTraceSession?.finishGeneration(written.summary,written.paused,written.messageId!=null&&!written.toolEnvelope)
                         var raw=written.text.trim()
                         val visible=written.messageId!=null
@@ -765,7 +773,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             complete=true
                             return@repeat
                         }
-                        if(useStructured&&!reviewing&&pauseForOwnerInput(request,raw,written.summary?.mayBeTruncated==true)){
+                        if(useStructured&&pauseForOwnerInput(request,raw,written.summary?.mayBeTruncated==true)){
                             responsePaused=true;complete=true;return@repeat
                         }
                         if(reviewing){
@@ -773,6 +781,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             val review=resolveReviewResponse(raw,structuredTools,written.summary?.mayBeTruncated==false&&!written.paused)
                             if(review.toolJson==null){reviewedStepCount=requestSteps.size;reviewSummary=review.summary;return@repeat}
                             raw=checkNotNull(review.toolJson)
+                            val proposed=ToolRegistry.parseAndValidate(raw)
+                            if(proposed.name in followups){
+                                semantic=com.user.localagent.core.PostReadActions.bind(checkNotNull(semantic),requestSteps,proposed.name,semanticOfferedTools)
+                                requestSemanticPlan=semantic
+                                taskGoal=com.user.localagent.core.SemanticRequestPlanning.toTaskGoal(checkNotNull(semantic))
+                                allowedTools=planTools(checkNotNull(semantic),semanticOfferedTools)+offeredTools.intersect(SkillToolCatalog.names)
+                                requestAuthorizedTools=allowedTools
+                            }
                         }
                         if(finalSynthesis&&written.toolEnvelope&&(reviewCount>=AutonomousReviewPolicy.MAX_REVIEWS||requestSteps.size>=taskGoal.stepBudget)){
                             pauseFinalNeedsAction(request)
@@ -784,7 +800,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"도구 형식 검증을 통과하지 못했습니다. 이 요청은 실행하지 않았습니다.")
                                 invalidToolAttempts++
                                 requestFeedbackGeneration?.let {generation->runCatching {app.planningFeedback.record(intentPlan.domain,"planner",VerificationState.FAILED,false,"invalid_json",generation)}}
-                                if(invalidToolAttempts>=2){answer("도구 인자 검증을 두 번 통과하지 못해 실행하지 않았습니다. 오류 유형은 다음 실행을 개선할 로컬 기록에 남겼습니다.");complete=true;return@repeat}
+                                if(invalidToolAttempts>=2){publishActionFinal(request,taskGoal.requiredTools,"도구 인자 검증을 두 번 통과하지 못해 실행하지 않았습니다.",true);complete=true;return@repeat}
                                 query="원래 요청: $text\n이전 도구 요청의 형식이 올바르지 않아 실행하지 않았다. 오류: ${error.message?.take(300)}. 정의된 도구와 인자만 사용한 JSON 객체 하나로 고치거나, 할 수 있는 결과를 자연어로 답하라."
                                 return@repeat
                             }
@@ -838,8 +854,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 val modelResult=if(call.name=="read_project_file")com.user.localagent.workspace.ProjectReadDelivery.modelResult(result.content)else com.user.localagent.core.compactJsonData(result.content,1100)
                                 toolEvidence+=buildJsonObject {put("tool",call.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(modelResult))}
                             }
-                            val next=if(actionMode)TaskHarness.decide(taskGoal,requestSteps)else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
-                            if(next is HarnessDecision.Stop){answer(next.reason);complete=true;return@repeat}
+                            val next=if(result.verification==VerificationState.PREPARED)HarnessDecision.Stop("관련 앱에서 확인할 때까지 작업을 일시 정지했습니다. 실제 외부 작업의 완료는 확인되지 않았습니다.",pendingExternalCompletion=true)else if(actionMode)TaskHarness.decide(taskGoal,requestSteps)else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
+                            if(next is HarnessDecision.Stop){publishActionFinal(request,taskGoal.requiredTools,next.reason,true);complete=true;return@repeat}
                             // A full action budget may satisfy host checks; still allow the review/final-writing rounds.
                             query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)
                         } else {
@@ -851,9 +867,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 return@repeat
                             }
                             if(!blocked)verificationGateQuery(request,text,raw,allowedTools,toolEvidence)?.let{query=it;return@repeat}
-                            val finalText=if(blocked)(decision as HarnessDecision.Stop).reason else raw.ifBlank {"모델이 빈 답변을 반환했습니다."}
-                            if(visible)lines.value += ChatLine(streamingId,"assistant",written.text) else answer(finalText)
-                            if(blocked&&visible)answer(finalText)
+                            publishCheckedAnswer(request,taskGoal.requiredTools,raw,written,if(blocked)(decision as HarnessDecision.Stop).reason else null)
                             if(!actionMode&&requestSteps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)})answer("조회 제한: 실패하거나 확인하지 못한 자료가 있습니다. 해당 부분은 확인된 사실이나 완료로 판단할 수 없습니다.")
                             if(workMode==AgentWorkMode.RESEARCH&&lastResearchSourceUrls.value.isEmpty())answer("출처 상태: 이번 실행에서 실제 공개 출처를 확인하지 않았습니다. 위 내용은 조사 계획·미검증 초안이며, 출처를 확인한 조사 완료 결과가 아닙니다.")
                             complete=true
@@ -1025,6 +1039,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             kakaoReadBinding=request.kakaoReadBinding,
             pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,
             ownerRequest=request.text,
+            contactLookup=contactLookup,
             isRunLive={originalJob.isActive&&activeRequest?.runId==request.runId},
             approveGmailSend={id,call,preview->approveGmailSend(id,call,preview)},
             goalStore=goals,
@@ -1518,6 +1533,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return null
     }
     /** No action is executed while an essential owner choice is outstanding. */
+    private suspend fun publishOwnerQuestion(request:QueuedChatRequest,question:String){
+        answer(question);persistStepEvidence()
+        app.repository.chat.updateRun(request.runId,"paused",errorCode=com.user.localagent.core.NextActionQuestion.PAUSE_CODE)
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
+    }
     private suspend fun pauseForOwnerInput(request:QueuedChatRequest,raw:String,truncated:Boolean):Boolean {
         var invalid=false
         val question=try{com.user.localagent.core.NextActionQuestion.parse(raw)}catch(_:Exception){invalid=true;null}
@@ -1531,7 +1551,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     /** A repeated-action stop is not a finished task: keep it paused with a reason the owner and logs can see. */
     private suspend fun pauseForHarness(request:QueuedChatRequest,reason:String,code:String){
-        answer("$reason 같은 행동이 반복돼 멈췄습니다. 확인된 결과는 보존했고, 작업은 완료되지 않았습니다.")
+        val detail="$reason 같은 행동이 반복돼 멈췄습니다. 확인된 결과는 보존했고, 작업은 완료되지 않았습니다."
+        val required=requestSemanticPlan?.requiredTools.orEmpty()
+        answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,detail)else detail)
         persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode=code)
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
@@ -1540,6 +1562,33 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     /** Comparison switch: skip the semantic preplan; the model picks each next action. Tool boundaries stay enforced. */
     private fun directNextActionLoop()=context.getSharedPreferences("chat-preferences",0).getBoolean("direct-next-action",false)
     private fun com.user.localagent.models.ChosenInference.withPcContext()=copy(options=options.copy(contextSize=8192))
+    private suspend fun publishCheckedAnswer(request:QueuedChatRequest,required:Set<String>,raw:String,written:WrittenAnswer,blockedReason:String?){
+        val final=if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,blockedReason)else blockedReason?:raw.ifBlank{"모델이 빈 답변을 반환했습니다."}
+        if(written.messageId==null)answer(final)else lines.value+=ChatLine(written.messageId,"assistant",written.text)
+        if(blockedReason!=null){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
+    }
+    private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean){
+        answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,reason)else reason)
+        if(paused){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
+    }
+    private suspend fun resolveRecipient(call:ToolCall):Pair<ToolCall,Boolean>{
+        val tools=checkNotNull(requestTools)
+        val choices=tools.recipientChoices(call)
+        if(choices.isEmpty())return call to false
+        val request=checkNotNull(activeRequest)
+        val decision=CompletableDeferred<Boolean>()
+        val action=PendingAction(call,decision,runId=request.runId,threadId=request.threadId,projectId=request.projectId,
+            reviewText="여러 연락처 중 수신자를 선택해주세요. 선택 전에는 문자 앱을 열지 않습니다.\n문자 내용:\n"+call.arguments.getValue("message").jsonPrimitive.content,recipientChoices=choices)
+        check(approval.value==null)
+        approval.value=action;status.value="문자 수신자 선택 대기"
+        val accepted=try{decision.await()}finally{if(approval.value===action)approval.value=null}
+        if(!accepted)throw CancellationException("사용자가 수신자 선택을 취소했습니다.")
+        currentCoroutineContext().ensureActive()
+        check(app.repository.chat.run(request.runId)?.let{it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true)
+        val resolved=tools.approveRecipient(call,checkNotNull(action.selectedRecipient.value))
+        recordAudit("recipient_choice",true,"USER_SELECTED_CONTACT · 현재 요청과 본문에 한정")
+        return resolved to true
+    }
     private suspend fun runTool(call:ToolCall):ToolResult {
         validateSemanticCall(call)
         val request=checkNotNull(activeRequest)
@@ -1558,12 +1607,19 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용 대기")
         requestTools?.validateGoalEditRead(call)
         toolInFlight=true
-        return try {performTool(call).also {if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}finally{
+        return try {val target=resolveRecipient(call);performTool(target.first,target.second).also {if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}
+        catch(cancel:CancellationException){throw cancel}
+        catch(error:Exception){
+            val failure=ToolResult(call.id,false,error.message?:"실행 전 확인 실패",VerificationState.FAILED,"실행 또는 대상 확인 실패")
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
+            requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary))
+            persistStepEvidence();failure
+        }finally{
             toolInFlight=false
             if(pendingGoalStopRunId==request.runId){pendingGoalStopRunId=null;currentCoroutineContext()[Job]?.cancel(CancellationException("목표 상태 영수증을 저장한 뒤 현재 실행을 중지했습니다."))}
         }
     }
-    private suspend fun performTool(call:ToolCall):ToolResult {
+    private suspend fun performTool(call:ToolCall,targetConfirmed:Boolean=false):ToolResult {
         ToolRegistry.validate(call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
         val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments}
@@ -1572,7 +1628,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}
         val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
         val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)
-        if(confirmation&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
+        if(confirmation&&!targetConfirmed&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
             traceAttempt?.let{workTraceSession?.approval(it,com.user.localagent.data.WorkTraceCode.APPROVAL_WAITING)}
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)
@@ -1585,19 +1641,25 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         currentCoroutineContext().ensureActive()
         val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
+        val bound=checkNotNull(app.repository.chat.run(checkNotNull(activeRequest).runId))
+        check(bound.status=="running"){"실행 요청이 이미 멈췄습니다."}
+        app.repository.chat.updateRunContext(bound.id,bound.contextJson) // Recheck branch/project revision after owner confirmation.
         traceAttempt?.let{workTraceSession?.start(it)}
         currentCoroutineContext().ensureActive()
         val intent=tools.prepareIntent(call)
         if(intent != null) {
-            withContext(Dispatchers.Main) { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.PREPARED,"작성·확인 화면 열림 · 저장·발송 미확인"))
-            val prepared=ToolResult(call.id,true,"관련 앱의 작성·확인 화면을 열었습니다. 실제 저장·발송 완료는 확인되지 않았습니다.",VerificationState.PREPARED,"Android Intent 전달 확인")
+            withContext(Dispatchers.Main) { externalIntentLauncher?.invoke(intent)?:context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.PREPARED,"Android 요청 전달 · 실제 화면·저장·발송 미확인"))
+            val prepared=ToolResult(call.id,true,"관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송 완료는 확인되지 않았습니다.",VerificationState.PREPARED,"Android Intent 전달 확인")
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,prepared)
+            persistStepEvidence()
             val recorded=traceAttempt?.let{workTraceSession?.outcome(it,prepared)}==true
-            recordOutcomeSafely(call.name,true,"PREPARED · 작성·확인 화면 열림",auditAlreadyStored=recorded)
+            recordOutcomeSafely(call.name,true,"PREPARED · Android 요청 전달 · 실제 화면·저장·발송 미확인",auditAlreadyStored=recorded)
             return prepared
         }
         var auditOk=false
         suspend fun commitObserved(observed:ToolResult) {
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
             requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
             val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
