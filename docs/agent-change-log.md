@@ -1,3 +1,11 @@
+## 2026-11-15 — 1067 실모델 계산·원문각2PASS / 파일해시·중복저장·평가기실패
+
+실제폰/paired-PC local model에서calc2/2(241556/186808ms),exact_quote2/2(311265/243722ms) PASS. file2/2FAIL(81490/129446ms)은path/본문정확·원본expectedSha256만오류이며QA가쓰기전차단했다. storage0는214013ms/paused로동일content/title의scope생략→default를서로다른call로취급해두메모를저장했다. 전체완료를주장하지않고stuck으로중지했다. storage1은정확본문승인흔적뒤원래inspect-first assertion이runCase밖으로탈출해첫batch가rows5/finishedfalse로끝났다. 원인확정0/해당시도cleanup·후상태미확인. 별도file/exact2rowfollowup은정상종료,합쳐기록7row=4PASS/3FAIL·모두cleanuptrue이고추가중단storage를성공에넣지않는다. 원래순서기준FAIL은보존하며사용자목표의실제상태는별도관찰이필요하다.
+
+650+10+6frozen입력/설치main·test/directoverlay종료후재대조일치,workerbusyfalse/cleanupfalse/residentnull확인. 사용자답변으로개인폰·개인PC구성이확정됐다. Root통합창을열어기존영속StepRef용rawfingerprint를보존한별도repeatdefault비교,실제read/hashschema결합,평가기unexpectedescape원장과Calendar8native배선후보를검토한다. 다른3채팅은ignoredstaging만작성하며canonical/compile/서명/설치/PC모델은root전용이다.
+
+PC실이발견한현재clientExactInput표시는server실계수동등성증거가아님을CONTRACTS에명시했다. token/chat의서버전처리·thinking차이가있고설치binary의rendererqualification은없다. explicitfalse/추가예산0·공통render/count·hostreceipt·legacy호환후보는설계단계이며이번결과를그수정의효과로승격하지않는다. registry102/내부배포완료0.
+
 ## 2026-11-15 — 1067 설치·1503JVM·59기기 PASS / 실모델비교 전
 
 main6e6f27832e44800be78046b59ca1f61d4712f30d9cd0dc86ae61c35bd4ebb4d8/testfa3fef003bc022ecbe68ba05b3d58ed4f75e6612d04c35490e2ee51902c361f3 독립설치해시·데이터유지·pinned directoverlay PASS. core811/app692=1503JVM 실패/오류/skip0,release/test4m47/sign PASS,lint0/144/1. 원래cold취소·1MiB와추가취소2회PASS,전체59고유기기/skip0. 종료후650+10+6입력·설치바이트재검일치. 새로운actualmodel/exact_quote효과는아직없고1066의3/6·storage0/2 FAIL유지.

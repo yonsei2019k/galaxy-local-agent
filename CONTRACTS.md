@@ -4,6 +4,12 @@ Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.
 
+## Evidence limits identified in1067
+
+`ExactStructuredReviewInput` currently verifies an immutable client-side count/generate input boundary. This alone does not establish actual paired-worker template/token-count equivalence: current worker token counting and generation apply different message/thinking preparation. Installed backend renderer qualification is still absent. Do not report this client flag or fake-counter tests as server-exact token evidence. A separate versioned explicit-thinking/renderer contract is staged only; normal captured legacy requests retain their existing authority and checks.
+
+Internal deployment targets the user's confirmed personal phone/personal PC configuration, with per-user pairing and data isolation. Shared-PC multi-user service, real Calendar OAuth effects and whole-phone cleanup are not validated capabilities.
+
 ## Core contracts (core owner)
 - `ToolCall(id: String, name: String, arguments: JsonObject)` and `ToolResult(id: String, success: Boolean, content: String)`.
 - `Risk` enum LOW, MEDIUM, HIGH; tool metadata and strict argument validation in `ToolRegistry`.
