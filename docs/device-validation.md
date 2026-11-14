@@ -1,5 +1,15 @@
 # Device validation
 
+## 2026-11-15 checkpoint1068 / installed, historical QA cleanup failure found
+
+Main `be5f0de6cc8a69379a993635d260ce67565817f750b93ee2704a8c92ad54e98c`; initial test `a531905cb7de1b5c13216b01d50ae95b874992b72bda0f648a6e95c04c47b835`, followed by test-only recovery diagnostic `82139739891b9ff163385c469d029fecf749af775eb87b6ebad102e86a87daab`. Independent installed-byte checks and pinned direct-overlay health pass; main/data are retained. Core819/app692=1511 JVM PASS,0 failures/errors/skips; release/test3m52/sign PASS, lint0 errors/144 warnings/1 hint.
+
+The read-only audit initially fails with one exact QA project left from1067 storage round1. A recovery-only test is independently reviewed, hardened with fresh roster/file checks and note revision CAS, then rebuilt in30s and installed as test SHA `1eaf2f56bf0143bb4b627800d994d15d5a2be07c45bb4295035b9c9d1804cbe3`; main is unchanged. Recovery0.888s PASS and a separate absence audit PASS. Current observation before deletion finds run completed, steps find_project_duplicates→save_note, one exact report note and three byte-identical PNGs. This does not regrade the old inspect-first sequence FAIL or the incomplete original cleanup.
+
+Current-test cold cancellation/1MiB PASS; old59/59 controlled tests PASS. Calendar V1 is6/8 PASS in42.706s, with unknown-effect POST and changed-project-scope tests failing at assertNotCreated because status is completed. Later HTTP/journal checks in those failing paths are unobserved; the read-only variant after the scope assertion is not reached. Do not report67/67 or actual OAuth/API validation. Root staged two completion-path repairs; these are uninstalled.
+
+Actual paired-PC cancellation strict FAIL: JUnit103.624s/report102914ms; matching in-flight cancel ACK is not observed. Real second-generation progress,232 prior acknowledged characters preserved, cancelled phone/UI, calls2→2, owner-scoped unload ACK, final idle and fixture cleanup are verified. Unload/idle do not replace the missing cancel ACK. StateFlow conflation/epoch filtering and DONE timing require separate investigation. Post-test655 source hashes, installed main/current test, pinned overlay and PC idle/cleanup are reverified. No1068 positive seven-workflow quality score is established.
+
 ## 2026-11-15 checkpoint1067 / compiled role and calendar guards, controlled59/59 pass
 
 Main SHA `6e6f27832e44800be78046b59ca1f61d4712f30d9cd0dc86ae61c35bd4ebb4d8`, test SHA `fa3fef003bc022ecbe68ba05b3d58ed4f75e6612d04c35490e2ee51902c361f3`, independently matched after installation without resetting data. Core811/app692=1503 JVM tests pass, failures/errors/skips0; release/test4m47 and signing pass; lint0 errors/144 warnings/1 hint; pinned direct-overlay health passes. All650+10+6 frozen inputs and main/test artifacts match after controlled59/59 phone checks, zero skipped. Original cold cancellation/1MiB guard and two further cancellation repeats pass without adding their repeats to the59 unique count.

@@ -1,3 +1,25 @@
+## 2026-11-15 — 1068 기존59PASS / 새Calendar6of8·실제PC취소ACK 미관찰
+
+Root recovery최종a3c66b5d는모델실독립정적리뷰권고대로삭제직전전체roster/files재검과note expectedUpdatedAt CAS를추가했다. test-only30s빌드/sign/install current1eaf2f56bf0143bb4b627800d994d15d5a2be07c45bb4295035b9c9d1804cbe3 독립해시/directoverlayPASS/mainbe5불변. 정확한자신의1067QA1scope복구0.888sPASS/별도readonlyabsencePASS. 삭제전현재관찰은runcompleted/find→save/정확한메모1/PNG3동일이며기존inspect-first strictFAIL을성공으로바꾸지않는다. 기존654source에test1추가655전체끝재검일치.
+
+currenttest cold취소/MiB와기존59고유폰검사PASS. Calendar8은42.706s/6PASS2FAIL:unknown POST·projectscope변경후status가completed. 첫상태assert실패라뒤HTTP/journal검사및scope test의후반readonly는미관찰. 실제OAuth/API증거0. source추적으로nonrepeat harnessStop의answer-only running종료와handler answer가scope거부로throw한뒤finally completed가능경로를발견했다. Root소유ignored후보에서기존publishActionFinal(pausedtrue)사용+catch진입시호스트종료상태를최종정리에전달하는작은보완만작성,아직canonical미적용/미compile다.
+
+실제PC취소103.624s는matchinginflight cancelACK미관찰로strictFAIL. ACK232문자보존/phonecancel/UI/호출2→2/ownerunloadACK/idle/cleanup은true지만이것을cancelACK로대체하지않는다. StateFlow관찰누락/epoch/DONErace는후보설명일뿐서버취소실패원인확정0. source655/설치main·currenttest/directoverlay종료후재검PASS,workerbusyfalse/cleanupfalse/residentnull. 모델실은TESTONLY관측보완,도구실file7prod+core9/native6·배포실batch2file+host13및독립리뷰는ignored후보로만동결한다. root1069통합전1068source/evidence를보존한다.
+
+## 2026-11-15 — 1068 설치·콜드2PASS / 과거QA 잔존1 확인
+
+1068mainbe5f0de6cc8a69379a993635d260ce67565817f750b93ee2704a8c92ad54e98c/test초기a531905cb7de1b5c13216b01d50ae95b874992b72bda0f648a6e95c04c47b835 설치·데이터유지·독립바이트/directoverlayPASS. 1511JVM0fail/error/skip/release3m52/sign/lint0·144·1. originalcold취소/1MiBPASS뒤read-only정확QAaudit가1067 storage1project잔존1개를확인해FAIL했다. old59/cal8은시작전중단,actualPCcancel/1068model미실행. 과거cleanupunknown을완료로간주하지않는다.
+
+Root는고정round1storage의privatebatchUUID·정확sourceowner/settings/단일thread·branch·run/model/PcRev/local-only/VERIFIED허용steps·실제한메모/원본PNG3바이트를검증하는test-only복구코드를추가했다. 기존654source변경0/추가1로655,테스트만assemble40s/sign/install한82139739891b9ff163385c469d029fecf749af775eb87b6ebad102e86a87daab가독립설치해시/directoverlay를통과했고mainbe5는불변이다. 아직복구실행0/삭제0,모델실독립안전리뷰뒤실행한다. source/실제상태/복구/원래strictFAIL은분리하며새폰67PASS를주장하지않는다.
+
+## 2026-11-15 — 1068 중복변경 방지·Calendar 기기배선 통합 / 첫 검사1511PASS
+
+Root가calendarV1 ab39a3e1의4기준sourceSHA를대조후작은DIhunk를통합했다. parent가request별Hub를한번정해worker→ToolExecutor→Runtime에공유하며기본값은기존실Hub다. isolated Calendar sender는test native코드에서만만들고modelJSON/queue/권한/UI설정에선선택할수없다. globalHub교체·owner연결store/credential수정·realHTTPfallback0. 8native는actualPendingAction/Compose승인클릭과fakeCalendarHTTP를검사하도록작성했으며아직폰에서실행하지않았다.
+
+Harness는기존rawfingerprint/영속StepRef해시를유지한채별도repeatFingerprint에save_note의누락title=메모/scope=default,create_reminder의누락scope=default만정규화한다. 실제호출/인자/권한·body/title/collection차이는유지하며동일효과의재실행을차단한다. 새8회귀포함core819/app692=1511JVM0fail/error/skip,Androidtestcompile2m15PASS. actualPC취소후보69e541도test-only로통합후추가compile35sPASS,실제inflight동일requestcancelACK+ACK본문보존은미실행. 중단된1067정확QA scope부재를읽기전용확인하는audit1도추가했으나아직미compile/미기기다.
+
+1068릴리스/폰검증을먼저고정하고,파일read/hashschema결합과batch원장후보는별도다음통합으로분리한다. 새읽기도구·새권한·모델변경0/registry102. 새1068설치·기기·실모델성공은아직주장하지않는다.
+
 ## 2026-11-15 — 1067 실모델 계산·원문각2PASS / 파일해시·중복저장·평가기실패
 
 실제폰/paired-PC local model에서calc2/2(241556/186808ms),exact_quote2/2(311265/243722ms) PASS. file2/2FAIL(81490/129446ms)은path/본문정확·원본expectedSha256만오류이며QA가쓰기전차단했다. storage0는214013ms/paused로동일content/title의scope생략→default를서로다른call로취급해두메모를저장했다. 전체완료를주장하지않고stuck으로중지했다. storage1은정확본문승인흔적뒤원래inspect-first assertion이runCase밖으로탈출해첫batch가rows5/finishedfalse로끝났다. 원인확정0/해당시도cleanup·후상태미확인. 별도file/exact2rowfollowup은정상종료,합쳐기록7row=4PASS/3FAIL·모두cleanuptrue이고추가중단storage를성공에넣지않는다. 원래순서기준FAIL은보존하며사용자목표의실제상태는별도관찰이필요하다.

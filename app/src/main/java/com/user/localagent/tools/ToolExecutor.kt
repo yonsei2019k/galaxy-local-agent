@@ -44,6 +44,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val kakaoReadBinding:String?=null,
     private val ownerRequest:String?=null,
     private val contactLookup:((String,Int)->List<ContactCandidate>)?=null,
+    private val connectionHubOverride:com.user.localagent.connections.ConnectionHub?=null,
     private val createImage:(suspend(ToolCall)->String)?=null) {
     fun resolveOwnerText(call:ToolCall):ToolCall=OwnerTextSources.resolve(call,ownerRequest)
     private val recipients=RecipientEvidence(ownerRequest.orEmpty())
@@ -52,16 +53,17 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
     private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
     private val bundledSkills by lazy {com.user.localagent.skills.BundledSkillStore(context)}
+    private val requestConnectionHub by lazy {connectionHubOverride?:com.user.localagent.connections.ConnectionHub.get(context)}
     private val requestConnections by lazy {com.user.localagent.connections.RequestConnectionExecutor(
         connectionRunId,connectionIsRunLive,connectionApproveGmailSend,
         execute={call,runId,approve->
-            suspend fun perform()=com.user.localagent.connections.ConnectionHub.get(context).executeInThread(
+            suspend fun perform()=requestConnectionHub.executeInThread(
                 call,runId,checkNotNull(connectionThreadId),connectionPcDataBinding,connectionVerifyAccess,approve)
             if(call.name in com.user.localagent.core.connections.PcToolCatalog.names&&connectionComputeEngine!=null)
                 connectionComputeEngine.withPcResource(cleanup={}){perform()}else perform()
         },verifyAccess=connectionVerifyAccess,
-        captureCalendar={call,run->com.user.localagent.connections.ConnectionHub.get(context).calendarTargetForApproval(call,run,connectionVerifyAccess)},
-        executeCalendar={call,run,approved->com.user.localagent.connections.ConnectionHub.get(context).executeApprovedCalendarInThread(
+        captureCalendar={call,run->requestConnectionHub.calendarTargetForApproval(call,run,connectionVerifyAccess)},
+        executeCalendar={call,run,approved->requestConnectionHub.executeApprovedCalendarInThread(
             call,run,checkNotNull(connectionThreadId),connectionPcDataBinding,connectionVerifyAccess,approved)})}
     private val fallbackProjectWorkspace by lazy {com.user.localagent.workspace.ProjectWorkspace(context)}
     private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace

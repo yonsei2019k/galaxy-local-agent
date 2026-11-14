@@ -73,6 +73,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private val restorePersistedQueue:Boolean=true,
     private val inferenceChoiceOverride:(suspend(QueuedChatRequest)->ChosenInference?)?=null,
     private val contactLookup:((String,Int)->List<com.user.localagent.core.ContactCandidate>)?=null,
+    private val workerConnectionHubFactory:((QueuedChatRequest)->com.user.localagent.connections.ConnectionHub)?=null,
+    private val requestConnectionHub:com.user.localagent.connections.ConnectionHub?=null,
     private val externalIntentLauncher:(suspend(Intent)->Unit)?=null) {
     internal val executionEngine:com.user.localagent.inference.ComputeExecutionEngine=workerBinding?.engine?:app.engine
     internal val executionOrchestration:com.user.localagent.models.LocalOrchestration=if(workerBinding==null)app.orchestration else
@@ -467,10 +469,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         break
                     }
                     val worker=try {
+                        val requestHub=workerConnectionHubFactory?.invoke(request)?:requestConnectionHub
                         val engine=workerEngineFactory?.invoke(request)?:com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=request.runId,
                             beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText)
                         ChatRunCoordinator(context,app,ChatRequestWorkerBinding(this@ChatRunCoordinator,request,engine),
-                            inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,externalIntentLauncher=externalIntentLauncher)
+                            inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,requestConnectionHub=requestHub,externalIntentLauncher=externalIntentLauncher)
                     }catch(cancel:CancellationException){throw cancel}
                     catch(_:Exception){
                         app.repository.chat.updateRun(request.runId,"failed","EXECUTION_INITIALIZATION_FAILED")
@@ -1173,6 +1176,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             kakaoReadBinding=request.kakaoReadBinding,
             pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,
             ownerRequest=request.text,
+            connectionHub=requestConnectionHub,
             contactLookup=contactLookup,
             isRunLive={originalJob.isActive&&activeRequest?.runId==request.runId},
             approveGmailSend={id,call,preview->approveGmailSend(id,call,preview)},

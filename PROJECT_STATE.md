@@ -2,7 +2,17 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1067;1503 JVM and controlled59/59 pass
+## Current actual device checkpoint: installed1068;1511 JVM pass, phone validation in progress
+
+1068 main SHA `be5f0de6cc8a69379a993635d260ce67565817f750b93ee2704a8c92ad54e98c` is installed with existing data retained. Core819/app692=1511 JVM tests pass, zero failures/errors/skips; release/test3m52 and signatures pass; lint0 errors/144 warnings/1 hint. Initial test SHA `a531905cb7de1b5c13216b01d50ae95b874992b72bda0f648a6e95c04c47b835` and intermediate diagnostic `82139739891b9ff163385c469d029fecf749af775eb87b6ebad102e86a87daab` are archived. Current test SHA `1eaf2f56bf0143bb4b627800d994d15d5a2be07c45bb4295035b9c9d1804cbe3` independently matches, with the main APK unchanged. Pinned direct-overlay health and all655 frozen source inputs were rechecked after the following phone/model tests.
+
+Original cold cancellation/1MiB and all59 existing controlled phone tests pass. New Calendar wiring tests pass6/8; uncertain POST and changed-project-scope cases incorrectly end with run status completed. Their later effect/journal assertions were not reached, and the read-only subcase after the scope failure did not execute. No real Calendar account/OAuth/API effect is tested. A staged fix pauses nonrepeat harness refusals and prevents an error-handler failure from falling through to completed; it is not installed yet.
+
+The interrupted1067 storage fixture really remained. After independent static review and exact request/settings/roster/local-only revision/report/three-PNG-byte checks, recovery removes only that scope in0.888s; a separate read-only absence audit passes. Before cleanup, a completed run, one exact report note and unchanged fixture files were observed; its original inspect-first API-order FAIL is preserved.
+
+Actual PC cancellation takes103.624s and strictly FAILS because a matching in-flight cancel ACK is not observed. The phone is cancelled,232 acknowledged characters are preserved, generation calls stay2, owner-scoped unload and final idle health/cleanup pass. Those facts do not establish the missing cancel ACK; StateFlow observation loss and a completion race remain candidates. New file/hash, batch-ledger and cancellation-observation candidates remain staged.1068 is not approved for internal distribution.
+
+## Historical actual device checkpoint: installed1067;1503 JVM and controlled59/59 pass
 
 1067 main SHA `6e6f27832e44800be78046b59ca1f61d4712f30d9cd0dc86ae61c35bd4ebb4d8` and test SHA `fa3fef003bc022ecbe68ba05b3d58ed4f75e6612d04c35490e2ee51902c361f3` independently match installed bytes, with data retained. Core811/app692=1503 JVM tests pass with zero failures/errors/skips; release/test4m47/signatures pass, lint0 errors/144 warnings/1 hint. Original cold cancellation and1MiB guard plus two further cancellation repeats pass. Controlled59/59 phone tests pass, zero skipped;650 source+10 public+6 build input hashes and installed artifacts were rechecked afterward.
 

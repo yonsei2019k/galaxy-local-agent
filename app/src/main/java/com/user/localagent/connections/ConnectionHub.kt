@@ -15,10 +15,11 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
-class ConnectionHub private constructor(private val context:Context) {
+class ConnectionHub private constructor(private val context:Context,
+    private val calendarAuthorizedSender:(suspend(ConnectedService,ApiRequest,ConnectionAccess)->ApiResponse)?=null) {
     val store=ConnectionStore(context)
-    val google=GoogleConnectionAuth(context,store)
-    val pc=PcToolClient(context,store)
+    val google by lazy {check(calendarAuthorizedSender==null){"isolated_calendar_has_no_google_auth"};GoogleConnectionAuth(context,store)}
+    val pc by lazy {check(calendarAuthorizedSender==null){"isolated_calendar_has_no_pc_client"};PcToolClient(context,store)}
     private val runtimes=java.util.concurrent.ConcurrentHashMap<ConnectedService,ConnectionRuntime>()
     fun clearCache(){runtimes.values.forEach {it.clearCache()}}
     fun authorizedServiceIds(writeOnly:Boolean=false):Set<String> = ConnectedService.entries.filter {store.connection(it)?.let {value->!writeOnly||value.writeAllowed}==true}.map {it.id}.toSet()+if(!writeOnly&&pc.authorized())setOf("pc-tools")else emptySet()
@@ -36,6 +37,11 @@ class ConnectionHub private constructor(private val context:Context) {
         override suspend fun sendAuthorized(service:ConnectedService,request:ApiRequest,expectedAccess:ConnectionAccess):ApiResponse {
             val state=store.connection(service)?:return ApiResponse(401,"{}")
             if(ConnectionAccess(state.principal,state.generation,true,state.writeAllowed)!=expectedAccess)return ApiResponse(401,"{}")
+            calendarAuthorizedSender?.let {sender->
+                check(service==ConnectedService.CALENDAR){"isolated_calendar_only"}
+                currentCoroutineContext().ensureActive()
+                return sender(service,request,expectedAccess).also {currentCoroutineContext().ensureActive()}
+            }
             val token=try {if(service.google)google.token(service,state.writeAllowed,expectedAccess)else store.read("token.${service.id}")?:return ApiResponse(401,"{}")}
                 catch(cancel:CancellationException){throw cancel}catch(_:Exception){return ApiResponse(401,"{}")}
             val current=store.connection(service)?:return ApiResponse(401,"{}")
@@ -70,6 +76,8 @@ class ConnectionHub private constructor(private val context:Context) {
     }
     private suspend fun executeBound(call:ToolCall,hostRunId:String?,hostThreadId:String?,pcDataBinding:String?,verifyAccess:suspend()->Unit,
         approveGmailSend:(suspend(GmailSendPreview)->Boolean)?,calendarApproval:ApprovedCalendarTarget?=null):ToolResult=withContext(Dispatchers.IO) {
+        if(calendarAuthorizedSender!=null&&ConnectionCatalog.tools[call.name]?.service!=ConnectedService.CALENDAR)
+            return@withContext ToolResult(call.id,false,"격리된 Calendar 검증 범위 밖의 요청입니다.",VerificationState.FAILED,"isolated_calendar_only")
         if(call.name in PcToolCatalog.names)return@withContext pc.execute(call,hostThreadId,pcDataBinding,verifyAccess,computeOwner=hostRunId)
         val service=ConnectionCatalog.tools[call.name]?.service?:return@withContext ToolResult(call.id,false,"지원하지 않는 연결 도구",VerificationState.FAILED)
         try {
@@ -151,5 +159,8 @@ class ConnectionHub private constructor(private val context:Context) {
     companion object {
         @Volatile private var instance:ConnectionHub?=null
         fun get(context:Context):ConnectionHub=instance?:synchronized(this){instance?:ConnectionHub(context.applicationContext).also {instance=it}}
+        /** Trusted instrumentation dependency only; never registered as a tool or installed as the global singleton. */
+        internal fun isolatedCalendarForValidation(context:Context,sender:suspend(ConnectedService,ApiRequest,ConnectionAccess)->ApiResponse):ConnectionHub=
+            ConnectionHub(context.applicationContext,sender)
     }
 }

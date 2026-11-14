@@ -101,6 +101,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
         kakaoReadBinding:String?=null,
         pcImageRecoveryAllowed:Boolean=false,
         ownerRequest:String?=null,
+        connectionHub:com.user.localagent.connections.ConnectionHub?=null,
         contactLookup:((String,Int)->List<com.user.localagent.core.ContactCandidate>)?=null,
     ):ToolExecutor {
         val scoped=repository.forThread(threadId)
@@ -146,6 +147,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
             },
             connectionRunId=requestRunId,connectionIsRunLive={requestJob?.isActive==true&&isRunLive()},connectionApproveGmailSend=approveGmailSend,
             connectionThreadId=threadId,connectionPcDataBinding=pcDataBinding,connectionVerifyAccess=::verifyAnalysisAccess,
+            connectionHubOverride=connectionHub,
             kakaoReadBinding=kakaoReadBinding,
             connectionComputeEngine=requestEngine as? com.user.localagent.inference.ComputeExecutionEngine,
             ownerRequest=ownerRequest,contactLookup=contactLookup,projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,

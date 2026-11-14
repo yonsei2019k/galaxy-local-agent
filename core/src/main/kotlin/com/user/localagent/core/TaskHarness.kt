@@ -30,6 +30,9 @@ class HarnessStep(tool:String,arguments:JsonObject,val evidence:StepEvidence) {
     val tool:String=tool
     val arguments:JsonObject=Json.parseToJsonElement(arguments.toString()).jsonObject
     internal val fingerprint:String=tool+":"+canonical(this.arguments)
+    // Repeat detection compares only host-defined defaults. The raw fingerprint above remains
+    // byte-for-byte stable for persisted readback StepRef bindings across app updates.
+    internal val repeatFingerprint:String=tool+":"+canonical(repeatArguments(tool,this.arguments))
     init {require(tool==evidence.tool);require(this.arguments.toString().length<=32768)}
     constructor(call:ToolCall,evidence:StepEvidence):this(call.name,call.arguments,evidence)
 }
@@ -215,10 +218,10 @@ object TaskHarness {
         }
     }
     private fun loopReason(steps:List<HarnessStep>):String? {
-        if(steps.zipWithNext().any {(a,b)->a.fingerprint==b.fingerprint})return "같은 도구와 인자의 연속 실행을 중단했습니다."
+        if(steps.zipWithNext().any {(a,b)->a.repeatFingerprint==b.repeatFingerprint})return "같은 도구와 인자의 연속 실행을 중단했습니다."
         fun refreshedRejectedFile(step:HarnessStep):Boolean = rejectedBeforeEffect(step)&&step.tool=="write_project_file"&&
             steps.drop(steps.indexOf(step)+1).any{it.tool=="read_project_file"&&it.evidence.state==VerificationState.VERIFIED&&it.arguments["path"]==step.arguments["path"]}
-        for(group in steps.groupBy {it.fingerprint}.values){
+        for(group in steps.groupBy {it.repeatFingerprint}.values){
             if(group.size>=3||group.count{!refreshedRejectedFile(it)}>=2&&!readOnly(group.first().tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
         }
         return null
@@ -233,6 +236,14 @@ object TaskHarness {
         Regex("(?:아래|다음)(?:의)?\\s*(문장|텍스트|문서|내용|인용|로그)(?:를|을|는|은|:|\\s)").find(text)?.range?.first?.let {text=text.substring(0,it)}
         return text.trim()
     }
+}
+private fun repeatArguments(tool:String,arguments:JsonObject):JsonObject {
+    val defaults=when(tool){
+        "save_note"->mapOf("title" to JsonPrimitive("메모"),"scope" to JsonPrimitive("default"))
+        "create_reminder"->mapOf("scope" to JsonPrimitive("default"))
+        else->return arguments
+    }
+    return JsonObject(defaults+arguments)
 }
 private fun canonical(value:JsonElement):String=when(value){
     is JsonObject->value.keys.sorted().joinToString(",","{","}"){JsonPrimitive(it).toString()+":"+canonical(value.getValue(it))}

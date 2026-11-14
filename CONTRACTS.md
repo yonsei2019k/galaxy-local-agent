@@ -6,6 +6,8 @@ The `core` JVM module has no Android dependencies. App code uses `kotlinx.serial
 
 ## Evidence limits identified in1067
 
+1068 keeps the raw `HarnessStep.fingerprint` stable for persistent readback references. Its separate repeat comparison fills only actual host defaults for note title/collection and reminder group. It does not rewrite tool payloads, normalize natural language, grant authority or complete a goal. Calendar native validation receives a request-local Hub through trusted constructors; default production execution keeps the real Hub and isolated transport cannot be selected by model or queued JSON.
+
 `ExactStructuredReviewInput` currently verifies an immutable client-side count/generate input boundary. This alone does not establish actual paired-worker template/token-count equivalence: current worker token counting and generation apply different message/thinking preparation. Installed backend renderer qualification is still absent. Do not report this client flag or fake-counter tests as server-exact token evidence. A separate versioned explicit-thinking/renderer contract is staged only; normal captured legacy requests retain their existing authority and checks.
 
 Internal deployment targets the user's confirmed personal phone/personal PC configuration, with per-user pairing and data isolation. Shared-PC multi-user service, real Calendar OAuth effects and whole-phone cleanup are not validated capabilities.
