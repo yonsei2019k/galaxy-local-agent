@@ -1,5 +1,11 @@
 # Device validation
 
+## 2026-11-14 checkpoint1052 / scenario tools and overlay check
+
+Actually installed1052 with existing data preserved; signed main/test base hashes independently compared (PROJECT_STATE.md). Core660/app581=1241 JVM PASS, release lint0 errors/137 warnings/1 hint, release/test assembly and signature verification PASS. No full20-scenario Android workflow validation is implied by the synthetic PC evaluator.1051 was independently installed/hash-verified before1052.
+
+Actual phone `TailscaleTransportValidation#pairedOverlayHealthThroughPinnedTransport` first failed on1051 with OVERLAY_NOT_ADVERTISED. PC Tailscale and Android peer were online, but worker hostname enumeration did not advertise an overlay. The bounded CLI fallback passed6 regressions and was deployed after compute idle, confirmed model cleanup and worker-only restart. Actual direct-overlay checks then passed on1051 (190ms), initial1052 (276ms) and final1052 (136ms), including VPN presence, original token/certificate pin, paired-server identity and no LAN fallback. Final1052 main hash differs from initial1052; PROJECT_STATE identifies the final installed bytes. Times include endpoint metadata/health work and are not pure RTT or inference throughput. External Wi-Fi-to-cellular handoff remains untested. No firewall/VPN permissions or settings were changed.
+
 ## 2026-11-01 checkpoint1035 / final new-data briefing installation
 
 Actually installed1035 main SHA `a4e9f60222ed5c8ea9b111c895230533ab595764ad835807a03b7489ca3cbe00`, test SHA `6bbb9d2c0c07706253ae43fc652222efe6595da228bb4236d626ddbf80066ac4`. Both installed base identities matched independent SHA readback, with no data reset. Core631/app570=1201, PC9, release lint0 errors/137 warnings and all19 device tests passed,0 skipped. The580 frozen Android input hashes matched. This final version includes recent-provider-first capture and newest-first48-record/48KB selection, while retaining old unanalysed records.

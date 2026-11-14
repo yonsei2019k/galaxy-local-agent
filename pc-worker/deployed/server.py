@@ -14,13 +14,9 @@ from owned_engines import OwnedEngines,OwnershipMismatch,RequestNotActive,Comput
 from pairing import Pairing
 
 from recovery_engines import RecoveryEngines
+from overlay_endpoint import overlay_endpoint
 def overlay():
- import ipaddress
- try:
-  for value in socket.gethostbyname_ex(socket.gethostname())[2]:
-   if ipaddress.ip_address(value) in ipaddress.ip_network('100.64.0.0/10'):return {'overlayEndpoint':f"https://{value}:{CONFIG['port']}"}
- except OSError:pass
- return {}
+ return overlay_endpoint(CONFIG['port'])
 LOG=r'D:\ZipHap\Compute\requests.log';LOG_LIMIT=2*1024*1024
 LOG_LOCK=threading.Lock()
 POLL=re.compile(r'^/v1/images/[0-9a-f-]{36}$')

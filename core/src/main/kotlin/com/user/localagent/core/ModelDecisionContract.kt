@@ -135,7 +135,8 @@ object ModelDecisionContract {
         when (action) {
             SemanticAction.PUBLIC_RESEARCH -> {
                 if (query.isBlank()) fail("missing_public_query", "PUBLIC_RESEARCH requires a concise publicQuery.")
-                if (tools.none { it in searchTools } || tools.any { it !in publicTools }) fail("invalid_public_tools", "PUBLIC_RESEARCH requires a registered public search or reference lookup and only public tools.")
+                if (tools.none { it in searchTools } || tools.any { it !in publicTools }) fail("invalid_public_tools",
+                    "PUBLIC_RESEARCH permits only these offered research tools: ${availableTools.intersect(publicTools).sorted().joinToString(",")}. Use TOOL_TASK for other offered connector tools, preserving the original request and constraints.")
                 if (source != SemanticSourceKind.NONE || deprecatedPrivacy == true) fail("public_private_conflict", "PUBLIC_RESEARCH must not use private records; omit sourceKind and usesPrivateData.")
                 canonicalQuery = query
             }

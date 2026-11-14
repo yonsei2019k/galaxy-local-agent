@@ -1,8 +1,16 @@
 # ZipHap.Agent project state
 
-Updated 2026-11-01. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
+Updated 2026-11-14. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1035; new-data briefing, phone review and calendar registration
+## Current actual device checkpoint: installed1052; scenario evaluation and Tailscale verification
+
+1052's final development revision is installed without data clearing. Main installed base SHA `7fb02e5f415dcf222d3be621be1577d62ff35a9bd02bdc9557f0b523c9dba552`; test base SHA `0aa1459cc455e650cfb574f26d5344bbaf181c0681ce28482af79bb86ca5ac82`. Both were independently compared with signed outputs. Core660/app581=1241 JVM checks passed, release lint0 errors/137 warnings/1 hint, release and test APK assembly/signature checks passed. These are build/install facts, not general semantic quality proof.
+
+All98 registered tools now have descriptions, including the21 previously empty core tools. The semantic planner receives brief descriptions of offered tools rather than names alone, retaining boundary sentences within160 characters. `pc-worker/eval/scenario_eval.py` exercises real local-model planning and production core validation/guards with synthetic tool results. Baseline20 scenarios,8 selected1052 follow-ups and3 boundary-description checks finished. Baseline automatic13/20 becomes12/20 after orchestrator review; these are synthetic results. Follow-ups improved calendar, unsupported file/photo disclosure and YouTube routing, but public-plan repair, price-monitoring capability disclosure and exact quoted-note fidelity still failed. TMAP navigation-start remains unsupported and its wording only partly improved. No general workflow success is claimed. See docs/scenario-evaluation-2026-11-14.ko.md. Unsupported file/photo cleanup, price monitoring and TMAP navigation-start tools were not added; TMAP open/destination tools do exist.
+
+Tailscale PC/Android peers are online. The first actual phone pinned-transport check failed with OVERLAY_NOT_ADVERTISED. The bounded installed-CLI fallback passed6 regressions, was deployed after idle/model cleanup and worker-only restart, and actual phone direct-overlay checks passed on1051 and both1052 revisions. VPN present, original certificate pin, paired server identity and no LAN fallback were verified. Final1052 check136ms includes metadata/health work and is not an inference benchmark. External-network handoff was not tested. No VPN/firewall settings were changed. The ordinary current app path uses paired-PC local inference and stops instead of falling back to phone inference. Older checkpoints below describe historical implementations.
+
+## Historical actual device checkpoint: installed1035; new-data briefing, phone review and calendar registration
 
 1035 is actually installed with data preserved. Main SHA `a4e9f60222ed5c8ea9b111c895230533ab595764ad835807a03b7489ca3cbe00`; test SHA `6bbb9d2c0c07706253ae43fc652222efe6595da228bb4236d626ddbf80066ac4`. Both installed base APKs were independently reread and matched. Core631/app570=1201 JVM tests,9 PC controller tests, release lint0 errors/137 warnings and19 actual device tests passed with0 skipped. All580 frozen Android input hashes matched. Subsequent documentation updates are not APK source changes. Existing uncommitted work is preserved.
 

@@ -15,7 +15,34 @@ data class ToolDefinition(val name:String,val risk:Risk,val arguments:Map<String
 object ToolRegistry {
     val supportedMessengerPackages=setOf("com.tionsoft.meettalk.eun","com.meditong.gw","com.kakao.talk","org.telegram.messenger","org.telegram.messenger.web")
     private fun text(required:Boolean=true,max:Int=4000)=Argument("string",required,max)
-    private fun def(name:String,risk:Risk,vararg args:Pair<String,Argument>)=ToolDefinition(name,risk,mapOf(*args))
+    /**
+     * Descriptions for the core phone tools. They were empty, so the model guessed what each tool does
+     * (found during scenario preparation). Wording states the real boundary of each tool.
+     */
+    private val coreDescriptions=mapOf(
+        "get_current_datetime" to "Current date, time and weekday in Asia/Seoul. Use before computing relative dates such as tomorrow or in 45 days.",
+        "list_calendar_events" to "Read events from the phone's calendars in an ISO-offset time range (start inclusive, end exclusive). Read-only.",
+        "prepare_calendar_event" to "Open the phone's calendar with a filled-in new event for the owner to confirm and save. Not saved until the owner confirms.",
+        "create_reminder" to "Save a reminder in this app that notifies at an ISO-offset datetime. Compute relative times from get_current_datetime first.",
+        "create_alarm" to "Open the phone's clock app with an alarm at hour (0-23) and minute; optional label and repeat days. The clock app confirms setting it.",
+        "save_note" to "Save a private note in this app (for example a parking spot or a list). Returns the note id after verified storage.",
+        "search_notes" to "Search this app's saved notes by text. Returns ids and bounded excerpts.",
+        "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person.",
+        "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
+        "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
+        "open_map" to "Open the default map app searching for a place or address. Does not start turn-by-turn navigation by itself.",
+        "open_url" to "Open an https URL in the phone's browser. Opening is not reading; use read_webpage to read page content.",
+        "save_memory" to "Remember a stable fact or preference about the owner for later conversations, only when the owner states it or asks to remember.",
+        "search_memories" to "Search remembered owner facts and preferences.",
+        "delete_memory" to "Delete one remembered fact by id after the owner explicitly asks.",
+        "update_note" to "Replace the text of one saved note by id.",
+        "update_reminder" to "Change the title or time of one saved reminder by id.",
+        "delete_note" to "Delete one saved note by id after the owner explicitly asks.",
+        "delete_reminder" to "Delete one saved reminder by id after the owner explicitly asks.",
+        "list_messenger_notifications" to "Read recent notifications of one messenger app (exact packageName) that the owner allowed. Notification text only, not full chat history.",
+        "reply_messenger_notification" to "Reply to one messenger notification by its id with the given text, after the owner approves the exact message. Actually sends.",
+    )
+    private fun def(name:String,risk:Risk,vararg args:Pair<String,Argument>)=ToolDefinition(name,risk,mapOf(*args),coreDescriptions[name].orEmpty())
     private fun read(name:String,description:String,vararg args:Pair<String,Argument>)=ToolDefinition(name,Risk.LOW,mapOf(*args),description)
     private val analysisReads=setOf("list_imported_conversations","search_conversation_imports","get_sms_summary","get_call_log_summary","list_audio_recordings","search_audio_transcripts","search_conversation_history")
     private fun limitMax(name:String)=when(name){

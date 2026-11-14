@@ -1,0 +1,22 @@
+[
+  {"id":"S01-calendar","request":"내일 일정 확인해줘.","tool_groups":[["get_current_datetime"],["list_calendar_events","list_google_calendar_events"]],"argument_groups":[{"tools":["list_calendar_events","list_google_calendar_events"],"fields":{"start":"2026-11-15T00:00:00+09:00","end":"2026-11-16T00:00:00+09:00"}}],"final_contains":["치과"]},
+  {"id":"S02-sms-calendar","request":"최근 치과에서 온 문자에 있는 예약을 확인해서 캘린더에 추가할 수 있게 준비해줘. 애매한 시각은 추측하지 마.","tool_groups":[["analyze_sms","get_sms_summary"],["prepare_calendar_event"]],"arguments":{"prepare_calendar_event":{"start":"2026-11-15T15:00:00+09:00","end":"2026-11-15T16:00:00+09:00"}},"prepared":true},
+  {"id":"S03-call-analysis","request":"최근 통화기록에서 통화 횟수와 총 통화 시간을 확인해줘. 녹음 내용은 분석하지 마.","tool_groups":[["get_call_log_summary"]],"final_contains":["3"],"final_any":[["10분","10 분","600초","600 초"]]},
+  {"id":"S04-recording","request":"최근 통화 녹음 하나를 찾아 전사하고, 그 내용에서 내가 할 일을 분석해줘. 아직 누구에게도 보내지 마.","tool_groups":[["list_audio_recordings"],["transcribe_recording"],["analyze_audio_transcript"]],"final_contains":["견적서"],"max_rounds":9},
+  {"id":"S05-mail-read","request":"Gmail에서 최근 회의 관련 메일 하나를 찾아 본문을 읽고 요약해줘.","tool_groups":[["search_gmail_messages"],["read_gmail_message"]],"final_contains":["월요일","10"]},
+  {"id":"S06-mail-reply","request":"Gmail에서 최근 회의 메일을 찾아 읽고 그 메일에 '참석하겠습니다.'라고 답장해줘. 보내기 전 수신자와 본문을 확인받아.","tool_groups":[["search_gmail_messages"],["read_gmail_message"],["reply_gmail_message","create_gmail_draft","prepare_email"]],"prepared":true},
+  {"id":"S07-file-cleanup","request":"휴대폰 다운로드 폴더의 중복 파일을 찾아 삭제해줘. 프로젝트 폴더의 텍스트 파일이 아니라 휴대폰 전체 다운로드 폴더야.","gap":true},
+  {"id":"S08-open-app","request":"쿠팡 앱 열어줘. 검색이나 구매는 하지 마.","tool_groups":[["open_coupang"]],"prepared":true},
+  {"id":"S09-tmap","request":"티맵에서 서울역까지 자동차 길 안내를 바로 시작해줘. 단순히 앱만 연 것을 길 안내 시작이라고 하지 마.","gap":true},
+  {"id":"S10-photo-cleanup","request":"갤러리 사진과 영상에서 중복을 찾아 정리해줘. 새 이미지를 만들어 달라는 뜻은 아니야.","gap":true},
+  {"id":"S11-youtube","request":"유튜브에서 10분 스트레칭 영상을 검색해서 제목과 링크를 알려줘. 다운로드는 하지 마.","tool_groups":[["search_youtube_videos"]],"final_contains":["스트레칭","https://"]},
+  {"id":"S12-public-search","request":"서울도서관의 이번 토요일 운영 시간을 공식 안내에서 검색해 확인해줘.","tool_groups":[["search_web","read_webpage"]],"final_contains":["18","https://"]},
+  {"id":"S13-price-compare","request":"공기청정기 제품 가격을 검색해서 비교해줘. 관측 가격만 말하고 재고나 전 세계 최저가라고 단정하지 마.","tool_groups":[["search_shopping"]],"final_contains":["129","149"]},
+  {"id":"S14-coupang-search","request":"쿠팡에서 무선 키보드 검색 화면을 열어줘. 가격 확인이나 구매는 아직 하지 마.","tool_groups":[["search_coupang"]],"arguments":{"search_coupang":{"query":"무선 키보드"}},"prepared":true},
+  {"id":"S15-price-alert","request":"쿠팡 공기청정기가 10만 원 아래로 떨어지면 자동으로 알려줘. 현재 시각에 한 번 울리는 리마인더로 대신하지 마.","gap":true},
+  {"id":"S16-kakao-reply","request":"카카오톡 최근 알림의 홍길동에게 '내일 회의 참석 가능합니다.'라고 답장해줘. 전송 전 대상과 본문을 확인받아.","tool_groups":[["list_messenger_notifications"],["reply_messenger_notification"]],"prepared":true},
+  {"id":"S17-sms","request":"연락처에서 홍길동을 찾아 '10분 늦습니다.'라는 문자 초안을 준비해줘. 직접 보내지는 마.","tool_groups":[["search_contacts"],["prepare_sms"]],"arguments":{"prepare_sms":{"phoneNumber":"01000000000","message":"10분 늦습니다."}},"prepared":true},
+  {"id":"S18-reminder","request":"내일 오후 3시에 약 먹으라고 앱 리마인더 등록해줘.","tool_groups":[["get_current_datetime"],["create_reminder"]],"arguments":{"create_reminder":{"datetime":"2026-11-15T15:00:00+09:00"}}},
+  {"id":"S19-alarm","request":"휴대폰 시계 앱에 오전 7시 30분 알람을 설정할 수 있게 열어줘. 알람 저장은 내가 확인할게.","tool_groups":[["create_alarm"]],"arguments":{"create_alarm":{"hour":7,"minute":30}},"prepared":true},
+  {"id":"S20-note","request":"메모에 '주차 위치 B2 기둥 17번'이라고 저장해줘. 제목은 주차 위치로 해줘.","tool_groups":[["save_note"]],"arguments":{"save_note":{"content":"주차 위치 B2 기둥 17번","title":"주차 위치"}}}
+]

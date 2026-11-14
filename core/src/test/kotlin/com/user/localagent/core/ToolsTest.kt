@@ -95,7 +95,7 @@ class ToolsTest {
     @Test fun readSchemasDescribePartialScopeAndPublishValidationBounds() {
         val schema=Json.parseToJsonElement(ToolRegistry.schemaJson(listOf("get_current_datetime","search_conversation_imports","get_sms_summary","list_audio_recordings","search_audio_transcripts"))).jsonArray
         val byName=schema.associate {it.jsonObject.getValue("name").jsonPrimitive.content to it.jsonObject}
-        assertFalse(byName.getValue("get_current_datetime").containsKey("description"))
+        assertTrue(byName.getValue("get_current_datetime").getValue("description").jsonPrimitive.content.isNotBlank())
         listOf("search_conversation_imports","get_sms_summary","list_audio_recordings","search_audio_transcripts").forEach {name->
             assertTrue(byName.getValue(name).getValue("description").jsonPrimitive.content.isNotBlank())
         }

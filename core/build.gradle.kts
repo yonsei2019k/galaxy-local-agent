@@ -7,3 +7,13 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
+
+// Local synthetic scenario runner reuses production parsing and execution guards, without Android effects.
+tasks.register("exportScenarioRuntime") {
+    dependsOn(tasks.testClasses)
+    doLast {
+        layout.buildDirectory.file("eval/runtime-classpath.txt").get().asFile.apply {
+            parentFile.mkdirs(); writeText(sourceSets["test"].runtimeClasspath.asPath)
+        }
+    }
+}
