@@ -1,5 +1,11 @@
 # Device validation
 
+## 2026-11-15 test-only1069 / storage goal v2 passes1/2
+
+Main remains `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`; new test-only APK `c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d` is signed, installed and independently matched with data retained. Core828/app717=1545 JVM tests have0 failures/errors/skips and Android-test assembly passes. The previous controlled73 tests were not rerun for this test-only phase.
+
+The separate explicit goal-v2 selector retains the original prompt, actual local-PC execution, three binary fixtures, exact report/readback, single save/approval and cleanup requirements; inspect-first is recorded separately rather than required when find already supplies the data. Actual repeats: round0 PASS253935ms/completed, round1 FAIL152439ms/paused/awaiting_owner_input. Both have VERIFIED find→save and independently observed one exact report plus unchanged three-file bytes and verified cleanup. The second model asks about a format already requested and satisfied. Its correct artifact is not full workflow success. Planned/started/recorded2, unstarted0, normal all-attempts-recorded termination; no historical v1 result is regraded. Post-run662+10+6 input hashes, installed artifacts/direct pinned overlay and idle PC/cleanup are verified. External-network handoff remains untested.
+
 ## 2026-11-15 checkpoint1069 / controlled73/73, actual file comparison running
 
 Main `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`, test `29791c77a50b7bb6c918215a2ed9f8dfa9ce8e55af59da8682779fe12f75e83a`, independent installed-byte match/data retained/pinned direct-overlay PASS. Final build3m20/sign PASS, core828/app705=1533 JVM0 failures/errors/skips, lint0/144/1. Controlled73 unique phone tests PASS: original59 + Calendar8(39.445s) + file-binding6(3.307s). Original cold cancellation/1MiB pass but are overlapping controls.

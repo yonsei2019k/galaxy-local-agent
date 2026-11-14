@@ -153,8 +153,64 @@ class TeamModelWorkflowDeviceValidation {
         assertEquals("One or more positive workflows failed; inspect the private report",0,rows.count{it["passed"]?.jsonPrimitive?.booleanOrNull!=true})
     }
 
-    private suspend fun runCase(context:Context,app:AppContainer,version:Long,token:String,kind:String,round:Int,onFailure:(Throwable)->Unit,
+    @Test fun actualLocalModelCompletesStorageGoalGradeV2()=runBlocking(Dispatchers.Default){
+        val args=InstrumentationRegistry.getArguments()
+        assumeTrue("teamModelValidationApproved=true required",args.getString("teamModelValidationApproved")=="true")
+        assumeTrue("teamModelStorageGradeVersion=2 required",args.getString("teamModelStorageGradeVersion")=="2")
+        require(args.getString("teamModelCases")==null||args.getString("teamModelCases")=="storage_report")
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val app=(context.applicationContext as LocalAgentApplication).container
+        check(!app.runs.hasActiveRuns.value&&!app.runs.busy.value&&app.repository.chat.queuedRuns().isEmpty()){"Owner work is active"}
+        val version=context.packageManager.getPackageInfo(context.packageName,0).longVersionCode
+        args.getString("teamModelExpectedVersion")?.toLongOrNull()?.let{check(it==version){"Unexpected installed version"}}
+        val repeats=args.getString("teamModelRepeats")?.toIntOrNull()?:1;require(repeats in 1..2)
+        val kinds=listOf("storage_report")
+        require(kinds.isNotEmpty()&&kinds.distinct().size==kinds.size&&kinds.all{it in selectableKinds})
+        val token=UUID.randomUUID().toString()
+        val report=File(checkNotNull(context.getExternalFilesDir(null)),"diagnostics/team-model-storage-goal-v2.json")
+        val batch=QaBatchIntegrity(kinds,repeats,version,token)
+        fun publish(current:JsonObject?=null,finished:Boolean=false){writeAtomic(report,buildJsonObject{
+            current?.let{batch.observe(it)}
+            put("batchToken",token);put("versionCode",version);put("actualModel",true);put("allowCloudText",false)
+            put("gradeVersion",2);put("gradeCriterion","storage_user_goal_with_actual_find_then_save")
+            put("changesHistoricalVerdict",false)
+            put("evidenceKind","actual_phone_coordinator_actual_local_pc_model_and_actual_scoped_provider_readback")
+            put("selectedCases",JsonArray(kinds.map(::JsonPrimitive)));put("repeats",repeats);put("finished",finished)
+            put("currentCase",batch.current?:JsonNull);put("rows",JsonArray(batch.rows.map{JsonObject(it+mapOf("gradeVersion" to JsonPrimitive(2)))}))
+            batch.summary().forEach{(key,value)->put(key,value)}
+        })}
+        var abort=false
+        var termination="all_attempts_recorded"
+        try {
+            publish()
+            for(attempt in batch.plan){
+                batch.begin(attempt);publish() // Durable planned/current attempt before fixture/model execution.
+                val row=batch.capture {
+                    check(context.packageManager.getPackageInfo(context.packageName,0).longVersionCode==version){"Installed version changed during the batch"}
+                    runCase(context,app,version,token,attempt.kind,attempt.round,batch::rememberCaseFailure,gradeVersion=2){stage->publish(stage)}
+                }
+                publish()
+                if(row["abortBatch"]?.jsonPrimitive?.booleanOrNull==true){abort=true;termination=if(batch.terminalFailure!=null)"attempt_boundary_failure"else"case_requested_abort";break}
+            }
+        }catch(error:Throwable){abort=true;termination="batch_boundary_failure";batch.abort(error)}
+        finally {
+            try {withContext(NonCancellable){
+                batch.finish(termination)
+                var durable=false
+                try{publish(finished=true);durable=true}catch(error:Throwable){abort=true;termination="final_report_write_failed";batch.abort(error);batch.finish(termination)}
+                finally{System.err.println("TEAM_MODEL_STORAGE_V2_BATCH_TERMINAL "+batch.summary().toString()+" durable="+durable)}
+            }}catch(error:Throwable){abort=true;batch.abort(error)}
+        }
+        batch.terminalFailure?.let{throw it}
+        val rows=batch.rows
+        assertFalse("Owner work or cleanup interrupted this QA batch",abort)
+        assertEquals("Missing cases are never scored as success",kinds.size*repeats,rows.size)
+        assertEquals("One or more positive workflows failed; inspect the private report",0,rows.count{it["passed"]?.jsonPrimitive?.booleanOrNull!=true})
+    }
+
+    private suspend fun runCase(context:Context,app:AppContainer,version:Long,token:String,kind:String,round:Int,onFailure:(Throwable)->Unit,gradeVersion:Int=1,
         progress:(JsonObject)->Unit):JsonObject {
+        require(gradeVersion==1||(gradeVersion==2&&kind=="storage_report"))
         val started=System.currentTimeMillis();val title="qa-team-model-"+token+"-"+round+"-"+kind
         val allowed=tools(kind);val store=app.repository.chat
         var project:ProjectRecord?=null;var room:ChatThreadRecord?=null;var scoped:LocalRepository?=null
@@ -381,6 +437,7 @@ class TeamModelWorkflowDeviceValidation {
                 "reminder_lifecycle"->{sequence("create_reminder","list_reminders","update_reminder","list_reminders");val current=repository.listReminders(limit=50).single();assertEquals(fixedReminderTitle,current.title);assertEquals(future.toInstant().toEpochMilli(),current.atEpochMillis);assertTrue(app.scheduler.verifyScheduled(current));val created=verified.single{it.tool=="create_reminder"};assertEquals(reminderTitle,created.arguments.getValue("title").jsonPrimitive.content);assertEquals(future.toInstant(),OffsetDateTime.parse(created.arguments.getValue("datetime").jsonPrimitive.content).toInstant());assertEquals(current.id,verified.single{it.tool=="update_reminder"}.arguments.getValue("id").jsonPrimitive.content);assertTrue(body.contains(fixedReminderTitle));details["reminderQueueVerified"]=JsonPrimitive(true);details["futureDeliveryVerified"]=JsonPrimitive(false)}
                 "file_typo"->{sequence("read_project_file","write_project_file","read_project_file");assertEquals(afterFile,ws.read("handoff.txt"));assertEquals(fixtureHashes["keep.txt"],fileHash(File(root,"keep.txt")));val write=verified.single{it.tool=="write_project_file"};assertEquals(fixtureHashes["handoff.txt"],write.arguments.getValue("expectedSha256").jsonPrimitive.content);assertEquals(afterFile,write.arguments.getValue("content").jsonPrimitive.content);assertEquals("handoff.txt",verified.last{it.tool=="read_project_file"}.arguments.getValue("path").jsonPrimitive.content);assertEquals(2,ws.list().size)}
                 "storage_report"->{
+                    if(gradeVersion==1){
                     sequence("inspect_project_storage","find_project_duplicates","save_note")
                     approvalDiagnostics.markCheck("POST_STORAGE_PROJECT_ROOT")
                     assertTrue(verified.filter{it.tool in setOf("inspect_project_storage","find_project_duplicates")}.all{(it.arguments["path"] as? JsonPrimitive)?.content.orEmpty().isBlank()})
@@ -393,11 +450,29 @@ class TeamModelWorkflowDeviceValidation {
                     approvalDiagnostics.markCheck("POST_STORAGE_FINAL_BODY");assertTrue(body.contains(storageBody))
                     details["binaryFixtureBytesEach"]=JsonPrimitive(photoBytes)
                     details["exactDuplicateFixtureUnchanged"]=JsonPrimitive(true);details["visualSimilarityValidated"]=JsonPrimitive(false)
+                    }else{
+                        val notes=repository.notes.first()
+                        val files=ws.list()
+                        val assessment=QaStorageGoalGradeV2.assess(QaStorageGoalGradeV2.Snapshot(
+                            completed.status,pcSeen,engine.get()?.generatedOnPc()==true,steps,approvals.count{it=="save_note"},
+                            notes.map{QaStorageGoalGradeV2.Note(it.title,it.body)},
+                            notes.singleOrNull()?.let{repository.getNote(it.id)==it}==true,noteTitle,storageBody,
+                            files.map{it.path},fixtureHashes.keys.associateWith{fileHash(File(root,it))},fixtureHashes,body))
+                        details["gradeVersion"]=JsonPrimitive(2)
+                        details["legacyApiRecipeMet"]=JsonPrimitive(assessment.legacyApiRecipeMet)
+                        details["inspectProjectStorageCallCount"]=JsonPrimitive(assessment.inspectCalls)
+                        details["goalChecksBeforeCleanup"]=JsonObject(assessment.checks.mapValues{JsonPrimitive(it.value)})
+                        details["goalMetBeforeCleanup"]=JsonPrimitive(assessment.goalMetBeforeCleanup)
+                        assessment.checks.forEach{(checkCode,met)->approvalDiagnostics.markCheck(checkCode);assertTrue(checkCode,met)}
+                        details["binaryFixtureBytesEach"]=JsonPrimitive(photoBytes)
+                        details["exactDuplicateFixtureUnchanged"]=JsonPrimitive(true);details["visualSimilarityValidated"]=JsonPrimitive(false)
+                    }
                 }
                 "capabilities"->{sequence("get_agent_capabilities");assertEquals(1,verified.count{it.tool=="get_agent_capabilities"});assertTrue(repository.notes.first().isEmpty());assertTrue(repository.listReminders(limit=50).isEmpty());assertTrue(ws.list().isEmpty());details["prerequisiteMetadataObserved"]=JsonPrimitive(true);details["metadataProvesRuntimeReadiness"]=JsonPrimitive(false)}
             }
             details["positiveCompletionVerified"]=JsonPrimitive(true)
             details["requiredVerifiedStagesAndOrder"]=JsonPrimitive(true)
+            if(gradeVersion==2)details["requiredVerifiedStagesCriterion"]=JsonPrimitive("find_project_duplicates_then_save_note; inspect_optional")
             details["independentScopedStateReadback"]=JsonPrimitive(true)
         }catch(error:Throwable){caught=error;onFailure(error);if(error is OwnerWorkActive)ownerInterrupted=true;checkpoint("case_caught")}
         finally {
@@ -431,7 +506,12 @@ class TeamModelWorkflowDeviceValidation {
             }
         }
         val interruptedExternally=caught is CancellationException&&!currentCoroutineContext().isActive
+        if(gradeVersion==2){
+            details["legacyApiRecipeMet"]=JsonPrimitive(QaStorageGoalGradeV2.legacyApiRecipeMet(steps))
+            details["inspectProjectStorageCallCount"]=JsonPrimitive(steps.count{it.tool=="inspect_project_storage"})
+        }
         val row=buildJsonObject {
+            if(gradeVersion==2){put("gradeVersion",2);put("gradeCriterion","storage_user_goal_with_actual_find_then_save");put("changesHistoricalVerdict",false)}
             put("kind",kind);put("round",round);put("versionCode",version);put("batchToken",token)
             put("passed",caught==null&&cleanupFailure==null);put("abortBatch",ownerInterrupted||cleanupFailure!=null||interruptedExternally)
             put("status",status);put("errorCode",code);put("pcSeen",pcSeen);put("allowCloudText",false);put("capturedPcRevision",revision)

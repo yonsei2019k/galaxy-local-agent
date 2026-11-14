@@ -1048,3 +1048,9 @@ Tailscale: 기준 실행 완료·compute_busy=false/cleanup_pending=false·모�
 ### 2026-11-14 상용화 준비 분석 보고서 (문서만, 소스·빌드·설치 변경 없음)
 
 `docs/commercial-readiness-2026-11-14.ko.md`를 추가했다. 기준은 커밋 8c3ed07과 설치 1059의 기존 기록이며, 저장소 문서·빌드 설정·매니페스트·CI·lint 결과·평가 기록을 읽어 정리했다. 새 빌드, 기기 검사, 모델 평가는 실행하지 않았다. 에이전트 품질, PC 의존 구조, 보안·개인정보, 배포·스토어 정책, 코드 구조, 사용자 경험, 운영·지원, 법무, 검증 체계의 간격과 단계별 통과 기준을 담는다. 스토어 정책·법률 항목은 최신 문서와 대조하지 않은 검토 필요 지적이다. 계약·도구·프롬프트 변경은 없다. 배포 경로, 추론 위치, 지원 범위의 소유자 결정이 남아 있다.
+## 2026-11-15 — 저장공간 goal-v2 실제1of2 / 정확한 저장 뒤 불필요 질문 발견
+
+Root가 별도 opt-in 시험 경로와 순수12회귀를 통합했다. 기존 v1 selector/요청/fixture/83assert와 과거 실패는 그대로이며, v2는 find 결과로 충분한 경우 redundant inspect 순서를 강제하지 않는다. 실제 PC·VERIFIED find→save·정확한4줄/메모1/승인1/독립 readback·파일3과원본해시·최종상태/본문·정리는 유지한다. production1069 main1cadc61b 불변, 새 test c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d 서명/설치/독립해시/directoverlay PASS. core828/app717=1545 JVM0fail/error/skip 및 androidTest assemble PASS, 원래73통제검사는 이번 test-only phase에서 재실행하지 않았다.
+
+실제2회는 round0 PASS253935ms/completed, round1 FAIL152439ms/paused(awaiting_owner_input)다. 두 회차 모두 실제 find→save/정확한보고메모1개/파일3개·해시불변/cleanuptrue를 독립 확인했지만, 두 번째는 이미 요청·저장된 형식을 다시 묻고 멈췄다. 정확한 artifact를 전체 성공으로 승격하지 않는다. planned/started/recorded2·unstarted0·all_attempts_recorded, 과거v1재등급0. 종료 후662source+10public+6build/설치바이트/directoverlay와 PC idle·cleanup 재확인. 세 채팅의 cancel handshake·typed paired-PC target·장문 note 후보는 ignored에서만 작성 중이며 아직 설치되지 않았다.
+

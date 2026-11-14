@@ -2,6 +2,12 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Latest test-only checkpoint: storage goal v2 passes1/2
+
+Production1069 is unchanged. A separate opt-in storage goal-v2 test APK `c3190b0b24df66623fe4163eebb62abe6659adf03d3200e54b96c3f7d800926d` is installed and independently matched. Core828/app717=1545 JVM tests pass with zero failures/errors/skips; Android-test assembly passes. All662 source,10 public and6 build inputs and installed bytes/pinned direct-overlay health match after the actual model batch. Earlier controlled73/73 belongs to the preceding test APK, not a new run of this test-only phase.
+
+Actual goal-v2 storage repeats pass1/2: round0 completes in253935ms; round1 pauses in152439ms with awaiting_owner_input after an unnecessary format question. Both independently contain exactly one correctly titled, exact four-line report note, unchanged three-file inventories/hashes and verified fixture cleanup. Both use actual find_project_duplicates→save_note, without redundant inspect. The paused round remains FAIL despite its correct stored artifact. All2 attempts are recorded, none unstarted; original v1 failures are unchanged. PC is idle afterward. No internal-distribution approval is implied.
+
 ## Current actual device checkpoint: installed1069;1533 JVM and controlled73/73 pass
 
 Main SHA `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`, test SHA `29791c77a50b7bb6c918215a2ed9f8dfa9ce8e55af59da8682779fe12f75e83a`, independently matched on the phone without data reset. Final build3m20/signing/lint0 errors/144 warnings/1 hint PASS; core828/app705=1533 JVM tests pass with zero failures/errors/skips. All660 source+10 public+6 build inputs and installed hashes/pinned overlay match after controlled73/73 phone tests: old59, Calendar8, read/hash binding6. Cold cancellation/1MiB also pass and their overlaps are not added.
