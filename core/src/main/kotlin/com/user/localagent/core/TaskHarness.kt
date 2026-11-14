@@ -7,13 +7,13 @@ import kotlinx.serialization.json.*
 enum class VerificationState { VERIFIED, PREPARED, UNVERIFIED, FAILED }
 
 /** Display/verification metadata, never a permission grant or a model-issued authority. */
-class TaskGoal(ownerRequest:String,successCriteria:List<String>,val stepBudget:Int=6,requiredTools:Set<String> = emptySet(),requiredArtifactFormats:Set<String> = emptySet()) {
+class TaskGoal(ownerRequest:String,successCriteria:List<String>,val stepBudget:Int=WorkSegments.STEP_BUDGET,requiredTools:Set<String> = emptySet(),requiredArtifactFormats:Set<String> = emptySet()) {
     val ownerRequest:String=ownerRequest.also {require(it.isNotBlank()&&it.length<=6000)}
     val goal:String get()=ownerRequest
     val successCriteria:List<String> = Collections.unmodifiableList(successCriteria.map {it.also {criterion->require(criterion.isNotBlank()&&criterion.length<=1000)}})
     val requiredTools:Set<String> = Collections.unmodifiableSet(requiredTools.toSet())
     val requiredArtifactFormats:Set<String> = Collections.unmodifiableSet(requiredArtifactFormats.toSet())
-    init {require(stepBudget in 1..6);require(this.successCriteria.isNotEmpty()&&this.successCriteria.size<=12);require(this.requiredTools.size<=12);require(this.requiredArtifactFormats.size<=5&&this.requiredArtifactFormats.all {it in setOf("docx","xlsx","pdf","txt","csv")})}
+    init {require(stepBudget in 1..WorkSegments.STEP_BUDGET);require(this.successCriteria.isNotEmpty()&&this.successCriteria.size<=12);require(this.requiredTools.size<=12);require(this.requiredArtifactFormats.size<=5&&this.requiredArtifactFormats.all {it in setOf("docx","xlsx","pdf","txt","csv")})}
 }
 data class StepEvidence(val tool:String,val state:VerificationState,val summary:String,val continuationId:String?=null) {
     init {
@@ -72,7 +72,7 @@ class StuckRecovery {
 /** Decisions consume host-generated verification only, never assertions from the model or source data. */
 object TaskHarness {
     /** Inherit only capabilities that the host router recognizes for a short follow-up. */
-    fun inferGoal(ownerRequest:String,previousUserRequests:List<String>,stepBudget:Int=6):TaskGoal {
+    fun inferGoal(ownerRequest:String,previousUserRequests:List<String>,stepBudget:Int=WorkSegments.STEP_BUDGET):TaskGoal {
         val web=WebTaskPlanner.plan(ownerRequest,previousUserRequests)
         if(web is WebTaskPlan.WebResearch&&!ProjectPaths.isBoundFileRequest(ownerRequest)&&DocumentTaskPlanner.plan(ownerRequest)==null)return researchGoal(ownerRequest,web,stepBudget)
         val current=inferGoal(ownerRequest,stepBudget)

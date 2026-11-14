@@ -107,7 +107,7 @@ object SemanticRequestPlanning {
         return toolClosure(plan.requiredTools, availableTools)
     }
 
-    fun toTaskGoal(plan: SemanticRequestPlan, stepBudget: Int = 6): TaskGoal {
+    fun toTaskGoal(plan: SemanticRequestPlan, stepBudget: Int = WorkSegments.STEP_BUDGET): TaskGoal {
         validate(plan, ToolRegistry.definitions.keys)
         return TaskGoal(plan.goal, listOf(evidenceCriterion(plan)) + plan.constraints, stepBudget, plan.requiredTools)
     }

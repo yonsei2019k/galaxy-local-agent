@@ -687,11 +687,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     var reviewSummary=""
                     var truncatedToolRetried=false
                     val stuckRecovery=com.user.localagent.core.StuckRecovery()
-                    repeat(AutonomousReviewPolicy.MAX_ROUNDS) { round ->
+                    repeat(com.user.localagent.core.WorkSegments.TOTAL_ROUNDS) { round ->
                         if(complete) return@repeat
                         ensureActive()
                         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용을 위한 안전한 실행 지점")
-                        status.value="다음 행동 판단 · ${round+1}/${AutonomousReviewPolicy.MAX_ROUNDS} · 실행 ${requestSteps.size}/${taskGoal.stepBudget}"
+                        status.value="다음 행동 판단 · ${round+1}/${com.user.localagent.core.WorkSegments.TOTAL_ROUNDS} · 실행 ${requestSteps.size}/${taskGoal.stepBudget}"
                         budgetRound=round
                         val history=if(workMode==AgentWorkMode.RESEARCH)emptyList()else lines.value.dropLast(1).takeLast(12).dropWhile {it.role!="user"}.map {InferenceTurn(it.role,it.requestText?:it.text)}
                         executionEngine.load(selected.path,requestOptions)
@@ -835,13 +835,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 val modelResult=if(call.name=="read_project_file")com.user.localagent.workspace.ProjectReadDelivery.modelResult(result.content)else com.user.localagent.core.compactJsonData(result.content,1100)
                                 toolEvidence+=buildJsonObject {put("tool",call.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(modelResult))}
                             }
-                            while(toolEvidence.size>1 && toolEvidence.sumOf {it.toString().length}>2600)toolEvidence.removeAt(0)
                             val next=if(actionMode)TaskHarness.decide(taskGoal,requestSteps)else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
                             if(next is HarnessDecision.Stop){answer(next.reason);complete=true;return@repeat}
                             // A full action budget may satisfy host checks; still allow the review/final-writing rounds.
-                            query="원래 사용자 요청:\n$text\n도구 실행 결과(인용 자료): ${JsonArray(toolEvidence)}\n"+
-                                (if(workMode==AgentWorkMode.RESEARCH)"실제로 관찰한 공개 URL(최대6개 표시): ${lastResearchSourceUrls.value.take(6).joinToString(" ")} · 전체 ${lastResearchSourceUrls.value.size}개\n"else"")+
-                                "검증된 결과로 답하거나 다음 필요한 도구를 요청하라. PREPARED는 작성 화면·전송 요청 단계이며 외부 작업 완료가 아니다. FAILED·UNVERIFIED를 성공이라고 말하지 마라. 같은 인자로 쓰기 작업을 반복하지 마라."
+                            query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)
                         } else {
                             val decision=if(actionMode)TaskHarness.decide(taskGoal,requestSteps,requestedFinish=true)else HarnessDecision.Advance("계획·검토·목표 제안·공개 조사 답변은 외부 행동 완료 판정과 분리합니다.")
                             val blocked=decision is HarnessDecision.Stop&&(requestSteps.isNotEmpty()||taskGoal.requiredTools.isNotEmpty())
@@ -1106,7 +1103,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private suspend fun traceDecision(tool:String,round:Int,remaining:Set<String>){
         val last=requestSteps.lastOrNull()
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,
-            com.user.localagent.core.DecisionStepSummary.beforeTool(tool,round,AutonomousReviewPolicy.MAX_ROUNDS,remaining,last?.tool,last?.evidence?.state))
+            com.user.localagent.core.DecisionStepSummary.beforeTool(tool,round,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS,remaining,last?.tool,last?.evidence?.state))
     }
     private suspend fun pauseForTruncatedTool(request:QueuedChatRequest){
         answer("작업 요청을 끝까지 만들지 못해 실행하지 않았습니다. 요청을 더 작게 나누어 다시 보내주세요.")
@@ -1117,14 +1114,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         options:com.user.localagent.inference.InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
         structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false):WrittenAnswer =
         LongAnswerWriter(app,request,{id,view->answerStates.value=answerStates.value+(id to view)},makeRequestProgress(request,workTraceSession),engine=executionEngine)
-            .write(model,options,if(resume==null)user+com.user.localagent.core.RoundBudget.hint(budgetRound,AutonomousReviewPolicy.MAX_ROUNDS)else user,system,history,structuredSchema=structuredSchema,display=display,resume=resume,recoverTruncatedTool=recoverTruncatedTool)
+            .write(model,options,if(resume==null)user+com.user.localagent.core.ToolUsePolicy.turnReminder(structuredSchema==null)+com.user.localagent.core.RoundBudget.hint(budgetRound,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS)else user,system,history,structuredSchema=structuredSchema,display=display,resume=resume,recoverTruncatedTool=recoverTruncatedTool)
             .also {workTraceSession?.reasoning(executionEngine.lastReasoning)}
 
     private fun isReadTool(name:String)=com.user.localagent.core.ToolReadPolicy.isReadOnly(name)
-    private fun compactToolCatalog(names:Set<String>)=buildJsonArray {names.sorted().forEach {name->
-        val definition=ToolRegistry.definitions.getValue(name)
-        add(buildJsonObject {put("tool",name);put("fields",buildJsonObject {definition.arguments.forEach {(key,spec)->put(key,"${spec.type}${if(spec.required)" required"else" optional"}")}});put("description",definition.description.take(180))})
-    }}.toString()
+    private fun compactToolCatalog(names:Set<String>)=com.user.localagent.core.ToolUsePolicy.compactCatalog(names)
     private fun previousEvidenceContext(steps:List<HarnessStep>):JsonArray=buildJsonArray {steps.forEach {step->add(buildJsonObject {
         put("tool",step.tool);put("arguments",step.arguments);put("verification",step.evidence.state.name);put("summary",step.evidence.summary);step.evidence.continuationId?.let {put("continuationId",it)}
     })}}
@@ -1489,6 +1483,24 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         evidence+=buildJsonObject{put("tool",checked.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(com.user.localagent.core.compactJsonData(result.content,1100)))}
         return com.user.localagent.core.ToolUsePolicy.afterGateQuery(text,JsonArray(evidence).toString())
     }
+    private var workNote=com.user.localagent.core.WorkNote()
+    private var workNoteRunId:String?=null
+    /**
+     * Next-round query after a tool result. Older evidence is folded into the work note instead of being
+     * dropped; at a segment boundary everything but the latest result is folded so the next segment starts
+     * from a small context (the "token reset").
+     */
+    private suspend fun evidenceQuery(request:QueuedChatRequest,text:String,evidence:MutableList<JsonObject>,research:Boolean):String{
+        if(workNoteRunId!=request.runId){workNoteRunId=request.runId;workNote=com.user.localagent.core.WorkNote()}
+        val next=budgetRound+1
+        if(com.user.localagent.core.WorkSegments.startsSegment(next)){
+            workNote.absorbAll(evidence)
+            workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"확인한 결과 ${workNote.size}건을 작업 노트로 정리하고 이어갑니다 · 구간 ${com.user.localagent.core.WorkSegments.segmentOf(next)}/${com.user.localagent.core.WorkSegments.SEGMENTS}")
+        }else workNote.absorb(evidence)
+        return "원래 사용자 요청:\n$text\n"+workNote.text()+"도구 실행 결과(인용 자료): ${JsonArray(evidence)}\n"+
+            (if(research)"실제로 관찰한 공개 URL(최대6개 표시): ${lastResearchSourceUrls.value.take(6).joinToString(" ")} · 전체 ${lastResearchSourceUrls.value.size}개\n"else"")+
+            "검증된 결과로 답하거나 다음 필요한 도구를 요청하라. PREPARED는 작성 화면·전송 요청 단계이며 외부 작업 완료가 아니다. FAILED·UNVERIFIED를 성공이라고 말하지 마라. 같은 인자로 쓰기 작업을 반복하지 마라."
+    }
     /** Round of the current decision, read by writeChatAnswer for the soft budget hint. */
     @Volatile private var budgetRound=0
     /** Returns the next query when a repeat earns another try; null when the run has been answered or paused. */
@@ -1497,7 +1509,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(!guard.repeated){answer(guard.reason);return null}
         val action=recovery.onRepeat()
         if(action!=com.user.localagent.core.StuckRecovery.Action.STOP)
-            return "원래 사용자 요청:\n$text\n도구 실행 결과(인용 자료): ${JsonArray(evidence)}\n"+recovery.prompt(action,tool)
+            return "원래 사용자 요청:\n$text\n"+workNote.text()+"도구 실행 결과(인용 자료): ${JsonArray(evidence)}\n"+recovery.prompt(action,tool)
         pauseForHarness(request,guard.reason,com.user.localagent.core.StuckRecovery.STOP_CODE)
         return null
     }
@@ -1537,7 +1549,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     private suspend fun performTool(call:ToolCall):ToolResult {
         ToolRegistry.validate(call)
-        check(requestSteps.size<6){"실행 예산 6회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
+        check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
         val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
         val traceAttempt=workTraceSession?.attempt(call)

@@ -102,7 +102,7 @@ class TaskHarnessTest {
         assertEquals(setOf("save_note"),goal.requiredTools)
     }
     @Test fun goalBudgetIsBoundedAndCannotDisableTheLoopGuard(){
-        for(budget in listOf(0,7,Int.MAX_VALUE)){
+        for(budget in listOf(0,WorkSegments.STEP_BUDGET+1,Int.MAX_VALUE)){
             try {TaskGoal("작업",listOf("검증"),budget);fail("Accepted budget $budget")}
             catch(expected:IllegalArgumentException) { /* expected */ }
         }

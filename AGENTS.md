@@ -20,3 +20,7 @@ For request understanding and research changes, also read `docs/agent-harness-re
 - The name is ZipHap.Agent; retain the application ID/signing key to preserve installed data and update compatibility.
 
 Local developer tools and signing material are outside this public repository. The ignored .local handoff explains their location. Do not copy signing material into source or upload it except to the already-authorized encrypted Actions Secrets.
+
+## Local LLM delegation (optional MCP)
+
+When the `ziphap-local-llm` MCP server is connected (`pc-worker/mcp/README.ko.md`), stay the orchestrator and delegate token-heavy reading, summarising, extraction and bulk rewriting to the PC model: `local_digest_files` for the gist of large or many files, `local_ask`/`local_batch` for self-contained subtasks. Keep design decisions, exact code edits, security judgement and final verification yourself, and check delegated results before relying on them. If a tool reports the PC is busy (the phone has priority), do that part yourself.

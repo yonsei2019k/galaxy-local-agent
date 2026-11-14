@@ -28,7 +28,31 @@ GEMMAS={
  'gemma-e4b':(GEMMA_ROOT/'gemma-e4b.gguf','d0027dd3a9128d9323e9f282c8bf010a8526c46477584535991dc1a869b56e96'),
  'pc-text':(Path(r'D:\ZipHap\Compute\Models\Qwen3.5-9B-Q4_K_M.gguf'),'03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8'),
 }
-THINKING_ALLOWANCE=3500
+THINKING_ALLOWANCE=900
+THINK_LIMIT=300
+class ThinkGuard:
+ """Passes the SSE stream through. If the model is still thinking after THINK_LIMIT reasoning tokens, or runs
+ out of tokens before any answer text, the request is reopened without thinking and its stream continues here.
+ A 3500-token allowance let single replies run 5-7 minutes, past the phone's 300 s read timeout."""
+ def __init__(self,first,reopen):self.r=first;self.reopen=reopen;self.count=0;self.content=False;self.switched=False
+ def readline(self,size=-1):
+  line=self.r.readline(size)
+  if self.switched or self.content or not line.startswith(b'data: ') or line.strip()==b'data: [DONE]':return line
+  try:event=json.loads(line[6:])
+  except ValueError:return line
+  for choice in event.get('choices') or []:
+   delta=choice.get('delta') or {}
+   if delta.get('content'):self.content=True;return line
+   if delta.get('reasoning_content'):self.count+=1
+   if self.count>THINK_LIMIT or choice.get('finish_reason')=='length':
+    try:self.r.close()
+    except Exception:pass
+    self.r=self.reopen();self.switched=True
+    return b': thinking limit reached, answering directly\n\n'
+  return line
+ def close(self):
+  try:self.r.close()
+  except Exception:pass
 _verified={}
 def verify_file(path,expected):
  identity=(path.stat().st_size,path.stat().st_mtime_ns,expected)
@@ -245,9 +269,13 @@ class Engines:
     schema=request['schema']
     if not isinstance(schema,dict) or len(json.dumps(schema))>65536:raise ValueError('SCHEMA_BOUND')
     payload['response_format']={'type':'json_schema','json_schema':{'name':'ziphap_output','strict':True,'schema':schema}}
-   with self.upstream('/v1/chat/completions',payload,timeout=300) as response:
+   direct=dict(payload,max_tokens=maximum,chat_template_kwargs={'enable_thinking':False})
+   guard=ThinkGuard(self.upstream('/v1/chat/completions',payload,timeout=300),lambda:self.upstream('/v1/chat/completions',direct,timeout=300)) if think else None
+   response=guard or self.upstream('/v1/chat/completions',payload,timeout=300)
+   try:
     with self.upstream_lock:self.upstreams[key]=response
     send(response)
+   finally:response.close()
   finally:
    with self.upstream_lock:self.upstreams.pop(key,None)
    if self.llm and self.llm.poll() is None:
