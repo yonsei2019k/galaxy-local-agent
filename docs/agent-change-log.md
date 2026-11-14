@@ -1,3 +1,9 @@
+## 2026-11-15 — ARCH-P1-01 순수 계약·상태 구현 인계
+
+배포 채팅 소유의 새 protocol/orchestration/v1/와 pc-worker/orchestration/11파일을 root가 인계받았다. 네트워크/프로세스/모델/파일 실행 효과 없는 stdlib prototype이다. 제출의도와 trusted-test HostAuthority/ExecutionBinding, scope/epoch/권한revision·job CAS, capability subset, 별도 external 권한 false 기본, idempotency충돌·단회 승인·cancel요청/ACK·효과불명 재시도 차단을 구현했다. wire파싱/Source enum은 실제 인증/격리/독립 효과증명의 구현이 아니다. 암호화 영속/TTL/provider/endpoint/Kotlin parity/실제target·byte readback은 아직없다.
+
+root 독립 `python -I -B -m unittest discover -s pc-worker/orchestration -p test_*.py`38개 PASS, 실패/오류/skip0.27wire/31state step은38개 내부이며 합산하지 않는다. 새 Android/worker 서비스 연결·설치0, 기존 app/core 회귀를 이 증거로 대체하지 않는다.11파일 외 기존worker/설계3문서 변경0, root의1062 앱 빌드와 분리한다.
+
 ## 2026-11-15 — 1061 진단 설치와 세 개발 채팅의 다음 소유권
 
 Root가 공유 소스·Gradle·서명·설치·실제 모델/폰 창·커밋을 계속 독점한다.1061 main SHA `2f196b057cdec55a1a50b1390c2252911582adb935c431e269373d199c14b35f`, test SHA `bcd20da999f2d42dba39727ebd2b683ca2635827e06e1ee3d48ff2792b9ea4e4` 설치 바이트 독립 일치, 데이터 초기화0. core718/app607=1325 JVM 실패/오류/skip0, 릴리스/테스트 빌드·서명 PASS, lint0오류144경고1hint. 통제 폰42/42 재통과, skip0. direct pinned Tailscale182ms는 외부망 이동/추론 성능 증거가 아니다.

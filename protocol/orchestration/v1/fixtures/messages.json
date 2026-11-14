@@ -1,0 +1,168 @@
+{
+  "fixture_version": 1,
+  "note": "Synthetic offline wire examples only. Accepted shape is not permission, authentication, execution or actual host verification.",
+  "cases": [
+    {
+      "id": "task-local-read",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"]}}",
+      "accepted": true,
+      "kind": "task_request"
+    },
+    {
+      "id": "task-local-write",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"write_artifact\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.write\"]}}",
+      "accepted": true,
+      "kind": "task_request"
+    },
+    {
+      "id": "task-external-intent-no-grant",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"external_agent\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"]}}",
+      "accepted": true,
+      "kind": "task_request"
+    },
+    {
+      "id": "task-phone-proposal",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"propose_artifact\",\"scope\":\"example-scope\",\"target\":\"phone\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"artifact.propose\"]}}",
+      "accepted": true,
+      "kind": "task_request"
+    },
+    {
+      "id": "control-start",
+      "raw": "{\"version\":1,\"kind\":\"control\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":0,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"action\":\"start\",\"approval_id\":null}",
+      "accepted": true,
+      "kind": "control"
+    },
+    {
+      "id": "control-approve",
+      "raw": "{\"version\":1,\"kind\":\"control\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":0,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"action\":\"approve\",\"approval_id\":\"example-approval\"}",
+      "accepted": true,
+      "kind": "control"
+    },
+    {
+      "id": "host-verified",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"effect_verified\",\"result_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+      "accepted": true,
+      "kind": "host_observation"
+    },
+    {
+      "id": "host-not-applied",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"not_applied\",\"result_digest\":null}",
+      "accepted": true,
+      "kind": "host_observation"
+    },
+    {
+      "id": "host-cancel-ack",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"cancel_ack\",\"result_digest\":null}",
+      "accepted": true,
+      "kind": "host_observation"
+    },
+    {
+      "id": "task-cannot-carry-grant",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"]},\"grant\":{\"allow\":true}}",
+      "accepted": false,
+      "error": "UNKNOWN_FIELD"
+    },
+    {
+      "id": "intent-cannot-carry-provider-token",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"],\"token\":\"example-untrusted\"}}",
+      "accepted": false,
+      "error": "UNKNOWN_FIELD"
+    },
+    {
+      "id": "missing-version-not-legacy-authority",
+      "raw": "{\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"]}}",
+      "accepted": false,
+      "error": "MISSING_FIELD"
+    },
+    {
+      "id": "bool-is-not-revision",
+      "raw": "{\"version\":1,\"kind\":\"control\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":true,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"action\":\"start\",\"approval_id\":null}",
+      "accepted": false,
+      "error": "TYPE"
+    },
+    {
+      "id": "bool-is-not-version",
+      "raw": "{\"version\":true,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"]}}",
+      "accepted": false,
+      "error": "TYPE"
+    },
+    {
+      "id": "unknown-provider",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"all-cloud\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\"]}}",
+      "accepted": false,
+      "error": "VALUE"
+    },
+    {
+      "id": "duplicate-capability",
+      "raw": "{\"version\":1,\"kind\":\"task_request\",\"request_id\":\"example-request\",\"idempotency_key\":\"example-key\",\"intent\":{\"operation\":\"inspect_workspace\",\"scope\":\"example-scope\",\"target\":\"pc\",\"provider\":\"local\",\"input_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capabilities\":[\"workspace.read\",\"workspace.read\"]}}",
+      "accepted": false,
+      "error": "DUPLICATE_ITEM"
+    },
+    {
+      "id": "agent-cannot-declare-verified",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"effect_verified\",\"result_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"verification\":\"VERIFIED\"}",
+      "accepted": false,
+      "error": "UNKNOWN_FIELD"
+    },
+    {
+      "id": "wire-origin-is-not-trusted",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"effect_verified\",\"result_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"source\":\"host\"}",
+      "accepted": false,
+      "error": "UNKNOWN_FIELD"
+    },
+    {
+      "id": "approval-needs-id",
+      "raw": "{\"version\":1,\"kind\":\"control\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":0,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"action\":\"approve\",\"approval_id\":null}",
+      "accepted": false,
+      "error": "TYPE"
+    },
+    {
+      "id": "start-cannot-smuggle-approval-id",
+      "raw": "{\"version\":1,\"kind\":\"control\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":0,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"action\":\"start\",\"approval_id\":\"example-old-approval\"}",
+      "accepted": false,
+      "error": "TYPE"
+    },
+    {
+      "id": "verified-needs-result-digest",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"effect_verified\",\"result_digest\":null}",
+      "accepted": false,
+      "error": "TYPE"
+    },
+    {
+      "id": "ack-is-not-result-proof",
+      "raw": "{\"version\":1,\"kind\":\"host_observation\",\"request_id\":\"example-request\",\"scope\":\"example-scope\",\"epoch\":2,\"expected_revision\":1,\"request_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"event\":\"cancel_ack\",\"result_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+      "accepted": false,
+      "error": "TYPE"
+    },
+    {
+      "id": "binding-is-not-wire-message",
+      "raw": "{\"version\":1,\"kind\":\"execution_binding\",\"allow_external_agent\":true}",
+      "accepted": false,
+      "error": "KIND"
+    },
+    {
+      "id": "duplicate-root-key",
+      "raw": "{\"kind\":\"control\",\"kind\":\"host_observation\"}",
+      "accepted": false,
+      "error": "DUPLICATE_KEY"
+    },
+    {
+      "id": "duplicate-nested-key",
+      "raw": "{\"kind\":\"task_request\",\"intent\":{\"scope\":\"example-a\",\"scope\":\"example-b\"}}",
+      "accepted": false,
+      "error": "DUPLICATE_KEY"
+    },
+    {
+      "id": "non-finite",
+      "raw": "{\"kind\":\"control\",\"epoch\":NaN}",
+      "accepted": false,
+      "error": "NON_FINITE"
+    },
+    {
+      "id": "floating-revision",
+      "raw": "{\"kind\":\"control\",\"epoch\":1.0}",
+      "accepted": false,
+      "error": "INTEGER_REQUIRED"
+    }
+  ]
+}

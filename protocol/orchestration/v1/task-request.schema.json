@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZipHap offline prototype task-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "kind",
+    "request_id",
+    "idempotency_key",
+    "intent"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "task_request"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "scope",
+        "target",
+        "provider",
+        "input_digest",
+        "capabilities"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "inspect_workspace",
+            "propose_artifact",
+            "write_artifact"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "phone",
+            "pc"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "local",
+            "external_agent"
+          ]
+        },
+        "input_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "workspace.read",
+              "artifact.propose",
+              "workspace.write"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

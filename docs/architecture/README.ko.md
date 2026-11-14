@@ -38,4 +38,6 @@
 
 단계1은 실행 권한을 발급하는 제품 서비스가 아니다. 최종 wire와 Kotlin/Python의 동일 golden fixture 검사가 준비되기 전 Android 실행 경로에 연결하지 않는다. 별도 Gradle 모듈이나 전체 coordinator 교체를 먼저 요구하지 않는다.
 
+단계1의 첫 작은 구현은 [순수 Python 계약·상태기계](../../pc-worker/orchestration/README.ko.md)와 [v1 합성 wire/fixture](../../protocol/orchestration/v1/README.md)에 있다. Root가 독립 재실행한38개 unittest가 통과했다.27개 wire 사례와7개 상태 script의31step은 그38검사 내부에 포함된다. 이 구현은 메모리 안에서만 상태를 검증하며 실제 인증·권한 저장·암호화/TTL·provider·프로세스·endpoint·Kotlin parity·폰/PC 제어는 미구현이다. 외부 agent 연결·설치나 실제 효과 검증 완료로 해석하지 않는다.
+
 세 개발 채팅은 모델·추론(xhigh), 도구·문제해결(high), 검증·내부배포(xhigh)로 역할을 나눈다. 각 작업은 파일·기준 hash·검사 범위를 인계한다. 통합 담당만 공유 계약 반영, Gradle·서명·설치·실제 모델 창·커밋을 소유한다. 채팅 간 보고는 같은 버전과 증거 종류로 연결하고 다른 작업의 결과를 합쳐 성공률을 만들지 않는다.

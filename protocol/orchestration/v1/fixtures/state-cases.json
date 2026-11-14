@@ -1,0 +1,352 @@
+{
+  "fixture_version": 1,
+  "note": "Synthetic test scripts, not wire messages. $request_digest is supplied by the harness from the parsed task; no live authority or effects.",
+  "cases": [
+    {
+      "id": "read-host-attested-completion",
+      "task_case": "task-local-read",
+      "steps": [
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 0,
+          "expect": {
+            "phase": "running",
+            "revision": 1,
+            "effect": "in_flight",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_verified",
+          "expected_revision": 1,
+          "expect": {
+            "phase": "completed",
+            "revision": 2,
+            "effect": "host_attested_verified",
+            "attempts": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "write-single-use-and-stale-cas",
+      "task_case": "task-local-write",
+      "steps": [
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 0,
+          "error": "PHASE"
+        },
+        {
+          "kind": "control",
+          "action": "approve",
+          "expected_revision": 0,
+          "approval_id": "example-approval-a",
+          "expect": {
+            "phase": "ready",
+            "revision": 1,
+            "effect": "none",
+            "attempts": 0
+          }
+        },
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 1,
+          "expect": {
+            "phase": "running",
+            "revision": 2,
+            "effect": "in_flight",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 1,
+          "error": "STALE_REVISION"
+        },
+        {
+          "kind": "observation",
+          "event": "not_applied",
+          "expected_revision": 2,
+          "expect": {
+            "phase": "paused",
+            "revision": 3,
+            "effect": "not_applied",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "retry",
+          "expected_revision": 3,
+          "expect": {
+            "phase": "awaiting_approval",
+            "revision": 4,
+            "effect": "not_applied",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "approve",
+          "expected_revision": 4,
+          "approval_id": "example-approval-a",
+          "error": "APPROVAL_REUSED"
+        },
+        {
+          "kind": "control",
+          "action": "approve",
+          "expected_revision": 4,
+          "approval_id": "example-approval-b",
+          "expect": {
+            "phase": "ready",
+            "revision": 5,
+            "effect": "not_applied",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 5,
+          "expect": {
+            "phase": "running",
+            "revision": 6,
+            "effect": "in_flight",
+            "attempts": 2
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_verified",
+          "expected_revision": 6,
+          "expect": {
+            "phase": "completed",
+            "revision": 7,
+            "effect": "host_attested_verified",
+            "attempts": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel-request-not-ack-and-late-effect",
+      "task_case": "task-local-read",
+      "steps": [
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 0,
+          "expect": {
+            "phase": "running",
+            "revision": 1,
+            "effect": "in_flight",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "cancel",
+          "expected_revision": 1,
+          "expect": {
+            "phase": "cancel_requested",
+            "revision": 2,
+            "effect": "in_flight",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_unknown",
+          "expected_revision": 2,
+          "expect": {
+            "phase": "cancel_requested",
+            "revision": 3,
+            "effect": "unknown",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "retry",
+          "expected_revision": 3,
+          "error": "EFFECT_UNCERTAIN_OR_APPLIED"
+        },
+        {
+          "kind": "observation",
+          "event": "cancel_ack",
+          "expected_revision": 3,
+          "expect": {
+            "phase": "cancelled",
+            "revision": 4,
+            "effect": "unknown",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_verified",
+          "expected_revision": 4,
+          "expect": {
+            "phase": "cancelled",
+            "revision": 5,
+            "effect": "host_attested_verified",
+            "attempts": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "unknown-needs-host-reconciliation-and-owner-retry",
+      "task_case": "task-local-read",
+      "steps": [
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 0,
+          "expect": {
+            "phase": "running",
+            "revision": 1,
+            "effect": "in_flight",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_unknown",
+          "expected_revision": 1,
+          "expect": {
+            "phase": "paused",
+            "revision": 2,
+            "effect": "unknown",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "retry",
+          "expected_revision": 2,
+          "error": "EFFECT_UNCERTAIN_OR_APPLIED"
+        },
+        {
+          "kind": "observation",
+          "event": "not_applied",
+          "expected_revision": 2,
+          "expect": {
+            "phase": "paused",
+            "revision": 3,
+            "effect": "not_applied",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "retry",
+          "expected_revision": 3,
+          "expect": {
+            "phase": "ready",
+            "revision": 4,
+            "effect": "not_applied",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 4,
+          "expect": {
+            "phase": "running",
+            "revision": 5,
+            "effect": "in_flight",
+            "attempts": 2
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_verified",
+          "expected_revision": 5,
+          "expect": {
+            "phase": "completed",
+            "revision": 6,
+            "effect": "host_attested_verified",
+            "attempts": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "same-key-is-not-new-permission",
+      "task_case": "task-local-read",
+      "steps": [
+        {
+          "kind": "resubmit",
+          "expect": {
+            "phase": "ready",
+            "revision": 0,
+            "effect": "none",
+            "attempts": 0
+          }
+        },
+        {
+          "kind": "resubmit",
+          "overrides": {
+            "input_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "error": "IDEMPOTENCY_CONFLICT"
+        }
+      ]
+    },
+    {
+      "id": "agent-verified-is-not-host-proof",
+      "task_case": "task-local-read",
+      "steps": [
+        {
+          "kind": "control",
+          "action": "start",
+          "expected_revision": 0,
+          "expect": {
+            "phase": "running",
+            "revision": 1,
+            "effect": "in_flight",
+            "attempts": 1
+          }
+        },
+        {
+          "kind": "observation",
+          "event": "effect_verified",
+          "expected_revision": 1,
+          "source": "AGENT",
+          "error": "UNTRUSTED_SOURCE"
+        },
+        {
+          "kind": "observation",
+          "event": "effect_verified",
+          "expected_revision": 1,
+          "expect": {
+            "phase": "completed",
+            "revision": 2,
+            "effect": "host_attested_verified",
+            "attempts": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "ack-before-cancel-is-invalid",
+      "task_case": "task-local-read",
+      "steps": [
+        {
+          "kind": "observation",
+          "event": "cancel_ack",
+          "expected_revision": 0,
+          "error": "PHASE"
+        }
+      ]
+    }
+  ]
+}
