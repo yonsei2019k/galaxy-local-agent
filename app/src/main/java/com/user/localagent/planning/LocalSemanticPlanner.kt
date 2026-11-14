@@ -1,6 +1,9 @@
 package com.user.localagent.planning
 
 import com.user.localagent.AppContainer
+import com.user.localagent.FailureLog
+import com.user.localagent.compute.PcBusy
+import com.user.localagent.compute.PcUnavailable
 import com.user.localagent.core.SemanticRequestPlan
 import com.user.localagent.core.SemanticRequestPlanning
 import com.user.localagent.core.ToolRegistry
@@ -8,6 +11,7 @@ import com.user.localagent.inference.GenerationEvent
 import com.user.localagent.inference.GenerationStopReason
 import com.user.localagent.inference.GenerationSummary
 import com.user.localagent.inference.InferenceTurn
+import com.user.localagent.inference.PcRequired
 import com.user.localagent.models.ChosenInference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -41,9 +45,11 @@ class SemanticPlanningException(val reasonCode: String, message: String) : Illeg
 class LocalSemanticPlanner internal constructor(
     private val requestEngine:com.user.localagent.inference.InferenceEngine,
     private val progress:(SemanticPlanningTelemetry)->Unit={},
-    private val budget:PlanningBudget=PlanningBudget()) {
+    private val budget:PlanningBudget=PlanningBudget(),
+    private val recordEngineFailure:(stage:String,error:Throwable,code:String)->Unit={_,_,_->}) {
     constructor(app:AppContainer,requestEngine:com.user.localagent.inference.InferenceEngine=app.engine,
-        progress:(SemanticPlanningTelemetry)->Unit={}) : this(requestEngine,progress,PlanningBudget())
+        progress:(SemanticPlanningTelemetry)->Unit={}) : this(requestEngine,progress,PlanningBudget(),
+            {stage,error,code->FailureLog.record(app.applicationContext,"semantic_$stage",error,code)})
     suspend fun plan(
         ownerRequest: String,
         history: List<InferenceTurn>,
@@ -61,6 +67,8 @@ class LocalSemanticPlanner internal constructor(
         var visibleChars=0
         var activeAttempt=0
         var lastProgress=0L
+        // Track the operation, not presentation/heartbeat events such as budget_checked or repairing.
+        var engineStage="loading"
         fun emit(stage:String,force:Boolean=true){
             val elapsed=(System.nanoTime()-started)/1_000_000L
             if(force||elapsed-lastProgress>=1000){lastProgress=elapsed;progress(SemanticPlanningTelemetry(stage,elapsed,inputTokens,visibleChars,activeAttempt,
@@ -97,6 +105,7 @@ class LocalSemanticPlanner internal constructor(
                     val system = instruction(failureCode, availableTools)
                     var input = envelope(ownerRequest, retainedHistory, retainedContext)
                     while (true) {
+                        engineStage="tokenizing"
                         emit("tokenizing")
                         // Respect the runtime transport limit before asking its tokenizer.
                         // This removes whole old turns, never bytes from the current request.
@@ -136,11 +145,13 @@ class LocalSemanticPlanner internal constructor(
                         input = envelope(ownerRequest, retainedHistory, retainedContext)
                     }
                     try {
+                        engineStage="generating"
                         emit("generating")
                         val raw = planningStage("generating",if(attempt==1)budget.firstGenerationMs else budget.retryGenerationMs,
                             budget.heartbeatMs,{emit("generating")}) {
                             generate(input, system, schema, constrained){count->val first=visibleChars==0&&count>0;visibleChars=count;emit("generating",first)}
                         }
+                        engineStage="validating"
                         emit("validating")
                         val parsed = try {
                             com.user.localagent.core.ModelDecisionContract.parse(raw, availableTools)
@@ -197,9 +208,34 @@ class LocalSemanticPlanner internal constructor(
             throw cancel
         } catch (failure: SemanticPlanningException) {
             throw failure
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             requestEngine.cancel()
-            fail("planning_engine_failed", "기기 내 모델의 작업 계획을 완료하지 못해 실행하지 않았습니다.")
+            currentCoroutineContext().ensureActive()
+            val code:String
+            val message:String
+            when {
+                failure is PcBusy || (failure is PcRequired && generateSequence(failure.cause){it.cause}.take(4).any{it is PcBusy})->{
+                    code="planning_pc_busy"
+                    message="PC가 다른 작업을 처리 중이어서 작업 계획을 완료하지 못했습니다. 해당 작업이 끝난 뒤 다시 요청해주세요. 도구는 실행하지 않았습니다."
+                }
+                failure is PcRequired->{
+                    code="planning_pc_required"
+                    message="PC 모델 계산을 사용할 수 없어 작업 계획을 완료하지 못했습니다. PC 연결과 실행 상태를 확인한 뒤 다시 요청해주세요. 도구는 실행하지 않았습니다."
+                }
+                failure is PcUnavailable->{
+                    code="planning_pc_unavailable"
+                    message="PC 계산 응답을 확인하지 못해 작업 계획을 완료하지 못했습니다. PC 연결과 실행 상태를 확인한 뒤 다시 요청해주세요. 도구는 실행하지 않았습니다."
+                }
+                else->{
+                    code="planning_engine_failed"
+                    message="작업 계획 단계의 모델 계산을 완료하지 못해 실행하지 않았습니다. 실행 기록에서 준비 상태를 확인해주세요."
+                }
+            }
+            // The existing private sink records class/cause names and app source frames only.
+            // Keep arbitrary engine messages, prompts and addresses out of the public exception.
+            // Diagnostics must never replace the original failure or cause another inference attempt.
+            runCatching {recordEngineFailure(engineStage,failure,code)}
+            fail(code,message)
         }
     }
 

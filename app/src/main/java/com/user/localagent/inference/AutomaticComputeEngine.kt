@@ -10,7 +10,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Stops work instead of computing on the phone; the phone never acts as a fallback in PC-only operation. */
-class PcRequired(message: String = "PC에 연결되어 있지 않아 실행하지 않았습니다. PC를 켜고 연결한 뒤 다시 요청해주세요.") : IllegalStateException(message)
+class PcRequired(message: String = "PC에 연결되어 있지 않아 실행하지 않았습니다. PC를 켜고 연결한 뒤 다시 요청해주세요.",cause:Throwable?=null) : IllegalStateException(message){
+    init {if(cause!=null)initCause(cause)}
+}
 
 /** A request owns its backend and state. Only its local native work reserves the phone slot. */
 class AutomaticComputeEngine internal constructor(
@@ -128,7 +130,7 @@ class AutomaticComputeEngine internal constructor(
         if (nativeCleanupUnconfirmed) dropActive()
     }
     private suspend fun fallback() {
-        if (pcOnly) throw PcRequired(if (lastPcFailure is PcBusy) lastPcFailure!!.message!! else"작업 중 PC 연결이 끊겼습니다. 휴대폰으로 넘기지 않고 멈췄습니다.")
+        if (pcOnly) throw PcRequired(if (lastPcFailure is PcBusy) lastPcFailure!!.message!! else"PC 계산을 완료하지 못했습니다. 휴대폰으로 넘기지 않고 멈췄습니다.",lastPcFailure)
         retryAfter = System.currentTimeMillis() + 30_000
         if (ownerRunId != null) phoneOverflowPinned = true
         report("PC 연결이 끊겼습니다. 휴대전화의 기존 작업 뒤에 이어 계산합니다.")

@@ -927,14 +927,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         app.chatAttachments.restoreToThread(request.threadId,request.attachments)
         val planning=error as? com.user.localagent.planning.SemanticPlanningException
         val planningTimeout=planning?.reasonCode?.let {it.startsWith("planning_")&&it.endsWith("_timeout")}==true
+        val planningDeferred=planningTimeout||planning?.reasonCode in setOf("planning_pc_busy","planning_pc_required","planning_pc_unavailable")
         FailureLog.record(context,"chat_run",error,planning?.reasonCode)
         if(app.repository.chat.run(request.runId)?.status !in com.user.localagent.data.ChatStore.TERMINAL){
             if(app.repository.chat.assistantForRun(request.runId)?.text.isNullOrBlank())
-                answer(if(planningTimeout)requireNotNull(planning).message.orEmpty() else "작업을 끝내지 못했습니다: ${error.message ?: error.javaClass.simpleName}")
+                answer(if(planningDeferred)requireNotNull(planning).message.orEmpty() else "작업을 끝내지 못했습니다: ${error.message ?: error.javaClass.simpleName}")
             withContext(NonCancellable){runCatching {persistStepEvidence()}}
-            app.repository.chat.updateRun(request.runId,if(planningTimeout)"paused"else"failed",planning?.reasonCode?:error.javaClass.simpleName)
+            app.repository.chat.updateRun(request.runId,if(planningDeferred)"paused"else"failed",planning?.reasonCode?:error.javaClass.simpleName)
         }
-        status.value=if(planningTimeout)"계획 대기 · 요청과 제한 보존됨"else"오류 · 실행 상태 확인 필요"
+        status.value=if(planningDeferred)"계산 대기 · 요청과 제한 보존됨"else"오류 · 실행 상태 확인 필요"
     }
 
     private suspend fun answer(text:String) {

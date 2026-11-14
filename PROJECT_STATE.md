@@ -1,8 +1,18 @@
 # ZipHap.Agent project state
 
-Updated 2026-11-14. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
+Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1060; internal baseline, not general release approval
+## Current actual device checkpoint: installed1061; diagnostic repair and actual-model evaluation
+
+1061 main SHA `2f196b057cdec55a1a50b1390c2252911582adb935c431e269373d199c14b35f` and test SHA `bcd20da999f2d42dba39727ebd2b683ca2635827e06e1ee3d48ff2792b9ea4e4` independently match installed bytes, without data clearing. Core718/app607=1325 JVM tests passed with zero failures/errors/skips; release/test build and signatures passed, lint0 errors/144 warnings/1 hint. All42 controlled phone tests passed again, zero skipped. Pinned direct-Tailscale health passed182ms; external-network handoff remains untested.
+
+Planning now records the actual loading/tokenizing/generating stage and original exception class/cause in the private diagnostic sink. Public errors use fixed, backend-appropriate codes/messages, never raw prompts/exception messages. Typed PC failures pause and retain the request. The old1059 exception cause was lost historically; this repairs diagnostics and does not prove that earlier failure resolved. The first1061 build exposed cause-constructor and coroutine stack-recovery test assumptions; both were repaired before the successful build.
+
+Actual PC-local-model/phone evaluation finished: capability inspection passed1/1 with metadata-only claims; the other five positive workflows failed their completion criteria. Calculation/save used an ineffective follow-up query, note correction/reminder input paused unnecessarily, file correction omitted the requested post-write read, and storage reporting failed canonical planning validation before tools. All five fixtures report verified cleanup. Thus only1/6 positive workflow types passed; a completed run status alone did not establish whole-task success. All617 input hashes and installed APK hashes were rechecked afterward. The capability case took about201 seconds, including about99 seconds generating final prose that the host renderer discards. Separate staged correctness/performance candidates are under review and absent from1061.
+
+The three named/pinned development chats use separate file ownership and xhigh/high/xhigh reasoning. [The integrated architecture](docs/architecture/README.ko.md) preserves the smartphone assistant, adds separately authorized PC/phone control and external-agent orchestration in stages, and starts with a side-effect-free protocol/state prototype. Generic external-agent control, provider adapters and a PC installer are not installed or validated yet. No paid-key requirement, cloud-setting change or real-account message was introduced by these tests.
+
+## Historical actual device checkpoint: installed1060; internal baseline, not general release approval
 
 1060 is installed without a data reset. Main base SHA `12c80a9464bbd9395cd1d487722febba72d9e187c779b2c2b0ef62f3c1fee063`, current test2 base SHA `3e7a028ef1e8dad7a1bd27679d608d09e503b9598d9f896e813039e2f8bd589a` independently match signed artifacts. All617 frozen app/core source/assets matched after the controlled phone checks. Core718/app603=1321 JVM tests passed with zero failures/errors/skips; release/test builds and signatures passed; release lint0 errors/144 warnings/1 hint. The first core integration attempt exposed blank-root and boolean-validation defects, both repaired. The first AndroidTest compilation missed a RoomDatabase import, then passed. Main bytes did not change when test2 isolated a metadata-test workspace and added the actual-model workflow harness.
 

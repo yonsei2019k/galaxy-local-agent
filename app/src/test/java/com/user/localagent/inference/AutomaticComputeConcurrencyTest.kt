@@ -75,7 +75,7 @@ class AutomaticComputeConcurrencyTest {
         val engine=pcOnly(fixture,local,remote)
         try {
             engine.load(path,options)
-            try {engine.generateChatEvents("q","",emptyList()).collect();fail("Phone fallback must not run")}catch(expected:PcRequired){/* stopped */}
+            try {engine.generateChatEvents("q","",emptyList()).collect();fail("Phone fallback must not run")}catch(expected:PcRequired){assertTrue(expected.cause is IOException);assertFalse(expected.message.orEmpty().contains("synthetic disconnect"))}
             assertEquals(0,local.loads)
             try {engine.withPhoneResource({}){fail("Phone work must not start")};fail("Phone work must be refused")}catch(expected:PcRequired){/* stopped */}
         } finally {engine.unload()}

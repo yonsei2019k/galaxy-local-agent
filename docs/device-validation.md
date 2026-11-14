@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-15 checkpoint1061 / planning diagnostics and actual-model evaluation
+
+Actually installed main SHA `2f196b057cdec55a1a50b1390c2252911582adb935c431e269373d199c14b35f`, test SHA `bcd20da999f2d42dba39727ebd2b683ca2635827e06e1ee3d48ff2792b9ea4e4`, independently matched without data clearing. Core718/app607=1325 JVM PASS, zero failures/errors/skips; release/test build/signatures PASS; lint0 errors/144 warnings/1 hint. The42 controlled phone checks passed again, zero skipped. Direct pinned Tailscale health182ms is a transport check, not external-network handoff or inference throughput.
+
+The actual PC-local-model capability workflow passed, with metadata observed and runtime-readiness claims explicitly excluded. Its total201 seconds included approximately99 seconds of final prose later replaced by the host renderer. The other five positive workflows finished without passing: calculation/save/query285s stored the exact result but its search did not rediscover the note; note correction117s and reminder creation77s paused for unnecessary clarification; file correction238s omitted the requested post-write read; storage reporting100s failed canonical planning validation before tools. All five report verified QA cleanup. Only1/6 positive workflow types passed. Private version/batch-bound reports retain tool order, readback and cleanup results. Final installed main/test hashes and all617 source/asset hashes match the same1061 candidate. These findings do not weaken the success criteria or establish general tool quality.
+
+1061 preserves original planning exception class/cause/stage in private diagnostics, and typed PC failures retain/pause the request with fixed public errors. Historical1059 logs have already discarded the cause, so no claim of reconstructing or proving repair of that original incident is made. The diagnostic regression checks exercise injected failures, not a replay of the original user request.
+
 ## 2026-11-14 checkpoint1060 / internal baseline and scoped useful tools
 
 Actually installed1060 without data clearing. Independently compared main base SHA `12c80a9464bbd9395cd1d487722febba72d9e187c779b2c2b0ef62f3c1fee063`, current test2 SHA `3e7a028ef1e8dad7a1bd27679d608d09e503b9598d9f896e813039e2f8bd589a`. All617 frozen Android/core source/assets matched after tests. Core718/app603=1321 JVM tests, release/test build/signatures PASS, zero JVM failures/errors/skips, lint0 errors/144 warnings/1 hint. First core pass exposed two actual integration failures: blank storage root rejected and missing boolean validation; both fixed. First AndroidTest compile missed RoomDatabase import; fixed before installation.

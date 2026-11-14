@@ -1,3 +1,13 @@
+## 2026-11-15 — 1061 진단 설치와 세 개발 채팅의 다음 소유권
+
+Root가 공유 소스·Gradle·서명·설치·실제 모델/폰 창·커밋을 계속 독점한다.1061 main SHA `2f196b057cdec55a1a50b1390c2252911582adb935c431e269373d199c14b35f`, test SHA `bcd20da999f2d42dba39727ebd2b683ca2635827e06e1ee3d48ff2792b9ea4e4` 설치 바이트 독립 일치, 데이터 초기화0. core718/app607=1325 JVM 실패/오류/skip0, 릴리스/테스트 빌드·서명 PASS, lint0오류144경고1hint. 통제 폰42/42 재통과, skip0. direct pinned Tailscale182ms는 외부망 이동/추론 성능 증거가 아니다.
+
+계획의 실제 loading/tokenizing/generating stage와 원인 예외 class/cause를 비공개 진단에 보존하고 public 오류는 고정 code/문구만 사용한다. typed PC 실패/timeout은 원래 권한·요청을 보존해 pause. 새 추론 재시도·라우팅/모델 변경0. 첫1061 검사에서 cause 생성자와 coroutine stack recovery의 동일객체 검사 문제가 드러나 수정 후 재빌드 통과했다. 원인 예외가 이미 버려진 과거1059 사건의 원인 복원/동일 요청 해결을 주장하지 않는다.
+
+실제 PC로컬모델/폰 능력조회1건 PASS. 나머지5종 완료 후 모두 strict positive 실패: 계산저장 뒤 잘못된 query/scope의 검색, 메모/알림 불필요 질문, 파일수정 뒤 명시적 final read 누락, storage의 두 차례 canonical planning 거부(도구실행0). 따라서 긍정 업무 유형1/6통과이며 completed 상태 자체를 성공으로 집계하지 않는다.5종 QA cleanup 모두 확인. 종료 뒤617입력 drift0/설치main·test SHA재일치와 pinned overlayhealth를 확인했다. 능력조회 약201초 중 호스트가 버리는 final prose 약99초 병목을 관찰했다. 모델 채팅은 ignored staging의 성능 후보만, 도구 채팅은 private 실제 실패 진단과 pure 개선후보만 소유한다. canonical app/core는 root 소유다.
+
+세 상세 설계를 통합한 docs/architecture/README.ko.md를 root가 작성했다. 폰 parent+PC child 원장, 외부 provider/자료 별도 권한, gate/격리 없는 adapter 관찰 전용, PC 최소 metadata와 개인원문 보관의 분리, 실제 receipt/readback을 확정한다. 배포 채팅에 새 protocol/orchestration/v1/와 pc-worker/orchestration/의 부작용 없는 계약/상태기계·합성 검사를 위임했다. 기존 worker/server·Android·실제 provider 연결 변경/설치 권한은 넘기지 않았다. 상세3문서는 동결·통합 검토 대상이며 새 PC agent/MCP 실행 완료가 아니다. attachments와 미할당 readiness 문서는 보존한다.
+
 ## 2026-10-31 — 1018 실제 통화 실패 보존 / 1019 원인 계측 준비
 
 서명1018 app SHA648fdb058fc8e13b4462293e8f695c7a773fa9d32f5983e359cb25e6ca1b3be8 실제 설치 해시를 확인했다. 원래test SHA cf176007c3d750362bbcdeb5fd4dd3a685bd1f87fe31301cbad256ae2f05ae2d에서 기초13개6.346초 PASS, 실제 structured-count1개60.629초 PASS다. 이후 공개 성능 진단용test APK를 별도 서명·설치했으며 이전test 해시의 결과로 섞지 않는다.
