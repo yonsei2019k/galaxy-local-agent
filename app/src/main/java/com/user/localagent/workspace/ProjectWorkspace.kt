@@ -56,6 +56,19 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
         val name=runCatching {metadata(rootUri(uri)).first}.getOrDefault("선택한 프로젝트")
         return ProjectSelection(name,true,permission?.isWritePermission==true)
     }
+    /**
+     * For a deleted project: forget the chosen phone folder (its files stay; the persisted access grant is
+     * released unless another project still uses it) and delete this project's app-private folder.
+     */
+    suspend fun discard()=withContext(Dispatchers.IO) {operation.withLock {
+        check(leases.get()==0){"실행 중인 프로젝트 폴더는 작업이 끝난 뒤 삭제할 수 있습니다."}
+        val previous=tree()
+        check(prefs.edit().clear().commit()){"프로젝트 폴더 연결 정보를 지우지 못했습니다."}
+        previous?.let(::releaseIfUnreferenced)
+        reads.clear()
+        check(!privateRoot.exists()||privateRoot.deleteRecursively()){"앱 전용 프로젝트 폴더를 삭제하지 못했습니다."}
+        mutableSelection.value=ProjectSelection("내 프로젝트",false,true)
+    }}
     suspend fun select(uri:Uri)=withContext(Dispatchers.IO) {operation.withLock {
         check(leases.get()==0){"실행 중인 프로젝트 폴더는 작업이 끝난 뒤 변경할 수 있습니다."}
         require(uri.scheme=="content"&&DocumentsContract.isTreeUri(uri))

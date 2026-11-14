@@ -59,6 +59,7 @@ data class KnowledgeScopeRecord(@PrimaryKey val claimId:String,val scopeKey:Stri
 data class ChatAccessScope(val threadId:String,val projectId:String?,val scopeKey:String,val useOwnerMemory:Boolean,val threadRevision:Long=0,val memoryEnabled:Boolean=true)
 data class ChunkAppendResult(val inserted:Boolean,val sequence:Int,val chars:Int)
 data class ThreadDeleteResult(val messagesDeleted:Int,val derivedClaimsDeleted:Int,val runsCancelled:Int)
+data class ProjectDeleteResult(val threadsDeleted:Int,val messagesDeleted:Int,val derivedClaimsDeleted:Int,val runsCancelled:Int)
 data class ChatMessagePage(val messages:List<MessageRecord>,val nextPosition:Long?)
 
 class ChatConverters {
@@ -72,6 +73,8 @@ class ChatConverters {
     @Query("SELECT * FROM chat_threads WHERE deletedAt IS NULL ORDER BY pinned DESC,updatedAt DESC,id") fun threads():Flow<List<ChatThreadRecord>>
     @Query("SELECT * FROM chat_runs ORDER BY createdAt DESC LIMIT 500") fun runs():Flow<List<ChatRunRecord>>
     @Query("SELECT * FROM chat_projects WHERE id=:id") suspend fun project(id:String):ProjectRecord?
+    @Query("SELECT * FROM chat_threads WHERE projectId=:projectId AND deletedAt IS NULL") suspend fun liveProjectThreads(projectId:String):List<ChatThreadRecord>
+    @Query("DELETE FROM chat_projects WHERE id=:id") suspend fun deleteProjectRow(id:String)
     @Query("SELECT * FROM chat_threads WHERE id=:id") suspend fun thread(id:String):ChatThreadRecord?
     @Query("SELECT * FROM chat_branches WHERE id=:id") suspend fun branch(id:String):ChatBranchRecord?
     @Query("SELECT * FROM chat_branches WHERE threadId=:threadId AND deletedAt IS NULL ORDER BY createdAt,id") suspend fun branches(threadId:String):List<ChatBranchRecord>
@@ -279,6 +282,24 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             dao.updateProjectLearningFlags(id,saved.settings.learnOwnerFacts)
         }
         saved
+    }
+    /**
+     * Permanently deletes a project: every live room in it (including archived and trashed rooms) is erased
+     * exactly as a single-room delete, then the project row is removed. With [deleteDerivedMemory], memory
+     * scoped to the project is erased too; otherwise it stays only in memory management. Files in the
+     * owner's external project folder are never touched.
+     */
+    suspend fun deleteProject(id:String,deleteDerivedMemory:Boolean=false):ProjectDeleteResult=database.withTransaction {
+        dao.project(id)?:error("프로젝트를 찾을 수 없습니다.")
+        var messages=0;var claims=0;var runs=0
+        val rooms=dao.liveProjectThreads(id)
+        rooms.forEach {room->val result=eraseThread(room.id,deleteDerivedMemory,true);messages+=result.messagesDeleted;claims+=result.derivedClaimsDeleted;runs+=result.runsCancelled}
+        if(deleteDerivedMemory){
+            val graph=KnowledgeStore(database)
+            dao.scopeClaims("project:$id").forEach {claim->graph.delete(claim.id);dao.deleteKnowledgeScope(claim.id);claims++}
+        }
+        dao.deleteProjectRow(id)
+        ProjectDeleteResult(rooms.size,messages,claims,runs)
     }
     suspend fun archiveProject(id:String,archived:Boolean=true)=database.withTransaction {val p=dao.project(id)?:error("프로젝트를 찾을 수 없습니다.");dao.project(p.copy(archived=archived,updatedAt=now()))}
     suspend fun createThread(projectId:String?=null,title:String="새 대화"):ChatThreadRecord=database.withTransaction {

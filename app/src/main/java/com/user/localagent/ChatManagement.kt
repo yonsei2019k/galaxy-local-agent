@@ -85,6 +85,27 @@ fun ChatRunCoordinator.saveProject(project: UiProject) = manage {
     else if (selectedProjectId.value == saved.id) selectThread(selectedThreadId.value)
 }
 
+fun ChatRunCoordinator.deleteProject(id: String, deleteDerivedMemory: Boolean) = manage {
+    val project = app.repository.chat.project(id) ?: error("프로젝트 없음")
+    // The legacy project shares the general "default" workspace; only a project's own folder is discarded.
+    val ownWorkspace = project.workspaceKey !in setOf("default", "personal") &&
+        app.repository.chat.projects.first().none { it.id != id && it.workspaceKey == project.workspaceKey }
+    val workspace = if (ownWorkspace) app.workspaceFor(id) else null
+    val rooms = app.repository.chat.threads.first().filter { it.projectId == id }
+    val selectedHere = rooms.any { it.id == selectedThreadId.value } || selectedProjectId.value == id
+    rooms.forEach { quiesceThread(it.id); goals.delete(it.id) }
+    val result = app.repository.chat.deleteProject(id, deleteDerivedMemory)
+    rooms.forEach { app.chatAttachments.clearThread(it.id) }
+    check(app.repository.chat.project(id) == null)
+    check(app.repository.chat.threads.first().none { it.projectId == id })
+    workspace?.discard()
+    if (selectedHere) {
+        val next = app.repository.chat.threads.first().firstOrNull { !it.archived } ?: app.repository.chat.createThread(null)
+        selectThread(next.id)
+    }
+    status.value = "프로젝트와 대화 ${result.threadsDeleted}개를 영구 삭제하고 확인했습니다. 연결한 휴대전화 폴더의 파일은 유지됩니다."
+}
+
 fun ChatRunCoordinator.renameThread(id: String, title: String) = manage {
     app.repository.chat.renameThread(id, title)
     check(app.repository.chat.thread(id)?.title == title.trim())

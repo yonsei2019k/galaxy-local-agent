@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity() {
             selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
             actions=ChatNavigationActions(
                 onSelectThread=chat::selectThread,onNewThread=chat::newThread,onSelectProject=chat::selectProject,
-                onSaveProject=chat::saveProject,onChooseProjectFolder={id->folderProjectId=id;projectFolder.launch(null)},
+                onSaveProject=chat::saveProject,onDeleteProject=chat::deleteProject,onChooseProjectFolder={id->folderProjectId=id;projectFolder.launch(null)},
                 onRenameThread=chat::renameThread,onPinThread=chat::pinThread,onArchiveThread=chat::archiveThread,
                 onClearThread=chat::clearThread,onDeleteThread=chat::deleteThread,onDuplicateThread=chat::duplicateThread,
                 onMoveThread=chat::moveThread,onExportThread=chat::exportThread,

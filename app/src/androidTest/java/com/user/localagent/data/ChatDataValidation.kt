@@ -189,6 +189,26 @@ class ChatDataValidation {
         assertFalse(repo.ownerProfileContext(a.id,"response preference").contains("Synthetic global preference"))
     }}
 
+    @Test fun deletedProjectErasesAllItsRoomsAndLeavesOtherProjectsIntact()=runBlocking(Dispatchers.IO){fixture{repo,db,_->
+        val doomed=repo.chat.createProject("Synthetic delete project");val kept=repo.chat.createProject("Synthetic kept project")
+        val a=repo.chat.createThread(doomed.id);val b=repo.chat.createThread(doomed.id);val other=repo.chat.createThread(kept.id)
+        repo.chat.archiveThread(b.id)
+        val m=repo.chat.addMessage(a.id,a.activeBranchId,"user","Synthetic project delete text QA-911")
+        repo.chat.addMessage(other.id,other.activeBranchId,"user","Synthetic kept text QA-912")
+        val run=repo.chat.createRun(a.id,a.activeBranchId,m.id);repo.chat.saveDraft(b.id,"Synthetic draft")
+        val result=repo.chat.deleteProject(doomed.id)
+        assertEquals(2,result.threadsDeleted);assertEquals(1,result.messagesDeleted)
+        assertNull(repo.chat.project(doomed.id))
+        assertNull(repo.chat.thread(a.id));assertNull(repo.chat.thread(b.id))
+        assertNull(db.dao().messageById(m.id));assertNull(db.chatDao().draft(b.id))
+        assertTrue(repo.chat.run(run.id)?.status in ChatStore.TERMINAL)
+        assertTrue(repo.chat.projects.first().none{it.id==doomed.id})
+        assertNotNull(repo.chat.project(kept.id));assertNotNull(repo.chat.thread(other.id))
+        assertEquals(1L,repo.forThread(other.id).messageCount())
+        assertTrue(runCatching{repo.chat.createThread(doomed.id)}.isFailure)
+        assertTrue(runCatching{repo.chat.deleteProject(doomed.id)}.isFailure)
+    }}
+
     @Test fun deletedRoomCannotReceiveDraftMessageOrRun()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val t=repo.chat.createThread();repo.chat.deleteThread(t.id)
         assertNull(repo.chat.thread(t.id))

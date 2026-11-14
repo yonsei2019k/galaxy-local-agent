@@ -90,6 +90,7 @@ data class ChatNavigationActions(
     val onSelectProject: (String) -> Unit = {},
     val onSaveProject: (UiProject) -> Unit = {},
     val onChooseProjectFolder: (String) -> Unit = {},
+    val onDeleteProject: ((String, Boolean) -> Unit)? = null,
     val onRenameThread: (String, String) -> Unit = { _, _ -> },
     val onPinThread: (String, Boolean) -> Unit = { _, _ -> },
     val onArchiveThread: (String, Boolean) -> Unit = { _, _ -> },
@@ -128,6 +129,7 @@ fun ChatNavigator(
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(RoomFilter.ACTIVE) }
     var projectEditorId by rememberSaveable { mutableStateOf<String?>(null) }
+    var projectDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
     var roomDialog by remember { mutableStateOf<Pair<RoomDialog, UiThread>?>(null) }
     val actions = navigation.actions
     var bodyMatches by remember(query){mutableStateOf<Set<String>?>(null)}
@@ -225,7 +227,13 @@ fun ChatNavigator(
     }
     projectEditorId?.let { id -> val project=if(id.isBlank())UiProject("", "")else navigation.projects.firstOrNull{it.id==id};if(project!=null)ProjectSettingsDialog(project, navigation.modelChoices,onDismiss = { projectEditorId = null }, onSave = {
         actions.onSaveProject(it); projectEditorId = null
-    }, onChooseFolder = { actions.onChooseProjectFolder(project.id) }) }
+    }, onChooseFolder = { actions.onChooseProjectFolder(project.id) },
+        onDelete = actions.onDeleteProject?.takeIf { project.id.isNotBlank() }?.let { { projectEditorId = null; projectDeleteId = project.id } }) }
+    projectDeleteId?.let { id -> navigation.projects.firstOrNull { it.id == id }?.let { project ->
+        ProjectDeletionDialog(project, roomCount = navigation.threads.count { it.projectId == id }, onDismiss = { projectDeleteId = null }) { eraseDerived ->
+            actions.onDeleteProject?.invoke(id, eraseDerived); projectDeleteId = null
+        }
+    } ?: run { projectDeleteId = null } }
     roomDialog?.let { (kind, room) ->
         when (kind) {
             RoomDialog.RENAME -> NameDialog("대화 이름", room.title, onDismiss = { roomDialog = null }) { title ->
@@ -297,7 +305,7 @@ private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, on
 }
 
 @Composable
-private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelChoice>, onDismiss: () -> Unit, onSave: (UiProject) -> Unit, onChooseFolder: () -> Unit) {
+private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelChoice>, onDismiss: () -> Unit, onSave: (UiProject) -> Unit, onChooseFolder: () -> Unit, onDelete: (() -> Unit)? = null) {
     var name by rememberSaveable(project.id) { mutableStateOf(project.name) }
     var instructions by rememberSaveable(project.id) { mutableStateOf(project.instructions) }
     var model by rememberSaveable(project.id) { mutableStateOf(project.modelId) }
@@ -336,6 +344,10 @@ private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelCh
             Text("폴더 · ${project.folderLabel}", style = MaterialTheme.typography.bodySmall)
             if (project.id.isNotBlank()) TextButton(onClick = onChooseFolder) { Text("휴대전화 폴더 선택") }
             else Text("프로젝트를 만든 뒤 폴더를 연결할 수 있습니다.", style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary)
+            if (onDelete != null) {
+                HorizontalDivider()
+                TextButton(onClick = onDelete, modifier = Modifier.testTag("delete_project")) { Text("프로젝트 삭제", color = ZipHapColors.Error) }
+            }
         }
     }, confirmButton = { TextButton(onClick = { onSave(project.copy(name = name.trim(), instructions = instructions.trim(), modelId = model.trim().ifBlank { "auto" },thinking=thinking,useOwnerMemory=ownerMemory,learnOwnerFacts=ownerLearning,disabledTools=disabledTools,revision=revision)) }, enabled = name.isNotBlank()) { Text("저장") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } })
 }
@@ -349,6 +361,23 @@ private fun toolLabel(name:String)=when(name){
     "create_reminder"->"리마인더 생성";"create_alarm"->"알람 생성";"save_note"->"메모 저장";"search_notes"->"메모 검색";"search_contacts"->"연락처 검색";"prepare_sms"->"문자 초안 작성";"prepare_email"->"이메일 초안 작성"
     "open_map"->"지도 열기";"open_url"->"웹페이지 열기";"save_memory"->"개인 기억 저장";"search_memories"->"개인 기억 검색";"delete_memory"->"개인 기억 삭제";"update_note"->"메모 수정";"update_reminder"->"리마인더 수정"
     "delete_note"->"메모 삭제";"delete_reminder"->"리마인더 삭제";"list_messenger_notifications"->"연결한 메신저 알림 조회";"reply_messenger_notification"->"연결한 메신저 답장";else->name
+}
+
+/** Project deletion needs its own explicit confirmation listing what goes and what stays. */
+@Composable
+private fun ProjectDeletionDialog(project: UiProject, roomCount: Int, onDismiss: () -> Unit, onConfirm: (Boolean) -> Unit) {
+    var derived by remember(project.id) { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("프로젝트 영구 삭제") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("‘${project.name}’ 프로젝트와 그 안의 대화 ${roomCount}개(보관함 포함)의 메시지, 방 목표, 첨부 복사본, 앱 전용 프로젝트 폴더를 삭제합니다. 진행 중인 작업은 중단되며 되돌릴 수 없습니다.")
+            Text("연결한 휴대전화 폴더의 파일은 삭제하지 않고 연결만 해제합니다.", style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary)
+            Row(Modifier.fillMaxWidth().clickable { derived = !derived }, verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = derived, onCheckedChange = { derived = it })
+                Text("이 프로젝트에서 얻은 개인 기억도 삭제", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }, confirmButton = { TextButton(onClick = { onConfirm(derived) }, modifier = Modifier.testTag("confirm_delete_project")) { Text("영구 삭제", color = ZipHapColors.Error) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } })
 }
 
 @Composable
