@@ -45,21 +45,15 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     override val residentModelPath:String? get()=path
     override val supportsStructuredOutput:Boolean get()=structured&&path!=null
     @Volatile private var reasoning:String?=null
-    /** nanoTime of the last PC confirmation that the text model is resident (load reply or completed chat); 0 = unknown. */
-    @Volatile private var verifiedAt=0L
     override val lastReasoning:String? get()=reasoning
     private fun requireAuthority(connection:PcConnection){if(!authorityMatches(connection))throw PcUnavailable()}
     suspend fun preflight():Boolean=transport.available(computeOwner)?.let {authorityMatches(it)}==true
     override suspend fun load(path:String,options:InferenceOptions)=withContext(Dispatchers.IO){mutex.withLock {
         lifecycle.incrementAndGet();cleanup.value=null
-        // The PC owns the engine choice; the phone's selected model no longer picks the weights.
-        val file=File(path)
-        // Every decision round calls load; skip the health + load round trips while the same model is known resident.
-        val textModel=!options.audioEnabled&&!options.visionEnabled&&!(settings.state.value.claudeText&&!options.imagePreparation)
-        val wanted=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.modelId(file.name)else PC_TEXT_MODEL
-        config?.let{resident->if(textModel&&PcResidency.reusable(alias,wanted,this@PcInferenceEngine.options,options,this@PcInferenceEngine.path,file.path,verifiedAt,System.nanoTime())){
-            requireAuthority(resident);status.value="PC 계산 준비됨 · $wanted";return@withLock}}
-        verifiedAt=0L
+        // The PC owns the engine choice; the phone path only labels the request and picks the Gemma helper.
+        val file=File(path).canonicalFile
+        require(file.parentFile==File(context.filesDir,"models").canonicalFile){"휴대폰 모델 폴더 밖의 모델 경로는 사용하지 않습니다."}
+        // Health is always checked: it also picks the reachable endpoint (home LAN or Tailscale).
         val connection=transport.available(computeOwner,waitForRestart=true)?:throw PcUnavailable()
         requireAuthority(connection)
         if(options.audioEnabled||options.visionEnabled){
@@ -79,6 +73,12 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
         val requestedModel=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.modelId(file.name)else PC_TEXT_MODEL
         val requestedSha=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.hashes.getValue(requestedModel).take(16)else PC_TEXT_SHA_PREFIX
         val body=buildJsonObject{put("modelId",requestedModel);put("modelShaPrefix",requestedSha);put("contextSize",options.contextSize)}
+        // Every decision round calls load; when the PC reports this owner's identical model resident, skip the load round trip.
+        if(PcResidency.reusable(transport.lastHealth,requestedModel,requestedSha,options.contextSize)){
+            config=connection;alias=requestedModel;this@PcInferenceEngine.options=options;this@PcInferenceEngine.path=file.path;structured=true
+            status.value="PC 계산 준비됨 · $requestedModel";metrics.value=null;generation.value=null
+            return@withLock
+        }
         val reply=transport.json(connection,"/v1/llm/load","POST",body,100_000,computeOwner)
         requireAuthority(connection)
         require(reply["modelId"]?.jsonPrimitive?.content==requestedModel)
@@ -88,7 +88,6 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
         currentCoroutineContext().ensureActive()
         config=connection;alias=requestedModel;this@PcInferenceEngine.options=options;this@PcInferenceEngine.path=file.path;structured=true
         status.value="PC 계산 준비됨 · $requestedModel";metrics.value=null;generation.value=null
-        verifiedAt=System.nanoTime()
     }}
     private fun messages(user:String,system:String,history:List<InferenceTurn>):JsonArray=buildJsonArray {
         if(system.isNotBlank())add(buildJsonObject{put("role","system");put("content",system)})
@@ -195,10 +194,8 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                 val summary=GenerationSummary(id,if(finish=="length")GenerationStopReason.MAX_OUTPUT else GenerationStopReason.EOG,GenerationEvidence.SDK,finish=="length",selected.maxOutputTokens,input,output,visible,measured,elapsedMillis=(seconds*1000).toLong(),thinkingTokenBudget=0,observedTimeToFirstVisibleTokenSeconds=if(visible>0)seconds else null)
                 generation.value=summary
                 if(text.isNotEmpty())emit(GenerationEvent.Delta(text.toString()))
-                if(alias!=PC_CLAUDE_MODEL)verifiedAt=System.nanoTime()
                 emit(GenerationEvent.Finished(summary));status.value="PC 계산 완료"
             }catch(error:Throwable){
-                verifiedAt=0L
                 val failure=if(cancellation.get()!=revision&&error !is CancellationException)CancellationException("PC 계산 중단").apply{initCause(error)}else error
                 generation.value=GenerationSummary(id,if(failure is CancellationException)GenerationStopReason.CANCELLED else GenerationStopReason.ENGINE_ERROR,GenerationEvidence.HOST,null,selected.maxOutputTokens,visibleChars=visible,errorCode=if(failure is CancellationException)"CANCELLED"else"PC_CONNECTION_OR_COMPLETION_FAILED",elapsedMillis=(System.nanoTime()-started)/1_000_000)
                 throw failure
@@ -221,14 +218,22 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             val reply=runCatching{transport.json(previous,"/v1/llm/unload","POST",buildJsonObject{},2000,computeOwner)}.getOrNull()
             cleanup.value=PcCleanupEvidence("unload",null,reply?.get("cleanup_complete")?.jsonPrimitive?.booleanOrNull,reply!=null)
         }
-        path=null;alias=null;options=null;config=null;structured=false;metrics.value=null;generation.value=null;verifiedAt=0L
+        path=null;alias=null;options=null;config=null;structured=false;metrics.value=null;generation.value=null
         status.value=if(cleanup.value?.cleanupComplete==true)"PC 계산 정리 확인됨"else"PC 정리 요청의 완료 여부는 확인이 필요합니다."
     }}}
 }
 
-/** The PC unloads an idle model after 300 s; reuse well inside that window, and only for the identical request. */
+/**
+ * The PC's own health reply decides residency: image jobs, other owners, media loads, idle unload and
+ * worker restarts all unload the text model without telling this engine. A worker without llmResident never skips.
+ */
 internal object PcResidency {
-    const val REUSE_NANOS=60_000_000_000L
-    fun reusable(alias:String?,wanted:String,current:InferenceOptions?,requested:InferenceOptions,currentPath:String?,requestedPath:String,verifiedAt:Long,now:Long):Boolean =
-        verifiedAt!=0L&&alias==wanted&&current==requested&&currentPath==requestedPath&&now-verifiedAt in 0 until REUSE_NANOS
+    fun reusable(health:JsonObject?,model:String,shaPrefix:String,contextSize:Int):Boolean {
+        val resident=(health?.get("llmResident") as? JsonObject)?:return false
+        val sha=(health["llm_models"] as? JsonObject)?.get(model)?.jsonPrimitive?.contentOrNull
+        return resident["modelId"]?.jsonPrimitive?.contentOrNull==model&&
+            resident["contextSize"]?.jsonPrimitive?.intOrNull==contextSize&&
+            resident["ownerMatches"]?.jsonPrimitive?.booleanOrNull==true&&
+            health["structured_output"]?.jsonPrimitive?.booleanOrNull==true&&sha!=null&&sha.startsWith(shaPrefix)
+    }
 }

@@ -25,9 +25,14 @@ class PcTransport(context:Context) {
     private val settings=PcComputeSettings.get(context)
     @Volatile private var lastDiscovery=0L
     private companion object {
-        /** Shared by every transport instance: when this phone last saw the paired PC answer. */
+        /** Shared by every transport instance: when, and on which network, this phone last saw the paired PC answer. */
         @Volatile var lastReachableAt=0L
+        @Volatile var lastReachableNetwork:Long?=null
     }
+    /** Health body of the last successful check by this instance; read right after [available]. */
+    @Volatile var lastHealth:JsonObject?=null
+        private set
+    private fun networkHandle():Long?=runCatching{context.getSystemService(android.net.ConnectivityManager::class.java)?.activeNetwork?.networkHandle}.getOrNull()
     @Volatile private var current:HttpsURLConnection?=null
     fun open(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000,computeOwner:String?=null):HttpsURLConnection {
         if(!PcLocalNetwork.allowed(context))throw PcUnavailable()
@@ -82,7 +87,9 @@ class PcTransport(context:Context) {
      */
     suspend fun available(computeOwner:String?=null,waitForRestart:Boolean=false):PcConnection?{
         probe(computeOwner)?.let{return it}
-        val delays=com.user.localagent.core.PcReconnectPolicy.retryDelays(waitForRestart,System.currentTimeMillis()-lastReachableAt)
+        // A different network (left home Wi-Fi, switched to mobile data) is not a worker restart: fail fast.
+        val sameNetwork=lastReachableNetwork!=null&&lastReachableNetwork==networkHandle()
+        val delays=com.user.localagent.core.PcReconnectPolicy.retryDelays(waitForRestart&&sameNetwork,System.currentTimeMillis()-lastReachableAt)
         delays.forEachIndexed {index,wait->
             settings.report("PC 응답 대기 · 작업기 재시작 중일 수 있어 다시 확인합니다 (${index+1}/${delays.size})")
             delay(wait)
@@ -101,7 +108,7 @@ class PcTransport(context:Context) {
             val result=json(candidate,"/v1/health",timeout=4000,computeOwner=computeOwner)
             result["overlayEndpoint"]?.jsonPrimitive?.contentOrNull?.let {overlay->runCatching{settings.updateOverlay(overlay)}}
             (result["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&result["serverId"]?.jsonPrimitive?.content==candidate.serverId&&
-                (computeOwner==null||result["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1)).also{if(it)lastReachableAt=System.currentTimeMillis()}
+                (computeOwner==null||result["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1)).also{if(it){lastReachableAt=System.currentTimeMillis();lastReachableNetwork=networkHandle();lastHealth=result}}
         }catch(cancel:CancellationException){throw cancel}catch(_:Exception){false}
         if(check(config)){settings.report("PC 사용 가능 · 작업과 결과는 스마트폰에서 관리");return@withContext config}
         if(System.currentTimeMillis()-lastDiscovery>15_000){

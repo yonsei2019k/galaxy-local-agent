@@ -826,3 +826,11 @@ TaskHarness 반복 감지를 즉시 종료 대신 상기 → 방향 전환 → �
 - `PcTransport.available(waitForRestart=true)`(모델 불러오기 경로만): 최근 10분 안에 응답한 PC가 실패하면 작업기 재시작으로 보고 5·5·10초 대기하며 재확인, 상태 문구 표시(`PcReconnectPolicy`). 오래 꺼진 PC나 상태 표시용 확인은 바로 실패.
 - `pc-worker/deployed/`: D 드라이브에서 실행 중인 작업기 파일 스냅샷(백업·모델·설정·토큰·인증서 제외)과 배포 방법. 상위 pc-worker 소스는 미배포 다음 버전임을 README에 명시.
 - 검증: core·app JVM(PcResidencyTest2, PcReconnectPolicyTest2 포함)·릴리스 빌드. 실제 집 밖 왕복 시간 감소와 재시작 중 자동 재시도는 기기에서 미검증.
+
+### 2026-11-14 1048 코드 리뷰(218f837) 9건 수정
+- 상주 판단: 60초 시간창 대신 PC health의 새 `llmResident`(모델·문맥·같은 owner 여부, ID 없음)와 `llm_models` SHA로만 load 생략(`PcResidency`). 이미지 작업·다른 owner·미디어·유휴 해제·재시작으로 내려간 모델을 더는 놓치지 않는다. health는 매번 확인해 집 LAN↔Tailscale 전환도 유지. 생략 시에도 metrics/generation 초기화. 구형 작업기는 항상 load.
+- 재시작 대기: 마지막 성공과 같은 네트워크일 때만(`activeNetwork.networkHandle`). 집을 나서 망이 바뀌면 바로 실패 안내.
+- 모델 경로: 휴대폰 `filesDir/models` 밖 경로 거부를 복원(파일 존재는 PC 전용이라 요구하지 않음).
+- 검증 게이트: 산술식·백분율이 있는 초안만(목록 번호·날짜·시각 제외). 게이트 도구가 실패하면 "검증:"을 쓰지 않고 초안 유지·실패 기록.
+- 작업기 server.py(백업 server.before-review-20261114.py, 패치 .local/.../patch_review_fixes.py, pc-worker/deployed와 동일 해시): 기록 교체를 잠금으로 직렬화, 스트림 시작 전 대화 실패는 바깥 응답 기록 한 번만. 유휴 확인 후 작업기만 재시작, health에 llmResident 노출 확인.
+- 검증: core·app JVM, 릴리스 빌드. 실제 이미지 후 대화·집 밖 전환은 기기 미검증.

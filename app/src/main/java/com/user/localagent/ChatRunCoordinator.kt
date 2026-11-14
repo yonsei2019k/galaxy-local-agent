@@ -1480,6 +1480,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"답변 검증: "+decision.summary,com.user.localagent.data.WorkSummarySource.MODEL_PLAN)
         val checked=try{ToolRegistry.validateForRequest(call,allowed)}catch(error:Exception){FailureLog.record(context,"verification_gate",error,"gate_call_invalid");return null}
         val result=try{runTool(checked)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(checked.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
+        // A failed check verifies nothing: keep the draft as written instead of asking for a "검증:" note.
+        if(!result.success||result.verification!=VerificationState.VERIFIED){
+            FailureLog.record(context,"verification_gate",null,"gate_tool_${checked.name}_${result.verification.name}")
+            workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"답변 검증 도구가 실패해 초안을 그대로 둡니다 · 검증되지 않음",com.user.localagent.data.WorkSummarySource.MODEL_PLAN)
+            return null
+        }
         evidence+=buildJsonObject{put("tool",checked.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(com.user.localagent.core.compactJsonData(result.content,1100)))}
         return com.user.localagent.core.ToolUsePolicy.afterGateQuery(text,JsonArray(evidence).toString())
     }

@@ -24,10 +24,12 @@ object ToolUsePolicy {
     }
 
     /**
-     * Cheap pre-filter on the model's own draft (not on the owner's request): drafts without any
-     * digit cannot contain a calculation or date worth a verification round.
+     * Cheap pre-filter on the model's own draft (not on the owner's request): only an arithmetic
+     * expression or a percentage is worth an extra round. List numbers ("1."), dates (2026-11-14),
+     * times (15:30) and plain amounts do not trigger it.
      */
-    fun worthVerifying(draft:String):Boolean = draft.any(Char::isDigit)
+    private val arithmetic=Regex("\\d\\s*[+×x*/÷=]\\s*\\d|\\d\\s+-\\s+\\d|\\d\\s*%")
+    fun worthVerifying(draft:String):Boolean = arithmetic.containsMatchIn(draft)
 
     fun gateSystem(tools:Set<String>):String =
         "You check a draft answer before it is final. If the draft contains any arithmetic, numeric claim, date difference or current-time claim "+

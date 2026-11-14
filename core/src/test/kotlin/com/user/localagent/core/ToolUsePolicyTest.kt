@@ -27,8 +27,13 @@ class ToolUsePolicyTest {
         assertTrue(SemanticPlannerInstructions.build(setOf("calculate")).contains("Prefer tools"))
     }
     @Test fun gateOnlyConsidersDraftsWithNumbers(){
-        assertTrue(ToolUsePolicy.worthVerifying("합계는 1,250원"))
+        assertTrue(ToolUsePolicy.worthVerifying("1,200 + 50 = 1,250원"))
+        assertTrue(ToolUsePolicy.worthVerifying("12 × 3은 36"))
+        assertTrue(ToolUsePolicy.worthVerifying("할인율 15% 적용"))
+        assertTrue(ToolUsePolicy.worthVerifying("100 - 30 = 70"))
         assertFalse(ToolUsePolicy.worthVerifying("안녕하세요"))
+        assertFalse(ToolUsePolicy.worthVerifying("1. 첫째\n2. 둘째"))
+        assertFalse(ToolUsePolicy.worthVerifying("회의는 2026-11-14 15:30입니다"))
         assertTrue(ToolUsePolicy.gateSystem(setOf("calculate")).contains("review_next"))
     }
 }

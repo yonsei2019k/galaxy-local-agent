@@ -22,14 +22,24 @@ def overlay():
  except OSError:pass
  return {}
 LOG=r'D:\ZipHap\Compute\requests.log';LOG_LIMIT=2*1024*1024
+LOG_LOCK=threading.Lock()
 POLL=re.compile(r'^/v1/images/[0-9a-f-]{36}$')
+def resident(header):
+ # Which text model is loaded right now, and whether it belongs to the asking owner; no IDs are exposed.
+ try:
+  process=ENGINE.llm
+  if not process or process.poll() is not None or not ENGINE.llm_alias:return {'llmResident':None}
+  mine=(not ENGINE.owner_set) or ENGINE.owner==owner_value(header)
+  return {'llmResident':{'modelId':ENGINE.llm_alias,'contextSize':ENGINE.llm_ctx,'ownerMatches':bool(mine)}}
+ except Exception:return {'llmResident':None}
 def note(path,status,error):
  # Successful image progress polls are ~95% of traffic and carry no diagnostic value.
  if status==200 and not error and POLL.match(path.split('?')[0]):return
  try:
   import os
-  if os.path.exists(LOG) and os.path.getsize(LOG)>LOG_LIMIT:os.replace(LOG,LOG[:-4]+'.1.log')
-  with open(LOG,'a',encoding='utf-8') as out:out.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {path} {status} {error}\n")
+  with LOG_LOCK:
+   if os.path.exists(LOG) and os.path.getsize(LOG)>LOG_LIMIT:os.replace(LOG,LOG[:-4]+'.1.log')
+   with open(LOG,'a',encoding='utf-8') as out:out.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {path} {status} {error}\n")
  except OSError:pass
 CONFIG=load();TOKEN=CONFIG['token']
 ENGINE=RecoveryEngines(hashlib.sha256(TOKEN.encode()).hexdigest());PAIRING=Pairing(CONFIG)
@@ -69,7 +79,7 @@ class Handler(BaseHTTPRequestHandler):
    request=self.body(4096)
    self.reply(PAIRING.start(self.client_address[0],request) if path.endswith('/start') else PAIRING.finish(self.client_address[0],request));return
   if not self.authorized():self.reply({'error':'UNAUTHORIZED'},401);return
-  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id']}|overlay());return
+  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id']}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
   owners=self.headers.get_all('X-ZipHap-Compute-Owner',[])
   if len(owners)>1:raise ValueError('DUPLICATE_OWNER')
   owner=owner_value(owners[0] if owners else None)
@@ -135,7 +145,8 @@ class Handler(BaseHTTPRequestHandler):
    began=time.time()
    try:ENGINE.chat(self.body(),send,owner)
    except Exception as failure:
-    note(path,'stream' if started else 'before-stream',f"{type(failure).__name__}:{str(failure) if re.fullmatch(r'[A-Z_]{3,40}',str(failure)) else '-'} after {time.time()-began:.1f}s")
+    if started:note(path,'stream',f"{type(failure).__name__}:{str(failure) if re.fullmatch(r'[A-Z_]{3,40}',str(failure)) else '-'} after {time.time()-began:.1f}s")
+    # Before streaming, the outer handler replies with the HTTP status and logs it once.
     if not started:raise
     self.close_connection=True
     return
