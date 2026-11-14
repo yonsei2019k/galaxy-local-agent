@@ -26,7 +26,7 @@ class AutomaticComputeEngine internal constructor(
     private val beforePhoneLoad: suspend () -> Unit = {},
     private val externalPcAuthority: () -> Boolean = { true },
     private val pcOnly: Boolean = false,
-) : ComputeExecutionEngine {
+) : ComputeExecutionEngine, PairedPcTextLoader {
     constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {},
         capturedPcRevision:Long?=null,allowCloudText:Boolean=false) :
         this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText), ownerRunId, beforePhoneLoad)
@@ -118,6 +118,22 @@ class AutomaticComputeEngine internal constructor(
         check(bind(local, ComputeResource.PHONE))
         local.load(path, options); snapshot()
     }
+    override suspend fun loadPairedPcText(target:com.user.localagent.models.PairedPcText,options:InferenceOptions):com.user.localagent.models.PairedPcLoadReceipt = mutex.withLock {
+        recoverPendingCleanup()
+        if(!pcOnly||ownerRunId==null||!externalPcAuthority())
+            throw com.user.localagent.models.InferencePrerequisiteMissing(com.user.localagent.models.InferencePrerequisiteReason.PC_AUTHORITY_CHANGED)
+        val loader=pc as? PairedPcTextLoader
+            ?:throw com.user.localagent.models.InferencePrerequisiteMissing(com.user.localagent.models.InferencePrerequisiteReason.PC_LOADER_UNAVAILABLE)
+        requestedPath=null;requestedOptions=options
+        if(!pcPreflight())throw PcRequired()
+        currentCoroutineContext().ensureActive()
+        check(bind(pc,ComputeResource.PC))
+        val receipt=loader.loadPairedPcText(target,options)
+        check(externalPcAuthority()&&receipt.matches(target,options.contextSize)){"원래 PC의 모델 준비 결과를 확인하지 못했습니다."}
+        snapshot()
+        receipt
+    }
+
     private fun snapshot() {
         status.value = active?.state?.value ?: "모델 없음"
         metrics.value = active?.lastMetrics?.value; generation.value = active?.lastGeneration?.value
@@ -241,7 +257,7 @@ class AutomaticComputeEngine internal constructor(
                     candidate.certificateSha256 == original.certificateSha256 && settings.snapshot()?.let {
                         it.serverId == original.serverId && it.token == original.token && it.certificateSha256 == original.certificateSha256
                     } == true
-            val pc = PcInferenceEngine(context, ::samePair, owner,authority)
+            val pc = PcInferenceEngine(context, ::samePair, owner,authority,targetCapturedPcRevision=capturedPcRevision)
             return Components(LocalInferenceEngine(context), pc,
                 eligible = { _, _ -> settings.snapshot()?.let(::samePair) == true },
                 preflight = pc::preflight, report = settings::report,

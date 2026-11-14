@@ -1,3 +1,19 @@
+## 2026-11-15 — 1071 target 소스1582JVM·release/lint PASS / 미설치
+
+Root의첫target검사는51s에planningStage<T:Any>와nullable loadTarget반환의타입오류로FAIL해loading lambda에Unit을명시했다. 두번째56s는누락소비자ReflectionWorker의파일전용가정으로FAIL해기존background local-only를LocalWeight unwrap으로보존했다. 이전app732XML캐시는새검사로세지않았다. 세번째4m20는core828/app754=1582 JVM0fail/error/skip 및androidTest assemble PASS,별도release/lint4m29 PASS/0errors144warnings1hint다. 종료671source+별도public10/build6을대조했다. 아직1071서명/설치/기기/실모델0이며폰1070의성공을승계하지않는다.
+
+모델공간없는PC선택target A,원래취소lifecycle 부분병합,rawload reply4회귀와target18회귀가포함된다. Hostphase관측은모델입력/판정을바꾸지않는bounded metadata이며missing join은UNKNOWN으로남긴다. typedPCcancel branch는별도flag/별도보고서/actual load receipt AND를추가하고원래cap128/취소기준/legacy기본경로를보존했으며지금은컴파일만했다. 준비부족native4는후보검토를마쳤으나아직현재검사입력에포함하지않았다. actualanalysispin연결후최종전체검사와설치를수행한다. note-v2/F1는별도후속이며누락JsonPrimitive import와기존isPrivateRead(patch_note) false→true 기대값1줄을통합때함께보완해야한다.
+
+## 2026-11-15 — 1071 PC 논리 모델 선택 통합 중 / 미설치
+
+Root가 동결 target후보 d3b71e2/manifest5c2b88f의 payload/native SHA를 대조하고 non-engine부분을 적용했다. current1070과다른 engine두파일은전체덮기없이 exacthunk로병합했다. 기존load와새typedload가동일 beginLoadEpoch의lifecycleLock/releaseEpoch를사용하며, 검증된cancel session/원래deadline대기/owner별결과/terminalSSE문구를보존한다. typedload는가짜폰파일/verified표식없이원래captured pairrevision/local-only와실제기존load응답의fullSHA/context/structured를확인한다. 독립리뷰의raw문자열숫자·boolean문제를새rawfactory에서거부하고순수4회귀를추가했다. source-only이며아직컴파일/설치/실제PC효과가없다.
+
+기본auto는폰verified모델목록대신host PairedPcText를선택할수있고,local/helper/명시cloud/legacyqueue의기존경계를보존한다. 준비부족은고정사유를보존해running만paused로닫으며failed/cancelled/기존종료상태우선이다. 실제빈ModelManager+productionselector/planner의합성엔진검사와normal send/selector/실제PCcanary는시험소스만추가했고아직실행하지않았다. 분석은actualprovenance연결이없는동안중간not-ready이며이상태로기존분석기능보존이나배포성공을주장하지않는다. 후속actualreceipt연결을별도후보로검토하고설치전에보완한다. note-v2와hostphase관측후보는미통합이고1070설치/actual결과와구분한다.
+
+## 2026-11-15 — 1070 실제PC 취소 독립반복도 PASS
+
+첫112109ms PASS뒤새run을확인하는동일strict시험을별도private파일로실행했다. 반복108169ms PASS/HTTP200ACK_CLEANED/실제수락·정리true/기존211자보존/calls2→2/phoneUIcancel/ownerunloadACK/idle/fixturecleanup을확인해현재취소관찰2of2다. 원래1068/69FAIL및nativeDecoderActiveProven=false를유지한다. 종료후664source+10public+6build/설치1070mainbe82·testc605/directoverlay및PCbusyfalse/cleanupfalse/residentnull을재확인하고source1071개발창으로옮겼다. 반복증거를아직설치하지않은1071typedloader의결과로쓰지않는다.
+
 ## 2026-11-15 — 1070 저장공간 goal-v2 실제2of2 PASS
 
 실제 PC/휴대폰 V2 저장공간2회가241098/193124ms PASS·completed·cleanuptrue다. 첫 회차find→save, 둘째inspect→find→save이며 두 회차 모두정확한4줄보고메모1/독립readback/파일3및원본해시유지/최종본문을확인했다. planned/started/recorded2·startedWithoutRow0·unstarted0·boundaryFailurefalse·all_attempts_recorded를확인했으며 원래1069의paused FAIL과과거v1실패는바꾸지않는다. 일반지침보완이포함된작은실제반복관찰이지일반정확도/단독원인증명이아니다. 종료후664source+10public+6build/설치mainbe82·testc605/directoverlay와workerbusyfalse/cleanupfalse/residentnull을재확인했다.

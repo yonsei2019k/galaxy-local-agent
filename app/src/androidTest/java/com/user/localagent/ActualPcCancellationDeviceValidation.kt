@@ -8,7 +8,7 @@ import com.user.localagent.compute.*
 import com.user.localagent.core.ToolRegistry
 import com.user.localagent.data.*
 import com.user.localagent.inference.*
-import com.user.localagent.models.ChosenInference
+import com.user.localagent.models.*
 import com.user.localagent.ui.UiAnswerPhase
 import com.user.localagent.workspace.ProjectWorkspace
 import java.io.File
@@ -36,7 +36,7 @@ class ActualPcCancellationDeviceValidation {
     private data class SavedPart(val id:String, val number:Int, val text:String)
 
     /** Test-only adapter for the CURRENT PC state's exact, source-reviewed fixed protocol. */
-    private class Probe(private val actual:AutomaticComputeEngine, observerScope:CoroutineScope):ComputeExecutionEngine by actual {
+    private class Probe(private val actual:AutomaticComputeEngine, observerScope:CoroutineScope):ComputeExecutionEngine by actual,PairedPcTextLoader {
         private val lock=Any()
         private var serial=0
         private var active=0
@@ -44,6 +44,8 @@ class ActualPcCancellationDeviceValidation {
         private var progressed=0
         private var prepared=0
         private val receipts=mutableListOf<PcCleanupEvidence>()
+        private var typedLoads=0
+        private var matchingTypedReceipts=0
         @Volatile var cancellation:GenerationSummary?=null
             private set
 
@@ -68,6 +70,16 @@ class ActualPcCancellationDeviceValidation {
                 Window(active,prepared) else null
         }
         fun count():Int=synchronized(lock){serial}
+        fun typedLoadCount():Int=synchronized(lock){typedLoads}
+        fun typedReceiptCount():Int=synchronized(lock){matchingTypedReceipts}
+        fun allTypedReceiptsMatched():Boolean=synchronized(lock){typedLoads>0&&matchingTypedReceipts==typedLoads}
+        override suspend fun loadPairedPcText(target:PairedPcText,options:InferenceOptions):PairedPcLoadReceipt {
+            synchronized(lock){typedLoads++}
+            val receipt=actual.loadPairedPcText(target,options)
+            check(receipt.matches(target,options.contextSize)){"QA_TYPED_LOAD_RECEIPT_MISMATCH"}
+            synchronized(lock){matchingTypedReceipts++}
+            return receipt // The real receipt is returned unchanged.
+        }
         fun cleanup():List<PcCleanupEvidence> = synchronized(lock){receipts.toList()}
         fun cancelOutcome(requestId:String):PcCancelOutcome?=actual.pcCancelOutcome(requestId)
         private fun snapshotCurrentCleanup(){
@@ -113,6 +125,7 @@ class ActualPcCancellationDeviceValidation {
     @Test fun realPcContinuationCanBeStoppedWithoutLosingAcknowledgedText()=runBlocking(Dispatchers.Default){
         val args=InstrumentationRegistry.getArguments()
         assumeTrue("actualPcCancelValidationApproved=true required",args.getString("actualPcCancelValidationApproved")=="true")
+        val logicalTarget=args.getString("actualPcCancelLogicalTarget")=="true"
         val expected=checkNotNull(args.getString("actualPcCancelExpectedVersion")?.toLongOrNull()){"QA_EXPECTED_VERSION_REQUIRED"}
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val app=(context.applicationContext as LocalAgentApplication).container
@@ -124,6 +137,7 @@ class ActualPcCancellationDeviceValidation {
         val revision=settings.authorizationRevision
         val original=checkNotNull(settings.snapshot()){"QA_PAIRING_REQUIRED"}
         val originalCloudChoice=settings.state.value.claudeText
+        if(logicalTarget)check(!originalCloudChoice){"QA_LOGICAL_TARGET_REQUIRES_LOCAL_TEXT_SETTING"}
         fun authorityUnchanged(){
             val current=checkNotNull(settings.snapshot()){"QA_PAIRING_REMOVED"}
             check(settings.authorizationRevision==revision&&current.serverId==original.serverId&&
@@ -147,7 +161,7 @@ class ActualPcCancellationDeviceValidation {
         val owner="허구의 우주 정거장에서 화분을 기르는 이야기 400문단을 처음부터 끝까지 써줘. "+
             "각 문단은 70자 이상이며 서로 다른 사건을 담고, 문단 번호는 1부터 400까지 이어져야 해. "+
             "계획이나 요약으로 대신하지 말고 지금 본문을 시작해. 도구나 외부 자료는 사용하지 마."
-        val report=File(checkNotNull(context.getExternalFilesDir(null)),"diagnostics/actual-pc-cancel-validation.json")
+        val report=File(checkNotNull(context.getExternalFilesDir(null)),if(logicalTarget)"diagnostics/actual-pc-cancel-logical-target-validation.json"else"diagnostics/actual-pc-cancel-validation.json")
         var project:ProjectRecord?=null;var room:ChatThreadRecord?=null;var workspace:ProjectWorkspace?=null
         var runner:ChatRunCoordinator?=null;var runId:String?=null;var originalUserId:String?=null
         var stage="creating_fixture";var validated=false;var cleanupVerified=false
@@ -163,6 +177,12 @@ class ActualPcCancellationDeviceValidation {
             put("kind","actual_pc_coordinator_owned_cancel");put("fixtureToken",token);put("versionCode",version)
             put("stage",stage);put("passed",validated&&caught==null&&cleanupVerified&&cleanupFailure==null)
             put("actualModel",true);put("allowCloudText",false);put("toolsEnabled",false)
+            put("targetMode",if(logicalTarget)"logical_paired_pc_profile"else"verified_phone_label")
+            put("choiceOverrideUsedForCancellationIsolation",true)
+            put("normalSendSelectorProven",false);put("cleanOnboardingProven",false)
+            put("typedLoadCount",probe.get()?.typedLoadCount()?:0)
+            put("typedLoadReceiptCount",probe.get()?.typedReceiptCount()?:0)
+            put("allTypedLoadReceiptsMatched",probe.get()?.allTypedReceiptsMatched()?:false)
             put("projectId",project?.id);put("threadId",room?.id);put("runId",runId);put("userMessageId",originalUserId);put("ownerRequestSha256",sha(owner))
             put("inflightSignal","positive_parsed_SSE_progress_AND_owner_health_NOT_native_active_proof")
             put("inflightObserved",window!=null);put("inflightGenerationSerial",window?.serial);put("preparedChars",window?.preparedChars)
@@ -194,11 +214,21 @@ class ActualPcCancellationDeviceValidation {
             val r=store.createThread(p.id,title).also{room=it;publish()}
             val ws=app.workspaceFor(p.id).also{workspace=it}
             check(!ws.state.value.external){"QA_EXTERNAL_WORKSPACE_FORBIDDEN"}
+            val choice=if(logicalTarget){
+                authorityUnchanged()
+                val captured=settings.captureTextAuthority()
+                check(captured.revision==revision&&!captured.allowCloudText){"QA_LOGICAL_TARGET_AUTHORITY"}
+                checkNotNull(RequestInferenceSelection.pairedText(PairedPcTextProfile.SELECTION_ID,revision,captured.allowCloudText,
+                    captured.revision,settings.snapshot()!=null,false)){"QA_LOGICAL_TARGET_NOT_SELECTED"}
+                    .let{it.copy(options=it.options.copy(contextSize=8192,maxOutputTokens=128,thinking=false))}
+            }else{
             app.models.refresh()
             val model=checkNotNull(app.models.models.value.firstOrNull{it.id=="gemma-e2b"&&it.verified}
                 ?:app.models.models.value.firstOrNull{it.verified&&!it.id.contains("mmproj")&&it.runtime in setOf("gguf","litertlm")}){"QA_VERIFIED_LABEL_REQUIRED"}
             // Request-local cap forces real prose continuation; no global model setting is changed.
             val choice=ChosenInference(model,InferenceOptions(contextSize=8192,maxOutputTokens=128,thinking=false),"Actual PC owned-cancellation QA")
+                choice
+            }
             val coordinator=withContext(Dispatchers.Main){ChatRunCoordinator(context,app,restorePersistedQueue=false,
                 inferenceChoiceOverride={choice},workerEngineFactory={request->
                     check(request.projectId==p.id&&request.threadId==r.id&&!request.allowCloudText&&!request.allowTools&&request.capturedPcRevision==revision){"QA_ENGINE_BINDING"}
@@ -208,8 +238,8 @@ class ActualPcCancellationDeviceValidation {
             ownerQuiet()
             val id=withContext(Dispatchers.Main){
                 val message=store.addMessage(r.id,r.activeBranchId,"user",owner).also{originalUserId=it.id}
-                val run=store.createRun(r.id,r.activeBranchId,message.id,model.id,8192,false)
-                val request=QueuedChatRequest(run.id,r.id,r.activeBranchId,p.id,owner,model.id,false,emptyList(),message.id,
+                val run=store.createRun(r.id,r.activeBranchId,message.id,choice.model.id,8192,false)
+                val request=QueuedChatRequest(run.id,r.id,r.activeBranchId,p.id,owner,choice.model.id,false,emptyList(),message.id,
                     allowTools=false,mode="act",workspaceBinding=ws.bindingFingerprint(),capturedPcRevision=revision,allowCloudText=false)
                 runId=run.id;publish()
                 store.updateRunContext(run.id,request.toJson())
@@ -315,6 +345,10 @@ class ActualPcCancellationDeviceValidation {
             // Unload proves owner cleanup, but cannot establish that the chat operation
             // was still active when stop reached the PC. Do not count that race as PASS.
             check(cancelAck){"QA_MATCHED_INFLIGHT_CANCEL_ACK_NOT_OBSERVED"}
+            if(logicalTarget){
+                check(captured.modelId==PairedPcTextProfile.SELECTION_ID){"QA_LOGICAL_TARGET_CAPTURE_CHANGED"}
+                check(recorded.typedLoadCount()>0&&recorded.allTypedReceiptsMatched()){"QA_TYPED_LOAD_NOT_VERIFIED"}
+            }
             validated=true;stage="owned_cancel_verified";publish()
         }catch(error:Throwable){caught=error}
         finally {

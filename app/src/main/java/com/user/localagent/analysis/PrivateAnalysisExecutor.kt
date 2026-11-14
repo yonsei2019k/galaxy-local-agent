@@ -56,11 +56,13 @@ class PrivateAnalysisExecutor(
         require(snapshot.coreSource.ref.kind==expected&&snapshot.coreSource.ref.scopeId==scopeId){"이 분석 도구에 맞는 현재 범위의 원문이 필요합니다."}
         val question=previous?.question?:call.arguments.getValue("question").jsonPrimitive.content
         val chosen=choose(question)?:error("검증된 분석 모델을 선택해야 합니다.")
+        val analysisModel=(chosen.model as? com.user.localagent.models.LocalWeight)?.installed
+            ?:throw com.user.localagent.models.InferencePrerequisiteMissing(com.user.localagent.models.InferencePrerequisiteReason.PC_ANALYSIS_PROVENANCE_UNAVAILABLE)
         val skill=skills.read(if(expected==PrivateEvidenceKind.AUDIO_TRANSCRIPT)"recording-analysis"else"message-analysis")
         val workflow=PrivateRecordAnalysisWorkflow(LocalPrivateAnalysisDecider(app,chosen,skill,snapshot,requestEngine=requestEngine),journal)
         val locator=snapshot.metadata.getValue("sourceLocator").jsonObject
         progress("원문 범위를 확인했습니다 · ${snapshot.coreSource.utf8ByteLength}바이트")
-        val result=workflow.run(snapshot.coreSource,locator,question,chosen.model.sha256,skill.sha256,
+        val result=workflow.run(snapshot.coreSource,locator,question,analysisModel.sha256,skill.sha256,
             analysisId=previous?.id,maxChunks=call.integer("maxChunks",16),progress={done,total->progress("원문 분석 · $done/$total 조각 · 근거와 진행 상태 저장 중")})
         val saved=journal.load(result.checkpoint.id)?:error("분석 저장 결과를 다시 읽지 못했습니다.")
         check(saved==result.checkpoint)

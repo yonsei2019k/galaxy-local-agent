@@ -560,8 +560,10 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
         val projector = app.models.models.value.single { it.id == model.id + "-mmproj" && it.verified }
         val chosen = app.orchestration.choose("통화 녹음의 후속 일정과 메모 및 이메일 제안 분석", explicitDeep = true)
             ?: throw CallPipelineFailure("TEXT_MODEL_UNAVAILABLE")
-        require(chosen.model.runtime in setOf("gguf", "litertlm"))
-        return CallAsrPin(model, projector, choice.language, if (model.id == "asr-qwen-17b") 2 else 4) to chosen.model
+        val localText = (chosen.model as? com.user.localagent.models.LocalWeight)?.installed
+            ?: throw CallPipelineFailure("TEXT_LOCAL_MODEL_REQUIRED")
+        require(localText.runtime in setOf("gguf", "litertlm"))
+        return CallAsrPin(model, projector, choice.language, if (model.id == "asr-qwen-17b") 2 else 4) to localText
     }
 
     private suspend fun verifyPins(job: CallPipelineJob) {

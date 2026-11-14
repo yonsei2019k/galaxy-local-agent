@@ -1,5 +1,8 @@
 package com.user.localagent
 
+import com.user.localagent.models.InferenceModelTarget
+import com.user.localagent.inference.loadTarget
+
 import com.user.localagent.inference.GenerationEvent
 import com.user.localagent.inference.GenerationStopReason
 import com.user.localagent.inference.InferenceEngine
@@ -40,11 +43,15 @@ internal class ExactStructuredReviewInput private constructor(
     private val consumed = AtomicBoolean(false)
 
     /** One collection, one exact count, at most one generation. No retry, clipping or cap reduction. */
-    fun events(engine: InferenceEngine, modelPath: String): Flow<GenerationEvent> = flow {
+    fun events(engine: InferenceEngine, modelPath: String): Flow<GenerationEvent> = eventsLoading(engine) { engine.load(modelPath, options) }
+
+    fun events(engine: InferenceEngine, target: InferenceModelTarget): Flow<GenerationEvent> = eventsLoading(engine) { engine.loadTarget(target, options) }
+
+    private fun eventsLoading(engine: InferenceEngine, load: suspend () -> Unit): Flow<GenerationEvent> = flow {
         if (!consumed.compareAndSet(false, true)) pause(ExactReviewInputPause.Code.EXACT_REVIEW_INPUT_REUSED)
         currentCoroutineContext().ensureActive()
         if (!engine.supportsStructuredOutput) pause(ExactReviewInputPause.Code.EXACT_REVIEW_COUNT_UNAVAILABLE)
-        engine.load(modelPath, options)
+        load()
         currentCoroutineContext().ensureActive()
         val count = try {
             engine.countStructuredChatTokens(prompt, system, schema, history)

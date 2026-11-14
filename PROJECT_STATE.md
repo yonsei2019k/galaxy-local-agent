@@ -2,7 +2,13 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Source1071 under development; build-only checkpoint
+
+The host paired-PC target, existing cancellation lifecycle merge, raw load-reply validation and observation-only phase diagnostics compile. Core828/app754=1582 JVM tests have0 failures/errors/skips; Android-test assembly4m20 and separate release/lint4m29 pass (0 errors/144 warnings/1 hint). All671 source+10 public+6 build inputs match. No1071 signing, installation or device/actual-model result is established. Actual analysis-model provenance is being connected before installation; the intermediate not-ready branch is not accepted as preservation of existing analysis. New prerequisite negative tests are staged, and note tools/F1 prerequisite follow-up remain separate unintegrated candidates.
+
 ## Latest installed checkpoint1070:1560 JVM,73 phone checks and actual PC cancellation pass
+
+An independent actual PC cancellation repeat also passes108169ms with a fresh run, actual request-matched HTTP200 acceptance/cleanup,211 preserved characters, calls2→2 and verified cleanup. This makes the current cancellation observations2/2; earlier failures and the native-activity evidence limit remain unchanged. All frozen inputs, installed bytes/direct overlay and idle PC are rechecked after that repeat. Source1071 is now under development and is not installed.
 
 Main `be82cf31423781f7df7622ebecde868cdc15eec31b6d4b24ec9bbbdd8db1da20` and test `c6059b24299ca5e8e57447323d10610fd7ee1f6c949e5d6e75076cb619943964` are installed without resetting data and independently matched. Core828/app732=1560 JVM tests pass with0 failures/errors/skips; final release/test build3m55, signatures and lint0 errors/144 warnings/1 hint pass. Direct Tailscale overlay authenticates the original pinned PC identity without LAN fallback158ms; external-network handoff remains untested.
 

@@ -1,5 +1,8 @@
 package com.user.localagent
 
+import com.user.localagent.models.*
+import com.user.localagent.inference.loadTarget
+
 import android.Manifest
 import android.content.Intent
 import android.os.Build
@@ -66,6 +69,17 @@ import java.time.ZonedDateTime
 import java.time.ZoneId
 import java.util.UUID
 import com.user.localagent.ui.*
+
+/** Host diagnostics only; these values never grant tools or select a model action. */
+internal enum class HostActionPhase { NEXT_ACTION,REVIEW,FINAL }
+internal enum class HostActionSchemaKind { TOOL_WITH_QUESTION,REVIEW_WITH_QUESTION,PLAIN }
+internal data class HostActionRunBinding(val runId:String,val threadId:String,val branchId:String,val projectId:String?)
+internal data class HostActionPhaseSnapshot(
+    val binding:HostActionRunBinding,val round:Int,val phase:HostActionPhase,
+    val requiredTools:Set<String>,val remainingTools:Set<String>,val readbackPendingTools:Set<String>,
+    val readbackBlocked:Boolean,val eligibleForFinal:Boolean,val managedReviewAvailable:Boolean,
+    val schemaKind:HostActionSchemaKind,val clarificationBranchTaken:Boolean?=null,
+)
 
 /** App-owned execution scope: leaving a chat/activity never changes an active request target. */
 class ChatRunCoordinator internal constructor(internal val context:android.content.Context,internal val app:AppContainer,
@@ -139,6 +153,36 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private var selection:Job?=null
     private var draining:Job?=null
     private var activeRequest:QueuedChatRequest?=null
+    private val mutableHostActionPhase=MutableStateFlow<HostActionPhaseSnapshot?>(null)
+    internal val hostActionPhaseSnapshots:StateFlow<HostActionPhaseSnapshot?> = mutableHostActionPhase.asStateFlow()
+    @Volatile private var hostActionGenerationOpen=false
+    internal fun hostActionSnapshotForGeneration(binding:HostActionRunBinding):HostActionPhaseSnapshot? {
+        val snapshot=mutableHostActionPhase.value?:return null
+        return snapshot.takeIf{workerBinding!=null&&hostActionGenerationOpen&&it.binding==binding&&
+            activeRequest?.runId==binding.runId&&it.clarificationBranchTaken==null}
+    }
+    private fun beginHostActionPhase(request:QueuedChatRequest,round:Int,phase:HostActionPhase,
+        required:Set<String>,remaining:Set<String>,pendingReads:Set<String>,readbackBlocked:Boolean,
+        eligibleForFinal:Boolean,managedReviewAvailable:Boolean,schemaKind:HostActionSchemaKind) {
+        hostActionGenerationOpen=false
+        if(workerBinding==null||activeRequest?.runId!=request.runId||
+            listOf(required,remaining,pendingReads).any{names->names.any{it !in ToolRegistry.definitions}}){
+            mutableHostActionPhase.value=null;return
+        }
+        fun frozen(names:Set<String>):Set<String> = java.util.Collections.unmodifiableSet(java.util.TreeSet(names))
+        mutableHostActionPhase.value=HostActionPhaseSnapshot(
+            HostActionRunBinding(request.runId,request.threadId,request.branchId,request.projectId),round,phase,
+            frozen(required),frozen(remaining),frozen(pendingReads),readbackBlocked,eligibleForFinal,managedReviewAvailable,schemaKind)
+        hostActionGenerationOpen=true
+    }
+    private suspend fun <T> duringHostActionGeneration(block:suspend()->T):T =
+        try{block()}finally{hostActionGenerationOpen=false}
+    private fun recordHostClarificationBranch(request:QueuedChatRequest,taken:Boolean) {
+        val old=mutableHostActionPhase.value?:return
+        if(old.binding==HostActionRunBinding(request.runId,request.threadId,request.branchId,request.projectId)&&old.round==budgetRound)
+            mutableHostActionPhase.value=old.copy(clarificationBranchTaken=taken)
+    }
+    private fun clearHostActionPhase(){hostActionGenerationOpen=false;mutableHostActionPhase.value=null}
     private var requestTools:com.user.localagent.tools.ToolExecutor?=null
     private var requestImports:com.user.localagent.imports.ConversationImport?=null
     internal var requestRepository:com.user.localagent.data.LocalRepository?=null
@@ -578,6 +622,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             var liveComputeProgress:Job?=null
             var updateLease:java.io.Closeable?=null
             var interruptedTerminalState:String?=null
+            var prerequisitePauseReason:InferencePrerequisiteReason?=null
             try {
                 updateLease=app.updates.acquireBusy("chat:${request.runId}")
                 workTraceSession=ChatWorkTraceSession.open(app.repository,request){workActivityController.markUnavailable(request.runId)}
@@ -601,7 +646,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         return@launch
                     }
                     val snapshot=request.continuation
-                    val model=app.models.models.value.firstOrNull {it.id==snapshot.modelId&&it.verified}?:error("이 답변에 사용한 모델을 먼저 준비해주세요.")
+                    val model=continuationTarget(request,snapshot.modelId)
                     workTraceSession?.beginGeneration(model.id,snapshot.options,true)
                     val continued=writeChatAnswer(request,model,snapshot.options,snapshot.user,snapshot.system,snapshot.history,resume=snapshot)
                     workTraceSession?.finishGeneration(continued.summary,continued.paused,continued.messageId!=null&&!continued.toolEnvelope)
@@ -617,7 +662,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 requestTools?.bindAvailableTools(if(request.allowTools)offeredTools else emptySet())
                 val semanticOfferedTools=offeredTools-SkillToolCatalog.names
                 val semanticChoice=if(request.allowTools)chooseInference(request)?.withPcContext()else null
-                if(request.allowTools&&semanticChoice==null){answer("문맥을 해석할 로컬 모델이 준비되지 않았습니다. 모델 설정에서 준비 상태를 확인해주세요.");return@launch}
+                if(request.allowTools&&semanticChoice==null)throw InferencePrerequisiteMissing(InferencePrerequisiteReason.MODEL_SELECTION_MISSING)
                 val directLoop=directNextActionLoop()
                 var semantic=initialSemanticPlan(request,text,actionMode,directLoop,semanticChoice,semanticOfferedTools,usableAttachments.isNotEmpty())
                 requestSemanticPlan=semantic
@@ -666,7 +711,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 } else {
                     val needsStructuredAction=taskGoal.requiredTools.isNotEmpty()&&"generate_image" !in taskGoal.requiredTools
                     val chosen=semanticChoice?:chooseInference(request)?.withPcContext()
-                    if(chosen == null) { answer("이 기기에서 성공한 CPU 벤치마크가 있는 모델이 필요합니다. 모델 탭에서 내려받은 모델을 측정해주세요. ‘지금 몇 시야’, ‘메모 저장: 우유 사기’는 바로 실행할 수 있습니다."); return@launch }
+                    if(chosen == null)throw InferencePrerequisiteMissing(InferencePrerequisiteReason.MODEL_SELECTION_MISSING)
                     val selected=chosen.model
                     val requestOptions=when {
                         usableAttachments.isNotEmpty()&&selected.runtime=="litertlm"->chosen.options.copy(contextSize=8192,backend="CPU",thinking=false,maxOutputTokens=1536)
@@ -685,7 +730,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         }
                     }else""
                     // Loading the same model is idempotent; the engine serializes replacement.
-                    executionEngine.load(selected.path, requestOptions)
+                    executionEngine.loadTarget(selected, requestOptions)
                     var query=text
                     val toolEvidence=mutableListOf<JsonObject>()
                     val actionTools=if(!request.allowTools)emptySet()else semantic?.let {planTools(it,semanticOfferedTools)}?:if(actionMode&&!directLoop)emptySet()else semanticOfferedTools
@@ -712,7 +757,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         status.value="다음 행동 판단 · ${round+1}/${com.user.localagent.core.WorkSegments.TOTAL_ROUNDS} · 실행 ${requestSteps.size}/${taskGoal.stepBudget}"
                         budgetRound=round
                         val history=if(workMode==AgentWorkMode.RESEARCH)emptyList()else lines.value.dropLast(1).takeLast(12).dropWhile {it.role!="user"}.map {InferenceTurn(it.role,it.requestText?:it.text)}
-                        executionEngine.load(selected.path,requestOptions)
+                        executionEngine.loadTarget(selected,requestOptions)
                         val readback=assessReadbacks(request,taskGoal,allowedTools,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS-round)
                         val readbacksComplete=!readback.applicable||readback.readbackSatisfied
                         if(readback.blockers.isNotEmpty()){
@@ -757,9 +802,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 if(reviewing&&executionEngine.supportsStructuredOutput)com.user.localagent.core.NextActionQuestion.extend(AutonomousReviewPolicy.schema(structuredTools,hint))
                                 else com.user.localagent.core.NextActionQuestion.schema(structuredTools,request.text,hint)
                             }else null
-                        val written=writeChatAnswer(request,selected,requestOptions,generationQuery,fitted.first,fitted.second,
+                        beginHostActionPhase(request,round,if(reviewing)HostActionPhase.REVIEW else if(finalSynthesis)HostActionPhase.FINAL else HostActionPhase.NEXT_ACTION,
+                            taskGoal.requiredTools,remainingRequired,readback.pending.map{it.readTool}.toSet(),readback.blockers.isNotEmpty(),eligibleForFinal,managedReview!=null,
+                            if(generationSchema==null)HostActionSchemaKind.PLAIN else if(reviewing)HostActionSchemaKind.REVIEW_WITH_QUESTION else HostActionSchemaKind.TOOL_WITH_QUESTION)
+                        val written=duringHostActionGeneration { writeChatAnswer(request,selected,requestOptions,generationQuery,fitted.first,fitted.second,
                             structuredSchema=generationSchema,
-                            display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty()&&!com.user.localagent.core.ActionCompletionReport.manages(taskGoal.requiredTools,observedOutcomes),recoverTruncatedTool=!reviewing,exactManagedReview=reviewing&&managedReview!=null)
+                            display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty()&&!com.user.localagent.core.ActionCompletionReport.manages(taskGoal.requiredTools,observedOutcomes),recoverTruncatedTool=!reviewing,exactManagedReview=reviewing&&managedReview!=null) }
                         workTraceSession?.finishGeneration(written.summary,written.paused,written.messageId!=null&&!written.toolEnvelope)
                         var raw=written.text.trim()
                         val visible=written.messageId!=null
@@ -911,10 +959,22 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 status.value="요청 중단 · 이미 확인된 실행 결과는 유지됩니다."
                 throw cancel
             } catch(error:Throwable) {
-                interruptedTerminalState="failed"
-                handleRequestFailure(request,error)
+                if(error is InferencePrerequisiteMissing){
+                    prerequisitePauseReason=error.reason
+                    // A notice is not the requested result. Preserve the host pause intent before publication.
+                    try {
+                        if(app.repository.chat.run(request.runId)?.status=="running"){
+                            answer(error.reason.notice)
+                            status.value="준비 필요 · 요청과 제한 보존됨"
+                        }
+                    }catch(cancel:CancellationException){interruptedTerminalState="cancelled";throw cancel}
+                    catch(publishError:Throwable){interruptedTerminalState="failed";if(publishError!==error)publishError.addSuppressed(error);throw publishError}
+                }else{
+                    interruptedTerminalState="failed"
+                    handleRequestFailure(request,error)
+                }
             } finally {
-                finishRequestResources(request,lease,liveComputeProgress,updateLease,interruptedTerminalState)
+                finishRequestResources(request,lease,liveComputeProgress,updateLease,interruptedTerminalState,prerequisitePauseReason)
             }
         }
     }
@@ -1006,7 +1066,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         semanticChoice:com.user.localagent.models.ChosenInference?,semanticOfferedTools:Set<String>,hasAttachment:Boolean):com.user.localagent.core.SemanticRequestPlan? {
     return if(request.allowTools&&actionMode&&!directLoop){
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.SEMANTIC_STARTED,"최근 대화와 이번 요청의 목표·범위를 해석합니다.")
-        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.INFERENCE_STARTED,"요청 해석 모델 ${semanticChoice!!.model.id}")
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.INFERENCE_STARTED,"요청 해석 대상 ${semanticChoice!!.model.id}")
         status.value="최근 대화와 요청의 의미를 기기에서 해석 중"
         val recent=lines.value.dropLast(1).takeLast(12).filter {it.role in setOf("user","assistant")}.map {InferenceTurn(it.role,it.requestText?:it.text)}
         val localContext=buildJsonObject {
@@ -1126,10 +1186,25 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             status.value=detail;workTraceSession?.progress(detail,scope)
         }
     })
+    private fun pairedTextChoice(request:QueuedChatRequest,selectionId:String):ChosenInference? {
+        val settings=com.user.localagent.compute.PcComputeSettings.get(context)
+        val current=settings.captureTextAuthority()
+        return RequestInferenceSelection.pairedText(selectionId,request.capturedPcRevision,request.allowCloudText,
+            current.revision,settings.snapshot()!=null,request.thinking)
+    }
+    private fun continuationTarget(request:QueuedChatRequest,selectionId:String):InferenceModelTarget {
+        if(selectionId==PairedPcTextProfile.SELECTION_ID)
+            return pairedTextChoice(request,selectionId)?.model
+                ?:throw InferencePrerequisiteMissing(InferencePrerequisiteReason.ORIGINAL_PC_AUTHORITY_MISSING)
+        val installed=app.models.models.value.firstOrNull {it.id==selectionId&&it.verified}
+            ?:throw InferencePrerequisiteMissing(InferencePrerequisiteReason.MODEL_SELECTION_MISSING)
+        return LocalWeight(installed)
+    }
     private suspend fun chooseInference(request:QueuedChatRequest):ChosenInference? {
         inferenceChoiceOverride?.let {return it(request)}
+        pairedTextChoice(request,request.modelId)?.let{return it}
         if(request.modelId=="auto")executionOrchestration.choose(request.text,request.thinking)?.let {return it}
-        // The PC picks the weights, so "auto" needs no phone benchmark; any verified phone entry only labels the request.
+        // Local/helper selection retains actual phone-file validation; it is not a PC load receipt.
         val model=app.models.models.value.firstOrNull {it.id==request.modelId&&it.verified&&it.runtime in setOf("litertlm","gguf")}
             ?:app.models.models.value.firstOrNull {request.modelId=="auto"&&it.verified&&it.runtime in setOf("litertlm","gguf")}?:return null
         return ChosenInference(model,InferenceOptions(contextSize=4096,backend="CPU",thinking=request.thinking,maxOutputTokens=if(request.thinking)2048 else 768),"사용자가 선택한 로컬 모델")
@@ -1204,7 +1279,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestResearch=com.user.localagent.web.WebResearchController(context,requestRepository!!)
     }
 
-    private suspend fun finishRequestResources(request:QueuedChatRequest,lease:java.io.Closeable?,liveComputeProgress:Job?,updateLease:java.io.Closeable?,interruptedTerminalState:String?){
+    private suspend fun finishRequestResources(request:QueuedChatRequest,lease:java.io.Closeable?,liveComputeProgress:Job?,updateLease:java.io.Closeable?,interruptedTerminalState:String?,prerequisitePauseReason:InferencePrerequisiteReason?){
         try {
             withContext(NonCancellable){liveComputeProgress?.cancelAndJoin()}
             withContext(NonCancellable+Dispatchers.IO){runCatching {app.chatAttachments.releaseRequest(request.runId)}}
@@ -1218,6 +1293,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         require(interruptedTerminalState in setOf("failed","cancelled"))
                         app.repository.chat.updateRun(request.runId,interruptedTerminalState,
                             errorCode=if(interruptedTerminalState=="failed")"request_failed_before_finalization"else null)
+                    }else if(InferencePrerequisiteFinalization.pauseReason("running",interruptedTerminalState,prerequisitePauseReason)!=null){
+                        app.repository.chat.updateRun(request.runId,"paused",errorCode=checkNotNull(prerequisitePauseReason).code)
                     }else{
                         // Covers early returns/non-action plans too; explicit cancellation states stay untouched.
                         val readback=runCatching {assessReadbacks(request,TaskHarness.inferGoal("일반 대화"),requestAuthorizedTools,1,forCompletion=true)}.getOrNull()
@@ -1240,6 +1317,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     executionWorkspace=null;requestTools=null;requestImports=null;requestRepository=null;requestResearch=null
                     requestSemanticPlan=null;requestAuthorizedTools=emptySet()
                     requestReadbackObligations=null
+                    clearHostActionPhase()
                     if(pendingGoalStopRunId==request.runId)pendingGoalStopRunId=null
                     workTraceSession=null
                     requestGuidance.clear();contextCalls.clear();omittedGuidance.clear()
@@ -1296,7 +1374,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode="tool_call_truncated")
     }
-    private suspend fun writeChatAnswer(request:QueuedChatRequest,model:com.user.localagent.models.InstalledModel,
+    private suspend fun writeChatAnswer(request:QueuedChatRequest,model:InferenceModelTarget,
         options:com.user.localagent.inference.InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
         structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false,exactManagedReview:Boolean=false):WrittenAnswer =
         LongAnswerWriter(app,request.copy(previousSteps=requestSteps.toList(),readbackObligations=requestReadbackObligations),{id,view->answerStates.value=answerStates.value+(id to view)},makeRequestProgress(request,workTraceSession),engine=executionEngine)
@@ -1714,6 +1792,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private suspend fun pauseForOwnerInput(request:QueuedChatRequest,raw:String,truncated:Boolean):Boolean {
         var invalid=false
         val question=try{com.user.localagent.core.NextActionQuestion.parse(raw)}catch(_:Exception){invalid=true;null}
+        recordHostClarificationBranch(request,question!=null||invalid)
         if(question==null&&!invalid)return false
         invalid=invalid||truncated
         answer(if(invalid)"추가 확인 질문의 형식을 확인하지 못해 실행하지 않고 멈췄습니다."else checkNotNull(question))

@@ -37,16 +37,84 @@ import org.junit.runner.RunWith
 class TeamModelWorkflowDeviceValidation {
     private class OwnerWorkActive:IllegalStateException("Owner work became active; QA only is cancelled")
 
-    private class RecordingEngine(private val delegate:ComputeExecutionEngine):ComputeExecutionEngine by delegate {
+    private class RecordingEngine(private val delegate:ComputeExecutionEngine,
+        private val expectedBinding:HostActionRunBinding,
+        private val hostCoordinator:()->ChatRunCoordinator?,
+    ):ComputeExecutionEngine by delegate {
         @Volatile var stage="created"
         private val events=mutableListOf<JsonObject>()
         private val generationLocations=linkedSetOf<String>()
+        private var generationSerial=0
+        private val hostSamples=mutableListOf<HostSample>() // At most the existing120 event slots.
+        private val diagnosticScope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
+        private var watchedSource:ChatRunCoordinator?=null
+        private data class HostSample(val serial:Int,val eventIndex:Int,val snapshot:HostActionPhaseSnapshot?,
+            var unknownReason:String?=null,var clarificationBranchTaken:Boolean?=null)
+        fun closeHostDiagnostics(){diagnosticScope.cancel()}
+        private fun phaseJson(sample:HostSample):JsonObject=buildJsonObject {
+            val value=sample.snapshot
+            if(value==null||sample.unknownReason!=null){
+                put("phase","UNKNOWN");put("join",sample.unknownReason?:"NO_HOST_SNAPSHOT")
+                put("clarificationBranchTaken",JsonNull)
+            }else{
+                put("phase",value.phase.name);put("join","ACTUAL_HOST_RUN_ROUND");put("round",value.round)
+                put("requiredTools",JsonArray(value.requiredTools.sorted().map(::JsonPrimitive)))
+                put("remainingTools",JsonArray(value.remainingTools.sorted().map(::JsonPrimitive)))
+                put("readbackPendingTools",JsonArray(value.readbackPendingTools.sorted().map(::JsonPrimitive)))
+                put("readbackBlocked",value.readbackBlocked);put("eligibleForFinal",value.eligibleForFinal)
+                put("managedReviewAvailable",value.managedReviewAvailable);put("schemaKind",value.schemaKind.name)
+                put("clarificationBranchTaken",sample.clarificationBranchTaken?.let(::JsonPrimitive)?:JsonNull)
+            }
+        }
+        private fun savePhase(sample:HostSample){
+            val previous=events.getOrNull(sample.eventIndex)?:return
+            events[sample.eventIndex]=JsonObject(previous+mapOf("hostActionPhase" to phaseJson(sample)))
+        }
+        private fun watch(source:ChatRunCoordinator){
+            val start=synchronized(events){if(watchedSource!=null)false else{watchedSource=source;true}}
+            if(!start)return
+            diagnosticScope.launch(start=CoroutineStart.UNDISPATCHED){
+                source.hostActionPhaseSnapshots.collect { value->
+                    if(value==null||value.binding!=expectedBinding||value.clarificationBranchTaken==null)return@collect
+                    synchronized(events){hostSamples.filter{it.snapshot?.binding==value.binding&&it.snapshot?.round==value.round}.forEach { sample->
+                        if(sample.unknownReason==null&&sample.snapshot!=null){
+                            if(sample.snapshot.copy(clarificationBranchTaken=null)==value.copy(clarificationBranchTaken=null))
+                                sample.clarificationBranchTaken=value.clarificationBranchTaken
+                            else{sample.unknownReason="SNAPSHOT_CHANGED";sample.clarificationBranchTaken=null}
+                            savePhase(sample)
+                        }
+                    }}
+                }
+            }
+        }
+        private fun beginGeneration(name:String):Int {
+            val source=hostCoordinator()
+            val snapshot=source?.hostActionSnapshotForGeneration(expectedBinding)
+            val serial=synchronized(events){++generationSerial}
+            val index=mark(name,serial)
+            if(index!=null)synchronized(events){
+                val changed=watchedSource!=null&&watchedSource!==source
+                val sample=HostSample(serial,index,snapshot,
+                    if(changed)"COORDINATOR_CHANGED" else if(snapshot==null)"NO_HOST_SNAPSHOT" else null)
+                hostSamples+=sample
+                if(snapshot!=null){
+                    val joined=hostSamples.filter{it.snapshot?.binding==snapshot.binding&&it.snapshot?.round==snapshot.round}
+                    if(joined.size>1)joined.forEach{it.unknownReason="NON_UNIQUE_GENERATION_JOIN";it.clarificationBranchTaken=null;savePhase(it)}
+                }
+                savePhase(sample)
+            }
+            if(snapshot!=null&&source!=null)watch(source)
+            return serial
+        }
         @Volatile var failure:JsonObject?=null
-        private fun mark(name:String){
+        private fun mark(name:String,serial:Int?=null):Int? {
             stage=name
-            synchronized(events){
-                if(events.size<120)events+=buildJsonObject{put("stage",name);put("atEpochMillis",System.currentTimeMillis());put("executionLocation",delegate.executionLocation)}
+            return synchronized(events){
+                val index=events.size.takeIf{it<120}
+                if(index!=null)events+=buildJsonObject{put("stage",name);put("atEpochMillis",System.currentTimeMillis());put("executionLocation",delegate.executionLocation)
+                    serial?.let{put("generationSerial",it)}}
                 if(name.startsWith("generate_"))generationLocations+=delegate.executionLocation
+                index
             }
         }
         private fun error(name:String,error:Throwable){
@@ -64,10 +132,10 @@ class TeamModelWorkflowDeviceValidation {
             mark("count_structured");return try{delegate.countStructuredChatTokens(userText,systemInstruction,schema,history)}catch(t:Throwable){error("count_structured",t);throw t}
         }
         override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<GenerationEvent> = flow {
-            mark("generate_chat");emitAll(delegate.generateChatEvents(userText,systemInstruction,history));mark("chat_finished")
+            val serial=beginGeneration("generate_chat");emitAll(delegate.generateChatEvents(userText,systemInstruction,history));mark("chat_finished",serial)
         }.catch{error("generate_chat",it);throw it}
         override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<GenerationEvent> = flow {
-            mark("generate_structured");emitAll(delegate.generateStructuredEvents(userText,systemInstruction,schema,history));mark("structured_finished")
+            val serial=beginGeneration("generate_structured");emitAll(delegate.generateStructuredEvents(userText,systemInstruction,schema,history));mark("structured_finished",serial)
         }.catch{error("generate_structured",it);throw it}
     }
 
@@ -310,7 +378,9 @@ class TeamModelWorkflowDeviceValidation {
                 inferenceChoiceOverride={choice},workerEngineFactory={request->
                     check(!request.allowCloudText&&request.capturedPcRevision==capturedRevision)
                     RecordingEngine(AutomaticComputeEngine(context,ownerRunId=request.runId,beforePhoneLoad={app.engine.unloadPhoneResidency()},
-                        capturedPcRevision=request.capturedPcRevision,allowCloudText=false)).also{engine.set(it)}
+                        capturedPcRevision=request.capturedPcRevision,allowCloudText=false),
+                        HostActionRunBinding(request.runId,request.threadId,request.branchId,request.projectId),
+                        hostCoordinator={runner?.executionForRun(request.runId)}).also{engine.set(it)}
                 },externalIntentLauncher={error("External Intent is forbidden in positive team QA")})}.also{runner=it}
             val ownRun=withContext(Dispatchers.Main){
                 val message=store.addMessage(r.id,r.activeBranchId,"user",owner)
@@ -477,6 +547,7 @@ class TeamModelWorkflowDeviceValidation {
         }catch(error:Throwable){caught=error;onFailure(error);if(error is OwnerWorkActive)ownerInterrupted=true;checkpoint("case_caught")}
         finally {
             withContext(NonCancellable){
+                engine.get()?.closeHostDiagnostics()
                 checkpoint("case_cleanup_started")
                 if(kind=="storage_report"){
                     val observation=captureStorageObservation(storageStateReader)

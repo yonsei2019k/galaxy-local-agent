@@ -2,6 +2,8 @@
 
 ## 2026-11-15 checkpoint1070 /73 controlled and actual PC cancellation PASS
 
+Independent repeat PASS108169ms: new run confirmed, same-request HTTP200 ACK_CLEANED with actual acceptance/cleanup,211 preserved characters, calls2→2 and fixture cleanup. Current cancellation observations are2/2. Frozen664+10+6 inputs, installed hashes/direct overlay and idle PC are reverified afterward. Developing1071 source has no installed/device evidence yet.
+
 Main `be82cf31423781f7df7622ebecde868cdc15eec31b6d4b24ec9bbbdd8db1da20`, test `c6059b24299ca5e8e57447323d10610fd7ee1f6c949e5d6e75076cb619943964`: signed, installed without data reset and independently matched. Full build3m55, core828/app732=1560 JVM0 failures/errors/skips, lint0 errors/144 warnings/1 hint. The two earlier builds failed the existing shorter-selection-prompt regression; wording was shortened and the test was retained. New cancellation15 JVM regressions pass. Original pinned direct-overlay transport authenticates the intended PC without LAN fallback158ms; external-network handoff is untested.
 
 Controlled73 unique checks PASS: old59+Calendar8+file-binding6; overlapping cold cancellation/1MiB controls pass separately. Actual PC cancellation PASS112109ms: same-request HTTP200 ACK_CLEANED with actual acknowledged/accepted/cleanup booleans, prior231 characters preserved, phone/UI cancelled and generation calls2→2. Owner unload ACK, final idle and fixture cleanup pass. nativeDecoderActiveProven remains false; positive parsed SSE is not native decoder activity proof. Previous1068/1069 failures are not regraded.

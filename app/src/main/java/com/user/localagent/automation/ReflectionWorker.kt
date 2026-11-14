@@ -89,8 +89,8 @@ class ReflectionWorker(context: Context, parameters: WorkerParameters) : Corouti
         try {
             // Refresh reads the local model index only. Never resolve/download/import a model here.
             val chosen = app.orchestration.choose("사용 패턴 정리", false)
-            val model = chosen?.model
-            if (model == null || !model.verified || model.runtime !in setOf("litertlm", "gguf")) {
+            val model = (chosen?.model as? com.user.localagent.models.LocalWeight)?.installed
+            if (chosen == null || model == null || !model.verified || model.runtime !in setOf("litertlm", "gguf")) {
                 controller.status("verified_local_model_required", generation); return Result.success()
             }
             if (!stillAllowed(controller, generation, app.automation, observationRevision)) { controller.status("deferred_runtime_or_opt_in", generation); return Result.success() }

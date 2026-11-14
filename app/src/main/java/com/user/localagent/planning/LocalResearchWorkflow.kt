@@ -1,5 +1,7 @@
 package com.user.localagent.planning
 
+import com.user.localagent.inference.loadTarget
+
 import com.user.localagent.AppContainer
 import com.user.localagent.core.SemanticAction
 import com.user.localagent.core.SemanticRequestPlan
@@ -371,7 +373,7 @@ class LocalResearchWorkflow internal constructor(
 internal class EngineResearchActionDecider(private val app: AppContainer,private val actionInstruction:String?=null,private val skillId:String?=null,
     private val requestEngine:com.user.localagent.inference.InferenceEngine=app.engine) : ResearchActionDecider {
     override suspend fun decide(input: String, schema: String, chosen: ChosenInference, repair: Boolean): String {
-        require(chosen.model.verified)
+        chosen.model.requireSelectable()
         val options = chosen.options.copy(thinking = false, maxOutputTokens = 384, audioEnabled = false, visionEnabled = false, projectorPath = null)
         val skill = withContext(Dispatchers.IO) {
             if(skillId!=null)com.user.localagent.skills.BundledSkillStore(app.applicationContext).read(skillId).body else app.applicationContext.assets.open("skills/research/SKILL.md").bufferedReader().use { reader ->
@@ -399,7 +401,7 @@ internal class EngineResearchActionDecider(private val app: AppContainer,private
         }
         try {
             return withTimeout(90_000L) {
-                requestEngine.load(chosen.model.path, options)
+                requestEngine.loadTarget(chosen.model, options)
                 var boundedInput = input
                 var tokens = requestEngine.countChatTokens(boundedInput, instruction, emptyList())
                     ?: error("조사 계획의 문맥 토큰 수를 확인하지 못했습니다.")

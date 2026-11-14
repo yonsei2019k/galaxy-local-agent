@@ -156,6 +156,7 @@ fun ChatWorkspace(
     onLoadOlderActivity:((String)->Unit)?=null,
     activeGoalLabel:String?=null,
     backgroundWork:(@Composable ()->Unit)?=null,
+    pairedPcTextAvailable:Boolean=false,
 ) {
     val context=LocalContext.current
     val draftStore=remember(context){com.user.localagent.data.DraftStore(context)}
@@ -303,7 +304,7 @@ fun ChatWorkspace(
             }
             Text(navigation?.threads?.find{it.id==navigation.selectedThreadId}?.title?.takeIf{it.isNotBlank()}?:"ZipHap.Agent", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                 color = ZipHapColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            WorkspaceModelSelector(models, selectedModelId, onModelChange,composerReady)
+            WorkspaceModelSelector(models, selectedModelId, onModelChange,composerReady,pairedPcTextAvailable)
         }
         HorizontalDivider(color = Color(0xFF23262A), thickness = 1.dp)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
@@ -530,10 +531,14 @@ private fun WorkspaceBranchSelector(branches:List<UiChatBranch>,selectedId:Strin
 }
 
 @Composable
-private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: String, onModelChange: (String) -> Unit,enabled:Boolean=true) {
+private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: String, onModelChange: (String) -> Unit,enabled:Boolean=true,pairedPcTextAvailable:Boolean=false) {
     var expanded by remember { mutableStateOf(false) }
     val usable = models.filter { it.verified && it.runtime in setOf("litertlm","gguf") }
-    val label = if (selectedId == "auto") "자동" else usable.find { it.id == selectedId }?.let(::shortModelLabel) ?: "모델 선택"
+    val label = when(selectedId){
+        com.user.localagent.models.PairedPcTextProfile.SELECTION_ID->com.user.localagent.models.PairedPcTextProfile.TITLE
+        "auto"->if(pairedPcTextAvailable)"PC · 자동"else"자동"
+        else->usable.find { it.id == selectedId }?.let(::shortModelLabel) ?: "모델 선택"
+    }
     Box {
         TextButton(
             enabled=enabled,
@@ -555,6 +560,11 @@ private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: Str
                 onClick = { expanded = false; onModelChange("auto") },
                 modifier = Modifier.testTag("model_option_auto"),
                 trailingIcon = { if (selectedId == "auto") Text("✓", color = ZipHapColors.TextSecondary) },
+            )
+            if(pairedPcTextAvailable)DropdownMenuItem(
+                text={Text(com.user.localagent.models.PairedPcTextProfile.TITLE)},
+                onClick={expanded=false;onModelChange(com.user.localagent.models.PairedPcTextProfile.SELECTION_ID)},
+                modifier=Modifier.testTag("model_option_paired_pc_text"),
             )
             usable.forEach { model ->
                 DropdownMenuItem(

@@ -1,5 +1,9 @@
 package com.user.localagent
 
+import com.user.localagent.models.InferenceModelTarget
+import com.user.localagent.models.LocalWeight
+import com.user.localagent.inference.loadTarget
+
 import android.app.ActivityManager
 import android.os.PowerManager
 import android.os.SystemClock
@@ -204,6 +208,10 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
     }
 
     suspend fun write(model:InstalledModel,initialOptions:InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
+        structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false,exactManagedReview:Boolean=false):WrittenAnswer =
+        write(LocalWeight(model),initialOptions,user,system,history,structuredSchema,display,resume,recoverTruncatedTool,exactManagedReview)
+
+    suspend fun write(model:InferenceModelTarget,initialOptions:InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
         structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false,exactManagedReview:Boolean=false):WrittenAnswer {
         val started=clock()
         require(partCharBudget in 1..ANSWER_PART_CHAR_BUDGET)
@@ -296,7 +304,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
 
     /** Generation/flush loop; terminal handlers stay in the smaller caller coroutine. */
     @OptIn(FlowPreview::class)
-    private suspend fun writeParts(progress:WriteProgress,model:InstalledModel,initialOptions:InferenceOptions,
+    private suspend fun writeParts(progress:WriteProgress,model:InferenceModelTarget,initialOptions:InferenceOptions,
         user:String,system:String,history:List<InferenceTurn>,structuredSchema:String?,display:Boolean,
         resume:ContinuationSnapshot?,recoverTruncatedTool:Boolean,exactManagedReview:Boolean,
         deadline:Long,branchExcerpt:String):WrittenAnswer? {
@@ -318,7 +326,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 var prompt=if(continuing)continuationPrompt()else user
                 var turns=if(continuing)emptyList()else history
                 var options=initialOptions.copy(thinking=initialOptions.thinking&&!continuing)
-                engine.load(model.path,options)
+                engine.loadTarget(model,options)
                 var count=engine.countChatTokens(prompt,compactSystem,turns)
                 // Optional excerpts are reduced before the owner's request or essential project/system rules.
                 while(count!=null&&count+minOf(options.maxOutputTokens,768)+8>options.contextSize&&summaryExcerpt.isNotEmpty()){
@@ -342,7 +350,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     ExactStructuredReviewInput.requireApplicable(true,request.allowCloudText,structuredSchema,display,continuing)
                     ExactStructuredReviewInput.capture(prompt,compactSystem,turns,checkNotNull(structuredSchema),options)
                 }else null
-                if(exactInput==null)engine.load(model.path,options)
+                if(exactInput==null)engine.loadTarget(model,options)
                 val partNumber=nextPart++
                 var segmentId:String?=null
                 var sequence=0
@@ -401,7 +409,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 try {
                     withTimeout((deadline-clock()).coerceAtLeast(1)) {
                         coroutineScope {
-                            val events=(if(exactInput!=null)exactInput.events(engine,model.path)
+                            val events=(if(exactInput!=null)exactInput.events(engine,model)
                                 else if(structuredSchema==null)engine.generateChatEvents(prompt,compactSystem,turns)
                                 else engine.generateStructuredEvents(prompt,compactSystem,structuredSchema,turns)).produceIn(this)
                             while(true){

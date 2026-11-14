@@ -1,5 +1,7 @@
 package com.user.localagent.planning
 
+import com.user.localagent.inference.loadTarget
+
 import com.user.localagent.AppContainer
 import com.user.localagent.FailureLog
 import com.user.localagent.compute.PcBusy
@@ -58,7 +60,9 @@ class LocalSemanticPlanner internal constructor(
         localContext: JsonObject = buildJsonObject {},
     ): SemanticPlanningResult {
         if (ownerRequest.isBlank()) fail("empty_request", "작업을 계획할 현재 요청이 비어 있습니다.")
-        if (!chosen.model.verified) fail("unverified_model", "검증된 기기 내 모델로 작업 계획을 만들어야 합니다.")
+        if ((chosen.model as? com.user.localagent.models.LocalWeight)?.installed?.verified == false)
+            fail("unverified_model", "검증된 기기 내 모델로 작업 계획을 만들어야 합니다.")
+        chosen.model.requireSelectable()
         if (availableTools.any { it !in ToolRegistry.definitions }) {
             fail("unknown_available_tool", "등록되지 않은 도구가 작업 계획 범위에 포함되어 있습니다.")
         }
@@ -85,7 +89,7 @@ class LocalSemanticPlanner internal constructor(
         try {
             return withTimeout(budget.totalMs) {
                 emit("loading")
-                planningStage("loading",budget.loadMs,budget.heartbeatMs,{emit("loading")}){requestEngine.load(chosen.model.path, options)}
+                planningStage("loading",budget.loadMs,budget.heartbeatMs,{emit("loading")}){requestEngine.loadTarget(chosen.model, options);Unit}
                 var constrained = requestEngine.supportsStructuredOutput
                 var retainedHistory = history.toList()
                 var retainedContext = localContext

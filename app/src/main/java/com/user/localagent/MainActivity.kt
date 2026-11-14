@@ -163,7 +163,8 @@ class MainActivity : ComponentActivity() {
         if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId||busy.value||app.imageStudio.state.value.running||RuntimeGate.inference.get()||RuntimeGate.benchmark.get()){
             status.value="현재 작업을 마치고 선택한 대화를 확인한 뒤 모델을 바꿔주세요.";return
         }
-        if(app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치와 무결성이 확인된 대화 모델을 선택해주세요.";return}
+        val pairedText=id==com.user.localagent.models.PairedPcTextProfile.SELECTION_ID&&com.user.localagent.compute.PcComputeSettings.get(this).state.value.let{it.paired&&!it.claudeText}
+        if(!pairedText&&app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치된 로컬 모델 또는 등록한 PC 텍스트 모델을 선택해주세요.";return}
         // A preference change is synchronous. The next serialized request owns runtime loading.
         app.runs.chooseModel(id,threadId)
         status.value="이 대화의 다음 요청에 선택한 모델을 사용합니다."
@@ -222,6 +223,7 @@ class MainActivity : ComponentActivity() {
         val working by busy.collectAsState()
         val messages by lines.collectAsState()
         val installed by app.models.models.collectAsState()
+        val pairedTextSettings by com.user.localagent.compute.PcComputeSettings.get(this@MainActivity).state.collectAsState()
         val chosenId by preferredModelId.collectAsState()
         val imageWork by app.imageStudio.state.collectAsState()
         val webWork by app.webResearch.state.collectAsState()
@@ -270,7 +272,7 @@ class MainActivity : ComponentActivity() {
                 onManageGoal={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)goalEditorThreadId=composerThreadId},onShowSkills={skillLibraryOpen=true},
                 runTimeline=runEvents.filter{it.threadId.isBlank()||it.threadId==selectedThreadId},
                 onSteer=if(working&&steerRunId!=null&&steerThreadId==selectedThreadId)({text->chat.steer(text,steerRunId,steerThreadId)})else null,
-                activeRunKey=steerRunId,viewport=roomViewport,onViewportChange=chat::updateViewport,hasEarlier=roomHasEarlier,onLoadEarlier=chat::loadEarlier,composerReady=composerReady,
+                activeRunKey=steerRunId,viewport=roomViewport,onViewportChange=chat::updateViewport,hasEarlier=roomHasEarlier,onLoadEarlier=chat::loadEarlier,composerReady=composerReady,pairedPcTextAvailable=pairedTextSettings.paired&&!pairedTextSettings.claudeText,
                 activityByMessageId=roomActivities,onLoadOlderActivity=chat.workActivityController::loadOlder,
                 activeGoalLabel=roomGoal?.takeIf {it.threadId==composerThreadId&&it.projectId.orEmpty()==selectedProjectId}?.outcome,
                 backgroundWork={Column {

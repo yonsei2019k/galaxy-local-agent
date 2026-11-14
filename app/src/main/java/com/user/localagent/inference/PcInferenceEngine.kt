@@ -20,7 +20,8 @@ data class PcCleanupEvidence(val operation:String,val requestId:String?,val clea
 
 /** The paired PC computes text only. Request state, authority and persistence stay on the phone. */
 class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null,
-    private val textAuthority:PcTextAuthority=PcTextAuthority(0)):InferenceEngine {
+    private val textAuthority:PcTextAuthority=PcTextAuthority(0),
+    private val targetCapturedPcRevision:Long?=null):InferenceEngine,PairedPcTextLoader {
     private val context=context.applicationContext
     private val transport=PcTransport(this.context)
     private val mutex=Mutex()
@@ -36,6 +37,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     private var alias:String?=null
     private var options:InferenceOptions?=null
     @Volatile private var path:String?=null
+    @Volatile private var logicalTextTarget:com.user.localagent.models.PairedPcText?=null
     @Volatile private var activeConnection:HttpsURLConnection?=null
     @Volatile private var activeRequest:String?=null
     private var structured=false
@@ -52,16 +54,21 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     override val lastMetrics:StateFlow<InferenceMetrics?> = metrics.asStateFlow()
     override val lastGeneration:StateFlow<GenerationSummary?> = generation.asStateFlow()
     override val residentModelPath:String? get()=path
-    override val supportsStructuredOutput:Boolean get()=structured&&path!=null
+    override val supportsStructuredOutput:Boolean get()=structured&&(path!=null||logicalTextTarget!=null)
     @Volatile private var reasoning:String?=null
     override val lastReasoning:String? get()=reasoning
     private fun requireAuthority(connection:PcConnection){if(!authorityMatches(connection))throw PcUnavailable()}
     suspend fun preflight():Boolean=transport.available(computeOwner)?.let {authorityMatches(it)}==true
-    override suspend fun load(path:String,options:InferenceOptions)=withContext(Dispatchers.IO){mutex.withLock {
+    /** Both host target types use the same request-bound cancellation lifecycle. Caller holds mutex. */
+    private fun beginLoadEpoch(){
         val previousEpoch=synchronized(lifecycleLock){
             val previous=lifecycle.get();lifecycle.incrementAndGet();cleanup.value=null;previous
         }
         cancelHandshake.releaseEpoch(previousEpoch)
+        logicalTextTarget=null
+    }
+    override suspend fun load(path:String,options:InferenceOptions)=withContext(Dispatchers.IO){mutex.withLock {
+        beginLoadEpoch()
         // The PC owns the engine choice; the phone path only labels the request and picks the Gemma helper.
         val file=File(path).canonicalFile
         require(file.parentFile==File(context.filesDir,"models").canonicalFile){"휴대폰 모델 폴더 밖의 모델 경로는 사용하지 않습니다."}
@@ -101,6 +108,30 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
         config=connection;alias=requestedModel;this@PcInferenceEngine.options=options;this@PcInferenceEngine.path=file.path;structured=true
         status.value="PC 계산 준비됨 · $requestedModel";metrics.value=null;generation.value=null
     }}
+
+    /** A logical target never fabricates a phone path or inherits current global pairing authority. */
+    override suspend fun loadPairedPcText(target:com.user.localagent.models.PairedPcText,options:InferenceOptions):com.user.localagent.models.PairedPcLoadReceipt =
+        withContext(Dispatchers.IO){mutex.withLock {
+            require(computeOwner!=null && targetCapturedPcRevision!=null &&
+                targetCapturedPcRevision==target.authorizationRevision && textAuthority.revision==target.authorizationRevision &&
+                !textAuthority.allowCloudText){"원래 요청에 캡처한 로컬 PC 사용 권한이 필요합니다."}
+            require(!options.audioEnabled&&!options.visionEnabled&&!options.imagePreparation&&!options.deviceOnly)
+            require(options.contextSize in setOf(4096,8192))
+            beginLoadEpoch();structured=false
+            val connection=transport.available(computeOwner,waitForRestart=true)?:throw PcUnavailable()
+            requireAuthority(connection)
+            val profile=com.user.localagent.models.PairedPcTextProfile
+            // A residency hint alone is not this request's authenticated load receipt.
+            val reply=transport.json(connection,"/v1/llm/load","POST",buildJsonObject {
+                put("modelId",profile.MODEL_ID);put("modelShaPrefix",profile.MODEL_SHA256);put("contextSize",options.contextSize)
+            },100_000,computeOwner)
+            requireAuthority(connection)
+            val receipt=com.user.localagent.models.PairedPcLoadReceipt.fromAuthenticatedLoadReply(target,reply,options.contextSize)
+            currentCoroutineContext().ensureActive()
+            config=connection;alias=profile.MODEL_ID;this@PcInferenceEngine.options=options;path=null;logicalTextTarget=target;structured=true
+            status.value="PC 계산 준비됨 · ${profile.TITLE}";metrics.value=null;generation.value=null
+            receipt
+        }}
     private fun messages(user:String,system:String,history:List<InferenceTurn>):JsonArray=buildJsonArray {
         if(system.isNotBlank())add(buildJsonObject{put("role","system");put("content",system)})
         require(history.size<=79)
@@ -268,7 +299,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             val reply=runCatching{transport.json(previous,"/v1/llm/unload","POST",buildJsonObject{},2000,computeOwner)}.getOrNull()
             cleanup.value=PcCleanupEvidence("unload",null,reply?.get("cleanup_complete")?.jsonPrimitive?.booleanOrNull,reply!=null)
         }
-        path=null;alias=null;options=null;config=null;structured=false;metrics.value=null;generation.value=null
+        path=null;logicalTextTarget=null;alias=null;options=null;config=null;structured=false;metrics.value=null;generation.value=null
         status.value=if(cleanup.value?.cleanupComplete==true)"PC 계산 정리 확인됨"else"PC 정리 요청의 완료 여부는 확인이 필요합니다."
     }}}
 }

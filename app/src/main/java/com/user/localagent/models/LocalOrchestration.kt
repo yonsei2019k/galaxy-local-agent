@@ -20,7 +20,9 @@ import kotlinx.serialization.json.*
 import java.io.File
 
 /** A choice only: the caller owns the inference gate and loads at most one model/session. */
-data class ChosenInference(val model: InstalledModel, val options: InferenceOptions, val reason: String)
+data class ChosenInference(val model: InferenceModelTarget, val options: InferenceOptions, val reason: String) {
+    constructor(model: InstalledModel, options: InferenceOptions, reason: String) : this(LocalWeight(model), options, reason)
+}
 
 /** Local reports supply readiness evidence; installation or a model's size never establishes quality. */
 class LocalOrchestration(
