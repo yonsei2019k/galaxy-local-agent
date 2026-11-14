@@ -1,5 +1,21 @@
 # Device validation
 
+## 2026-11-14 checkpoint1054 / blank-note compatibility closure
+
+1054 is actually installed without data clearing. Main installed base SHA `6549167a16eb0e65fd1175f4d1d122639041035f3bbc76d0d6b90bd2ea1810a8`, test SHA `5bf08125c0eb4d6a1db54e2113172631cfc5a94629883e4eaa98a8ca327beafe` independently match signed outputs;596 frozen Android input hashes match. The only subsequent behavior fix restores rejection of provided empty/whitespace note content after the1053 optional-payload change. Core671/app581=1252 JVM, evaluator11, release/test assembly/signatures PASS; lint0 errors/137 warnings/1 hint.
+
+The exact same six phone checks listed below were rerun on1054: **6 PASS / 0 skipped**. Pinned direct overlay health252ms, VPN present, original identity/certificate pin and no LAN fallback. App launch requested after checks. The real DB write/readback and synthetic event checks keep their stated boundaries; no full real-model Android workflow success or external-network handoff is claimed. The20 scenario runs remain1053 evidence, not a new1054 model benchmark.
+
+## 2026-11-14 checkpoint1053 / owner-text boundary and smartphone regressions
+
+Actually installed1053 without data reset. Independently reread main SHA `8c74e744a6ed36d7269973c0dcbb7b3c31a431fb9625c7dbf8ee750962bffcb3` and test SHA `00c5ae7222c14066ddd3960177639ec3a631777329e4256dd10158afa9e5d78c` matched the signed artifacts. All596 frozen Android input hashes matched. Core671/app581=1252 JVM tests,11 evaluator tests, release/test assembly and signatures passed; lint0 errors/137 warnings/1 hint.
+
+Actual phone checks **6 PASS / 0 skipped**: `OwnerTextReferenceValidation#exactCopyAndForeignReferenceRejection` verified Unicode/newline/double-space literal note storage/readback, rejected missing/foreign request bindings before writing and removed only its unique QA note. Four `LongAnswerFinishValidation` methods verified resource pause before text, cancellation during the fifth part, no auto-continuation/execution of capped structured output, and structured clarification returned to the host without displaying JSON or creating prose continuation. Those four use synthetic inference events and real encrypted chat storage; they do not prove a real-model clarification was selected or persisted by the coordinator.
+
+Actual `TailscaleTransportValidation#pairedOverlayHealthThroughPinnedTransport` passed118ms: VPN present, original certificate pin and paired-server identity verified, direct overlay, LAN fallback disabled. This is endpoint metadata/health timing, not inference throughput. External Wi-Fi/cellular handoff was not tested. No VPN/firewall/worker/model/pairing setting was changed.
+
+Separately,15 smartphone scenario types were covered by20 PC-local-model evaluations with synthetic effects: first14 automatic8/manual4, final-source selected5 automatic2/manual1, strict-schema public-source experiment1 automatic/manual pass. This does not validate actual mail, calendar, contact, map, cancellation or continuous monitoring workflows. Several model errors remain, including choosing the first ambiguous contact in a synthetic draft. See docs/smartphone-scenario-evaluation-2026-11-14.ko.md. No live message was prepared/sent or owner note/calendar event deleted by those evaluations. Raw transcripts and device logs stay ignored under `.local`.
+
 ## 2026-11-14 checkpoint1052 / scenario tools and overlay check
 
 Actually installed1052 with existing data preserved; signed main/test base hashes independently compared (PROJECT_STATE.md). Core660/app581=1241 JVM PASS, release lint0 errors/137 warnings/1 hint, release/test assembly and signature verification PASS. No full20-scenario Android workflow validation is implied by the synthetic PC evaluator.1051 was independently installed/hash-verified before1052.

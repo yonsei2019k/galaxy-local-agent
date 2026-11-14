@@ -42,7 +42,9 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val connectionComputeEngine:com.user.localagent.inference.ComputeExecutionEngine?=null,
     private val connectionApproveGmailSend:suspend(String,ToolCall,com.user.localagent.core.connections.GmailSendPreview)->Boolean={_,_,_->false},
     private val kakaoReadBinding:String?=null,
+    private val ownerRequest:String?=null,
     private val createImage:(suspend(ToolCall)->String)?=null) {
+    fun resolveOwnerText(call:ToolCall):ToolCall=OwnerTextSources.resolve(call,ownerRequest)
     private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
     private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
     private val bundledSkills by lazy {com.user.localagent.skills.BundledSkillStore(context)}
@@ -141,7 +143,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "get_call_log_summary"->phoneJson(phoneRecords.callLogSummary(call.optional("query"),call.epoch("start"),call.epoch("end"),call.i("limit",5)),"android_call_log",call,::summaryJson)
                 "list_audio_recordings"->phoneJson(phoneRecords.recordAudio(call.optional("query"),call.i("limit",20)),"android_recording_metadata",call,::audioJson)
                 "search_audio_transcripts"->searchAudioTranscripts(call)
-                "save_note"->{require(call.s("scope","default") !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};val note=repository.saveNote(call.s("title","메모"),call.s("content"),call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};"메모 저장·재조회 확인 · id=${note.id}"}
+                "save_note"->{require(call.s("scope","default") !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};val content=resolveOwnerText(call).s("content");val note=repository.saveNote(call.s("title","메모"),content,call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};"메모 저장·재조회 확인 · id=${note.id}"}
                 "search_notes"->searchNotesBounded(call)
                 "save_memory"->{val memory=repository.saveMemory(call.s("content"),call.s("kind","fact"));check(repository.getMemory(memory.id)==memory){"기억 저장 후 재조회가 일치하지 않습니다."};"승인한 기억 저장·재조회 확인 · id=${memory.id}"}
                 "search_memories"->repository.searchMemories(call.s("query"),call.i("limit",5)).joinToString("\n"){"${it.id} | ${it.text}"}.ifBlank {"관련 기억이 없습니다."}

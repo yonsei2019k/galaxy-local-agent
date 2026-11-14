@@ -38,6 +38,18 @@ ML Kit Advanced 한국어와 현재 Qwen3-ASR1.7B/0.6B를 동일 비개인 합�
 
 # 에이전트 공통 변경 기록
 
+## 2026-11-14 — 1054 빈 메모 거부 호환성 마감: 설치 검증 종료
+동일 담당 codex-smartphone-scenarios. 아래1053 설치·6개 기기 검증은 실제 완료다. 최종 diff 검토에서 save_note.content를 선택 인자로 바꾸며 종전 required 문자열의 blank 거부가 약해진 것을 발견했다. Tools.kt에 제공된 content의 nonblank 검사를 복구하고 OwnerTextSourcesTest에 빈 문자열/공백 회귀를 추가했다. 나머지1053 실행 경로는 바꾸지 않았다. 1054 최종 main SHA `6549167a16eb0e65fd1175f4d1d122639041035f3bbc76d0d6b90bd2ea1810a8`, test SHA `5bf08125c0eb4d6a1db54e2113172631cfc5a94629883e4eaa98a8ca327beafe`로 실제 업데이트 설치 후 base 해시를 독립 대조했다.596개 Android 입력 해시 동일, core671/app581=1252 및 평가기11 PASS, release/test 빌드·서명 PASS, lint0 errors/137 warnings/1 hint. 같은 기기6개도 다시 PASS/skip0, 실제 직접 Tailscale252ms/VPN/원래 인증 핀·서버ID/LAN fallback 없음. 이후 앱 열기 요청을 전달했다. 실제 모델20회는1053 변형의 증거이며1054 새 모델 실행으로 주장하지 않는다. 소유 해제; 동명이인·계획·최종 인용 등 아래 의미 품질 실패는 그대로 미해결이다.
+
+## 2026-11-14 — 1053 스마트폰 시나리오 확대/원문 참조 저장: 설치 검증 종료
+담당 codex-smartphone-scenarios. 기준 c1c0137/설치1052. 시작 시 미커밋 없음 확인. 소유 core OwnerTextSources/Tools/ToolCallSchema/NextActionQuestion/AssistantPolicy/계획 메타데이터와 회귀, app AppContainer/ChatRunCoordinator/ToolExecutor의 요청별 원문 고정 연결 및 신규 기기 검사, pc-worker/eval 확장 과제·권한/실패 채점. 모델이 현재 요청의 인용문 참조를 선택한 경우에만 호스트가 정확한 원문으로 materialize한다. 인용문은 데이터이지 명령·도구 권한이 아니며 scope/승인/기존 읽기 전용 제한은 유지한다. 원문 참조는 현재 불변 요청에 바인딩하고 다른 요청·출처의 ID는 거부한다. 구조화 실행 단계에서도 필수 사용자 정보가 없으면 clarification 질문 한 개를 선택할 수 있게 하며, 질문은 도구/권한/완료가 아닌 awaiting_owner_input 일시정지다. 실제 모델·합성 결과·기기 저장·빌드/설치는 구분해 기록한다. PC 작업기/모델/연결 설정은 변경하지 않는다.
+
+최종 core671/app581=1252, Python 평가기11 PASS; release lint0 errors/137 warnings/1 hint, release/test 조립·서명 PASS. 새 질문 처리를 거대 suspend 실행 함수에 직접 넣은 중간 빌드는 MethodTooLarge로 실패했다. 처리 함수를 분리한 최종 빌드는 성공했고596개 Android 입력 해시가 유지됐다. 현재 설치1053 main SHA `8c74e744a6ed36d7269973c0dcbb7b3c31a431fb9625c7dbf8ee750962bffcb3`, test SHA `00c5ae7222c14066ddd3960177639ec3a631777329e4256dd10158afa9e5d78c`를 실제 base에서 독립 재조회했다. 데이터 초기화·모델 교체 없음.
+
+실제 기기6개 모두 PASS/skip0: 원문 참조의 암호화 저장·재조회/다른 요청 거부/자기 QA 정리1, 합성 이벤트 기반 장문 자원 일시정지·실행 중 취소·잘린 구조화 출력 차단·질문 JSON 비표시4, 실제 원래 인증정보의 직접 Tailscale 상태 확인1(118ms/VPN/원래 인증서 핀·서버 ID/LAN fallback 없음). 질문 선택·coordinator 전체 모델 경로의 실제 기기 성공을 주장하지 않는다. 외부망 전환은 미검사다.
+
+합성 fixture 기반 실제 PC 로컬 모델: 최초14개 자동8/수동4, 최종 소스 선택 재검사5개 자동2/수동1, strict 계획 스키마 공개 검색 비교1개 자동·수동1 통과. 전체15종20회이며 현재 APK에서15개 실제 작업을 완료했다는 뜻이 아니다. 최초 결과·재검사·실험은 별도 폴더/manifest로 보존했다. 최종 기기 소스에 없는 원래 결과를 현재 APK 증거로 승격하지 않는다. 자세한 실패와 남은 원문 참조 선택/제목·최종 인용/공개 계획/권한 실패 설명/좌표·화면 단정/성급한 질문 및 동명이인 첫 번호 선택은 docs/smartphone-scenario-evaluation-2026-11-14.ko.md에 기록했다. 외부 실제 발송·일정/소유자 자료 삭제 없음. 작업 소유 해제; 알려진 의미 품질 문제는 미해결이다.
+
 이 문서는 ZipHap.Agent를 작업하는 모든 채팅과 하위 에이전트가 작업 전에 읽는 공통 인수인계다. 원본 프로젝트는 `C:\Users\VICTUS\source\galaxy-local-agent`다. 채팅이 Roblox 폴더에 연결되어 있어도 Android 소스는 이 프로젝트에서 수정한다.
 
 ## 기록 규칙

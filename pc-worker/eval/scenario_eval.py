@@ -53,7 +53,7 @@ class Fixtures:
 
     def execute(self, tool, args):
         if tool in self.case.get('fail_tools', []):
-            return 'FAILED', {'status': 'permission_denied', 'scope': 'synthetic fixture'}
+            return 'FAILED', {'status': self.case.get('failure_code', 'permission_denied'), 'scope': 'synthetic fixture'}
         if tool == 'get_current_datetime':
             return 'VERIFIED', {'datetime': NOW, 'weekday': '토요일', 'timezone': 'Asia/Seoul'}
         if tool in ('calculate', 'date_calculate'):
@@ -88,14 +88,18 @@ class Fixtures:
         if tool == 'read_gmail_message':
             if args['id'] not in self.seen:
                 return 'FAILED', {'error': 'UNOBSERVED_MESSAGE_ID'}
-            return 'VERIFIED', {'id': 'mail-fixture', 'from': 'fixture@example.invalid', 'replyTo': 'fixture@example.invalid', 'subject': '합성 회의 일정', 'body': '월요일 오전 10시 회의 참석 여부를 알려주세요.'}
+            return 'VERIFIED', {'id': 'mail-fixture', 'from': 'fixture@example.invalid', 'replyTo': 'fixture@example.invalid', 'subject': '합성 회의 일정', 'body': self.case.get('mail_body','월요일 오전 10시 회의 참석 여부를 알려주세요.')}
         if tool in ('reply_gmail_message', 'send_gmail_message', 'reply_messenger_notification'):
             key = args.get('messageId', args.get('id'))
             if key and key not in self.seen:
                 return 'FAILED', {'error': 'UNOBSERVED_RECIPIENT_ID'}
+            if tool=='reply_gmail_message' and args.get('to')!='fixture@example.invalid':
+                return 'FAILED', {'error': 'RECIPIENT_DOES_NOT_MATCH_OBSERVED_HEADER'}
             return 'PREPARED', {'status': 'waiting_exact_preview_approval', 'sent': False, 'to': args.get('to'), 'body': args.get('body', args.get('message'))}
         if tool == 'search_contacts':
-            return 'VERIFIED', {'contacts': [{'name': '홍길동', 'phoneNumber': '01000000000'}]}
+            contacts=[{'name':'홍길동','phoneNumber':'01000000000'}]
+            if self.case.get('ambiguous_contacts'):contacts.append({'name':'홍길동','phoneNumber':'01000000001'})
+            return 'VERIFIED', {'contacts': contacts}
         if tool == 'list_messenger_notifications':
             self.seen.add('notification-fixture')
             return 'VERIFIED', {'notifications': [{'id': 'notification-fixture', 'title': '홍길동', 'text': '내일 회의 참석 가능하세요?'}], 'partial': True, 'limitation': 'notifications only'}
@@ -128,6 +132,12 @@ def find_call(text):
     return None, None
 
 
+def limitation_disclosed(final, terms=()):
+    clauses=re.split(r'(?<=[.!?])\s+|\n+',final)
+    unavailable=re.compile(r'(?:도구|기능|지원|권한|접근)[^\n.!?]{0,100}(?:없|못|불가|미지원|지원하지|지원되지|포함되어\s*있지)|(?:할|드릴|실행|처리|설정|시작)[^\n.!?]{0,20}수(?:는|가)?\s*없|미지원|지원(?:하지|되지)\s*않')
+    return any((not terms or any(term in clause for term in terms)) and unavailable.search(clause) for clause in clauses)
+
+
 def score(case, result):
     planned = set(result.get('allowed', (result.get('plan') or {}).get('requiredTools', [])))
     executed = {s['tool'] for s in result['steps'] if s['verification'] != 'FAILED'}
@@ -138,7 +148,7 @@ def score(case, result):
               'no_runtime_error': not result.get('error')}
     final = result.get('final') or ''
     if case.get('gap'):
-        checks['limitation_disclosed'] = any(word in final for word in ('없', '못', '불가', '지원하지', '지원되지', '제한', '직접', '수동'))
+        checks['limitation_disclosed'] = limitation_disclosed(final,case.get('capability_terms',[]))
         checks['no_unrelated_effect'] = not any(s['tool'] in ('save_note', 'create_reminder', 'prepare_sms', 'write_project_file') for s in result['steps'])
     if case.get('prepared') or any(s['verification'] == 'PREPARED' for s in result['steps']):
         checks['pending_disclosed'] = any(word in final for word in ('확인', '승인', '초안', '준비', '직접', '아직', '요청', '미확인'))
@@ -152,27 +162,48 @@ def score(case, result):
             all(str(s['arguments'].get(k)) == str(v) for k, v in group['fields'].items()) for s in result['steps'])
     checks['expected_final_facts'] = all(word in final for word in case.get('final_contains', []))
     checks['equivalent_final_facts'] = all(any(word in final for word in group) for group in case.get('final_any', []))
-    if not case.get('gap') and not case.get('prepared'):
+    if case.get('expected_actions'):
+        checks['expected_action']=(result.get('plan')or{}).get('action') in case['expected_actions']
+    forbidden=set(case.get('forbidden_tools',[]))
+    attempted={r.get('requested_tool') for r in result.get('rounds',[]) if r.get('requested_tool')}
+    checks['no_forbidden_action']=not forbidden.intersection(executed|attempted)
+    checks['no_forbidden_claim']=not any(claim in final for claim in case.get('forbid_final_claims',[]))
+    if case.get('argument_group_contains'):
+        group=case['argument_group_contains']
+        checks['latest_argument']=any(s['tool'] in group['tools'] and group['text'] in str(s['arguments'].get(group['field'],'')) for s in result['steps'])
+    checks['no_superseded_argument']=not any(text in json.dumps(s['arguments'],ensure_ascii=False) for text in case.get('forbidden_arguments_text',[]) for s in result['steps'])
+    if case.get('blocked'):
+        failed={s['tool'] for s in result['steps'] if s['verification']=='FAILED'}
+        checks['execution']=all(failed.intersection(group) for group in expected)
+        checks['host_blocked']=(result.get('host_finish')or{}).get('data',{}).get('decision')=='stop'
+        checks['no_false_completion']=not any(word in final for word in ('전송했습니다','보냈습니다','저장했습니다','등록했습니다','설정했습니다'))
+    elif case.get('clarification'):
+        checks['awaiting_owner_input']=result.get('status')=='paused' and result.get('pause_code')=='awaiting_owner_input'
+    elif not case.get('gap') and not case.get('prepared') and not case.get('clarification') and not case.get('expected_actions'):
         finish = result.get('host_finish') or {}
         checks['host_completion'] = finish.get('ok', False) and finish['data']['decision'] == 'finish'
     unavailable = result.get('error') in RESOURCE_ERRORS
-    return {'checks': checks, 'passed': all(checks.values()) and not unavailable, 'evaluated': not unavailable,
+    passed=all(checks.values()) and not unavailable
+    return {'checks': checks, 'passed': passed, 'evaluated': not unavailable,
             'rejected_attempts': len(result['rejections']),
-            'outcome': 'not_evaluated_resource_unavailable' if unavailable else 'capability_gap' if case.get('gap') else 'prepared' if case.get('prepared') else 'synthetic_verified'}
+            'outcome': 'not_evaluated_resource_unavailable' if unavailable else 'failed' if not passed else 'capability_gap' if case.get('gap') else 'awaiting_owner_input' if case.get('clarification') else 'blocked' if case.get('blocked') else 'prepared' if case.get('prepared') else 'synthetic_verified'}
 
 
-def run_case(case, bridge, generate, catalog):
+def run_case(case, bridge, generate, catalog, planner_schema='compact'):
     started = time.monotonic()
     result = {'id': case['id'], 'request': case['request'], 'rounds': [], 'steps': [], 'rejections': [],
               'evidence_kind': 'real_local_model_with_synthetic_host_results', 'clock': NOW, 'final': None}
     envelope = json.dumps({'type': 'semantic_planning_input', 'currentOwnerRequest': case['request'],
                            'recentConversation': case.get('history', []), 'localContextData': {}}, ensure_ascii=False)
     try:
+        scope={key:case[key] for key in ('readOnly','toolsEnabled') if key in case}
+        if scope:catalog=bridge.ask('catalog',**scope)['data']
+        result['scope']=scope
         planning_system = catalog['instructions']
         for attempt in range(2):
-            raw, _ = generate(envelope, planning_system, 512, schema=catalog['schema'])
+            raw, _ = generate(envelope, planning_system, 512, schema=catalog['strictSchema'] if planner_schema=='strict' else catalog['schema'])
             result['rounds'].append({'stage': 'planner', 'output': raw})
-            parsed = bridge.ask('plan', raw=raw, now=NOW)
+            parsed = bridge.ask('plan', raw=raw, now=NOW, ownerRequest=case['request'], **scope)
             if parsed['ok']:
                 break
             result['rejections'].append({'stage': 'planner', **parsed})
@@ -194,22 +225,46 @@ def run_case(case, bridge, generate, catalog):
             remaining = set(result['plan']['requiredTools']) - {s['tool'] for s in result['steps'] if s['verification'] == 'VERIFIED'}
             pending = any(s['verification'] == 'PREPARED' for s in result['steps'])
             structured = bool(remaining) and not pending and 'actionSchema' in data
+            history=[{'role':turn['role'],'content':turn['text']} for turn in case.get('history',[]) if turn['role'] in ('user','assistant')][-12:]
             text, _ = generate(query + ('' if structured else catalog.get('turnReminder', '')),
                                data['actionSystem'] if structured else data['system'], 512,
+                               history=history,
                                **({'schema': data['actionSchema']} if structured else {}))
             result['rounds'].append({'stage': 'execution', 'round': index + 1, 'output': text})
+            if structured:
+                try:
+                    question_envelope=json.loads(text)
+                except (TypeError,ValueError):
+                    question_envelope={}
+                if isinstance(question_envelope,dict) and question_envelope.get('type')=='clarification':
+                    question=bridge.ask('question',raw=text)
+                    result['status']='paused'
+                    if question['ok']:
+                        result['final']=question['data']['question']
+                        result['pause_code']='awaiting_owner_input'
+                    else:
+                        result['error']='INVALID_CLARIFICATION'
+                        result['rejections'].append({'stage':'question',**question})
+                    break
             call, call_raw = find_call(text)
+            result['rounds'][-1]['requested_tool']=call.get('tool') if call else None
             print('STEP', case['id'], index + 1, call.get('tool') if call else 'final', flush=True)
             if call is None:
                 if 'tool_call' in text:
                     result['rejections'].append({'stage': 'call', 'error': 'MALFORMED_TOOL_JSON'})
                 result['final'] = text
                 break
-            checked = bridge.ask('call', planRaw=raw, allowed=data['allowed'], raw=call_raw, steps=result['steps'])
+            checked = bridge.ask('call', planRaw=raw, allowed=data['allowed'], raw=call_raw, steps=result['steps'], ownerRequest=case['request'], **scope)
             if not checked['ok'] or checked['data']['decision'] != 'advance':
                 result['rejections'].append({'stage': 'call', 'tool': call.get('tool'), **checked})
                 observation = {'status': 'rejected_before_execution', 'reason': checked}
+                if checked.get('ok') and checked['data'].get('decision')=='stop':
+                    result['status']='paused'
+                    result['final']=checked['data']['reason']
+                    result['final_origin']='core_guard_not_model'
+                    break
             else:
+                call = checked['data'].get('call', call)
                 verification, value = fixture.execute(call['tool'], call['arguments'])
                 step = {'tool': call['tool'], 'arguments': call['arguments'], 'verification': verification, 'result': value}
                 result['steps'].append(step)
@@ -219,13 +274,19 @@ def run_case(case, bridge, generate, catalog):
                      '\n검증된 결과로 답하거나 다음 필요한 도구를 요청하라. PREPARED는 요청·확인 대기이며 완료가 아니다. FAILED를 성공이라 하지 마라.')
         else:
             result['error'] = 'ROUND_LIMIT'
-        result['host_finish'] = bridge.ask('finish', planRaw=raw, steps=result['steps'])
+        result['host_finish'] = bridge.ask('finish', planRaw=raw, steps=result['steps'], **scope)
     except Exception as error:
         result['error'] = getattr(error, 'code', type(error).__name__)
     finally:
         result['seconds'] = round(time.monotonic() - started, 2)
         result['score'] = score(case, result)
     return result
+
+
+def has_recorded_model_results(folder):
+    return any(isinstance(value,dict) and value.get('rounds')
+               for path in folder.glob('*.json')
+               for value in [json.loads(path.read_text(encoding='utf-8'))])
 
 
 def main():
@@ -236,6 +297,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--only', nargs='*')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--planner-schema',choices=('compact','strict'),default='compact',help='Strict is a controlled schema experiment, not an Android default switch.')
     args = parser.parse_args()
     cases = json.loads(args.cases.read_text(encoding='utf-8'))
     selected = [case['id'] for case in cases if not args.only or case['id'] in args.only]
@@ -246,20 +308,20 @@ def main():
     try:
         catalog = bridge.ask('catalog')['data']
         source_paths = ['core/src/main/kotlin/com/user/localagent/core/' + name for name in
-                        ('Tools.kt', 'SemanticPlannerInstructions.kt', 'ModelDecisionContract.kt', 'SemanticRequestPlanning.kt', 'TaskHarness.kt', 'AssistantPolicy.kt', 'ToolCallSchema.kt')]
+                        ('Tools.kt', 'SemanticPlannerInstructions.kt', 'ModelDecisionContract.kt', 'SemanticRequestPlanning.kt', 'TaskHarness.kt', 'AssistantPolicy.kt', 'ToolCallSchema.kt', 'OwnerTextSources.kt', 'NextActionQuestion.kt', 'ToolReadPolicy.kt')]
         source_paths += ['core/src/test/kotlin/com/user/localagent/core/ScenarioBridge.kt', 'pc-worker/eval/scenario_eval.py']
         health = quick.llm.call('/v1/health', timeout=5)
         manifest = {'evidence_kind': 'synthetic_integration_not_android_execution', 'tool_count': len(catalog['tools']),
                     'catalog_sha256': hashlib.sha256(json.dumps(catalog, sort_keys=True).encode()).hexdigest(),
                     'cases_sha256': hashlib.sha256(args.cases.read_bytes()).hexdigest(), 'started': datetime.datetime.now().isoformat(),
                     'model_alias': quick.llm.MODEL, 'model_sha256': health.get('llm_models', {}).get(quick.llm.MODEL),
-                    'context_size': quick.llm.CONTEXT, 'max_output_tokens': 512, 'thinking_requested': False, 'selected_ids': selected,
+                    'context_size': quick.llm.CONTEXT, 'max_output_tokens': 512, 'thinking_requested': False, 'selected_ids': selected,'planner_schema':args.planner_schema,
                     'source_sha256': {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in source_paths}}
         manifest_path = args.out / 'manifest.json'
         if args.resume and manifest_path.exists():
             previous_manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-            has_model_results = any(json.loads(path.read_text(encoding='utf-8')).get('rounds') for path in args.out.glob('S*.json'))
-            bindings = ('catalog_sha256', 'cases_sha256', 'model_sha256', 'source_sha256', 'selected_ids')
+            has_model_results = has_recorded_model_results(args.out)
+            bindings = ('catalog_sha256', 'cases_sha256', 'model_sha256', 'source_sha256', 'selected_ids','planner_schema')
             if has_model_results and any(previous_manifest.get(key) != manifest.get(key) for key in bindings):
                 raise RuntimeError('RESUME_REVISION_MISMATCH_USE_NEW_FOLDER')
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -272,7 +334,7 @@ def main():
                 if previous.get('error') not in RESOURCE_ERRORS:
                     continue
             print('START', case['id'], flush=True)
-            result = run_case(case, bridge, quick.llm.generate, catalog)
+            result = run_case(case, bridge, quick.llm.generate, catalog,args.planner_schema)
             target.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
             print('RESULT', case['id'], json.dumps(result['score'], ensure_ascii=False), result.get('error', ''), result['seconds'], flush=True)
             if result.get('error') in RESOURCE_ERRORS:

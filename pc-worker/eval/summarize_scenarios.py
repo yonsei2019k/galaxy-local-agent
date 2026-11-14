@@ -1,5 +1,6 @@
 """Summarize recorded scenario transcripts without model calls or rewriting original results."""
 import collections
+import argparse
 import hashlib
 import json
 import sys
@@ -21,7 +22,7 @@ def summarize(folder, cases_path):
             continue
         result = json.loads(path.read_text(encoding='utf-8'))
         rating = result['score']
-        kind = 'gap_acknowledged' if case.get('gap') else 'confirmation_pending' if case.get('prepared') else 'synthetic_completed'
+        kind = 'gap_acknowledged' if case.get('gap') else 'blocked_by_core_guard' if case.get('blocked') else 'cancellation_interpreted' if case.get('expected_actions')==['CANCEL'] else 'read_only_response' if case.get('readOnly') else 'awaiting_owner_choice' if case.get('clarification') else 'confirmation_pending' if case.get('prepared') else 'synthetic_completed'
         unavailable = result.get('error') in {'PC_BUSY', 'COMPUTE_OWNER_MISMATCH', 'UNREACHABLE', 'MODEL_MISSING'}
         rows.append({'id': case['id'], 'passed': rating['passed'], 'observed_outcome': 'not_evaluated' if unavailable else kind if rating['passed'] else 'failed',
                      'failed_checks': [key for key, value in rating['checks'].items() if not value],
@@ -35,7 +36,11 @@ def summarize(folder, cases_path):
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    folder = Path(sys.argv[1])
-    report = summarize(folder, Path(__file__).with_name('scenarios.json'))
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('folder',type=Path)
+    parser.add_argument('--cases',type=Path,default=Path(__file__).with_name('scenarios.json'))
+    args=parser.parse_args()
+    folder = args.folder
+    report = summarize(folder,args.cases)
     (folder / 'summary.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(report, ensure_ascii=False, indent=2))

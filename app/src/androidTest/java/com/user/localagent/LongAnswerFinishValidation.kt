@@ -222,6 +222,17 @@ class LongAnswerFinishValidation {
         assertEquals(2,segments.size);assertEquals(suffix,app.repository.chat.segmentText(segments.last().id))
     }}
 
+    @Test fun structuredQuestionReturnsToHostWithoutDisplayingJsonOrContinuing()=runBlocking<Unit>{fixture {app,request,model,user->
+        val raw="""{"type":"clarification","question":"어느 연락처인가요?"}"""
+        val engine=ScriptedEngine(listOf(GenerationEvent.Delta(raw),terminal(GenerationStopReason.EOG,false,raw.length)))
+        val result=LongAnswerWriter(app,request,{_,_->},{},engine).write(model,InferenceOptions(maxOutputTokens=128),user,"합성 추가 질문",emptyList(),
+            structuredSchema=com.user.localagent.core.NextActionQuestion.schema(setOf("search_contacts")),display=false)
+        assertTrue(result.toolEnvelope);assertFalse(result.paused);assertNull(result.messageId)
+        assertEquals("어느 연락처인가요?",com.user.localagent.core.NextActionQuestion.parse(result.text))
+        assertEquals(1,engine.calls)
+        app.repository.chat.assistantForRun(request.runId)?.let{assertEquals("",app.repository.chat.fullMessageText(it.id))}
+    }}
+
     @Test fun ordinaryJsonWithToolNamedDataFieldsRemainsProse()=runBlocking<Unit>{fixture {app,request,model,user->
         val data="{\"tool\":\"hammer\",\"arguments\":{\"label\":\"한글🙂\"},\"result\":\"일반 자료\"}"
         val engine=ScriptedEngine(listOf(GenerationEvent.Delta(data),terminal(GenerationStopReason.EOG,false,data.length)))

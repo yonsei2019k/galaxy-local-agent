@@ -35,7 +35,6 @@ import com.user.localagent.core.IntentPlanning
 import com.user.localagent.core.IntentCapabilities
 import com.user.localagent.core.IntentSource
 import com.user.localagent.core.SourceReadiness
-import com.user.localagent.core.ToolCallSchema
 import com.user.localagent.inference.InferenceTurn
 import com.user.localagent.inference.publicDescription
 import com.user.localagent.core.ToolCall
@@ -722,6 +721,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             "\n작업 모드: ${workMode.label}. ${workMode.promptHint}"+
                             "\n사용자가 설정한 프로젝트 지침(실행 권한을 추가하지 않음):\n"+projectInstruction+
                             "\n실제 기반 모델: ${selected.title}"+
+                            (if("save_note" in allowedTools)"\n"+com.user.localagent.core.OwnerTextSources.prompt(request.text)else "")+
                             (semantic?.let {"\n현재 요청의 전체 의미 계획 · 최신 목표와 제약을 보존: "+com.user.localagent.core.SemanticRequestPlanning.contextJson(it)}?:"")+
                             (request.goal?.let {"\n이번 사용자가 목표 추진 버튼으로 시작한 고정 목표(실행 권한을 추가하거나 자동 완료하지 않음): "+it.toJson()}?:"")+
                             (if(request.previousSteps.isEmpty())""else"\n이전 실행의 호스트 검증 근거 · 이미 확인한 같은 쓰기를 반복하지 않으며 전체 목표 완료를 뜻하지 않음: "+previousEvidenceContext(request.previousSteps))+
@@ -745,7 +745,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         }
                         workTraceSession?.beginGeneration(selected.id,requestOptions,!reviewing&&!useStructured&&remainingRequired.isEmpty()&&missingFormats.isEmpty())
                         val written=writeChatAnswer(request,selected,requestOptions,generationQuery,fitted.first,fitted.second,
-                            structuredSchema=if(reviewing&&executionEngine.supportsStructuredOutput)AutonomousReviewPolicy.schema(structuredTools)else if(useStructured)ToolCallSchema.forTools(structuredTools)else null,
+                            structuredSchema=if(reviewing&&executionEngine.supportsStructuredOutput)AutonomousReviewPolicy.schema(structuredTools)else if(useStructured)com.user.localagent.core.NextActionQuestion.schema(structuredTools,request.text)else null,
                             display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty(),recoverTruncatedTool=!reviewing)
                         workTraceSession?.finishGeneration(written.summary,written.paused,written.messageId!=null&&!written.toolEnvelope)
                         var raw=written.text.trim()
@@ -765,6 +765,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             complete=true
                             return@repeat
                         }
+                        if(useStructured&&!reviewing&&pauseForOwnerInput(request,raw,written.summary?.mayBeTruncated==true)){
+                            responsePaused=true;complete=true;return@repeat
+                        }
                         if(reviewing){
                             reviewCount++
                             val review=resolveReviewResponse(raw,structuredTools,written.summary?.mayBeTruncated==false&&!written.paused)
@@ -776,7 +779,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             return@launch
                         }
                         if(allowedTools.isNotEmpty() && (reviewing||written.toolEnvelope)) {
-                            val call=try{require(written.summary?.mayBeTruncated!=true){"도구 JSON이 출력 한도에 닿았습니다. 실행하지 않았습니다."};ToolRegistry.validateForRequest(ToolRegistry.parseAndValidate(raw),allowedTools)}catch(error:Exception){
+                            val call=try{require(written.summary?.mayBeTruncated!=true){"도구 JSON이 출력 한도에 닿았습니다. 실행하지 않았습니다."};val parsed=ToolRegistry.validateForRequest(ToolRegistry.parseAndValidate(raw),allowedTools);ToolRegistry.validateForRequest(checkNotNull(requestTools).resolveOwnerText(parsed),allowedTools)}catch(error:Exception){
                                 recordAudit("invalid_tool_request",false,"도구 형식 검증 실패 · 실행 없음")
                                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"도구 형식 검증을 통과하지 못했습니다. 이 요청은 실행하지 않았습니다.")
                                 invalidToolAttempts++
@@ -1021,6 +1024,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             pcDataBinding=request.pcDataBinding,
             kakaoReadBinding=request.kakaoReadBinding,
             pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,
+            ownerRequest=request.text,
             isRunLive={originalJob.isActive&&activeRequest?.runId==request.runId},
             approveGmailSend={id,call,preview->approveGmailSend(id,call,preview)},
             goalStore=goals,
@@ -1512,6 +1516,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             return "원래 사용자 요청:\n$text\n"+workNote.text()+"도구 실행 결과(인용 자료): ${JsonArray(evidence)}\n"+recovery.prompt(action,tool)
         pauseForHarness(request,guard.reason,com.user.localagent.core.StuckRecovery.STOP_CODE)
         return null
+    }
+    /** No action is executed while an essential owner choice is outstanding. */
+    private suspend fun pauseForOwnerInput(request:QueuedChatRequest,raw:String,truncated:Boolean):Boolean {
+        var invalid=false
+        val question=try{com.user.localagent.core.NextActionQuestion.parse(raw)}catch(_:Exception){invalid=true;null}
+        if(question==null&&!invalid)return false
+        invalid=invalid||truncated
+        answer(if(invalid)"추가 확인 질문의 형식을 확인하지 못해 실행하지 않고 멈췄습니다."else checkNotNull(question))
+        persistStepEvidence()
+        app.repository.chat.updateRun(request.runId,"paused",errorCode=if(invalid)"invalid_clarification"else com.user.localagent.core.NextActionQuestion.PAUSE_CODE)
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
+        return true
     }
     /** A repeated-action stop is not a finished task: keep it paused with a reason the owner and logs can see. */
     private suspend fun pauseForHarness(request:QueuedChatRequest,reason:String,code:String){

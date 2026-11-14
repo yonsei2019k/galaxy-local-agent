@@ -25,7 +25,7 @@ object ToolRegistry {
         "prepare_calendar_event" to "Open the phone's calendar with a filled-in new event for the owner to confirm and save. Not saved until the owner confirms.",
         "create_reminder" to "Save a reminder in this app that notifies at an ISO-offset datetime. Compute relative times from get_current_datetime first.",
         "create_alarm" to "Open the phone's clock app with an alarm at hour (0-23) and minute; optional label and repeat days. The clock app confirms setting it.",
-        "save_note" to "Save a private note in this app (for example a parking spot or a list). Returns the note id after verified storage.",
+        "save_note" to "Save a private note. Exactly one of content or contentQuoteId; select a current owner quote ID for exact copy without rewriting. Returns id after storage/readback.",
         "search_notes" to "Search this app's saved notes by text. Returns ids and bounded excerpts.",
         "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person.",
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
@@ -76,7 +76,7 @@ object ToolRegistry {
         def("prepare_calendar_event",Risk.MEDIUM,"title" to text(max=300),"start" to text(),"end" to text(),"description" to text(false),"location" to text(false,500)),
         def("create_reminder",Risk.MEDIUM,"title" to text(max=300),"datetime" to text(),"scope" to text(false,80)),
         def("create_alarm",Risk.MEDIUM,"hour" to Argument("integer"),"minute" to Argument("integer"),"label" to text(false,300),"days" to Argument("array",false)),
-        def("save_note",Risk.MEDIUM,"content" to text(max=12000),"title" to text(false,300),"scope" to text(false,80)),
+        def("save_note",Risk.MEDIUM,"content" to text(false,12000),"contentQuoteId" to text(false,64),"title" to text(false,300),"scope" to text(false,80)),
         def("search_notes",Risk.LOW,"query" to text(max=500),"scope" to text(false,80),"limit" to Argument("integer",false)),
         def("search_contacts",Risk.LOW,"query" to text(max=300),"limit" to Argument("integer",false)),
         def("prepare_sms",Risk.MEDIUM,"phoneNumber" to text(max=40),"message" to text(max=4000)),
@@ -128,6 +128,11 @@ object ToolRegistry {
             }
         }
         listOf("start","end","datetime").forEach {field ->call.arguments[field]?.let {OffsetDateTime.parse(it.jsonPrimitive.content)}}
+        if(call.name=="save_note"){
+            require(("content" in call.arguments) xor ("contentQuoteId" in call.arguments)){"메모 본문 또는 현재 요청 인용문 참조 중 하나만 필요합니다."}
+            call.arguments["content"]?.let{require(it.jsonPrimitive.content.isNotBlank()){"메모 본문은 비어 있을 수 없습니다."}}
+            call.arguments["contentQuoteId"]?.let{require(it.jsonPrimitive.content.matches(Regex("[a-f0-9]{64}"))){"인용문 참조 형식이 올바르지 않습니다."}}
+        }
         if(call.arguments.containsKey("start") && call.arguments.containsKey("end")) {
             val start=OffsetDateTime.parse(call.arguments.getValue("start").jsonPrimitive.content)
             val end=OffsetDateTime.parse(call.arguments.getValue("end").jsonPrimitive.content)
@@ -179,11 +184,13 @@ object ToolRegistry {
                         if(spec.type=="string")put("maxLength",spec.maxLength)
                         if(key in setOf("start","end","datetime"))put("format","date-time")
                         if(key=="contentSha256")put("pattern","^[a-fA-F0-9]{64}$")
+                        if(key=="contentQuoteId")put("pattern","^[a-f0-9]{64}$")
                         if(key=="recordingId"&&name in RecordingToolCatalog.names)put("pattern","^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
                         if(key=="limit"){put("minimum",1);put("maximum",limitMax(name))}
                         if(spec.type=="array")put("items",buildJsonObject{put("type","integer")})
                     })}})
                     put("required",buildJsonArray {d.arguments.filterValues {it.required}.keys.forEach {add(it)}})
+                    if(name=="save_note")put("oneOf",buildJsonArray{listOf("content","contentQuoteId").forEach{field->add(buildJsonObject{put("required",buildJsonArray{add(field)})})}})
                 })
             })
         }

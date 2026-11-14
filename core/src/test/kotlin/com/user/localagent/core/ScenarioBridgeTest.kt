@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ScenarioBridgeTest {
+    @Test fun capturedReadOnlyScopeCannotPlanOrExecuteMutation(){
+        val plan="""{"action":"TOOL_TASK","goal":"메모 저장","targetType":"PERSONAL_RECORD","requiredTools":["save_note"]}"""
+        assertTrue(runCatching {ScenarioBridge.respond(buildJsonObject{put("op","plan");put("raw",plan);put("now","2026-11-14T10:00:00+09:00");put("readOnly",true)})}.isFailure)
+        val catalog=ScenarioBridge.respond(buildJsonObject{put("op","catalog");put("toolsEnabled",false)})
+        assertEquals(0,catalog.getValue("tools").jsonArray.size)
+    }
     private val raw="""{"action":"TOOL_TASK","goal":"메모 저장","targetType":"PERSONAL_RECORD","requiredTools":["save_note"]}"""
     @Test fun exportsActualPolicyAndCapabilityClosure() {
         val answer=ScenarioBridge.respond(buildJsonObject {put("op","plan");put("raw",raw);put("now","2026-11-14T10:00:00+09:00")})

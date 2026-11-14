@@ -4,7 +4,7 @@ import kotlinx.serialization.json.*
 
 /** Native decoding format only. It never grants permission or replaces host validation/approval. */
 object ToolCallSchema {
-    fun forTools(allowedTools:Set<String>):String {
+    fun forTools(allowedTools:Set<String>,ownerRequest:String?=null):String {
         require(allowedTools.isNotEmpty()&&allowedTools.size<=40){"구조화 출력에는 허용한 도구1–40개가 필요합니다."}
         require(allowedTools.all {it in ToolRegistry.definitions}){"알 수 없는 도구의 출력 스키마를 만들 수 없습니다."}
         val names=allowedTools.sorted()
@@ -19,14 +19,14 @@ object ToolCallSchema {
                 put("properties",buildJsonObject {
                     put("type",buildJsonObject {put("type","string");put("enum",buildJsonArray {add("tool_call")})})
                     put("tool",buildJsonObject {put("type","string");put("enum",buildJsonArray {add(name)})})
-                    put("arguments",arguments(name,definitions.getValue(name)))
+                    put("arguments",arguments(name,definitions.getValue(name),ownerRequest))
                 })
                 put("required",buildJsonArray {add("type");add("tool");add("arguments")})
             })}})
         }.toString().also {require(it.length<=65536){"도구 출력 스키마가 너무 큽니다."}}
     }
 
-    private fun arguments(name:String,original:JsonObject):JsonObject {
+    private fun arguments(name:String,original:JsonObject,ownerRequest:String?):JsonObject {
         val definition=ToolRegistry.definitions.getValue(name)
         val properties=original.getValue("properties").jsonObject.mapValues {(key,value)->
             val changes=value.jsonObject.toMutableMap()
@@ -50,6 +50,18 @@ object ToolCallSchema {
                 }
             }
             JsonObject(changes)
+        }
+        if(name=="save_note"){
+            val quotes=ownerRequest?.let(OwnerTextSources::quotes).orEmpty()
+            fun variant(payload:String)=buildJsonObject{
+                put("type","object");put("additionalProperties",false)
+                put("properties",JsonObject(properties.filterKeys{it !in setOf("content","contentQuoteId")||it==payload}.toMutableMap().apply {
+                    if(payload=="contentQuoteId")put(payload,buildJsonObject{put("type","string");put("enum",JsonArray(quotes.map{JsonPrimitive(it.id)}))})
+                    else put(payload,JsonObject(getValue(payload).jsonObject+mapOf("minLength" to JsonPrimitive(1))))
+                }))
+                put("required",buildJsonArray{add(payload)})
+            }
+            return if(quotes.isEmpty())variant("content") else buildJsonObject{put("oneOf",buildJsonArray{add(variant("content"));add(variant("contentQuoteId"))})}
         }
         return JsonObject(original.toMutableMap().apply {put("properties",JsonObject(properties));put("additionalProperties",JsonPrimitive(false))})
     }

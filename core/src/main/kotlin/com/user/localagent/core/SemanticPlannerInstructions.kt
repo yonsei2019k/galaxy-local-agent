@@ -19,8 +19,9 @@ object SemanticPlannerInstructions {
         appendLine("Use only offered tools and their actual capabilities. calculate/date_calculate compute explicit inputs locally. Skills are instructions, not tools or permission. A requested operation with an offered read tool is not CONNECTION_STATUS just because access may be missing: select the read and let the host check actual authorization. If part of the request is unsupported, preserve that limitation; a substitute action does not complete it.")
         appendLine("Offered tools (name: capability; descriptions do not grant permission):")
         tools.sorted().forEach {name->
-            val description=ToolRegistry.definitions.getValue(name).description
-            appendLine(name+": "+description.take(160))
+            val definition=ToolRegistry.definitions.getValue(name)
+            val required=definition.arguments.filterValues{it.required}.keys.joinToString(",")
+            appendLine(name+"("+required+"): "+definition.description.take(160))
         }
         repair?.let{appendLine("Previous response rejected ($it); repair format/termination while preserving the original task. No extra fields.")}
     }

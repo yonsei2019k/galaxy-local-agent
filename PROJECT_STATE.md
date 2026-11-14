@@ -2,7 +2,23 @@
 
 Updated 2026-11-14. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1052; scenario evaluation and Tailscale verification
+## Current actual device checkpoint: installed1054; blank-note compatibility preserved
+
+1054 is installed without data reset. Independently reread main SHA `6549167a16eb0e65fd1175f4d1d122639041035f3bbc76d0d6b90bd2ea1810a8` and test SHA `5bf08125c0eb4d6a1db54e2113172631cfc5a94629883e4eaa98a8ca327beafe` match signed outputs. All596 frozen Android inputs match. Final review of1053 found that making content optional had weakened its previous blank-string rejection;1054 restores nonblank validation for provided content and adds empty/whitespace regression assertions. No planner/prompt/worker/model/pairing settings changed after1053.
+
+Core671/app581=1252 JVM and11 evaluator tests passed; release lint0 errors/137 warnings/1 hint, release/test assembly/signatures passed. All6 actual phone checks from1053 passed again,0 skipped: encrypted literal note/foreign reference boundary1, synthetic-event writer/storage4, real pinned direct-Tailscale health1 (252ms, VPN present, original identity/pin, no LAN fallback). The app launch was requested afterward. These checks retain the scope boundaries below. No new full model scenario run is claimed for1054; the20 runs below belong to the1053 variants. Model selection/answer-quality failures remain open.
+
+## Historical actual device checkpoint: installed1053; literal-copy boundary and smartphone regressions
+
+1053 is installed without clearing data. Independently reread main SHA `8c74e744a6ed36d7269973c0dcbb7b3c31a431fb9625c7dbf8ee750962bffcb3` and test SHA `00c5ae7222c14066ddd3960177639ec3a631777329e4256dd10158afa9e5d78c` match the signed outputs. All596 frozen Android inputs remained unchanged through validation. Core671/app581=1252 JVM tests and11 evaluator tests passed. Release lint0 errors/137 warnings/1 hint; release/test assembly and signatures passed. No worker/model/pairing settings or weights were changed; the existing paired-PC local-inference path remains in place.
+
+The model can select a current-owner quote reference for exact `save_note` payloads. The host resolves it before approval, duplicate and execution checks; legacy content still works. Structured next-action output can now select a non-executable clarification and pause with `awaiting_owner_input`. These boundaries do not guarantee that the model chooses the correct reference or question. The planner catalog now includes required argument names.
+
+Actual phone checks6/6 passed,0 skipped: encrypted literal-note write/readback and foreign-reference rejection/cleanup; four synthetic-event writer checks covering resource pause, in-flight cancellation, capped structured output and undisplayed clarification JSON; one real pinned direct-Tailscale health check118ms with VPN present, original pairing/server identity and no LAN fallback. The writer checks do not exercise a full model-driven Android clarification workflow. External Wi-Fi/cellular handoff remains untested.
+
+New smartphone suite has15 scenario types. Fourteen first-round real-local-model/core-integration cases used synthetic results: automatic8/14, manual whole-task review4/14. Five final-source follow-ups: automatic2/5, manual1/5. One strict-planner-schema public-source experiment passed1/1 but the app default stays compact. These20 executions are not real account/phone workflow success. Exact-reference selection, final quoting/title fidelity, permission-error explanation, public-plan repair, unobserved map coordinates/screen claims and premature or missing recipient clarification remain open. In particular, P15 chose the first ambiguous recipient in a synthetic SMS draft; no real SMS was prepared or sent by the evaluator. Unsupported cleanup/monitoring/navigation-start tools were not added. Details: docs/smartphone-scenario-evaluation-2026-11-14.ko.md.
+
+## Historical actual device checkpoint: installed1052; scenario evaluation and Tailscale verification
 
 1052's final development revision is installed without data clearing. Main installed base SHA `7fb02e5f415dcf222d3be621be1577d62ff35a9bd02bdc9557f0b523c9dba552`; test base SHA `0aa1459cc455e650cfb574f26d5344bbaf181c0681ce28482af79bb86ca5ac82`. Both were independently compared with signed outputs. Core660/app581=1241 JVM checks passed, release lint0 errors/137 warnings/1 hint, release and test APK assembly/signature checks passed. These are build/install facts, not general semantic quality proof.
 

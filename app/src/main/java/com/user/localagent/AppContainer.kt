@@ -100,6 +100,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
         pcDataBinding:String?=null,
         kakaoReadBinding:String?=null,
         pcImageRecoveryAllowed:Boolean=false,
+        ownerRequest:String?=null,
     ):ToolExecutor {
         val scoped=repository.forThread(threadId)
         val capturedAccess=repository.chat.accessScope(threadId)
@@ -146,7 +147,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
             connectionThreadId=threadId,connectionPcDataBinding=pcDataBinding,connectionVerifyAccess=::verifyAnalysisAccess,
             kakaoReadBinding=kakaoReadBinding,
             connectionComputeEngine=requestEngine as? com.user.localagent.inference.ComputeExecutionEngine,
-            projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
+            ownerRequest=ownerRequest,projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
                 call.arguments["negativePrompt"]?.jsonPrimitive?.content.orEmpty(),call.arguments["steps"]?.jsonPrimitive?.intOrNull,
                 call.arguments["seed"]?.jsonPrimitive?.longOrNull?:-1,referenceUri=chatAttachments.currentRequestReferenceUri(requestRunId)).toolResult()})}
     }
