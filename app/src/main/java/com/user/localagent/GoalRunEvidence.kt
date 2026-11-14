@@ -23,7 +23,7 @@ internal fun inheritVerifiedGoalSteps(goal:GoalDefinition,sources:List<GoalRunEv
         check(source.status !in setOf("queued","running")){"같은 목표의 실행이 아직 대기·진행 중입니다. 완료하거나 중지한 뒤 다시 추진해주세요."}
         for(step in request.previousSteps){
             if(step.evidence.state!=VerificationState.VERIFIED||step.tool in SkillToolCatalog.names||step.tool in GoalToolCatalog.names)continue
-            if(step.tool in setOf("list_project_files","read_project_file","write_project_file")&&request.workspaceBinding!=workspaceBinding)continue
+            if(step.tool in setOf("list_project_files","read_project_file","write_project_file")+ProjectStorageToolCatalog.names&&request.workspaceBinding!=workspaceBinding)continue
             val call=runCatching {ToolRegistry.validate(ToolCall("goal-evidence",step.tool,step.arguments))}.getOrNull()?:continue
             if(result.none {it.tool==call.name&&it.arguments==call.arguments})result+=HarnessStep(call,
                 StepEvidence(call.name,VerificationState.VERIFIED,"이전 동일 목표 실행에서 검증됨 · 전체 목표 완료를 뜻하지 않음 · "+step.evidence.summary.safeHead(3800)))

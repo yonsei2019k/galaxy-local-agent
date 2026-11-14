@@ -380,8 +380,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(snapshot.isNotEmpty())app.chatAttachments.captureForRequest(reservedRunId,threadId,snapshot)
             val binding=app.workspaceFor(thread.projectId).bindingFingerprint()
             val pcBinding=capturePcDataBindingForNewRun(threadId)
+            val pcTextAuthority=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,model,thinking,runId=reservedRunId){user,run->
-                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,model,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true).also {submitted=it}.toJson()
+                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,model,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=pcTextAuthority.allowCloudText).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -466,7 +467,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     }
                     val worker=try {
                         val engine=workerEngineFactory?.invoke(request)?:com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=request.runId,
-                            beforePhoneLoad={app.engine.unloadPhoneResidency()})
+                            beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText)
                         ChatRunCoordinator(context,app,ChatRequestWorkerBinding(this@ChatRunCoordinator,request,engine),
                             inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,externalIntentLauncher=externalIntentLauncher)
                     }catch(cancel:CancellationException){throw cancel}
@@ -601,6 +602,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 catch(_:Exception){runCatching {recordAudit("knowledge_capture",false,"직접 대화의 기억 저장 검증 실패")}}
                 val disabledTools=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
                 val offeredTools=AgentWorkModePolicy.filterTools(workMode,ToolRegistry.definitions.keys-disabledTools)
+                requestTools?.bindAvailableTools(if(request.allowTools)offeredTools else emptySet())
                 val semanticOfferedTools=offeredTools-SkillToolCatalog.names
                 val semanticChoice=if(request.allowTools)chooseInference(request)?.withPcContext()else null
                 if(request.allowTools&&semanticChoice==null){answer("문맥을 해석할 로컬 모델이 준비되지 않았습니다. 모델 설정에서 준비 상태를 확인해주세요.");return@launch}
@@ -1601,7 +1603,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         check(call.name !in SkillToolCatalog.names){"지침 조회는 작업 실행 근거와 분리해서 처리해야 합니다."}
         check(AgentWorkModePolicy.allows(AgentWorkMode.parse(request.mode),call.name)){"선택한 작업 모드에서 허용하지 않는 도구입니다. 변경 작업은 실행·디버그 모드에서 요청해주세요."}
         check(call.name !in request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()){"프로젝트에서 사용하지 않도록 설정한 도구입니다."}
-        if(call.name in setOf("list_project_files","read_project_file","write_project_file")){
+        if(call.name in setOf("list_project_files","read_project_file","write_project_file")+com.user.localagent.core.ProjectStorageToolCatalog.names){
             check(request.workspaceBinding!=null&&request.workspaceBinding==executionWorkspace?.bindingFingerprint()){"요청 이후 프로젝트 폴더가 변경되었거나 이전 작업의 폴더 기록이 없습니다. 현재 폴더에서 새 요청으로 실행해주세요."}
         }
         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용 대기")
@@ -1622,17 +1624,19 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private suspend fun performTool(call:ToolCall,targetConfirmed:Boolean=false):ToolResult {
         ToolRegistry.validate(call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
-        val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments}
+        val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
         val traceAttempt=workTraceSession?.attempt(call)
         val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}
         val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
         val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)
+        val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
+        val targetReview=tools.reviewForAction(call)
         if(confirmation&&!targetConfirmed&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
             traceAttempt?.let{workTraceSession?.approval(it,com.user.localagent.data.WorkTraceCode.APPROVAL_WAITING)}
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)
-            val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId);approval.value=action
+            val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId,reviewText=targetReview);approval.value=action
             val allowed=try { deferred.await() } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
@@ -1640,7 +1644,6 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(action.remember.value && CapabilityPolicy.canPreapprove(call.name))app.repository.addGrant(GrantRecord("builtin",codeHash,call.name,call.arguments["scope"]?.jsonPrimitive?.content?:"default"))
         }
         currentCoroutineContext().ensureActive()
-        val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
         val bound=checkNotNull(app.repository.chat.run(checkNotNull(activeRequest).runId))
         check(bound.status=="running"){"실행 요청이 이미 멈췄습니다."}
         app.repository.chat.updateRunContext(bound.id,bound.contextJson) // Recheck branch/project revision after owner confirmation.

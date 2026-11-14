@@ -29,7 +29,7 @@ import kotlinx.coroutines.*
     val claims by app.repository.knowledge.collectAsState(emptyList())
     val memories by app.repository.memories.collectAsState(emptyList())
     val notes by app.repository.notes.collectAsState(emptyList())
-    val reminders by app.repository.reminders.collectAsState(emptyList())
+    val reminders by app.repository.remindersForOwnerManagement.collectAsState(emptyList())
     var filter by rememberSaveable {mutableStateOf("confirmed")}
     var value by rememberSaveable {mutableStateOf("")}
     var core by rememberSaveable {mutableStateOf(true)}

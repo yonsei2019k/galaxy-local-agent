@@ -159,7 +159,9 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         moved
     }
     private val credentialAssignment=Regex("(?:비밀번호|패스워드|api[ _-]?key|password|passcode|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|secret[ _-]?key|주민(?:등록)?번호|카드번호)[\\s\"']*[:：=]\\s*\\S",RegexOption.IGNORE_CASE)
-    val notes=chatDao.notes(scopeKey);val memories=chatDao.memories(scopeKey);val reminders=dao.observeReminders()
+    val notes=chatDao.notes(scopeKey);val memories=chatDao.memories(scopeKey);val reminders=chatDao.reminders(scopeKey)
+    /** The explicit owner management screen may aggregate live projects; chat tools use scoped listReminders. */
+    internal val remindersForOwnerManagement:Flow<List<ReminderRecord>> by lazy {check(access==null);chatDao.remindersForOwnerManagement()}
     val messages=if(access==null)dao.observeMessages()else chat.messages(access.threadId)
     val knowledge:Flow<List<KnowledgeClaim>> = chatDao.knowledge(scopeKey,access?.useOwnerMemory?:true).map {items->items.map(::displayKnowledge)}
     suspend fun saveKnowledgeClaim(record:KnowledgeClaim,expectedEpoch:Long?=null):KnowledgeClaim=database.withTransaction {
@@ -344,9 +346,13 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         dao.memoriesForMessage(id).forEach {graph.eraseSource(it.id)};graph.eraseSource(id);dao.deleteMessageMemories(id)
         chatDao.deleteChunks(id);chatDao.deleteSegments(id);chatDao.deleteRefs(id);chatDao.deleteSourceScope("message",id);dao.deleteMessage(id);dao.invalidateSummaries()
     }
-    suspend fun saveNote(title:String,body:String,collection:String="default",id:String?=null):NoteRecord=database.withTransaction {
-        verifyScopeLive();require(body.isNotBlank()&&body.length<=12000);if(id!=null&&dao.noteById(id)!=null)checkResource("note",id)
-        val record=NoteRecord(id?:UUID.randomUUID().toString(),title.take(300),body,collection.take(80));dao.note(record)
+    suspend fun saveNote(title:String,body:String,collection:String="default",id:String?=null,expectedUpdatedAt:Long?=null):NoteRecord=database.withTransaction {
+        verifyScopeLive();require(body.isNotBlank()&&body.length<=12000)
+        val previous=id?.let {dao.noteById(it)}
+        if(previous!=null)checkResource("note",previous.id)
+        if(expectedUpdatedAt!=null)check(previous?.updatedAt==expectedUpdatedAt){"확인한 메모가 변경되었거나 삭제되어 덮어쓰지 않았습니다."}
+        val revision=nextResourceRevision(previous?.updatedAt)
+        val record=NoteRecord(id?:UUID.randomUUID().toString(),title.take(300),body,collection.take(80),revision);dao.note(record)
         bindResource("note",record.id);record
     }
     suspend fun searchNotes(query:String)=chatDao.searchNotes(scopeKey,query.take(500),50)
@@ -435,22 +441,53 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
             dao.invalidateSummaries()
         }
     }
-    suspend fun saveReminder(title:String,atEpochMillis:Long,group:String="default",id:String?=null):ReminderRecord = database.withTransaction {
-        require(title.isNotBlank())
+    suspend fun saveReminder(title:String,atEpochMillis:Long,group:String="default",id:String?=null,expectedUpdatedAt:Long?=null):ReminderRecord = database.withTransaction {
+        verifyScopeLive();require(title.isNotBlank())
         val previous=id?.let {dao.reminderById(it)}
-        val revision=maxOf(System.currentTimeMillis(),(previous?.updatedAt?:0)+1)
+        if(previous!=null)checkResource("reminder",previous.id)
+        if(expectedUpdatedAt!=null)check(previous?.updatedAt==expectedUpdatedAt){"확인한 리마인더가 변경되었거나 삭제되어 덮어쓰지 않았습니다."}
+        val revision=nextResourceRevision(previous?.updatedAt)
         val record=ReminderRecord(id?:UUID.randomUUID().toString(),title.take(300),atEpochMillis,group.take(80),updatedAt=revision)
-        dao.reminder(record);record
+        dao.reminder(record);chatDao.sourceScope(SourceScopeRecord("reminder",record.id,scopeKey,access?.threadId));record
     }
-    suspend fun setReminderStatus(id:String,status:String)=dao.reminderStatus(id,status)
-    suspend fun claimReminder(id:String)=dao.claimReminder(id)==1
-    suspend fun claimReminder(record:ReminderRecord)=dao.claimReminderVersion(record.id,record.atEpochMillis,record.updatedAt,System.currentTimeMillis())==1
-    suspend fun finishReminder(record:ReminderRecord,status:String)=dao.finishReminderVersion(record.id,record.atEpochMillis,record.updatedAt,status)==1
-    suspend fun recoverInterruptedReminders()=dao.recoverDelivering(System.currentTimeMillis())
-    suspend fun pendingReminders()=dao.pendingReminders()
-    suspend fun getReminder(id:String)=dao.reminderById(id)
-    suspend fun getNote(id:String):NoteRecord? {checkResource("note",id);return dao.noteById(id)}
-    suspend fun getMemory(id:String):MemoryRecord? {checkResource("memory",id);return dao.memoryById(id)}
+    suspend fun listReminders(scope:String="",limit:Int=20,includeCompleted:Boolean=false):List<ReminderRecord> = database.withTransaction {
+        verifyScopeLive();require(scope.length<=80&&'\u0000' !in scope);require(limit in 1..50)
+        chatDao.listReminders(scopeKey,scope,limit,includeCompleted)
+    }
+    suspend fun setReminderStatus(id:String,status:String)=database.withTransaction {if(dao.reminderById(id)!=null){checkResource("reminder",id);dao.reminderStatus(id,status)}}
+    suspend fun claimReminder(id:String)=database.withTransaction {if(dao.reminderById(id)==null)false else {checkResource("reminder",id);dao.claimReminder(id)==1}}
+    suspend fun claimReminder(record:ReminderRecord)=database.withTransaction {if(dao.reminderById(record.id)==null)false else {checkResource("reminder",record.id);dao.claimReminderVersion(record.id,record.atEpochMillis,record.updatedAt,System.currentTimeMillis())==1}}
+    suspend fun finishReminder(record:ReminderRecord,status:String)=database.withTransaction {if(dao.reminderById(record.id)==null)false else {checkResource("reminder",record.id);dao.finishReminderVersion(record.id,record.atEpochMillis,record.updatedAt,status)==1}}
+    internal suspend fun recoverInterruptedReminders():Int {check(access==null);return dao.recoverDelivering(System.currentTimeMillis())}
+    suspend fun pendingReminders():List<ReminderRecord> = database.withTransaction {verifyScopeLive();chatDao.pendingReminders(scopeKey)}
+    suspend fun getReminder(id:String):ReminderRecord? = database.withTransaction {val value=dao.reminderById(id)?:return@withTransaction null;checkResource("reminder",id);value}
+    suspend fun getNote(id:String):NoteRecord? = database.withTransaction {val value=dao.noteById(id)?:return@withTransaction null;checkResource("note",id);value}
+    suspend fun getMemory(id:String):MemoryRecord? = database.withTransaction {val value=dao.memoryById(id)?:return@withTransaction null;checkResource("memory",id);value}
+    internal suspend fun getReminderForDelivery(id:String):ReminderRecord? = database.withTransaction {
+        check(access==null)
+        val value=dao.reminderById(id)?:return@withTransaction null
+        val stored=chatDao.sourceScope("reminder",id)?.scopeKey?:"owner"
+        val live=when {
+            stored=="owner"->true
+            stored.startsWith("project:")->chatDao.project(stored.removePrefix("project:"))!=null
+            stored.startsWith("thread:")->chatDao.thread(stored.removePrefix("thread:"))?.let {it.deletedAt==null}==true
+            else->false
+        }
+        value.takeIf {live}
+    }
+    internal suspend fun pendingRemindersForDelivery():List<ReminderRecord> {check(access==null);return chatDao.pendingRemindersForDelivery()}
+    internal suspend fun claimReminderForDelivery(record:ReminderRecord):Boolean=database.withTransaction {
+        check(access==null)
+        if(getReminderForDelivery(record.id)==null)false else dao.claimReminderVersion(record.id,record.atEpochMillis,record.updatedAt,System.currentTimeMillis())==1
+    }
+    internal suspend fun finishReminderForDelivery(record:ReminderRecord,status:String):Boolean=database.withTransaction {
+        check(access==null)
+        if(getReminderForDelivery(record.id)==null)false else dao.finishReminderVersion(record.id,record.atEpochMillis,record.updatedAt,status)==1
+    }
+    internal suspend fun reminderIdsForProjectRemoval(projectId:String):List<String> = database.withTransaction {
+        check(access==null);chatDao.reminderIdsInScopes(chatDao.projectThreadScopeKeys(projectId)+"project:$projectId")
+    }
+    internal suspend fun reminderIdsForThreadRemoval(threadId:String):List<String> {check(access==null);return chatDao.reminderIdsInScopes(listOf("thread:$threadId"))}
     /** Rollback only the exact image metadata receipt created by this execution. */
     suspend fun deleteGeneratedImageIfUnchanged(expected:NoteRecord):Boolean=database.withTransaction {
         require(expected.collection=="generated-images")
@@ -460,8 +497,18 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         graph.eraseSource(expected.id);dao.deleteNote(expected.id);chatDao.deleteSourceScope("note",expected.id)
         true
     }
-    suspend fun deleteNote(id:String)=database.withTransaction {checkResource("note",id);if(dao.noteById(id)?.collection!="planning-feedback")graph.eraseSource(id);dao.deleteNote(id);chatDao.deleteSourceScope("note",id)}
-    suspend fun deleteReminder(id:String)=dao.deleteReminder(id)
+    suspend fun deleteNote(id:String,expectedUpdatedAt:Long?=null)=database.withTransaction {
+        val previous=dao.noteById(id)
+        if(previous!=null)checkResource("note",id)
+        if(expectedUpdatedAt!=null)check(previous?.updatedAt==expectedUpdatedAt){"확인한 메모가 변경되었거나 삭제되어 지우지 않았습니다."}
+        if(previous!=null){if(previous.collection!="planning-feedback")graph.eraseSource(id);dao.deleteNote(id);chatDao.deleteSourceScope("note",id)}
+    }
+    suspend fun deleteReminder(id:String,expectedUpdatedAt:Long?=null)=database.withTransaction {
+        val previous=dao.reminderById(id)
+        if(previous!=null)checkResource("reminder",id)
+        if(expectedUpdatedAt!=null)check(previous?.updatedAt==expectedUpdatedAt){"확인한 리마인더가 변경되었거나 삭제되어 지우지 않았습니다."}
+        if(previous!=null){dao.deleteReminder(id);chatDao.deleteSourceScope("reminder",id)}
+    }
     suspend fun recordToolRun(name:String,success:Boolean,summary:String,runId:String?=null,threadId:String?=null){
         recordToolRunEvidence(name,success,summary,runId,threadId)
     }
@@ -639,6 +686,10 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val stored=chatDao.sourceScope(kind,id)?.scopeKey?:"owner"
         check(stored==scopeKey){"다른 대화방·프로젝트 범위의 자료입니다."}
         verifyScopeLive()
+    }
+    private fun nextResourceRevision(previous:Long?):Long {
+        check(previous!=Long.MAX_VALUE){"자료 버전 한도에 도달해 변경하지 않았습니다."}
+        return maxOf(System.currentTimeMillis(),(previous?:0)+1)
     }
     private suspend fun verifyScopeLive(){access?.takeIf {it.threadId.isNotBlank()}?.let {scope->
         val thread=chat.thread(scope.threadId)?:error("삭제된 대화방에는 자료를 저장하지 않습니다.")

@@ -19,9 +19,9 @@ private const val PC_CLAUDE_MODEL="claude"
 data class PcCleanupEvidence(val operation:String,val requestId:String?,val cleanupComplete:Boolean?,val acknowledged:Boolean)
 
 /** The paired PC computes text only. Request state, authority and persistence stay on the phone. */
-class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null):InferenceEngine {
+class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null,
+    private val textAuthority:PcTextAuthority=PcTextAuthority(0)):InferenceEngine {
     private val context=context.applicationContext
-    private val settings=PcComputeSettings.get(this.context)
     private val transport=PcTransport(this.context)
     private val mutex=Mutex()
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
@@ -65,7 +65,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             status.value="PC 계산 준비됨";metrics.value=null;generation.value=null
             return@withLock
         }
-        if(settings.state.value.claudeText&&!options.imagePreparation){
+        if(textAuthority.usesCloudText(options)){
             config=connection;alias=PC_CLAUDE_MODEL;this@PcInferenceEngine.options=options;this@PcInferenceEngine.path=file.path;structured=true
             status.value="Claude 사용 · 내용이 Anthropic으로 전송됩니다";metrics.value=null;generation.value=null
             return@withLock
@@ -181,6 +181,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                     }
                 }
                 currentCoroutineContext().ensureActive()
+                requireAuthority(config)
                 require(done&&finish in setOf("stop","length")){"PC 계산의 완료 신호를 확인하지 못했습니다."}
                 val seconds=(System.nanoTime()-started)/1e9
                 val input=promptTokens?.takeIf{it>=0};val output=outputTokens?.takeIf{it>=0}

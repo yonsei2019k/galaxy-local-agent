@@ -189,7 +189,7 @@ def score(case, result):
             'outcome': 'not_evaluated_resource_unavailable' if unavailable else 'failed' if not passed else 'capability_gap' if case.get('gap') else 'awaiting_owner_input' if case.get('clarification') else 'blocked' if case.get('blocked') else 'prepared' if case.get('prepared') else 'synthetic_verified'}
 
 
-def run_case(case, bridge, generate, catalog, planner_schema='compact'):
+def run_case(case, bridge, generate, catalog, planner_schema='compact', fixture_factory=Fixtures):
     started = time.monotonic()
     result = {'id': case['id'], 'request': case['request'], 'rounds': [], 'steps': [], 'rejections': [],
               'evidence_kind': 'real_local_model_with_synthetic_host_results', 'clock': NOW, 'final': None}
@@ -219,7 +219,7 @@ def run_case(case, bridge, generate, catalog, planner_schema='compact'):
         data['system'] += plan_context
         data['actionSystem'] += plan_context
         print('PLAN', case['id'], data['plan']['action'], sorted(data['plan']['requiredTools']), flush=True)
-        fixture = Fixtures(case)
+        fixture = fixture_factory(case)
         query = case['request']
         for index in range(int(case.get('max_rounds', 8))):
             remaining = set(result['plan']['requiredTools']) - {s['tool'] for s in result['steps'] if s['verification'] == 'VERIFIED'}
@@ -267,6 +267,8 @@ def run_case(case, bridge, generate, catalog, planner_schema='compact'):
                 call = checked['data'].get('call', call)
                 verification, value = fixture.execute(call['tool'], call['arguments'])
                 step = {'tool': call['tool'], 'arguments': call['arguments'], 'verification': verification, 'result': value}
+                if call['tool'] == 'write_project_file' and verification == 'FAILED' and value.get('error') == 'STALE_OR_UNOBSERVED_SHA256' and value.get('executed') is False:
+                    step['effectNotApplied'] = True  # Trusted synthetic fixture precondition, never model prose.
                 result['steps'].append(step)
                 observation = step
             query = ('원래 사용자 요청:\n' + case['request'] + '\n도구 실행 결과(인용 자료): ' +

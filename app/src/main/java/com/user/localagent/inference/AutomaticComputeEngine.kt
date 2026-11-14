@@ -25,8 +25,9 @@ class AutomaticComputeEngine internal constructor(
     private val externalPcAuthority: () -> Boolean = { true },
     private val pcOnly: Boolean = false,
 ) : ComputeExecutionEngine {
-    constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {}) :
-        this(components(context.applicationContext, ownerRunId), ownerRunId, beforePhoneLoad)
+    constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {},
+        capturedPcRevision:Long?=null,allowCloudText:Boolean=false) :
+        this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText), ownerRunId, beforePhoneLoad)
     private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit) :
         this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = true)
 
@@ -226,17 +227,17 @@ class AutomaticComputeEngine internal constructor(
         val eligible: (String, InferenceOptions) -> Boolean, val preflight: suspend () -> Boolean, val report: (String) -> Unit,
         val externalPcAuthority: () -> Boolean)
     companion object {
-        private fun components(context: Context, owner: String?): Components {
+        private fun components(context: Context, owner: String?,capturedPcRevision:Long?,allowCloudText:Boolean): Components {
             val settings = PcComputeSettings.get(context)
             val original = settings.snapshot()
-            val originalRevision = settings.authorizationRevision
-            fun samePair(candidate: PcConnection): Boolean = owner == null ||
-                original != null && settings.authorizationRevision == originalRevision &&
+            val authority=PcTextAuthority(capturedPcRevision?:settings.authorizationRevision,allowCloudText)
+            fun samePair(candidate: PcConnection): Boolean = (owner == null&&capturedPcRevision==null&&!allowCloudText) ||
+                original != null && authority.matches(settings.authorizationRevision) &&
                     candidate.serverId == original.serverId && candidate.token == original.token &&
                     candidate.certificateSha256 == original.certificateSha256 && settings.snapshot()?.let {
                         it.serverId == original.serverId && it.token == original.token && it.certificateSha256 == original.certificateSha256
                     } == true
-            val pc = PcInferenceEngine(context, ::samePair, owner)
+            val pc = PcInferenceEngine(context, ::samePair, owner,authority)
             return Components(LocalInferenceEngine(context), pc,
                 eligible = { _, _ -> settings.snapshot()?.let(::samePair) == true },
                 preflight = pc::preflight, report = settings::report,

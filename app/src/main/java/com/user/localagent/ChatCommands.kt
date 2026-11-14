@@ -137,13 +137,13 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                 check(actual.status==GoalStatus.ACTIVE&&sameGoalWork(request.goal,actual)){"목표가 중지·변경되어 이전 작업의 추가 지시를 적용하지 않았습니다."}
                 queueBoundedGoalRun(access,actual,request.branchId,request.modelId,request.thinking,request.workspaceBinding,
                     checkNotNull(currentCoroutineContext()[Job]),ownerInstruction=updated,capturedAllowTools=request.allowTools,capturedMode=request.mode,
-                    capturedPcDataBinding=request.pcDataBinding)
+                    capturedPcDataBinding=request.pcDataBinding,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText)
             }else queueMutation.withLock {
             var submitted:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,updated,request.modelId,request.thinking){user,newRun->
                 QueuedChatRequest(newRun.id,threadId,thread.activeBranchId,thread.projectId,updated,request.modelId,request.thinking,emptyList(),user.id,
                     allowTools=request.allowTools,mode=request.mode,previousSteps=steps,workspaceBinding=request.workspaceBinding,goal=request.goal,
-                    pcDataBinding=request.pcDataBinding,kakaoReadBinding=request.kakaoReadBinding,pcImageRecoveryAllowed=request.pcImageRecoveryAllowed).also {submitted=it}.toJson()
+                    pcDataBinding=request.pcDataBinding,kakaoReadBinding=request.kakaoReadBinding,pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText).also {submitted=it}.toJson()
             }
             queued.value=listOf(checkNotNull(submitted))+queued.value
             app.repository.chat.reorderQueuedRuns(queued.value.map {it.runId})

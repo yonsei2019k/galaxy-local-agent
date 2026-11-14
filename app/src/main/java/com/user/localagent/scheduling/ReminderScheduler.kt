@@ -30,6 +30,8 @@ private object NotificationGate {
 data class ScheduleResult(val exact: Boolean, val notificationsAllowed: Boolean, val message: String)
 class ReminderScheduler(private val context: Context) {
     private val manager = context.getSystemService(AlarmManager::class.java)
+    /** Approval stays outside this gate; serialize verified DB changes and queue effects with delivery/restore. */
+    internal suspend fun <T> withMutation(block:suspend()->T):T=deliveryMutex.withLock {block()}
     fun schedule(record: ReminderRecord): ScheduleResult {
         require(record.atEpochMillis > System.currentTimeMillis()) { "이미 지난 시각에는 새 알림을 예약하지 않습니다." }
         synchronized(NotificationGate.lock) {
@@ -72,7 +74,7 @@ class ReminderScheduler(private val context: Context) {
         val repository = LocalRepository(context)
         repository.recoverInterruptedReminders()
         var count = 0
-        repository.pendingReminders().forEach { record ->
+        repository.pendingRemindersForDelivery().forEach { record ->
             currentCoroutineContext().ensureActive()
             if (record.atEpochMillis > System.currentTimeMillis()) {
                 try { schedule(record); count++ }
@@ -121,7 +123,7 @@ class ReminderDeliveryWorker(context: Context, parameters: WorkerParameters) : C
     override suspend fun doWork(): Result {
         val id = inputData.getString("id") ?: return Result.failure()
         return try {
-            val record = LocalRepository(applicationContext).getReminder(id) ?: return Result.success()
+            val record = LocalRepository(applicationContext).getReminderForDelivery(id) ?: return Result.success()
             if (record.atEpochMillis != inputData.getLong("at", -1) || record.updatedAt != inputData.getLong("revision", -1)) return Result.success()
             ReminderNotifier.deliver(applicationContext, id); Result.success()
         } catch (cancelled: CancellationException) { throw cancelled
@@ -131,7 +133,7 @@ class ReminderDeliveryWorker(context: Context, parameters: WorkerParameters) : C
 class DailyBriefWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result = try {
         val now = System.currentTimeMillis()
-        val upcoming = LocalRepository(applicationContext).pendingReminders().filter { it.atEpochMillis in now..now + TimeUnit.DAYS.toMillis(1) }
+        val upcoming = LocalRepository(applicationContext).pendingRemindersForDelivery().filter { it.atEpochMillis in now..now + TimeUnit.DAYS.toMillis(1) }
         if (upcoming.isNotEmpty()) ReminderNotifier.notify(applicationContext, "daily-brief", "오늘의 할 일", "앞으로 24시간 동안 예정된 알림 ${upcoming.size}개")
         Result.success()
     } catch (cancelled: CancellationException) { throw cancelled
@@ -149,7 +151,7 @@ private object ReminderNotifier {
     suspend fun deliverUnlocked(context: Context, id: String) {
         val generation = NotificationGate.generation(id)
         val repository = LocalRepository(context)
-        val record = repository.getReminder(id) ?: return
+        val record = repository.getReminderForDelivery(id) ?: return
         if (record.atEpochMillis > System.currentTimeMillis()) return // Ignore stale alarms following an edit.
         if (!notificationsAllowed(context)) {
             repository.recordToolRun("reminder_delivery", false, "알림 표시 권한 또는 채널 비활성화")
@@ -157,19 +159,19 @@ private object ReminderNotifier {
         }
         var claimed = false
         try {
-            withContext(NonCancellable) { claimed = repository.claimReminder(record) }
+            withContext(NonCancellable) { claimed = repository.claimReminderForDelivery(record) }
             if (!claimed) return
             currentCoroutineContext().ensureActive()
             val posted = synchronized(NotificationGate.lock) {
                 if (NotificationGate.generation(id) != generation) false
                 else notify(context, id, "리마인더", record.title)
             }
-            repository.finishReminder(record, if (posted) "delivered" else "pending")
+            repository.finishReminderForDelivery(record, if (posted) "delivered" else "pending")
         } catch (cancelled: CancellationException) {
-            if (claimed) withContext(NonCancellable) { repository.finishReminder(record, "pending") }
+            if (claimed) withContext(NonCancellable) { repository.finishReminderForDelivery(record, "pending") }
             throw cancelled
         } catch (error: Exception) {
-            if (claimed) withContext(NonCancellable) { repository.finishReminder(record, "pending") }
+            if (claimed) withContext(NonCancellable) { repository.finishReminderForDelivery(record, "pending") }
             throw error
         }
     }

@@ -16,6 +16,8 @@ data class QueuedChatRequest(
     val pcDataBinding:String?=null,
     val kakaoReadBinding:String?=null,
     val pcImageRecoveryAllowed:Boolean=false,
+    val capturedPcRevision:Long?=null,
+    val allowCloudText:Boolean=false,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -23,6 +25,8 @@ data class QueuedChatRequest(
         parentGoalStartRunId?.let {require(goal!=null&&mode in setOf("act","debug")&&it.isNotBlank()&&it.length<=100&&it!=runId&&it.none {c->c.code<32}){"목표 시작 요청의 원래 실행 연결이 올바르지 않습니다."}}
         pcDataBinding?.let {require(it.matches(Regex("[a-f0-9]{64}"))){"PC 자료 선택의 고정 버전이 올바르지 않습니다."}}
         kakaoReadBinding?.let {require(runCatching{java.util.UUID.fromString(it).toString()==it}.getOrDefault(false))}
+        require(capturedPcRevision==null||capturedPcRevision>=0)
+        require(!allowCloudText||capturedPcRevision!=null){"클라우드 사용은 현재 요청에 캡처한 명시 권한이 필요합니다."}
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
@@ -32,7 +36,8 @@ data class QueuedChatRequest(
         put("pcDataBinding",pcDataBinding)
         put("kakaoReadBinding",kakaoReadBinding)
         put("pcImageRecoveryAllowed",pcImageRecoveryAllowed)
-        put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);step.evidence.continuationId?.let {put("continuationId",it)}})}})
+        put("capturedPcRevision",capturedPcRevision);put("allowCloudText",allowCloudText)
+        put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
         goal?.let {put("goal",it.toJson())}
@@ -48,12 +53,14 @@ data class QueuedChatRequest(
                 o["attachments"]?.jsonArray.orEmpty().map {v->val a=v.jsonObject;ChatAttachment(a.getValue("id").jsonPrimitive.content,a.getValue("name").jsonPrimitive.content,a.getValue("mimeType").jsonPrimitive.content,a.getValue("bytes").jsonPrimitive.long)},s("userMessageId"),
                 o["continuation"]?.jsonObject?.let(ContinuationSnapshot::parse),o["allowTools"]?.jsonPrimitive?.booleanOrNull?:true,
                 o["mode"]?.jsonPrimitive?.content?:"act",
-                o["previousSteps"]?.jsonArray.orEmpty().map {element->val step=element.jsonObject;val tool=step.getValue("tool").jsonPrimitive.content;require(tool in ToolRegistry.definitions){"등록되지 않은 도구의 실행 근거는 복원할 수 없습니다."};val args=step.getValue("arguments").jsonObject;ToolRegistry.validate(ToolCall(java.util.UUID.randomUUID().toString(),tool,args));HarnessStep(tool,args,StepEvidence(tool,VerificationState.valueOf(step.getValue("state").jsonPrimitive.content),step.getValue("summary").jsonPrimitive.content,step["continuationId"]?.jsonPrimitive?.contentOrNull))},
+                o["previousSteps"]?.jsonArray.orEmpty().map {element->val step=element.jsonObject;val tool=step.getValue("tool").jsonPrimitive.content;require(tool in ToolRegistry.definitions){"등록되지 않은 도구의 실행 근거는 복원할 수 없습니다."};val args=step.getValue("arguments").jsonObject;ToolRegistry.validate(ToolCall(java.util.UUID.randomUUID().toString(),tool,args));HarnessStep(tool,args,StepEvidence(tool,VerificationState.valueOf(step.getValue("state").jsonPrimitive.content),step.getValue("summary").jsonPrimitive.content,step["continuationId"]?.jsonPrimitive?.contentOrNull,step["effectNotApplied"]?.jsonPrimitive?.boolean?:false))},
                 o["queueOrder"]?.jsonPrimitive?.longOrNull?:0,o["workspaceBinding"]?.jsonPrimitive?.contentOrNull,
                 o["goal"]?.takeUnless {it is JsonNull}?.jsonObject?.let(GoalDefinition::parse),
                 o["parentGoalStartRunId"]?.jsonPrimitive?.contentOrNull,
                 o["pcDataBinding"]?.jsonPrimitive?.contentOrNull,o["kakaoReadBinding"]?.jsonPrimitive?.contentOrNull,
-                o["pcImageRecoveryAllowed"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false)
+                o["pcImageRecoveryAllowed"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
+                o["capturedPcRevision"]?.takeUnless {it is JsonNull}?.let {require(it is JsonPrimitive&&!it.isString);it.long},
+                o["allowCloudText"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false)
         }
     }
 }

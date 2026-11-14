@@ -94,7 +94,11 @@ fun ChatRunCoordinator.deleteProject(id: String, deleteDerivedMemory: Boolean) =
     val rooms = app.repository.chat.threads.first().filter { it.projectId == id }
     val selectedHere = rooms.any { it.id == selectedThreadId.value } || selectedProjectId.value == id
     rooms.forEach { quiesceThread(it.id); goals.delete(it.id) }
-    val result = app.repository.chat.deleteProject(id, deleteDerivedMemory)
+    val result = app.scheduler.withMutation {
+        val reminders=app.repository.reminderIdsForProjectRemoval(id)
+        reminders.forEach {app.scheduler.cancel(it)}
+        app.repository.chat.deleteProject(id, deleteDerivedMemory).also {reminders.forEach {reminderId->app.scheduler.cancel(reminderId)}}
+    }
     rooms.forEach { app.chatAttachments.clearThread(it.id) }
     check(app.repository.chat.project(id) == null)
     check(app.repository.chat.threads.first().none { it.projectId == id })
@@ -140,7 +144,12 @@ fun ChatRunCoordinator.deleteThread(id: String, deleteDerivedMemory: Boolean) = 
     val prior = app.repository.chat.thread(id) ?: error("대화 없음")
     quiesceThread(id)
     goals.delete(id)
-    app.repository.chat.deleteThread(id, deleteDerivedMemory)
+    app.scheduler.withMutation {
+        val reminders=app.repository.reminderIdsForThreadRemoval(id)
+        reminders.forEach {app.scheduler.cancel(it)}
+        app.repository.chat.deleteThread(id, deleteDerivedMemory)
+        reminders.forEach {app.scheduler.cancel(it)}
+    }
     app.chatAttachments.clearThread(id)
     check(app.repository.chat.thread(id) == null)
     if (selectedThreadId.value == id) {

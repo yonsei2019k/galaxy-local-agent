@@ -121,6 +121,20 @@ class ChatConverters {
     @Query("SELECT c.* FROM knowledge_claims c JOIN knowledge_scopes s ON s.claimId=c.id WHERE s.scopeKey=:scopeKey") suspend fun scopeClaims(scopeKey:String):List<KnowledgeClaim>
     @Query("SELECT n.* FROM notes n LEFT JOIN source_scopes s ON s.resourceKind='note' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun notes(scopeKey:String):Flow<List<NoteRecord>>
     @Query("SELECT n.* FROM memories n LEFT JOIN source_scopes s ON s.resourceKind='memory' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun memories(scopeKey:String):Flow<List<MemoryRecord>>
+    @Query("SELECT r.* FROM reminders r LEFT JOIN source_scopes s ON s.resourceKind='reminder' AND s.resourceId=r.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY r.atEpochMillis,r.id")
+    fun reminders(scopeKey:String):Flow<List<ReminderRecord>>
+    @Query("SELECT r.* FROM reminders r LEFT JOIN source_scopes s ON s.resourceKind='reminder' AND s.resourceId=r.id WHERE ((:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey) AND (:groupFilter='' OR r.reminder_group=:groupFilter) AND (:includeCompleted=1 OR r.status IN ('pending','delivering')) ORDER BY r.atEpochMillis,r.id LIMIT :limit")
+    suspend fun listReminders(scopeKey:String,groupFilter:String,limit:Int,includeCompleted:Boolean):List<ReminderRecord>
+    @Query("SELECT r.* FROM reminders r LEFT JOIN source_scopes s ON s.resourceKind='reminder' AND s.resourceId=r.id WHERE ((:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey) AND r.status='pending' ORDER BY r.atEpochMillis,r.id")
+    suspend fun pendingReminders(scopeKey:String):List<ReminderRecord>
+    @Query("SELECT r.* FROM reminders r LEFT JOIN source_scopes s ON s.resourceKind='reminder' AND s.resourceId=r.id WHERE s.resourceId IS NULL OR s.scopeKey='owner' OR EXISTS (SELECT 1 FROM chat_projects p WHERE s.scopeKey='project:' || p.id) OR EXISTS (SELECT 1 FROM chat_threads t WHERE s.scopeKey='thread:' || t.id AND t.deletedAt IS NULL) ORDER BY r.atEpochMillis,r.id")
+    fun remindersForOwnerManagement():Flow<List<ReminderRecord>>
+    @Query("SELECT r.* FROM reminders r LEFT JOIN source_scopes s ON s.resourceKind='reminder' AND s.resourceId=r.id WHERE r.status='pending' AND (s.resourceId IS NULL OR s.scopeKey='owner' OR EXISTS (SELECT 1 FROM chat_projects p WHERE s.scopeKey='project:' || p.id) OR EXISTS (SELECT 1 FROM chat_threads t WHERE s.scopeKey='thread:' || t.id AND t.deletedAt IS NULL)) ORDER BY r.atEpochMillis,r.id")
+    suspend fun pendingRemindersForDelivery():List<ReminderRecord>
+    @Query("SELECT resourceId FROM source_scopes WHERE resourceKind='reminder' AND scopeKey IN (:scopeKeys)") suspend fun reminderIdsInScopes(scopeKeys:List<String>):List<String>
+    @Query("SELECT 'thread:' || id FROM chat_threads WHERE projectId=:projectId") suspend fun projectThreadScopeKeys(projectId:String):List<String>
+    @Query("DELETE FROM reminders WHERE id IN (SELECT resourceId FROM source_scopes WHERE resourceKind='reminder' AND scopeKey IN (:scopeKeys))") suspend fun deleteRemindersInScopes(scopeKeys:List<String>)
+    @Query("DELETE FROM source_scopes WHERE resourceKind='reminder' AND scopeKey IN (:scopeKeys)") suspend fun deleteReminderScopes(scopeKeys:List<String>)
     @Query("SELECT n.* FROM notes n LEFT JOIN source_scopes s ON s.resourceKind='note' AND s.resourceId=n.id WHERE ((:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey) AND (instr(lower(n.title),lower(:query))>0 OR instr(lower(n.body),lower(:query))>0) ORDER BY n.updatedAt DESC LIMIT :limit") suspend fun searchNotes(scopeKey:String,query:String,limit:Int):List<NoteRecord>
     @Query("SELECT n.* FROM notes n LEFT JOIN source_scopes s ON s.resourceKind='note' AND s.resourceId=n.id WHERE ((:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey) AND n.collection NOT IN (:excludedCollections) AND (:scope='' OR n.collection=:scope) AND (instr(lower(n.title),lower(:query))>0 OR instr(lower(n.body),lower(:query))>0) ORDER BY n.updatedAt DESC LIMIT :limit")
     suspend fun searchUserNotes(scopeKey:String,query:String,scope:String,excludedCollections:List<String>,limit:Int):List<NoteRecord>
@@ -291,6 +305,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
      */
     suspend fun deleteProject(id:String,deleteDerivedMemory:Boolean=false):ProjectDeleteResult=database.withTransaction {
         dao.project(id)?:error("프로젝트를 찾을 수 없습니다.")
+        val reminderScopes=dao.projectThreadScopeKeys(id)+"project:$id"
         var messages=0;var claims=0;var runs=0
         val rooms=dao.liveProjectThreads(id)
         rooms.forEach {room->val result=eraseThread(room.id,deleteDerivedMemory,true);messages+=result.messagesDeleted;claims+=result.derivedClaimsDeleted;runs+=result.runsCancelled}
@@ -298,6 +313,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             val graph=KnowledgeStore(database)
             dao.scopeClaims("project:$id").forEach {claim->graph.delete(claim.id);dao.deleteKnowledgeScope(claim.id);claims++}
         }
+        dao.deleteRemindersInScopes(reminderScopes);dao.deleteReminderScopes(reminderScopes)
         dao.deleteProjectRow(id)
         ProjectDeleteResult(rooms.size,messages,claims,runs)
     }
@@ -541,7 +557,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
                 dao.knowledgeScope(KnowledgeScopeRecord(moved.id,target));database.knowledgeDao().moveEvidence(claim.id,moved.id)
                 database.knowledgeDao().delete(claim.id);dao.deleteKnowledgeScope(claim.id)
             }
-            dao.threadSources(threadId).forEach {dao.sourceScope(it.copy(scopeKey=target))}
+            // A derived-memory choice does not silently transfer an independent scheduled action.
+            dao.threadSources(threadId).filter {it.resourceKind!="reminder"}.forEach {dao.sourceScope(it.copy(scopeKey=target))}
         }
         dao.thread(updated);updated
     }
@@ -554,6 +571,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         dao.thread(t.copy(activeBranchId=branch.id,title=if(deleted)"삭제된 대화"else t.title,revision=t.revision+1,deletedAt=if(deleted)now()else null,updatedAt=now()))
         dao.tombstoneBranches(threadId,now())
         if(!deleted)dao.branch(branch)
+        if(deleted){val reminderScopes=listOf("thread:$threadId");dao.deleteRemindersInScopes(reminderScopes);dao.deleteReminderScopes(reminderScopes)}
         records.forEach {m->
             if(deleteDerivedMemory){claims+=database.knowledgeDao().linkedToSource(m.id).count {it.sourceId==m.id};graph.eraseSource(m.id);local.memoriesForMessage(m.id).forEach {memory->graph.eraseSource(memory.id);local.deleteMemory(memory.id);dao.deleteSourceScope("memory",memory.id)}}
             else {database.knowledgeDao().tombstone(KnowledgeTombstone("*",m.id,now()))}

@@ -15,7 +15,8 @@ class TaskGoal(ownerRequest:String,successCriteria:List<String>,val stepBudget:I
     val requiredArtifactFormats:Set<String> = Collections.unmodifiableSet(requiredArtifactFormats.toSet())
     init {require(stepBudget in 1..WorkSegments.STEP_BUDGET);require(this.successCriteria.isNotEmpty()&&this.successCriteria.size<=12);require(this.requiredTools.size<=12);require(this.requiredArtifactFormats.size<=5&&this.requiredArtifactFormats.all {it in setOf("docx","xlsx","pdf","txt","csv")})}
 }
-data class StepEvidence(val tool:String,val state:VerificationState,val summary:String,val continuationId:String?=null) {
+data class StepEvidence(val tool:String,val state:VerificationState,val summary:String,val continuationId:String?=null,
+    val effectNotApplied:Boolean=false) {
     init {
         require(tool.isNotBlank()&&tool.length<=100);require(summary.length<=4000)
         val idPattern="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
@@ -165,8 +166,10 @@ object TaskHarness {
             return HarnessDecision.Advance(if(steps.lastOrNull()?.evidence?.state==VerificationState.FAILED)"실패한 결과를 보완하는 안전한 다른 단계가 필요합니다." else "다음 필요한 실행 또는 결과 검증을 진행합니다.")
         }
         val unresolvedFailure=steps.withIndex().any {(index,step)->
-            step.evidence.state==VerificationState.FAILED&&
-                (!readOnly(step.tool)||steps.drop(index+1).none {it.tool==step.tool&&it.evidence.state==VerificationState.VERIFIED})
+            step.evidence.state==VerificationState.FAILED&&steps.drop(index+1).none {later->
+                later.evidence.state==VerificationState.VERIFIED&&later.tool==step.tool&&
+                    (readOnly(step.tool)||(rejectedBeforeEffect(step)&&recoveryTarget(later)==recoveryTarget(step)))
+            }
         }
         if(unresolvedFailure)return HarnessDecision.Stop("아직 복구·검증되지 않은 실행이 있어 작업 완료를 확인할 수 없습니다.")
         if(steps.any {it.evidence.state==VerificationState.PREPARED})return HarnessDecision.Stop("작성·확인 화면이 준비됐습니다. 외부 작업의 실제 완료는 아직 확인되지 않았습니다.",true)
@@ -185,7 +188,7 @@ object TaskHarness {
     fun beforeStep(goal:TaskGoal,steps:List<HarnessStep>,call:ToolCall):HarnessDecision {
         if(steps.size>=goal.stepBudget)return HarnessDecision.Stop("작업 단계 예산에 도달했습니다.")
         val safeRead=readOnly(call.name)
-        if(!safeRead&&steps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)&&!readOnly(it.tool)})
+        if(!safeRead&&steps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)&&!readOnly(it.tool)&&!rejectedBeforeEffect(it)})
             return HarnessDecision.Stop("이전 변경 작업의 결과가 확인되지 않았습니다. 먼저 대상 상태를 조회하고 중복 변경을 피해야 합니다.")
         if(goal.requiredTools.isEmpty()&&!safeRead)return HarnessDecision.Stop("확인된 사용자 작업 목표에 포함되지 않은 변경·외부 행동입니다.")
         if(call.name !in goal.requiredTools&&!safeRead)return HarnessDecision.Stop("요청한 목표에 포함되지 않은 변경·외부 행동입니다.")
@@ -193,10 +196,30 @@ object TaskHarness {
         loopReason(steps+proposed)?.let {return HarnessDecision.Stop(it,repeated=true)}
         return HarnessDecision.Advance("목표에 필요한 단계이며 실행 결과는 이후 별도로 검증합니다.")
     }
+    /** Only host-confirmed, unapplied updates can be repaired. Text and model claims never set this fact. */
+    private fun rejectedBeforeEffect(step:HarnessStep):Boolean =
+        step.evidence.state==VerificationState.FAILED&&step.evidence.effectNotApplied&&recoveryTarget(step)!=null
+
+    /** Requests stay in their original scoped run; this matches only the stable record/file target. */
+    private fun recoveryTarget(step:HarnessStep):String? {
+        fun text(key:String)=(step.arguments[key] as? JsonPrimitive)?.takeIf{it.isString}?.content?.takeIf{it.isNotBlank()}
+        return when(step.tool){
+            "update_note","update_reminder"->text("id")
+            "write_project_file"->{
+                // A creation without an observed existing-file hash is not an update recovery.
+                val hash=text("expectedSha256")?:return null
+                if(!hash.matches(Regex("[a-f0-9]{64}")))return null
+                text("path")?.takeIf{runCatching{ProjectPaths.segments(it)}.isSuccess}
+            }
+            else->null
+        }
+    }
     private fun loopReason(steps:List<HarnessStep>):String? {
         if(steps.zipWithNext().any {(a,b)->a.fingerprint==b.fingerprint})return "같은 도구와 인자의 연속 실행을 중단했습니다."
+        fun refreshedRejectedFile(step:HarnessStep):Boolean = rejectedBeforeEffect(step)&&step.tool=="write_project_file"&&
+            steps.drop(steps.indexOf(step)+1).any{it.tool=="read_project_file"&&it.evidence.state==VerificationState.VERIFIED&&it.arguments["path"]==step.arguments["path"]}
         for(group in steps.groupBy {it.fingerprint}.values){
-            if(group.size>=3||group.size>=2&&!readOnly(group.first().tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
+            if(group.size>=3||group.count{!refreshedRejectedFile(it)}>=2&&!readOnly(group.first().tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
         }
         return null
     }

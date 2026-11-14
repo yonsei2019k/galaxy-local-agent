@@ -33,7 +33,7 @@ object SemanticRequestPlanning {
         "get_sms_summary", "get_call_log_summary", "search_contacts", "list_messenger_notifications",
         "list_imported_conversations", "search_conversation_imports", "search_conversation_history",
         "list_audio_recordings", "search_audio_transcripts", "list_calendar_events", "search_notes",
-        "search_memories", "list_project_files", "read_project_file",
+        "search_memories", "list_project_files", "read_project_file", "inspect_project_storage", "find_project_duplicates", "list_reminders", "get_agent_capabilities",
     ) + com.user.localagent.core.connections.ConnectionCatalog.privateReadNames + com.user.localagent.core.connections.PcToolCatalog.names + PrivateAnalysisToolCatalog.privateReadNames + RecordingToolCatalog.names + GoalToolCatalog.names + KakaoScreenToolCatalog.names
     private fun contentTools(source: SemanticSourceKind): Set<String> = when (source) {
         SemanticSourceKind.SMS -> setOf("get_sms_summary", "analyze_sms")
@@ -144,7 +144,7 @@ object SemanticRequestPlanning {
                 "search_memories" -> sources += IntentSource.MEMORIES
                 "list_calendar_events" -> sources += IntentSource.CALENDAR
                 "list_audio_recordings", "search_audio_transcripts" -> sources += IntentSource.AUDIO_TRANSCRIPTS
-                "list_project_files", "read_project_file" -> sources += IntentSource.PROJECT
+                "list_project_files", "read_project_file", "inspect_project_storage", "find_project_duplicates" -> sources += IntentSource.PROJECT
                 else -> Unit
             } }
         }

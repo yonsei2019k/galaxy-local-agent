@@ -40,7 +40,7 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
         when(req.action) {
             GoalLifecycleAction.START,GoalLifecycleAction.RESUME -> {
                 if(req.action==GoalLifecycleAction.RESUME)check(req.goal.status==GoalStatus.PAUSED){"일시 정지한 목표만 재개할 수 있습니다."}
-                queueBoundedGoalRun(req.scope,req.goal,caller.branchId,caller.modelId,caller.thinking,caller.workspaceBinding,callerJob,caller.runId)
+                queueBoundedGoalRun(req.scope,req.goal,caller.branchId,caller.modelId,caller.thinking,caller.workspaceBinding,callerJob,caller.runId,capturedPcRevision=caller.capturedPcRevision,allowCloudText=caller.allowCloudText)
             }
             GoalLifecycleAction.PAUSE,GoalLifecycleAction.CLEAR,GoalLifecycleAction.UPDATE -> null
         }
@@ -52,7 +52,7 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
 internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessScope,goal:GoalDefinition,
     branchId:String,modelId:String,thinking:Boolean,expectedWorkspaceBinding:String?,callerJob:Job,parentGoalStartRunId:String?=null,
     ownerInstruction:String=goal.outcome,capturedAllowTools:Boolean=true,capturedMode:String=ConversationSubmissionPolicy.newRequestMode().wireName,
-    capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId)):GoalLifecycleReceipt {
+    capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId),capturedPcRevision:Long?=null,allowCloudText:Boolean=false):GoalLifecycleReceipt {
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
     val ownedContexts=linkedSetOf<String>()
@@ -85,7 +85,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
                     allowTools=capturedAllowTools,mode=capturedMode,previousSteps=priorSteps,
-                    workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding).also {captured=it}.toJson().also {ownedContexts+=it}
+                    workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText).also {captured=it}.toJson().also {ownedContexts+=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val linked=withContext(NonCancellable) {

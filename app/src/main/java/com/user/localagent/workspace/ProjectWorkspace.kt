@@ -111,6 +111,25 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
             children(selected,directory).take(100).map {(name,mime,size)->ProjectFile((parts+name).joinToString("/"),mime==DocumentsContract.Document.MIME_TYPE_DIR,size)}
         }
     }}
+    /** Binary observation only: never records full-text delivery or authorizes an overwrite. */
+    suspend fun hashForAudit(path:String,maxBytes:Long):ProjectFileDigest=withContext(Dispatchers.IO){operation.withLock{WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()){
+        require(maxBytes in 0..16L*1024*1024){"파일 해시 관찰 한도를 초과했습니다."}
+        val parts=ProjectPaths.segments(path);val selected=tree()
+        val target=if(selected==null)local(parts)else null
+        val uri=selected?.let{resolve(it,parts,false)}
+        fun version():Pair<Long?,Long?> = if(target!=null){require(target.isFile){"프로젝트 파일이 아닙니다."};target.length() to target.lastModified()}else{
+            resolver.query(checkNotNull(uri),arrayOf(DocumentsContract.Document.COLUMN_SIZE,DocumentsContract.Document.COLUMN_LAST_MODIFIED,DocumentsContract.Document.COLUMN_MIME_TYPE),null,null,null)?.use{cursor->
+                check(cursor.moveToFirst());require(cursor.getString(2)!=DocumentsContract.Document.MIME_TYPE_DIR)
+                (if(cursor.isNull(0))null else cursor.getLong(0)) to (if(cursor.isNull(1))null else cursor.getLong(1))
+            }?:error("프로젝트 파일 정보를 읽지 못했습니다.")
+        }
+        val before=version();require(before.first==null||before.first!!<=maxBytes){"파일이 해시 관찰 한도보다 큽니다."}
+        val digest=MessageDigest.getInstance("SHA-256");var count=0L
+        val input=target?.inputStream()?:resolver.openInputStream(checkNotNull(uri))?:error("파일을 읽지 못했습니다.")
+        input.use{stream->val buffer=ByteArray(8192);while(true){currentCoroutineContext().ensureActive();val n=stream.read(buffer,0,minOf(buffer.size.toLong(),maxBytes-count+1).toInt());if(n<0)break;count+=n;require(count<=maxBytes){"파일이 해시 관찰 한도를 초과했습니다."};digest.update(buffer,0,n)}}
+        val after=version();require(before==after&&(after.first==null||after.first==count)){"관찰 중 파일이 변경되어 중복 근거로 사용하지 않았습니다."}
+        ProjectFileDigest(parts.joinToString("/"),count,digest.digest().joinToString(""){"%02x".format(it)})
+    }}}
     suspend fun read(path:String):String=withContext(Dispatchers.IO) {operation.withLock {WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()) {
         readUnlocked(ProjectPaths.segments(path)).also{reads[readKey(ownerReader,path)]=ReadEvidence(sha256(it),true,bindingUnlocked())}
     }}}
@@ -140,9 +159,9 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
         val previous=runCatching {readUnlocked(parts)}.getOrElse {error->
             if(exists(parts))throw error else null
         }
-        if(previous!=null)require(expectedSha256!=null&&expectedSha256==sha256(previous)){"기존 파일은 먼저 읽고 확인한 SHA-256으로 수정해야 합니다."}
-        if(previous!=null){val evidence=reads[readKey(reader,path)];require(evidence?.hash==sha256(previous)&&evidence.complete&&evidence.binding==bindingUnlocked()){ "현재 실행에 파일 전체가 전달되지 않아 덮어쓰지 않았습니다. 발췌문으로 원본을 교체하지 않았습니다." }}
-        else require(expectedSha256==null){"수정할 기존 파일이 없습니다."}
+        if(previous!=null&&!(expectedSha256!=null&&expectedSha256==sha256(previous)))throw com.user.localagent.core.ToolPreconditionRejected("기존 파일은 먼저 읽고 확인한 SHA-256으로 수정해야 합니다.")
+        if(previous!=null){val evidence=reads[readKey(reader,path)];if(!(evidence?.hash==sha256(previous)&&evidence.complete&&evidence.binding==bindingUnlocked()))throw com.user.localagent.core.ToolPreconditionRejected("현재 실행에 파일 전체가 전달되지 않아 덮어쓰지 않았습니다. 발췌문으로 원본을 교체하지 않았습니다.")}
+        else if(expectedSha256!=null)throw com.user.localagent.core.ToolPreconditionRejected("수정할 기존 파일이 없습니다.")
         currentCoroutineContext().ensureActive()
         // A bounded write+readback finishes before cancellation is reported; it cannot claim an unverified save.
         withContext(NonCancellable) {

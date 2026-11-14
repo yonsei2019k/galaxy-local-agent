@@ -38,6 +38,17 @@ ML Kit Advanced 한국어와 현재 Qwen3-ASR1.7B/0.6B를 동일 비개인 합�
 
 # 에이전트 공통 변경 기록
 
+## 2026-11-14 ACTIVE 회사·팀 내부 배포 준비
+담당 root-internal-beta, 기준8c3ed07/실제폰1059. 사용자 명시 병렬 승인. 루트는 공유 Tools/ToolExecutor/ProjectWorkspace/ChatRunCoordinator/AppContainer/권한·추론설정·계약 통합, Gradle·서명·설치·실제 폰·PC 모델 실행 창을 단독 소유한다. tool_gaps는 신규 저장소 점검/정확 중복 탐색 catalog·auditor·신규 회귀만, scenario_suite는 pc-worker/eval의 선택적 fixture seam와 신규 문제해결 과제/채점·신규 TeamProblemSolvingDeviceValidation만, internal_release_audit는 신규 docs/internal-release-readiness-2026-11-14.ko.md와 읽기 감사만 소유한다. 다른 공유파일 편집·동시 빌드·기기/모델 호출 금지. 실제 성공 결과·안전 중단·미지원·실행 보류를 분리한다. 기존98개 도구의 활용과 새 도구는 실제 등록/실행/설치 근거로 확인하며, 원문·기기/주소·진단은 ignored .local에만 둔다. 미추적 .codex-attachments는 보존·커밋 제외한다. 내부 배포가 목표이며 스토어 공개·실제 계정 발송·소유자 파일 삭제를 자동 수행하지 않는다.
+
+후속 사용자 지시로 Codex 개발 채팅3개를 실제 생성·고정했다: ZipHap ① 모델·추론(xhigh), ZipHap ② 도구·문제해결(high), ZipHap ③ 검증·내부배포(xhigh). 모델은 계정 기본값 유지. 직접 인간의 소통 허가를 확인하고 채팅간 인계하며 task별 파일 소유권/판정/미실행 상태를 ignored .local/coordination/internal-beta에 분리 기록한다. 모델 채팅은 ActionCompletionReport/해당회귀 및 TaskHarness/typed precondition recovery 신규회귀만, 도구 채팅은 신규 AgentCapabilities 및신규회귀만, 배포 채팅은 README/docs/user-guide 두문서만 소유한다. 기존 하위 작업은 감사·신규저장소·문제해결평가기와 리마인더 scope/CAS/배달 직렬화 소스를 인계했다. 루트만 전체 빌드·모델·실기·설치·커밋한다. 현재 목표는 내부 배포 후보 검증이며 아직 새 APK/실기 성공으로 표시하지 않는다.
+
+1060 중간 기준선 설치·통제 실기 검증 종료: main `12c80a9464bbd9395cd1d487722febba72d9e187c779b2c2b0ef62f3c1fee063`, test2 `3e7a028ef1e8dad7a1bd27679d608d09e503b9598d9f896e813039e2f8bd589a` 실제 base 독립 일치/데이터 초기화0.617개 app/core 입력 해시·목록 불변. core718/app603=1321 실패·오류·skip0, 릴리스/테스트 빌드·서명 PASS, lint0오류144경고1hint. 첫 core2실패(루트빈경로/boolean검증)를실제로수정했고 test compile의RoomDatabase import도보완. 새102개 도구등록. scoped reminder/CAS/실제대상 preview·없는대상삭제거부/배달직렬화, 불변local-cloud authority, 선택프로젝트storage/중복metadata와관련후속모델검토·pre-effect복구를연결했다. 세부계약은CONTRACTS.
+
+Test2 실제폰42JUnit 전부PASS/skip0: 새tool/범위/승인CAS/진단18, 기존recipient/UI/script/postread3(내부10+6반복), 원문/writer5, 동시실행4, 격리chat/project DB12. test1은 metadata fixture초기workspace state갱신경합으로17/18, test2격리폴더로보완한뒤main동일바이트에서18개전부재검사했다. Tailscale최초220ms 및test2후 직접인증PASS. 이수치는기존1059 실제모델10회나새로컴파일한6개실제모델복합워크플로우의성공이아니다. 신규28과제(positive18/boundary6/prepared4)와Python27회귀PASS, 실제모델실행전. 원문/예약/파일은QA만, 기존owner설정변경·실제계정발송0.
+
+사용자의 추가 방향은 스마트폰 비서 본체를 유지하며 PC·폰을 함께 통제하고 PC외부에이전트/MCP를 통합하는 상세구조·빌드설계 우선이다.1060을기준선으로보존한다. 새설계 소유: 모델채팅 docs/architecture/dual-device-orchestration.ko.md, 도구채팅 tool-execution-boundaries.ko.md, 배포채팅 build-release-validation.ko.md. 모델채팅의 pc-worker/mcp 보강은offline회귀후동결전이며실제worker배포/MCP연결/PCagent실행성공이아니다. 다른실패제보채팅은LocalSemanticPlanner진단후보를ignored next/planning-failure에만작성했다. 과거원인예외상실로그는복구불가이며1061에서원인·stage보존을통합예정,새원인분류를원래오류해결로주장하지않는다. 현재루트가모든공유소스/빌드/실기창을계속소유하고,상용완료판정·public release·push는아직없다.
+
 ## 2026-11-14 — 1059 대상 선택/완료 근거 강화: 설치 검증 종료
 담당 codex-recipient-evidence. 기준5e039ed/설치1054, 시작 미커밋 없음. 소유 core 연락처 선택 근거/실행 결과 표시 및 회귀, app ToolExecutor/ChatRunCoordinator/PendingAction 확인 UI, 신규 Android 반복 검사. 모델은 의도를 해석하고 도구를 선택하며, 호스트는 실제 조회 대상·사용자 선택·실행 근거를 검사한다. 임의 수신자/미관찰 좌표를 실행하기 전에 막고, 완료 문장은 실행 후 검사를 통과한 결과로 표시한다. 기존 읽기 전용·취소·승인과 PC 로컬 추론 경로를 유지한다. 개인 자료/기기 로그는 ignored .local에만 보관하고 실제 폰·실제 모델·합성 입력·외부 실행의 경계를 구분한다.
 
@@ -887,3 +898,7 @@ Tailscale: 기준 실행 완료·compute_busy=false/cleanup_pending=false·모�
 - `ChatStore.deleteProject`: 한 트랜잭션에서 프로젝트의 살아 있는 대화 전부(보관 포함)를 단일 대화 삭제와 같은 방식으로 지우고 프로젝트 행 삭제. 개인 기억 선택 시 project 범위 지식도 삭제. `ChatRunCoordinator.deleteProject`: 대화별 실행 중단·목표·첨부 정리, 선택 중이면 다른 대화로 이동. `ProjectWorkspace.discard`: 연결한 휴대전화 폴더는 파일 유지·접근 권한만 해제(다른 프로젝트가 쓰면 유지), 앱 전용 프로젝트 폴더 삭제. "default"/"personal" 공용 작업 공간은 건드리지 않음.
 - 검증: core·app JVM, 릴리스·테스트 APK 빌드·서명, 기기 1058 설치(데이터 유지), ChatDataValidation 12개 PASS(새 프로젝트 삭제 시험 포함, 격리 합성 DB). 실제 화면에서 삭제 버튼 조작은 미확인.
 - 다른 에이전트의 미커밋 변경(수신자 확인 등)은 건드리지 않았고 이 커밋에 넣지 않았다.
+
+### 2026-11-14 상용화 준비 분석 보고서 (문서만, 소스·빌드·설치 변경 없음)
+
+`docs/commercial-readiness-2026-11-14.ko.md`를 추가했다. 기준은 커밋 8c3ed07과 설치 1059의 기존 기록이며, 저장소 문서·빌드 설정·매니페스트·CI·lint 결과·평가 기록을 읽어 정리했다. 새 빌드, 기기 검사, 모델 평가는 실행하지 않았다. 에이전트 품질, PC 의존 구조, 보안·개인정보, 배포·스토어 정책, 코드 구조, 사용자 경험, 운영·지원, 법무, 검증 체계의 간격과 단계별 통과 기준을 담는다. 스토어 정책·법률 항목은 최신 문서와 대조하지 않은 검토 필요 지적이다. 계약·도구·프롬프트 변경은 없다. 배포 경로, 추론 위치, 지원 범위의 소유자 결정이 남아 있다.

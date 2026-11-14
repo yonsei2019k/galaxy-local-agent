@@ -9,7 +9,7 @@ object ScenarioBridge {
         val row=item.jsonObject
         val tool=row.getValue("tool").jsonPrimitive.content
         HarnessStep(tool,row.getValue("arguments").jsonObject,StepEvidence(tool,
-            VerificationState.valueOf(row.getValue("verification").jsonPrimitive.content),"synthetic fixture"))
+            VerificationState.valueOf(row.getValue("verification").jsonPrimitive.content),"synthetic fixture",effectNotApplied=row["effectNotApplied"]?.jsonPrimitive?.boolean?:false))
     }?:emptyList()
 
     fun respond(input:JsonObject):JsonObject {

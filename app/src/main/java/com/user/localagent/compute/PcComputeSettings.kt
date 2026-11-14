@@ -36,6 +36,7 @@ class PcComputeSettings private constructor(private val context:Context) {
         }.onFailure{mutable.value=PcComputeState(status="PC 연결 설정을 다시 등록해주세요.")}
     }}
     fun snapshot():PcConnection?=connection
+    fun captureTextAuthority():PcTextAuthority=synchronized(lock){PcTextAuthority(revision,mutable.value.claudeText)}
     suspend fun importPairing(uri:Uri)=withContext(Dispatchers.IO){
         require(uri.scheme=="content")
         val raw=context.contentResolver.openInputStream(uri)?.use {input->val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(1024);while(true){val count=input.read(buffer);if(count<0)break;require(output.size()+count<=8192);output.write(buffer,0,count)};String(output.toByteArray(),Charsets.UTF_8)}?:error("PC 연결 파일을 열 수 없습니다.")
@@ -86,8 +87,17 @@ class PcComputeSettings private constructor(private val context:Context) {
         val pin=PcImageModelCatalog.selection(id)
         mutable.value=mutable.value.copy(imageModelId=pin.id);persist()
     }
-    /** Owner choice of text engine; applies from the next model load. Claude sends the request off the PC. */
-    fun claudeText(enabled:Boolean)=synchronized(lock){mutable.value=mutable.value.copy(claudeText=enabled);persist()}
+    /** Changing local/cloud authority revokes captured requests; only newly submitted requests inherit the choice. */
+    fun claudeText(enabled:Boolean)=synchronized(lock){updateTextEngine(enabled)}
+    internal fun updateTextEngineIfUnchanged(expectedRevision:Long,enabled:Boolean):Long?=synchronized(lock){
+        if(revision!=expectedRevision)return@synchronized null
+        updateTextEngine(enabled);revision
+    }
+    private fun updateTextEngine(enabled:Boolean){
+        if(mutable.value.claudeText==enabled)return
+        advanceAuthorization()
+        mutable.value=mutable.value.copy(claudeText=enabled);persist()
+    }
     fun report(status:String){mutable.update {it.copy(status=status)}}
     fun forget()=synchronized(lock){advanceAuthorization();connection=null;store.write("");mutable.value=PcComputeState()}
     private fun advanceAuthorization(){
@@ -104,5 +114,7 @@ class PcComputeSettings private constructor(private val context:Context) {
     companion object {
         @Volatile private var instance:PcComputeSettings?=null
         fun get(context:Context):PcComputeSettings=instance?:synchronized(this){instance?:PcComputeSettings(context.applicationContext).also {instance=it}}
+        /** The caller supplies an isolated files/preferences context; never replaces the application singleton. */
+        internal fun isolatedForValidation(context:Context)=PcComputeSettings(context)
     }
 }

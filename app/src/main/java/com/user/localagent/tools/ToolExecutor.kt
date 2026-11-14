@@ -62,6 +62,27 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         },verifyAccess=connectionVerifyAccess)}
     private val fallbackProjectWorkspace by lazy {com.user.localagent.workspace.ProjectWorkspace(context)}
     private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace
+    private var capturedAvailableTools:Set<String> = emptySet()
+    fun bindAvailableTools(names:Set<String>){require(names.all{it in ToolRegistry.definitions});capturedAvailableTools=names.toSet()}
+    private val reviewedTargets=mutableMapOf<String,Pair<String,Long>>()
+    private fun reviewKey(call:ToolCall)=call.name+":"+JsonObject(call.arguments.toSortedMap())
+    /** The approval names a real scoped record, and its revision must still match at the mutation. */
+    suspend fun reviewForAction(call:ToolCall):String? {
+        ToolRegistry.validate(call)
+        val target=when(call.name){
+            "update_note","delete_note"->{val note=repository.getNote(call.s("id"))?:error("대상 메모가 없어 변경·삭제하지 않았습니다.");Triple(note.toString(),note.updatedAt,"메모: ${note.title}\n범위: ${note.collection}\n현재 본문:\n${note.body.take(1200)}")}
+            "update_reminder","delete_reminder"->{val item=repository.getReminder(call.s("id"))?:error("대상 알림이 없어 변경·삭제하지 않았습니다.");Triple(item.toString(),item.updatedAt,"알림: ${item.title}\n범위: ${item.group}\n예약 시각: ${java.time.Instant.ofEpochMilli(item.atEpochMillis)}\n상태: ${item.status}")}
+            else->return null
+        }
+        reviewedTargets[reviewKey(call)]=target.first to target.second
+        return target.third+"\n\n요청 내용:\n"+call.arguments.toString()
+    }
+    private suspend fun verifyActionReview(call:ToolCall){
+        val expected=reviewedTargets[reviewKey(call)]?:return
+        val current=when(call.name){"update_note","delete_note"->repository.getNote(call.s("id"))?.toString();"update_reminder","delete_reminder"->repository.getReminder(call.s("id"))?.toString();else->return}
+        require(current==expected.first){"확인한 대상이 변경되거나 삭제되어 이전 승인을 적용하지 않았습니다. 최신 대상을 다시 확인해주세요."}
+    }
+    private fun approvedVersion(call:ToolCall,current:Long)=reviewedTargets[reviewKey(call)]?.second?:current
     // Production creates a fresh executor for every captured request; UI reads cannot grant it authority.
     private val projectReadAuthority=java.util.UUID.randomUUID().toString()
     suspend fun acceptProjectReadContext(evidence:List<JsonObject>,actualModelQuery:String){
@@ -93,7 +114,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             else->null
         }
     }
-    suspend fun execute(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
+    suspend fun execute(call:ToolCall):ToolResult=if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call)}else executeUnlocked(call)
+    private suspend fun executeUnlocked(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
             if(call.name in KakaoScreenToolCatalog.names){
@@ -122,8 +144,16 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             if(call.name in com.user.localagent.core.connections.ConnectionCatalog.tools||call.name in com.user.localagent.core.connections.PcToolCatalog.names){
                 return@withContext requestConnections.execute(call)
             }
+            verifyActionReview(call)
             val result=when(call.name){
                 "get_current_datetime"->ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString()
+                "get_agent_capabilities"->AgentCapabilities(context).report(capturedAvailableTools,projectWorkspace)
+                "inspect_project_storage","find_project_duplicates"->com.user.localagent.workspace.ProjectStorageAudit(projectWorkspace::list,projectWorkspace::hashForAudit).execute(call)
+                "list_reminders"->buildJsonObject {
+                    put("status","ok");put("source","current_request_reminders");put("untrustedData",true);put("deliveryNotVerifiedByQueuePresence",true)
+                    val limit=call.i("limit",20);val items=repository.listReminders(call.s("scope"),50,(call.arguments["includeCompleted"]?.jsonPrimitive?.boolean)?:false)
+                    put("limit",limit);put("truncated",items.size>limit||items.size==50);put("reminders",buildJsonArray{items.take(limit).forEach{item->add(buildJsonObject{put("id",item.id);put("title",item.title);put("scope",item.group);put("atEpochMillis",item.atEpochMillis);put("datetime",java.time.Instant.ofEpochMilli(item.atEpochMillis).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime().toString());put("status",item.status);put("updatedAt",item.updatedAt)})}})
+                }.toString()
                 "list_project_files"->buildJsonObject {put("project",projectWorkspace.state.value.name);put("entries",buildJsonArray {projectWorkspace.list(call.s("path")).forEach {entry->add(buildJsonObject {put("path",entry.path);put("directory",entry.directory);put("bytes",entry.bytes)})}});put("limit",100);put("untrustedSourceData",true)}.toString()
                 "read_project_file"->{val read=projectWorkspace.readForTool(call.s("path"),projectReadAuthority);buildJsonObject {put("path",read.path);put("text",clip(read.text,8000));put("truncated",read.text.length>8000);put("sha256",read.sha256);put("readToken",read.token);put("untrustedSourceData",true)}.toString()}
                 "write_project_file"->projectWorkspace.writeForTool(call.s("path"),call.s("content"),call.arguments["expectedSha256"]?.jsonPrimitive?.content,projectReadAuthority)
@@ -158,10 +188,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "search_memories"->repository.searchMemories(call.s("query"),call.i("limit",5)).joinToString("\n"){"${it.id} | ${it.text}"}.ifBlank {"관련 기억이 없습니다."}
                 "delete_memory"->{repository.forgetMemory(call.s("id"));check(repository.getMemory(call.s("id"))==null){"기억 삭제 후에도 레코드가 남아 있습니다."};"기억과 연결된 원문·요약 삭제 확인"}
                 "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 저장 또는 예약 큐 재조회를 확인하지 못했습니다. 중복 생성 전 기존 작업을 확인해주세요."};"${scheduled.message} 저장·예약 큐 확인 · id=${record.id}, 시각=${call.s("datetime")}"}
-                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id);check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};"메모 수정·재조회 확인"}
-                "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());scheduler.cancel(old.id);val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};scheduled.message+" 저장·예약 큐 확인"}
-                "delete_note"->{val old=repository.getNote(call.s("id"));require(old?.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};repository.deleteNote(call.s("id"));check(repository.getNote(call.s("id"))==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
-                "delete_reminder"->{scheduler.cancel(call.s("id"));repository.deleteReminder(call.s("id"));check(repository.getReminder(call.s("id"))==null){"리마인더 삭제를 확인하지 못했습니다."};"리마인더 삭제·재조회 확인"}
+                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};"메모 수정·재조회 확인"}
+                "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};scheduled.message+" 저장·예약 큐 확인"}
+                "delete_note"->{val old=repository.getNote(call.s("id"))?:error("대상 메모가 이미 없어 삭제하지 않았습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};repository.deleteNote(old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
+                "delete_reminder"->{val old=repository.getReminder(call.s("id"))?:error("대상 알림이 이미 없어 삭제하지 않았습니다.");repository.deleteReminder(old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);check(repository.getReminder(old.id)==null){"리마인더 삭제를 확인하지 못했습니다."};"리마인더 삭제·재조회 확인"}
                 "list_calendar_events"->listCalendar(call)
                 "search_contacts"->searchContacts(call)
                 "list_messenger_notifications"->listMessengerNotifications(call)
@@ -178,7 +208,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             val prepared=call.name=="reply_messenger_notification"
             ToolResult(call.id,true,result,if(prepared)VerificationState.PREPARED else VerificationState.VERIFIED,
                 if(prepared)"메신저 전송 요청 전달 확인 · 수신 완료는 확인되지 않음" else "기기 제공자 조회 또는 저장 후 재조회 확인")
-        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패")}
+        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패",effectNotApplied=error is ToolPreconditionRejected)}
     }
     private fun ToolCall.optional(key:String)=arguments[key]?.jsonPrimitive?.content?.takeIf {it.isNotBlank()}
     private fun ToolCall.epoch(key:String)=optional(key)?.let {OffsetDateTime.parse(it).toInstant().toEpochMilli()}

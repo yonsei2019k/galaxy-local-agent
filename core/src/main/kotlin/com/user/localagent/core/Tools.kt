@@ -7,7 +7,9 @@ import java.time.ZoneId
 import java.util.UUID
 
 data class ToolCall(val id:String,val name:String,val arguments:JsonObject)
-data class ToolResult(val id:String,val success:Boolean,val content:String,val verification:VerificationState=VerificationState.UNVERIFIED,val verificationSummary:String="")
+data class ToolResult(val id:String,val success:Boolean,val content:String,val verification:VerificationState=VerificationState.UNVERIFIED,val verificationSummary:String="",val effectNotApplied:Boolean=false){
+    init {require(!effectNotApplied||!success&&verification==VerificationState.FAILED)}
+}
 enum class Risk { LOW, MEDIUM, HIGH }
 data class Argument(val type:String,val required:Boolean=true,val maxLength:Int=4000)
 data class ToolDefinition(val name:String,val risk:Risk,val arguments:Map<String,Argument>,val description:String="",val timeoutMillis:Long=30_000)
@@ -46,6 +48,7 @@ object ToolRegistry {
     private fun read(name:String,description:String,vararg args:Pair<String,Argument>)=ToolDefinition(name,Risk.LOW,mapOf(*args),description)
     private val analysisReads=setOf("list_imported_conversations","search_conversation_imports","get_sms_summary","get_call_log_summary","list_audio_recordings","search_audio_transcripts","search_conversation_history")
     private fun limitMax(name:String)=when(name){
+        "list_reminders"->50
         "read_analysis_evidence"->10
         "search_publications"->5
         "verify_reference"->3
@@ -75,6 +78,8 @@ object ToolRegistry {
         def("list_calendar_events",Risk.LOW,"start" to text(),"end" to text(),"calendarId" to text(false,80)),
         def("prepare_calendar_event",Risk.MEDIUM,"title" to text(max=300),"start" to text(),"end" to text(),"description" to text(false),"location" to text(false,500)),
         def("create_reminder",Risk.MEDIUM,"title" to text(max=300),"datetime" to text(),"scope" to text(false,80)),
+        read("list_reminders","List reminders only in the current chat/project data scope, returning actual ids, title, datetime, group and delivery status. Optional scope filters the reminder group; includeCompleted includes delivered records. Queue presence is not notification delivery.","scope" to text(false,80),"limit" to Argument("integer",false),"includeCompleted" to Argument("boolean",false)),
+        read("get_agent_capabilities","Inspect current allowed tools and actual permission/model/workspace prerequisites without changing settings or making network requests. Registration or paired-PC configuration is not proof a workflow ran or a connector is reachable."),
         def("create_alarm",Risk.MEDIUM,"hour" to Argument("integer"),"minute" to Argument("integer"),"label" to text(false,300),"days" to Argument("array",false)),
         def("save_note",Risk.MEDIUM,"content" to text(false,12000),"contentQuoteId" to text(false,64),"title" to text(false,300),"scope" to text(false,80)),
         def("search_notes",Risk.LOW,"query" to text(max=500),"scope" to text(false,80),"limit" to Argument("integer",false)),
@@ -92,7 +97,7 @@ object ToolRegistry {
         def("delete_reminder",Risk.HIGH,"id" to text(max=100)),
         def("list_messenger_notifications",Risk.LOW,"packageName" to text(max=80),"limit" to Argument("integer",false)),
         def("reply_messenger_notification",Risk.HIGH,"id" to text(max=100),"message" to text(max=2000))
-    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions).let { entries ->
+    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ProjectStorageToolCatalog.definitions).let { entries ->
         require(entries.map {it.name}.distinct().size==entries.size){"도구 이름이 중복됩니다."}
         entries.associateBy {it.name}
     }
@@ -118,8 +123,9 @@ object ToolRegistry {
             val value=call.arguments[key]
             require(!spec.required || value!=null){"필수 인자가 없습니다: $key"}
             if(value!=null) when(spec.type) {
-                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&call.name=="list_project_files") || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
+                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
                 "integer" -> require(value is JsonPrimitive && !value.isString && (value.intOrNull!=null || (key=="seed"&&call.name=="generate_image"&&value.longOrNull!=null))){"$key 정수 필요"}
+                "boolean" -> require(value is JsonPrimitive&&!value.isString&&value.booleanOrNull!=null){"$key 참/거짓 값 필요"}
                 "array" -> when {
                     GoalToolCatalog.isArrayArgument(call.name,key)->GoalToolCatalog.validateArray(call.name,key,value)
                     OfficeToolCatalog.isIntervalArgument(call.name,key)->OfficeToolCatalog.validateIntervals(value)
@@ -161,6 +167,7 @@ object ToolRegistry {
         if(call.name=="prepare_email") require(call.arguments.getValue("to").jsonPrimitive.content.matches(Regex("[^\\s@,;]+@[^\\s@,;]+\\.[^\\s@,;]+"))){"받는 주소 형식 오류"}
         if(call.name in OfficeToolCatalog.names)OfficeToolCatalog.validate(call)
         if(call.name in GoalToolCatalog.names)GoalToolCatalog.validate(call)
+        if(call.name in ProjectStorageToolCatalog.names)ProjectStorageToolCatalog.validate(call)
         if(call.name in EvidenceToolCatalog.names)EvidenceToolCatalog.validate(call)
         if(call.name in PrivateAnalysisToolCatalog.names)PrivateAnalysisToolCatalog.validate(call)
         if(call.name in RecordingToolCatalog.names)RecordingToolCatalog.validate(call)

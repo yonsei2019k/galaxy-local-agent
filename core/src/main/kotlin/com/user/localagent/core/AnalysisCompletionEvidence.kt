@@ -5,7 +5,7 @@ import kotlinx.serialization.json.*
 /** The host binds partial/full analysis receipts, never a model-issued completion flag. */
 object AnalysisCompletionEvidence {
     fun fromResult(call:ToolCall,result:ToolResult):StepEvidence {
-        if(call.name !in PrivateAnalysisToolCatalog.analysisNames||!result.success)return StepEvidence(call.name,result.verification,result.verificationSummary)
+        if(call.name !in PrivateAnalysisToolCatalog.analysisNames||!result.success)return StepEvidence(call.name,result.verification,result.verificationSummary,effectNotApplied=result.effectNotApplied)
         val report=Json.parseToJsonElement(result.content).jsonObject
         val id=report.getValue("analysisId").jsonPrimitive.content
         require(UUID.matches(id))

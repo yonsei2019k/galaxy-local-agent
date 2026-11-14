@@ -34,7 +34,7 @@ object AgentWorkModePolicy {
     val contextReadTools:Set<String> = setOf("list_skills","read_skill")
     private val publicReadTools=setOf("search_web","search_shopping","read_webpage","get_current_datetime","search_youtube_videos")+EvidenceToolCatalog.names+OfficeToolCatalog.names
     private val localReadTools=setOf(
-        "get_current_datetime","list_project_files","read_project_file","search_conversation_history",
+        "get_current_datetime","get_agent_capabilities","list_reminders","list_project_files","read_project_file","inspect_project_storage","find_project_duplicates","search_conversation_history",
         "list_imported_conversations","search_conversation_imports","get_sms_summary","get_call_log_summary",
         "list_audio_recordings","search_audio_transcripts","list_calendar_events","search_notes","search_contacts",
         "search_memories","list_messenger_notifications","analyze_selected_data","query_selected_data","list_notebooklm_notebooks",

@@ -32,4 +32,14 @@ class PostReadActionsTest {
         assertEquals("어느 연락처인가요?",NextActionQuestion.parse("""{"type":"clarification","question":"어느 연락처인가요?"}"""))
         assertFalse(schema.contains("prepare_sms"))
     }
+    @Test fun repairCanContinueAnObservedNoteReminderOrFileOnlyWithinCapturedTools(){
+        val relations=mapOf("search_notes" to "update_note","list_reminders" to "update_reminder","read_project_file" to "write_project_file","calculate" to "save_note")
+        relations.forEach{(read,action)->
+            val tools=setOf(read,action);val proposed=plan.copy(requiredTools=setOf(read))
+            val observed=listOf(HarnessStep(read,buildJsonObject{},StepEvidence(read,VerificationState.VERIFIED,"actual host observation")))
+            assertEquals(setOf(action),PostReadActions.offered(proposed,observed,tools))
+            assertTrue(PostReadActions.offered(proposed,observed,setOf(read)).isEmpty())
+            assertTrue(PostReadActions.offered(proposed,observed+HarnessStep(action,buildJsonObject{},StepEvidence(action,VerificationState.PREPARED,"external pending")),tools).isEmpty())
+        }
+    }
 }
