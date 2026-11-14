@@ -4,7 +4,7 @@ import kotlinx.serialization.json.*
 
 /** Native decoding format only. It never grants permission or replaces host validation/approval. */
 object ToolCallSchema {
-    fun forTools(allowedTools:Set<String>,ownerRequest:String?=null):String {
+    fun forTools(allowedTools:Set<String>,ownerRequest:String?=null,projectWrites:ProjectWriteSchemaConstraints?=null):String {
         require(allowedTools.isNotEmpty()&&allowedTools.size<=40){"구조화 출력에는 허용한 도구1–40개가 필요합니다."}
         require(allowedTools.all {it in ToolRegistry.definitions}){"알 수 없는 도구의 출력 스키마를 만들 수 없습니다."}
         val names=allowedTools.sorted()
@@ -19,14 +19,14 @@ object ToolCallSchema {
                 put("properties",buildJsonObject {
                     put("type",buildJsonObject {put("type","string");put("enum",buildJsonArray {add("tool_call")})})
                     put("tool",buildJsonObject {put("type","string");put("enum",buildJsonArray {add(name)})})
-                    put("arguments",arguments(name,definitions.getValue(name),ownerRequest))
+                    put("arguments",arguments(name,definitions.getValue(name),ownerRequest,projectWrites))
                 })
                 put("required",buildJsonArray {add("type");add("tool");add("arguments")})
             })}})
         }.toString().also {require(it.length<=65536){"도구 출력 스키마가 너무 큽니다."}}
     }
 
-    private fun arguments(name:String,original:JsonObject,ownerRequest:String?):JsonObject {
+    private fun arguments(name:String,original:JsonObject,ownerRequest:String?,projectWrites:ProjectWriteSchemaConstraints?):JsonObject {
         val definition=ToolRegistry.definitions.getValue(name)
         val properties=original.getValue("properties").jsonObject.mapValues {(key,value)->
             val changes=value.jsonObject.toMutableMap()
@@ -51,6 +51,8 @@ object ToolCallSchema {
             }
             JsonObject(changes)
         }
+        if(name=="write_project_file"&&projectWrites!=null)return projectWrites.arguments(
+            JsonObject(original+mapOf("properties" to JsonObject(properties),"additionalProperties" to JsonPrimitive(false))))
         if(name=="save_note"){
             val quotes=ownerRequest?.let(OwnerTextSources::quotes).orEmpty()
             fun variant(payload:String)=buildJsonObject{

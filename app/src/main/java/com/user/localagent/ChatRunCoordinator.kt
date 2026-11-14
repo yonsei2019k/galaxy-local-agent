@@ -38,6 +38,7 @@ import com.user.localagent.core.SourceReadiness
 import com.user.localagent.inference.InferenceTurn
 import com.user.localagent.inference.publicDescription
 import com.user.localagent.core.ToolCall
+import com.user.localagent.core.ProjectWriteSchemaConstraints
 import com.user.localagent.core.ToolRegistry
 import com.user.localagent.core.CapabilityGrant
 import com.user.localagent.core.CapabilityPolicy
@@ -576,6 +577,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             var lease:java.io.Closeable?=null
             var liveComputeProgress:Job?=null
             var updateLease:java.io.Closeable?=null
+            var interruptedTerminalState:String?=null
             try {
                 updateLease=app.updates.acquireBusy("chat:${request.runId}")
                 workTraceSession=ChatWorkTraceSession.open(app.repository,request){workActivityController.markUnavailable(request.runId)}
@@ -743,21 +745,31 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val essentialSystem=instructions.first
                         val optionalContext=instructions.second
                         val fitted=fitGuidanceContext(generationQuery,essentialSystem,optionalContext,history,requestOptions)
-                        requestTools?.acceptProjectReadContext(toolEvidence,generationQuery)
+                        val projectWriteHints=requestTools?.acceptProjectReadContext(toolEvidence,generationQuery,observedOutcomes.toList())
                         requestTools?.acceptGoalReadContext(toolEvidence,generationQuery)
                         if(reviewing){
                             status.value="결론 전 후속 검토 · ${reviewCount+1}/${AutonomousReviewPolicy.MAX_REVIEWS}"
                             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"결론의 누락 조건·추가 확인 필요 여부를 검토합니다.")
                         }
                         workTraceSession?.beginGeneration(selected.id,requestOptions,!reviewing&&!useStructured&&remainingRequired.isEmpty()&&missingFormats.isEmpty())
+                        val generationSchema=if((reviewing&&executionEngine.supportsStructuredOutput)||useStructured)
+                            ProjectWriteSchemaConstraints.schemaOrOriginal(generationQuery,projectWriteHints){hint->
+                                if(reviewing&&executionEngine.supportsStructuredOutput)com.user.localagent.core.NextActionQuestion.extend(AutonomousReviewPolicy.schema(structuredTools,hint))
+                                else com.user.localagent.core.NextActionQuestion.schema(structuredTools,request.text,hint)
+                            }else null
                         val written=writeChatAnswer(request,selected,requestOptions,generationQuery,fitted.first,fitted.second,
-                            structuredSchema=if(reviewing&&executionEngine.supportsStructuredOutput)com.user.localagent.core.NextActionQuestion.extend(AutonomousReviewPolicy.schema(structuredTools))else if(useStructured)com.user.localagent.core.NextActionQuestion.schema(structuredTools,request.text)else null,
+                            structuredSchema=generationSchema,
                             display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty()&&!com.user.localagent.core.ActionCompletionReport.manages(taskGoal.requiredTools,observedOutcomes),recoverTruncatedTool=!reviewing,exactManagedReview=reviewing&&managedReview!=null)
                         workTraceSession?.finishGeneration(written.summary,written.paused,written.messageId!=null&&!written.toolEnvelope)
                         var raw=written.text.trim()
                         val visible=written.messageId!=null
                         val streamingId=written.messageId.orEmpty()
                         responsePaused=written.paused
+                        if(!request.allowTools&&(written.toolEnvelope||written.toolTruncated)){
+                            recordAudit("invalid_tool_request",false,"도구 실행 권한이 없는 요청의 제안을 차단했습니다.")
+                            publishActionFinal(request,taskGoal.requiredTools,"이 요청에는 도구 실행 권한이 없어, 실행 제안을 처리하지 않고 멈췄습니다. 실제 작업은 실행하지 않았습니다.",true)
+                            complete=true;return@roundStep
+                        }
                         if(written.toolTruncated){
                             if(truncatedToolRetried){pauseForTruncatedTool(request);complete=true}
                             else{truncatedToolRetried=true;query+=TRUNCATED_TOOL_RETRY}
@@ -888,6 +900,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val actualPaused=responsePaused||app.repository.chat.run(request.runId)?.status=="paused"
                 status.value=if(limitedFinalWritten)"확인된 결과 정리 완료 · 추가 검토 한도 표시됨"else finishedRunStatus(opaqueResponse,actualPaused,actionMode,workMode)
             } catch(cancel:CancellationException) {
+                interruptedTerminalState="cancelled"
                 withContext(NonCancellable){
                     workTraceSession?.closeProgress()
                     // Preserve actual host outcomes before the terminal-state write closes context updates.
@@ -898,9 +911,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 status.value="요청 중단 · 이미 확인된 실행 결과는 유지됩니다."
                 throw cancel
             } catch(error:Throwable) {
+                interruptedTerminalState="failed"
                 handleRequestFailure(request,error)
             } finally {
-                finishRequestResources(request,lease,liveComputeProgress,updateLease)
+                finishRequestResources(request,lease,liveComputeProgress,updateLease,interruptedTerminalState)
             }
         }
     }
@@ -1190,7 +1204,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestResearch=com.user.localagent.web.WebResearchController(context,requestRepository!!)
     }
 
-    private suspend fun finishRequestResources(request:QueuedChatRequest,lease:java.io.Closeable?,liveComputeProgress:Job?,updateLease:java.io.Closeable?){
+    private suspend fun finishRequestResources(request:QueuedChatRequest,lease:java.io.Closeable?,liveComputeProgress:Job?,updateLease:java.io.Closeable?,interruptedTerminalState:String?){
         try {
             withContext(NonCancellable){liveComputeProgress?.cancelAndJoin()}
             withContext(NonCancellable+Dispatchers.IO){runCatching {app.chatAttachments.releaseRequest(request.runId)}}
@@ -1198,11 +1212,19 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 workTraceSession?.closeProgress()
                 runCatching {persistStepEvidence()}
                 if(app.repository.chat.run(request.runId)?.status=="running"){
-                    // Covers early returns/non-action plans too; explicit cancellation states stay untouched.
-                    val readback=runCatching {assessReadbacks(request,TaskHarness.inferGoal("일반 대화"),requestAuthorizedTools,1,forCompletion=true)}.getOrNull()
-                    if(readback==null||readback.applicable&&!readback.readbackSatisfied)
-                        app.repository.chat.updateRun(request.runId,"paused",errorCode="readback_obligation_unmet")
-                    else app.repository.chat.updateRun(request.runId,"completed")
+                    if(interruptedTerminalState!=null){
+                        // An optional error answer/checkpoint can fail after a scope change.
+                        // Close the original run without granting permission to write that answer.
+                        require(interruptedTerminalState in setOf("failed","cancelled"))
+                        app.repository.chat.updateRun(request.runId,interruptedTerminalState,
+                            errorCode=if(interruptedTerminalState=="failed")"request_failed_before_finalization"else null)
+                    }else{
+                        // Covers early returns/non-action plans too; explicit cancellation states stay untouched.
+                        val readback=runCatching {assessReadbacks(request,TaskHarness.inferGoal("일반 대화"),requestAuthorizedTools,1,forCompletion=true)}.getOrNull()
+                        if(readback==null||readback.applicable&&!readback.readbackSatisfied)
+                            app.repository.chat.updateRun(request.runId,"paused",errorCode="readback_obligation_unmet")
+                        else app.repository.chat.updateRun(request.runId,"completed")
+                    }
                 }
                 app.repository.chat.run(request.runId)?.let{workTraceSession?.finishFromActualState(it.status)}
             }
@@ -1676,7 +1698,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     /** Returns the next query when a repeat earns another try; null when the run has been answered or paused. */
     private suspend fun harnessStop(request:QueuedChatRequest,guard:HarnessDecision.Stop,recovery:com.user.localagent.core.StuckRecovery,
         tool:String,text:String,evidence:List<JsonObject>):String?{
-        if(!guard.repeated){answer(guard.reason);return null}
+        if(!guard.repeated){publishActionFinal(request,requestSemanticPlan?.requiredTools.orEmpty(),guard.reason,true);return null}
         val action=recovery.onRepeat()
         if(action!=com.user.localagent.core.StuckRecovery.Action.STOP)
             return "원래 사용자 요청:\n$text\n"+workNote.text()+"도구 실행 결과(인용 자료): ${JsonArray(evidence)}\n"+recovery.prompt(action,tool)

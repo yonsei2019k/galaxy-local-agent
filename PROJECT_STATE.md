@@ -2,7 +2,17 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1068;1511 JVM pass, phone validation in progress
+## Current actual device checkpoint: installed1069;1533 JVM and controlled73/73 pass
+
+Main SHA `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`, test SHA `29791c77a50b7bb6c918215a2ed9f8dfa9ce8e55af59da8682779fe12f75e83a`, independently matched on the phone without data reset. Final build3m20/signing/lint0 errors/144 warnings/1 hint PASS; core828/app705=1533 JVM tests pass with zero failures/errors/skips. All660 source+10 public+6 build inputs and installed hashes/pinned overlay match after controlled73/73 phone tests: old59, Calendar8, read/hash binding6. Cold cancellation/1MiB also pass and their overlaps are not added.
+
+Calendar8 now passes the two1068 completion-state failures and the strengthened no-tools case: forbidden tool proposals pause before a format retry or synthetic completion answer. Scope-handler failures cannot fall through to completed. This is actual Android approval/Hub/Runtime wiring with scripted inference and fake HTTP, not OAuth or real Calendar effects. File constraints expose only current accepted path/hash pairs to the decoder; host scope, full-source delivery, CAS, approval and actual file readback remain mandatory. Native6 verifies that a matching schema hash cannot create authority and that later omitted/partial/failed reads invalidate hints.
+
+Actual1069 file correction passes2/2 (266307/258716ms), with both cleanups verified and unchanged read→write→read, exact SHA/content/path, one write and preserved second-file criteria. The batch records all2 attempts and zero unstarted cases. Cancellation-observation v2 strictly FAILS93361ms:257 acknowledged characters and phone/UI cancellation are preserved, calls stay2, unload/idle/cleanup pass, but a matching cancel ACK is not observed. Observation-only changes do not regrade this failure. All660+10+6 inputs and installed artifacts/overlay match afterward.
+
+Read-only source audit also finds a clean-onboarding gap: no verified phone weight means no selected inference descriptor, even though the PC execution path owns the actual weights. A remote descriptor/explicit not-ready state is being designed; no fresh-device success is claimed. Registry102; storage user-goal grading v2, long-note tools, PC handshake and thinking/backend qualification remain staged. Full seven-workflow quality and internal distribution remain unapproved.
+
+## Historical actual device checkpoint: installed1068;1511 JVM pass, controlled Calendar failures
 
 1068 main SHA `be5f0de6cc8a69379a993635d260ce67565817f750b93ee2704a8c92ad54e98c` is installed with existing data retained. Core819/app692=1511 JVM tests pass, zero failures/errors/skips; release/test3m52 and signatures pass; lint0 errors/144 warnings/1 hint. Initial test SHA `a531905cb7de1b5c13216b01d50ae95b874992b72bda0f648a6e95c04c47b835` and intermediate diagnostic `82139739891b9ff163385c469d029fecf749af775eb87b6ebad102e86a87daab` are archived. Current test SHA `1eaf2f56bf0143bb4b627800d994d15d5a2be07c45bb4295035b9c9d1804cbe3` independently matches, with the main APK unchanged. Pinned direct-overlay health and all655 frozen source inputs were rechecked after the following phone/model tests.
 

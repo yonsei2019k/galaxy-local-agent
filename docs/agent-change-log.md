@@ -1,3 +1,25 @@
+## 2026-11-15 — 1069 실모델file2of2 PASS / 취소ACK 재검FAIL 보존
+
+실제PC/file_typo2회는266307/258716msPASS·각cleanuptrue,원래read/write/read·정확path/body/원본SHA·단일write·보존파일불변기준을그대로통과했다. batchplanned2/started2/recorded2/unstarted0/all_attempts_recorded. OBS-V2 actualPCcancel은93361ms strictFAIL(matchingACK미관찰),ACK257문자보존/phoneUIcancel/calls2→2/unloadACK/idle/cleanuptrue를그대로구분한다. source660+public10+config6/설치main·test/directoverlay끝재검일치. 취소요청dispatch·2s대8s budget/epoch/StateFlow/DONErace는소스진단후보이며아직서버원인확정0/기준완화0이다.
+
+BYOD읽기감사는phoneverifiedweight빈목록→chooseInference null의startup공백을발견했다. PC실행부는실제weights를PC에서로드하므로폰등록이필수라는현재선택부와분리설계가필요하다. source만확인했으며fresh-device실행이나모델다운로드0,remote descriptor/원래권한보존/명시not-ready상태를별도설계중이다. 기존storage v1순서FAIL은보존하고같은실제fixture/모델/상태검증의user-goal v2를명시opt-in 별도test-only후보로인계받았다. canonical통합전1069production/evidence를보존한다.
+
+## 2026-11-15 — 1069 설치·1533JVM·73기기 PASS / 실모델file1회PASS·2회째진행
+
+Main1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9/test29791c77a50b7bb6c918215a2ed9f8dfa9ce8e55af59da8682779fe12f75e83a 독립설치해시·데이터유지·directoverlayPASS. 최종build3m20/sign/lint0·144·1/core828app705=1533JVM0fail/error/skip. 통제폰73고유=old59+cal8(39.445s)+filebinding6(3.307s)PASS;원래cold취소/MiB도PASS이나중복합산0. cal기존두FAIL과강화readonlypaused/허위marker미노출이통과해해당post/journal/HTTP부정검사를실행했다. 실제OAuth/원격계정검증은아니다.
+
+종료후660+10+6frozen입력/설치main·test/directoverlay재대조일치. 실제PCmodel file_typo2회를시작했고round0는원래정확path/content/원본SHA·read/write/read·keep파일불변/단일write/cleanup기준으로266307msPASS,round1은아직진행중이다. 현재1/1완료만확인하며2/2·일반102도구품질·실제PC취소ACK·상용완료로승격하지않는다. 모델live동안모든source/Gradle/worker/install은root포함동결한다.
+
+## 2026-11-15 — 1069 완료판정·실제read/hash decoder·평가원장 소스 통합
+
+첫660입력빌드는core828/app705=1533JVM0fail/error/skip·release4m27PASS였다. 설치전readonly회귀를더좁게보강했다:원래allowTools=false인요청이실제toolEnvelope/잘린도구제안을반환하면권한없는형식재시도를진행하지않고hostpaused로멈춘다. readonlycalcase에paused/합성허위완료문구미노출검사를추가했다. 실제일반텍스트응답·이미허용된현재요청의도구선택은이gate의대상이아니다. 바뀐2source입력을다시동결해최종빌드로분리하며이새회귀는아직실기전이다.
+
+Root가1068소스/기기결과를614188e로보존한뒤filepatch161d82/manifest3f706의기준7sourceSHA, batchpatchad319/Team20bc·host13회귀6f298, actualPCcancel관측patch56c879를각각대조해부분diff만통합했다. fullfile덮기없이CalendarDI와request별rawfingerprint/StepRef를보존했다. nativefile6에는정상accept→다음query본문누락→거부순서와실제DB삭제반환검사를좁게보강했다. 원래6scenario prompt/83assert/순서기준은유지,helper는예외탈출row/cleanupunknown/미시작수를분리하고unknown뒤abort한다.
+
+완료판정은nonrepeat거부도기존publishActionFinal(pausedtrue)로닫으며,catch진입시원래호스트종료상태(failed/cancelled)를local로포착해작은finalizer로전달한다. handler의answer/checkpoint가바뀐scope에서실패해도stillrunning을completed로바꾸지않는다. 이미기록된paused/terminal과정상계획·권한·본문·도구선택은유지하며새intentrouter0. 이는1068두FAIL의별도누락경로보완이고아직기기재검전이다.
+
+파일hint는현재request reader의실제fullbody/tokenaccept를재확인한path/hash쌍만native grammar에제공한다. 실제write/CAS/승인/SAF·readback권한은기존host검사그대로다. invalid/큰hint는원래safe schema,최종schema한문자열을writer에전달하지만일반writer의countChatTokens를server-exact/schema포함계수로승격하지않는다. actualPC관측은실제StateFlow값동기snapshot과stop전fsync이동만으로강한cancelACK AND를유지,원래1068FAIL재등급0/worker수정0. Registry102/모델추가0,1069전체보안·릴리스·기기·실모델검증은지금부터진행한다.
+
 ## 2026-11-15 — 1068 기존59PASS / 새Calendar6of8·실제PC취소ACK 미관찰
 
 Root recovery최종a3c66b5d는모델실독립정적리뷰권고대로삭제직전전체roster/files재검과note expectedUpdatedAt CAS를추가했다. test-only30s빌드/sign/install current1eaf2f56bf0143bb4b627800d994d15d5a2be07c45bb4295035b9c9d1804cbe3 독립해시/directoverlayPASS/mainbe5불변. 정확한자신의1067QA1scope복구0.888sPASS/별도readonlyabsencePASS. 삭제전현재관찰은runcompleted/find→save/정확한메모1/PNG3동일이며기존inspect-first strictFAIL을성공으로바꾸지않는다. 기존654source에test1추가655전체끝재검일치.

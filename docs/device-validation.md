@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-15 checkpoint1069 / controlled73/73, actual file comparison running
+
+Main `1cadc61b43e84a6cfb2616311ac63edafd7ec5bd2fc4c17204ddb4062c7587f9`, test `29791c77a50b7bb6c918215a2ed9f8dfa9ce8e55af59da8682779fe12f75e83a`, independent installed-byte match/data retained/pinned direct-overlay PASS. Final build3m20/sign PASS, core828/app705=1533 JVM0 failures/errors/skips, lint0/144/1. Controlled73 unique phone tests PASS: original59 + Calendar8(39.445s) + file-binding6(3.307s). Original cold cancellation/1MiB pass but are overlapping controls.
+
+Calendar unknown-effect and changed-scope failures are repaired and their remaining HTTP/journal checks now execute; no-tools variant additionally asserts paused and absence of the synthetic false-completion marker. Actual account/OAuth/provider effects remain untested. File native checks use actual isolated encrypted Room/Workspace/ToolExecutor and synthetic model-input delivery, including previous full acceptance followed by omission, stale/partial/failed reads, reader/workspace isolation, wrong SHA and actual DB cleanup. These are not actual-model results.
+
+Actual PC model file_typo2/2 PASS266307/258716ms, both cleanup verified under unchanged original criteria; all2 attempts recorded, zero unstarted, normal batch termination. Cancellation OBS-V2 strictly FAILS93361ms:257 prior acknowledged characters, cancelled phone/UI, calls2→2, unload ACK, idle and fixture cleanup are verified; matching cancel ACK remains unobserved. This is not proof of a server cancellation defect or an in-flight cancel ACK success. Post-model660+10+6 hashes, installed artifacts/pinned overlay and PC idle/cleanup are reverified. Full seven-workflow quality is not established.
+
 ## 2026-11-15 checkpoint1068 / installed, historical QA cleanup failure found
 
 Main `be5f0de6cc8a69379a993635d260ce67565817f750b93ee2704a8c92ad54e98c`; initial test `a531905cb7de1b5c13216b01d50ae95b874992b72bda0f648a6e95c04c47b835`, followed by test-only recovery diagnostic `82139739891b9ff163385c469d029fecf749af775eb87b6ebad102e86a87daab`. Independent installed-byte checks and pinned direct-overlay health pass; main/data are retained. Core819/app692=1511 JVM PASS,0 failures/errors/skips; release/test3m52/sign PASS, lint0 errors/144 warnings/1 hint.

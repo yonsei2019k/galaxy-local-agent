@@ -27,7 +27,7 @@ object AutonomousReviewPolicy {
     fun forFinalization(raw:String,tools:Set<String>,complete:Boolean):Decision =
         if(!complete)Decision.Unavailable() else try{parse(raw,tools)}catch(_:IllegalArgumentException){Decision.Unavailable()}catch(_:IllegalStateException){Decision.Unavailable()}
 
-    fun schema(tools:Set<String>):String {
+    fun schema(tools:Set<String>,projectWrites:ProjectWriteSchemaConstraints?=null):String {
         val complete=buildJsonObject {
             put("type","object");put("additionalProperties",false)
             put("properties",buildJsonObject {
@@ -41,7 +41,7 @@ object AutonomousReviewPolicy {
             put("properties",buildJsonObject {
                 put("type",buildJsonObject {put("type","string");put("enum",buildJsonArray {add("review_next")})})
                 put("summary",buildJsonObject {put("type","string");put("minLength",1);put("maxLength",600)})
-                put("call",Json.parseToJsonElement(ToolCallSchema.forTools(tools)))
+                put("call",Json.parseToJsonElement(ToolCallSchema.forTools(tools,projectWrites=projectWrites)))
             })
             put("required",buildJsonArray {add("type");add("summary");add("call")})
         }

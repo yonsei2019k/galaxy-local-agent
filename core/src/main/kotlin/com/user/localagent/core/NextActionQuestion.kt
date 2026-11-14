@@ -5,8 +5,8 @@ import kotlinx.serialization.json.*
 /** A question pauses execution. It is never a registered tool, permission, or completion. */
 object NextActionQuestion {
     const val PAUSE_CODE="awaiting_owner_input"
-    fun schema(tools:Set<String>,ownerRequest:String?=null):String {
-        return extend(ToolCallSchema.forTools(tools,ownerRequest))
+    fun schema(tools:Set<String>,ownerRequest:String?=null,projectWrites:ProjectWriteSchemaConstraints?=null):String {
+        return extend(ToolCallSchema.forTools(tools,ownerRequest,projectWrites))
     }
     fun extend(schema:String):String {
         val original=Json.parseToJsonElement(schema).jsonObject

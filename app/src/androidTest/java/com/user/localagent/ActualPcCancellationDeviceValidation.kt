@@ -68,6 +68,16 @@ class ActualPcCancellationDeviceValidation {
         }
         fun count():Int=synchronized(lock){serial}
         fun cleanup():List<PcCleanupEvidence> = synchronized(lock){receipts.toList()}
+        private fun snapshotCurrentCleanup(){
+            // StateFlow may conflate cancel -> unload. Preserve only an actually published value;
+            // this cannot recover a late reply rejected by the PC engine's lifecycle guard.
+            val evidence=actual.lastPcCleanup.value?:return
+            synchronized(lock){if(receipts.size<24)receipts+=evidence}
+        }
+        override suspend fun unload(){
+            snapshotCurrentCleanup() // No delay, network call or inferred cancel receipt.
+            actual.unload()
+        }
         private fun observe(block:()->Flow<GenerationEvent>):Flow<GenerationEvent> = flow {
             val mine=synchronized(lock){++serial;active=serial;armed=0;progressed=0;prepared=0;serial}
             try { emitAll(block()) }
@@ -75,6 +85,7 @@ class ActualPcCancellationDeviceValidation {
                 // AutomaticComputeEngine.events finally snapshots PcInferenceEngine's terminal
                 // summary BEFORE its caller starts owner-scoped unload. Read it here, not later.
                 cancellation=actual.lastGeneration.value?.takeIf{it.reason==GenerationStopReason.CANCELLED}
+                snapshotCurrentCleanup()
                 throw cancel
             }finally{synchronized(lock){if(active==mine)active=0}}
         }
@@ -232,12 +243,12 @@ class ActualPcCancellationDeviceValidation {
                                     if(live?.serial!=candidate.serial||!coordinator.isRunLive(id))null else {
                                         val ownJob=checkNotNull(coordinator.runningJobForThread(r.id)){"QA_OWN_JOB_MISSING"}
                                         beforeText=text;beforeParts=saved;answerId=message.id;window=live
-                                        countAtStop=checkNotNull(probe.get()).count();stage="stopping_own_observed_pc_generation";publish()
+                                        countAtStop=checkNotNull(probe.get()).count();stage="stopping_own_observed_pc_generation"
                                         coordinator.stopRun(id,r.id)
                                         ownJob
                                     }
                                 }
-                                if(stopped!=null)return@withTimeout stopped
+                                if(stopped!=null){publish();return@withTimeout stopped}
                             }
                         }
                     }

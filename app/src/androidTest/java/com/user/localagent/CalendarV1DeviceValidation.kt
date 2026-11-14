@@ -372,6 +372,8 @@ class CalendarV1DeviceValidation {
         withHarness {
             val s=create(allowTools=false);start(s);finish(s)
             assertTrue(checkNotNull(runner).pendingActions.value.none{it.runId==s.runId});assertTrue(steps(s).isEmpty())
+            assertEquals("paused",checkNotNull(store.run(s.runId)).status)
+            assertFalse(body(s).contains("QA_SYNTHETIC_UNTRUSTED_COMPLETION"))
             assertEquals(0,s.posts.get());assertEquals(0,s.gets.get());assertFalse(body(s).contains("일정 생성 후 실제 ID·활성 상태"))
         }
     }

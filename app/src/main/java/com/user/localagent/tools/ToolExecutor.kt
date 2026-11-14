@@ -92,8 +92,16 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private fun approvedVersion(call:ToolCall,current:Long)=reviewedTargets[reviewKey(call)]?.second?:current
     // Production creates a fresh executor for every captured request; UI reads cannot grant it authority.
     private val projectReadAuthority=java.util.UUID.randomUUID().toString()
-    suspend fun acceptProjectReadContext(evidence:List<JsonObject>,actualModelQuery:String){
-        projectWorkspace.acceptToolReadContext(projectReadAuthority,com.user.localagent.workspace.ProjectReadDelivery.delivered(evidence,actualModelQuery))
+    suspend fun acceptProjectReadContext(evidence:List<JsonObject>,actualModelQuery:String,
+        hostOutcomes:List<ObservedToolOutcome>?=null):ProjectWriteSchemaConstraints {
+        val delivered=com.user.localagent.workspace.ProjectReadDelivery.delivered(evidence,actualModelQuery)
+        val latest=hostOutcomes?.let(ProjectWriteSchemaConstraints::latestHostReadTokens)
+        val current=if(latest==null)delivered else delivered.filter{item->
+            latest[ProjectPaths.segments(item.path).joinToString("/")]==item.token
+        }
+        projectWorkspace.acceptToolReadContext(projectReadAuthority,current)
+        return ProjectWriteSchemaConstraints.fromHostReadSnapshot(actualModelQuery,
+            projectWorkspace.acceptedToolWriteBindings(projectReadAuthority,current))
     }
     suspend fun releaseProjectReadContext(){projectWorkspace.releaseToolReadContext(projectReadAuthority)}
     fun acceptGoalReadContext(evidence:List<JsonObject>,actualModelQuery:String){goalReadContext?.invoke(evidence,actualModelQuery)}

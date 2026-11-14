@@ -148,6 +148,17 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
             if(pending.binding==binding&&pending.token==item.token&&pending.hash==item.sha256&&sha256(item.text)==pending.hash)reads[key]=pending.copy(complete=true)
         }
     }}
+    /** No filesystem refresh: export only the still-accepted issued reads supplied for this generation. */
+    suspend fun acceptedToolWriteBindings(reader:String,delivered:List<DeliveredProjectRead>):List<com.user.localagent.core.ProjectWriteReadBinding> = withContext(Dispatchers.IO){operation.withLock {
+        require(reader!=ownerReader&&reader.isNotBlank())
+        val binding=bindingUnlocked()
+        delivered.mapNotNull { item->
+            val key=readKey(reader,item.path);val current=reads[key]?:return@mapNotNull null
+            if(current.complete&&current.binding==binding&&current.token!=null&&current.token==item.token&&
+                current.hash==item.sha256&&sha256(item.text)==current.hash)
+                com.user.localagent.core.ProjectWriteReadBinding(key.second,current.hash)else null
+        }.distinct().toList()
+    }}
     suspend fun releaseToolReadContext(reader:String)=withContext(Dispatchers.IO){operation.withLock{reads.keys.removeAll{it.first==reader}}}
     suspend fun write(path:String,content:String,expectedSha256:String?=null):String=writeScoped(path,content,expectedSha256,ownerReader)
     suspend fun writeForTool(path:String,content:String,expectedSha256:String?=null,reader:String):String{

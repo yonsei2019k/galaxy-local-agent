@@ -96,7 +96,10 @@ class TeamModelWorkflowDeviceValidation {
     private fun writeAtomic(file:File,value:JsonObject){
         check(file.parentFile?.isDirectory==true||file.parentFile?.mkdirs()==true)
         val atomic=AtomicFile(file);val stream=atomic.startWrite()
-        try{stream.write(value.toString().toByteArray(Charsets.UTF_8));atomic.finishWrite(stream)}catch(error:Throwable){atomic.failWrite(stream);throw error}
+        try{stream.write(value.toString().toByteArray(Charsets.UTF_8));atomic.finishWrite(stream)}catch(error:Throwable){
+            try{atomic.failWrite(stream)}catch(cleanup:Throwable){if(cleanup!==error)error.addSuppressed(cleanup)}
+            throw error
+        }
     }
 
     @Test fun actualLocalModelCompletesSixUsefulScopedWorkflows()=runBlocking(Dispatchers.Default){
@@ -112,28 +115,45 @@ class TeamModelWorkflowDeviceValidation {
         require(kinds.isNotEmpty()&&kinds.distinct().size==kinds.size&&kinds.all{it in selectableKinds})
         val token=UUID.randomUUID().toString()
         val report=File(checkNotNull(context.getExternalFilesDir(null)),"diagnostics/team-model-workflows.json")
-        val rows=mutableListOf<JsonObject>()
+        val batch=QaBatchIntegrity(kinds,repeats,version,token)
         fun publish(current:JsonObject?=null,finished:Boolean=false){writeAtomic(report,buildJsonObject{
+            current?.let{batch.observe(it)}
             put("batchToken",token);put("versionCode",version);put("actualModel",true);put("allowCloudText",false)
             put("evidenceKind","actual_phone_coordinator_actual_local_pc_model_and_actual_scoped_provider_readback")
             put("selectedCases",JsonArray(kinds.map(::JsonPrimitive)));put("repeats",repeats);put("finished",finished)
-            put("currentCase",current?:JsonNull);put("rows",JsonArray(rows.toList()))
+            put("currentCase",batch.current?:JsonNull);put("rows",JsonArray(batch.rows))
+            batch.summary().forEach{(key,value)->put(key,value)}
         })}
-        publish()
         var abort=false
-        loop@for(round in 0 until repeats)for(kind in kinds){
-            check(context.packageManager.getPackageInfo(context.packageName,0).longVersionCode==version){"Installed version changed during the batch"}
-            val row=runCase(context,app,version,token,kind,round){stage->publish(stage)}
-            rows+=row;publish()
-            if(row["abortBatch"]?.jsonPrimitive?.booleanOrNull==true){abort=true;break@loop}
+        var termination="all_attempts_recorded"
+        try {
+            publish()
+            for(attempt in batch.plan){
+                batch.begin(attempt);publish() // Durable planned/current attempt before fixture/model execution.
+                val row=batch.capture {
+                    check(context.packageManager.getPackageInfo(context.packageName,0).longVersionCode==version){"Installed version changed during the batch"}
+                    runCase(context,app,version,token,attempt.kind,attempt.round,batch::rememberCaseFailure){stage->publish(stage)}
+                }
+                publish()
+                if(row["abortBatch"]?.jsonPrimitive?.booleanOrNull==true){abort=true;termination=if(batch.terminalFailure!=null)"attempt_boundary_failure"else"case_requested_abort";break}
+            }
+        }catch(error:Throwable){abort=true;termination="batch_boundary_failure";batch.abort(error)}
+        finally {
+            try {withContext(NonCancellable){
+                batch.finish(termination)
+                var durable=false
+                try{publish(finished=true);durable=true}catch(error:Throwable){abort=true;termination="final_report_write_failed";batch.abort(error);batch.finish(termination)}
+                finally{System.err.println("TEAM_MODEL_BATCH_TERMINAL "+batch.summary().toString()+" durable="+durable)}
+            }}catch(error:Throwable){abort=true;batch.abort(error)}
         }
-        publish(finished=true)
+        batch.terminalFailure?.let{throw it}
+        val rows=batch.rows
         assertFalse("Owner work or cleanup interrupted this QA batch",abort)
         assertEquals("Missing cases are never scored as success",kinds.size*repeats,rows.size)
         assertEquals("One or more positive workflows failed; inspect the private report",0,rows.count{it["passed"]?.jsonPrimitive?.booleanOrNull!=true})
     }
 
-    private suspend fun runCase(context:Context,app:AppContainer,version:Long,token:String,kind:String,round:Int,
+    private suspend fun runCase(context:Context,app:AppContainer,version:Long,token:String,kind:String,round:Int,onFailure:(Throwable)->Unit,
         progress:(JsonObject)->Unit):JsonObject {
         val started=System.currentTimeMillis();val title="qa-team-model-"+token+"-"+round+"-"+kind
         val allowed=tools(kind);val store=app.repository.chat
@@ -153,6 +173,12 @@ class TeamModelWorkflowDeviceValidation {
         }
         var modelLabel="";var revision:Long?=null
         val details=linkedMapOf<String,JsonElement>()
+        var storageStateReader:(suspend()->JsonObject)?=null
+        fun checkpoint(phase:String,cleanup:Boolean?=null){runCatching{progress(buildJsonObject {
+            put("kind",kind);put("round",round);put("qaStage",phase);put("lastCheckCode",approvalDiagnostics.lastCheckCode)
+            caught?.let{put("caseFailure",it.javaClass.simpleName);put("caseFailureMessage",it.message)}
+            cleanup?.let{put("cleanupVerified",it)}
+        })}}
         try {
             if(app.runs.hasActiveRuns.value||app.runs.busy.value||store.queuedRuns().isNotEmpty())throw OwnerWorkActive()
             val p=store.createProject(title,ProjectSettings(useOwnerMemory=false,learnOwnerFacts=false,disabledTools=ToolRegistry.definitions.keys-allowed)).also{project=it}
@@ -188,6 +214,16 @@ class TeamModelWorkflowDeviceValidation {
                 check(fixtureHashes["a.png"]==fixtureHashes["b.png"]&&fixtureHashes["a.png"]!=fixtureHashes["c.png"])
             }
             val storageBody="파일 수=3\n중복 그룹 수=1\n중복 경로=a.png, b.png\n추가 사본 바이트="+photoBytes
+            if(kind=="storage_report"){
+                val initialBinding=ws.bindingFingerprint()
+                val initialAccess=store.accessScope(r.id)
+                storageStateReader={
+                    check(store.project(p.id)?.title==title&&p.workspaceKey==p.id&&store.thread(r.id)?.projectId==p.id)
+                    check(store.accessScope(r.id)==initialAccess)
+                    check(!ws.state.value.external&&ws.bindingFingerprint()==initialBinding)
+                    observeStorageState(repository,ws,root,noteTitle,storageBody,fixtureHashes)
+                }
+            }
             val owner=when(kind){
                 "exact_quote"->"메모 하나를 저장한 뒤 검색으로 다시 읽어 확인해줘.\n"+
                     "메모 제목은 “"+noteTitle+"”이고, 분류(scope)는 "+collection+"로 지정해줘.\n"+
@@ -363,9 +399,15 @@ class TeamModelWorkflowDeviceValidation {
             details["positiveCompletionVerified"]=JsonPrimitive(true)
             details["requiredVerifiedStagesAndOrder"]=JsonPrimitive(true)
             details["independentScopedStateReadback"]=JsonPrimitive(true)
-        }catch(error:Throwable){caught=error;if(error is OwnerWorkActive)ownerInterrupted=true}
+        }catch(error:Throwable){caught=error;onFailure(error);if(error is OwnerWorkActive)ownerInterrupted=true;checkpoint("case_caught")}
         finally {
             withContext(NonCancellable){
+                checkpoint("case_cleanup_started")
+                if(kind=="storage_report"){
+                    val observation=captureStorageObservation(storageStateReader)
+                    details["storageStateObservation"]=observation
+                    runCatching{progress(buildJsonObject{put("kind",kind);put("round",round);put("qaStage","storage_state_observed");put("storageStateObservation",observation)})}
+                }
                 // Capture private run evidence before deleting only the test-created scope.
                 runId?.let{id->runCatching{store.run(id)?.let{run->status=run.status;code=run.errorCode;steps=QueuedChatRequest.fromJson(run.contextJson).previousSteps}}}
                 if(body.isBlank())room?.let{r->runCatching{for(message in store.messages(r.id).first().filter{it.role=="assistant"})body+=store.fullMessageText(message.id)+"\n"}}
@@ -384,11 +426,12 @@ class TeamModelWorkflowDeviceValidation {
                         }
                         assertNull(store.project(p.id));r?.let{assertNull(store.thread(it.id))};workspace?.discard()
                     }
-                }catch(error:Throwable){cleanupFailure=error}
+                }catch(error:Throwable){cleanupFailure=error;onFailure(error)}
+                checkpoint("case_cleanup_finished",cleanupFailure==null)
             }
         }
         val interruptedExternally=caught is CancellationException&&!currentCoroutineContext().isActive
-        return buildJsonObject {
+        val row=buildJsonObject {
             put("kind",kind);put("round",round);put("versionCode",version);put("batchToken",token)
             put("passed",caught==null&&cleanupFailure==null);put("abortBatch",ownerInterrupted||cleanupFailure!=null||interruptedExternally)
             put("status",status);put("errorCode",code);put("pcSeen",pcSeen);put("allowCloudText",false);put("capturedPcRevision",revision)
@@ -402,5 +445,30 @@ class TeamModelWorkflowDeviceValidation {
             caught?.let{put("error",it.javaClass.simpleName);put("message",it.message)}
             cleanupFailure?.let{put("cleanupError",it.javaClass.simpleName);put("cleanupMessage",it.message)}
         }
+        checkpoint("case_row_ready",cleanupFailure==null)
+        return row
+    }
+
+    /** Artifact/file observation only; cannot satisfy or relax the existing strict tool sequence. */
+    private suspend fun captureStorageObservation(reader:(suspend()->JsonObject)?):JsonObject=try {
+        withTimeoutOrNull(5_000){reader?.invoke()}
+            ?:storageObservationUnknown(if(reader==null)"scope_not_initialized"else"observation_timeout")
+    }catch(error:Throwable){storageObservationUnknown("observation_failed",error.javaClass.simpleName)}
+
+    private suspend fun observeStorageState(repository:LocalRepository,workspace:ProjectWorkspace,root:File,title:String,expectedBody:String,
+        hashes:Map<String,String>):JsonObject {
+            val notes=repository.notes.first();val files=workspace.list();val note=notes.singleOrNull()
+            val unchanged=hashes.mapValues{(name,hash)->fileHash(File(root,name))==hash}
+            return buildJsonObject {
+                put("observationOnly",true);put("complete",true);put("changesStrictVerdict",false)
+                put("noteCount",notes.size);put("matchingTitleCount",notes.count{it.title==title});put("exactArtifactCount",notes.count{it.title==title&&it.body==expectedBody})
+                put("titleMatches",note?.let{JsonPrimitive(it.title==title)}?:JsonNull);put("bodyMatches",note?.let{JsonPrimitive(it.body==expectedBody)}?:JsonNull)
+                put("fileEntryCount",files.size);put("fixtureHashesUnchanged",JsonObject(unchanged.mapValues{JsonPrimitive(it.value)}))
+                put("toolObservationCompleteness","unknown_without_raw_receipt");put("goalVerdict","not_assigned")
+            }
+    }
+    private fun storageObservationUnknown(reason:String,errorClass:String?=null)=buildJsonObject {
+        put("observationOnly",true);put("complete",false);put("reason",reason);put("changesStrictVerdict",false)
+        put("titleMatches",JsonNull);put("bodyMatches",JsonNull);put("error",errorClass);put("goalVerdict","not_assigned")
     }
 }
