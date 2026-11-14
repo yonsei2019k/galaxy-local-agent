@@ -1,3 +1,9 @@
+## 2026-11-15 — 1066 실모델3of6 종료 / payload역할·불필요경로질문 실패 보존
+
+Source6002fed/installed1066에서실모델cap128237·correctnote257752·reminder282489 PASS,calc92191·file62106·storage121657/105588 FAIL. 유형3/6,storage0/2,전체시도3/7;모두QAcleanup확인. calc실제제안본문은계산숫자없이접미사만,storage는요청제목을본문에넣고첫시도title도없음. QA필드guard가실행전차단했다. file은boundworkspace+명시상대파일에도root입력을다시물어steps0/paused. 실패시running기록은QA취소전snapshot이며완료로집계하지않는다. 실제숫자·제안·nonce원문은ignored private만보존한다.
+
+모든642/10/6입력·설치main/test·pinnedoverlay종료후재검PASS,PCbusy/cleanupfalse. 일반rolemetadata/OwnerTextSources힌트와project path metadata후보(선택/원문resolver/권한변경0),기존6불변exact_quote opt-in 실제모델회귀후보는아직미compile/미설치다. calendar대상binding/readback후보84purePASS는app/API/폰미통합이고독립리뷰중. 별도oracle감사는storage불필요API순서요구와실제사용자목표를구분했으나현재오류payload FAIL을성공으로바꾸지않았다.
+
 ## 2026-11-15 — 1066 설치·cold예외경로와59고유기기검사 PASS
 
 Root signed/install main2113fddd2aa797ecbda134b3e3c1d4cf83bee6c07ae0870236688af3b237ddb8/test0acde604a3423e1a705adcc0e6e060d4b0071d3512ac4aba703701bb427c2b95 독립바이트일치·데이터유지·direct pinned overlay PASS.1476JVM0fail/error/skip,release/test3m51/sign PASS,lint0/144/1. 원래cold취소·1MiB각각PASS,취소는별도프로세스2회추가PASS. 전체59고유JUnit PASS/skip0=기존42+readback4+writer17-중복4. syntheticengine 여부를실제PCinference로승격하지않는다. baseline/candidate31둘다JVM PASS였고실기경로개선만증명하며일반ART원인확정0.
