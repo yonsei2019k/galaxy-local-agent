@@ -6,6 +6,20 @@ import org.junit.Test
 
 /** Synthetic structured choices only; no natural-language request classifier is involved. */
 class ModelDecisionContractTest {
+    @Test fun storageAndConnectorPrivacyRoundTripThroughBothContracts() {
+        val tools=setOf("inspect_project_storage","find_project_duplicates")+
+            com.user.localagent.core.connections.PcToolCatalog.names
+        for(tool in tools){
+            val plan=parse(decision("TOOL_TASK","requiredTools" to array(tool)))
+            assertTrue("Private capability lost: $tool",plan.usesPrivateData)
+            assertEquals(plan,SemanticRequestPlanning.parse(SemanticRequestPlanning.contextJson(plan)))
+        }
+        val storage=parse(decision("TOOL_TASK","requiredTools" to array("inspect_project_storage","find_project_duplicates","save_note")))
+        assertTrue(storage.usesPrivateData)
+        assertEquals("mixed_private_public",failure(decision("TOOL_TASK","publicQuery" to JsonPrimitive("public"),
+            "requiredTools" to array("inspect_project_storage","search_web")).toString()).code)
+    }
+
     private fun decision(action: String, vararg fields: Pair<String, JsonElement>): JsonObject =
         JsonObject(mapOf("action" to JsonPrimitive(action), "goal" to JsonPrimitive("현재 사용자의 목표"), "targetType" to JsonPrimitive("GENERAL")) + fields)
     private fun array(vararg values: String) = JsonArray(values.map(::JsonPrimitive))

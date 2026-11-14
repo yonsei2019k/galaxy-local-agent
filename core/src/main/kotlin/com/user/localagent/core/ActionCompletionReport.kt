@@ -42,6 +42,17 @@ object ActionCompletionReport {
                 }
             }else when(call.name){
                 "save_note","update_note"->{append("메모 ").append(if(call.name=="save_note")"저장"else"수정").append(" 후 재조회를 확인했습니다.");if(value("title").isNotEmpty())append("\n제목: ").append(value("title"));append("\n본문:\n").append(value("content"))}
+                "create_reminder","update_reminder"->{
+                    val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
+                    val reminder=receipt?.get("reminder") as? JsonObject
+                    val title=(reminder?.get("title") as? JsonPrimitive)?.takeIf{it.isString}?.content
+                    val at=(reminder?.get("atEpochMillis") as? JsonPrimitive)?.longOrNull
+                    if((receipt?.get("storedAndReadBack") as? JsonPrimitive)?.booleanOrNull==true&&(receipt?.get("queueVerified") as? JsonPrimitive)?.booleanOrNull==true&&title!=null&&at!=null){
+                        append("알림 ").append(if(call.name=="create_reminder")"저장"else"수정").append("과 예약 큐를 확인했습니다.")
+                        append("\n제목: ").append(title).append("\n시각: ").append(java.time.Instant.ofEpochMilli(at).atZone(ToolRegistry.defaultZone))
+                        append("\n알림이 실제 표시됐는지는 아직 확인하지 않았습니다.")
+                    }else append(result.content)
+                }
                 "get_current_datetime"->append("기기에서 조회한 시각: ").append(result.content)
                 "search_contacts"->append("연락처 조회 결과:\n").append(result.content)
                 else->append(result.content)

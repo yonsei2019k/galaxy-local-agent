@@ -35,6 +35,12 @@ object SemanticRequestPlanning {
         "list_audio_recordings", "search_audio_transcripts", "list_calendar_events", "search_notes",
         "search_memories", "list_project_files", "read_project_file", "inspect_project_storage", "find_project_duplicates", "list_reminders", "get_agent_capabilities",
     ) + com.user.localagent.core.connections.ConnectionCatalog.privateReadNames + com.user.localagent.core.connections.PcToolCatalog.names + PrivateAnalysisToolCatalog.privateReadNames + RecordingToolCatalog.names + GoalToolCatalog.names + KakaoScreenToolCatalog.names
+
+    /** Typed capability metadata shared with sparse decision normalization, not an intent router. */
+    internal fun isPrivateRead(tool:String):Boolean = tool in privateReads ||
+        (ToolRegistry.definitions[tool]?.risk==Risk.LOW &&
+            (tool.startsWith("get_")||tool.startsWith("list_")||tool.startsWith("search_")||tool.startsWith("read_")) &&
+            tool !in publicTools && tool!="get_current_datetime" && tool !in SkillToolCatalog.names)
     private fun contentTools(source: SemanticSourceKind): Set<String> = when (source) {
         SemanticSourceKind.SMS -> setOf("get_sms_summary", "analyze_sms")
         SemanticSourceKind.KAKAO -> setOf("list_messenger_notifications", "search_conversation_imports", "analyze_conversation_import", "read_kakao_screen")

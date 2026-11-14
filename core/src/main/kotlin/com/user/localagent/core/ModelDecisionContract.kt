@@ -151,7 +151,7 @@ object ModelDecisionContract {
             SemanticAction.TOOL_TASK -> {
                 if (tools.isEmpty()) fail("missing_required_tools", "TOOL_TASK requires the supported tools needed for the task.")
                 canonicalSource = source
-                canonicalPrivacy = source != SemanticSourceKind.NONE || tools.any(::isPrivateRead)
+                canonicalPrivacy = source != SemanticSourceKind.NONE || tools.any(SemanticRequestPlanning::isPrivateRead)
                 if (tools.any { it in searchTools }) {
                     if (canonicalPrivacy) fail("mixed_private_public", "Plan the local private phase separately from external public search; preserve the remaining goal in constraints.")
                     if (query.isBlank()) fail("missing_public_query", "A tool task using public search requires publicQuery.")
@@ -184,9 +184,6 @@ object ModelDecisionContract {
     private fun noTools(tools: Set<String>) {
         if (tools.isNotEmpty()) fail("unexpected_tools", "This action does not execute tools. Omit requiredTools or use an empty array.")
     }
-    private fun isPrivateRead(tool: String): Boolean = tool in GoalToolCatalog.names || tool in PrivateAnalysisToolCatalog.privateReadNames || tool in RecordingToolCatalog.names || ToolRegistry.definitions[tool]?.risk == Risk.LOW &&
-        (tool.startsWith("get_") || tool.startsWith("list_") || tool.startsWith("search_") || tool.startsWith("read_")) &&
-        tool !in publicTools && tool != "get_current_datetime" && tool !in SkillToolCatalog.names
     private fun fail(code: String, hint: String): Nothing = throw ModelDecisionException(code, hint)
 
     private fun rejectDuplicateKeys(raw: String) {

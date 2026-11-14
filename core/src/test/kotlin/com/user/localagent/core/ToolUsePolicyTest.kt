@@ -1,9 +1,20 @@
 package com.user.localagent.core
 
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class ToolUsePolicyTest {
+    @Test fun noteFilterAndAbsoluteTimeGuidanceReachBothModelCatalogs(){
+        val compact=Json.parseToJsonElement(ToolUsePolicy.compactCatalog(setOf("search_notes","create_reminder"))).jsonArray
+        val note=compact.single{it.jsonObject["tool"]?.jsonPrimitive?.content=="search_notes"}.jsonObject
+        assertTrue(note.getValue("argumentDescriptions").jsonObject.getValue("scope").jsonPrimitive.content.contains("not an access scope"))
+        assertTrue(note.getValue("argumentDescriptions").jsonObject.getValue("query").jsonPrimitive.content.contains("Literal substring"))
+        val full=Json.parseToJsonElement(ToolRegistry.schemaJson(setOf("search_notes","create_reminder"))).jsonArray
+        val reminder=full.single{it.jsonObject["name"]?.jsonPrimitive?.content=="create_reminder"}.jsonObject
+        assertTrue(reminder.getValue("parameters").jsonObject.getValue("properties").jsonObject.getValue("datetime").jsonObject.getValue("description").jsonPrimitive.content.contains("supplied absolute"))
+    }
+
     @Test fun verificationToolsAreRegisteredReadOnlyTools(){
         ToolUsePolicy.verificationTools.forEach {
             assertTrue(it in ToolRegistry.definitions)

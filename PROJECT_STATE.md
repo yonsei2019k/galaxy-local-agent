@@ -2,7 +2,17 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Current actual device checkpoint: installed1061; diagnostic repair and actual-model evaluation
+## Current actual device checkpoint: installed1062; target readback and planner contract repair
+
+1062 is installed without data clearing. Main SHA `8ef8f9c7ec6619c5801e3b15f468c4e223a8e5204d4bc81646531bb9907b41c4` and test SHA `a614fd8b619c31d98a743a5441471e313cc1231f24bb76467eb184bc3a4de6f4` independently match installed bytes. Core756/app613=1369 JVM tests passed, zero failures/errors/skips; release/test builds and signatures passed, lint0 errors/144 warnings/1 hint. The first three builds hit the existing oversized request-coroutine JVM method limit; unchanged prompt/planning construction and bounded round execution were extracted, preserving budgets/cancellation/early exits, and build4 passed. All623 app/core inputs are frozen and unchanged after42/42 controlled phone checks, zero skipped. Actual-model capability inspection passed in124546ms with verified cleanup and no final generate_chat call; the earlier1061 observation took200938ms. These are single workflow observations, not a general speed benchmark. The other five positive workflows are running separately.
+
+The two planning contracts now agree that project storage/selected PC data are private. Note query/collection and absolute reminder datetime definitions are explicit; unknown collection strings are not widened into global access. Host-created note/reminder receipts and `RequiredReadbackPolicy` require a later same-target/version/content query where the model selected both mutation and read tools. Empty or stale reads cannot satisfy this criterion. A missing legacy receipt pauses conservatively rather than reconstructing proof from prose or repeating the write. Complete pure observation tasks can use a bounded structured review and host-rendered final result; actual latency remains to be measured. The general clipped-summary policy is unchanged.
+
+Independent static review found two follow-ups, staged outside this frozen candidate: a later same-target partial result can be dropped and leave an older good readback valid (P1); managed-review preflight counting precedes optional context/round hints/branch-summary changes in the common writer, so it does not certify the exact final structured prompt (P2). Neither is described as fixed by1062. No generic commercial/team-release approval is claimed. Long-note safe partial editing/full observation remains a tool gap with a separate staged read/patch proposal.
+
+Direct pinned Tailscale health passed71ms after installation, original authentication/identity and no LAN fallback; external-network handoff remains untested. PC/phone orchestration's offline contract/state prototype has38 independent root-run tests passing and is committed separately in `e22299d`. It is not connected to a provider, service or Android executor. Detailed architecture is in [the integrated design](docs/architecture/README.ko.md).
+
+## Historical actual device checkpoint: installed1061; diagnostic repair and actual-model evaluation
 
 1061 main SHA `2f196b057cdec55a1a50b1390c2252911582adb935c431e269373d199c14b35f` and test SHA `bcd20da999f2d42dba39727ebd2b683ca2635827e06e1ee3d48ff2792b9ea4e4` independently match installed bytes, without data clearing. Core718/app607=1325 JVM tests passed with zero failures/errors/skips; release/test build and signatures passed, lint0 errors/144 warnings/1 hint. All42 controlled phone tests passed again, zero skipped. Pinned direct-Tailscale health passed182ms; external-network handoff remains untested.
 

@@ -1,3 +1,13 @@
+## 2026-11-15 — 1062 대상 재조회 계약 통합·실제 설치
+
+root가 모델실23개/도구실12개 pure 회귀 후보와 직접 만든 actual raw-host receipt adapter6개 회귀를 통합했다(이 수들은 전체1369 JVM 안에 포함). private 도구 분류의 두 parser 불일치로 storage계획을 거부하던 결함을 typed공유metadata로 수정하되 legacycanonical제약은 유지했다. Argument.description을schema/compactcatalog에전달하고 literal note query/실제collection과 supplied absolute datetime을설명한다. scope='all'/targetType 별칭으로 조회권한을늘리지 않는다.
+
+note/reminder 성공mutation은실제id/version/content JSON을반환하며queue검증≠notification delivery다. 원래필수read+mutation관계에한해 같은target/version/content의후속read를요구하고empty/wrong/stale/prewrite/partial은단독완료조건을충족하지않는다. previoussummary에서원본receipt를복원하지않고미완료로보류한다. 모델이원래권한/예산안에서다음조회도구를고르며host자동NL실행0. 순수완결조회는짧은structuredreview+livebinding/취소/Finish후hostreport로끝낼수있으며mutation/긴작성/연구등은제외.
+
+build1~3은기존executeRequest coroutine MethodTooLarge 실패. 동일prompt/planning 생성과비inline bounded round 경계를분리해정상compile/기존조기종료·취소·예산유지,build4성공. core756/app613=1369 실패/오류/skip0,lint0오류144경고1hint,release/test서명·설치 PASS. main `8ef8f9c7ec6619c5801e3b15f468c4e223a8e5204d4bc81646531bb9907b41c4`, test `a614fd8b619c31d98a743a5441471e313cc1231f24bb76467eb184bc3a4de6f4` 설치바이트 독립일치/데이터초기화0. source623 drift0. 통제폰42/42 PASS skip0,direct pinnedTailscale71ms. 실제모델capability1/1 PASS124546ms/cleanuptrue,generate_chat0.1061동일workflow200938ms와단일관찰비교이며일반속도보증아님. 나머지5positive는현재별도실행중이다.
+
+교차정적검토가후속P1(정상read후같은대상잘린새결과를adapter가버려오래된proof유지)과P2(preflight후commonwriter가문맥/hint/summary를추가하여최종structured입력동일성미보장)를발견했다.1062수정완료로주장하지않으며독립ignored후보와회귀로준비한다. 모델실은최종writer계산후보,배포실은latepartial증거후보,도구실은긴메모read/unique literalpatch의누락도구후보만소유. 실행중623canonical source/PC/폰은root외변경0. 상용/팀배포승격미승인,owner자료/실계정발송/보호프로필/기존설정변경0.
+
 ## 2026-11-15 — ARCH-P1-01 순수 계약·상태 구현 인계
 
 배포 채팅 소유의 새 protocol/orchestration/v1/와 pc-worker/orchestration/11파일을 root가 인계받았다. 네트워크/프로세스/모델/파일 실행 효과 없는 stdlib prototype이다. 제출의도와 trusted-test HostAuthority/ExecutionBinding, scope/epoch/권한revision·job CAS, capability subset, 별도 external 권한 false 기본, idempotency충돌·단회 승인·cancel요청/ACK·효과불명 재시도 차단을 구현했다. wire파싱/Source enum은 실제 인증/격리/독립 효과증명의 구현이 아니다. 암호화 영속/TTL/provider/endpoint/Kotlin parity/실제target·byte readback은 아직없다.

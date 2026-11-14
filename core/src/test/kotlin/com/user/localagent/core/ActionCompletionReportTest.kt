@@ -5,6 +5,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ActionCompletionReportTest {
+    @Test fun structuredReminderReceiptDisplaysActualScheduleWithoutInternalJsonOrDeliveryClaim(){
+        val receipt=buildJsonObject {
+            put("status","ok");put("storedAndReadBack",true);put("queueVerified",true);put("notificationDelivered",false)
+            put("reminder",buildJsonObject{put("title","최종 회의 자료");put("atEpochMillis",java.time.Instant.parse("2026-11-20T01:00:00Z").toEpochMilli())})
+        }.toString()
+        val text=ActionCompletionReport.render(setOf("update_reminder"),listOf(observed("update_reminder",VerificationState.VERIFIED,body=receipt)))
+        assertTrue(text.contains("최종 회의 자료"));assertTrue(text.contains("2026-11-20T10:00+09:00"))
+        assertTrue(text.contains("실제 표시됐는지는 아직 확인하지"));assertFalse(text.contains("atEpochMillis"));assertFalse(text.contains("notificationDelivered"))
+    }
+
     private fun observed(tool:String,state:VerificationState,success:Boolean=true,args:JsonObject=buildJsonObject{},body:String="실제 결과")=
         ObservedToolOutcome(ToolCall("fixture",tool,args),ToolResult("fixture",success,body,state))
     @Test fun noEvidenceCannotBecomeCompletion(){

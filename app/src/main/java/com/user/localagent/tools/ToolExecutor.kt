@@ -182,14 +182,14 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "get_call_log_summary"->phoneJson(phoneRecords.callLogSummary(call.optional("query"),call.epoch("start"),call.epoch("end"),call.i("limit",5)),"android_call_log",call,::summaryJson)
                 "list_audio_recordings"->phoneJson(phoneRecords.recordAudio(call.optional("query"),call.i("limit",20)),"android_recording_metadata",call,::audioJson)
                 "search_audio_transcripts"->searchAudioTranscripts(call)
-                "save_note"->{require(call.s("scope","default") !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};val content=resolveOwnerText(call).s("content");val note=repository.saveNote(call.s("title","메모"),content,call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};"메모 저장·재조회 확인 · id=${note.id}"}
+                "save_note"->{require(call.s("scope","default") !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};val content=resolveOwnerText(call).s("content");val note=repository.saveNote(call.s("title","메모"),content,call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};noteMutationReceipt(note)}
                 "search_notes"->searchNotesBounded(call)
                 "save_memory"->{val memory=repository.saveMemory(call.s("content"),call.s("kind","fact"));check(repository.getMemory(memory.id)==memory){"기억 저장 후 재조회가 일치하지 않습니다."};"승인한 기억 저장·재조회 확인 · id=${memory.id}"}
                 "search_memories"->repository.searchMemories(call.s("query"),call.i("limit",5)).joinToString("\n"){"${it.id} | ${it.text}"}.ifBlank {"관련 기억이 없습니다."}
                 "delete_memory"->{repository.forgetMemory(call.s("id"));check(repository.getMemory(call.s("id"))==null){"기억 삭제 후에도 레코드가 남아 있습니다."};"기억과 연결된 원문·요약 삭제 확인"}
-                "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 저장 또는 예약 큐 재조회를 확인하지 못했습니다. 중복 생성 전 기존 작업을 확인해주세요."};"${scheduled.message} 저장·예약 큐 확인 · id=${record.id}, 시각=${call.s("datetime")}"}
-                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};"메모 수정·재조회 확인"}
-                "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};scheduled.message+" 저장·예약 큐 확인"}
+                "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 저장 또는 예약 큐 재조회를 확인하지 못했습니다. 중복 생성 전 기존 작업을 확인해주세요."};reminderMutationReceipt(record,scheduled.message)}
+                "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};noteMutationReceipt(updated)}
+                "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};reminderMutationReceipt(record,scheduled.message)}
                 "delete_note"->{val old=repository.getNote(call.s("id"))?:error("대상 메모가 이미 없어 삭제하지 않았습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};repository.deleteNote(old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
                 "delete_reminder"->{val old=repository.getReminder(call.s("id"))?:error("대상 알림이 이미 없어 삭제하지 않았습니다.");repository.deleteReminder(old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);check(repository.getReminder(old.id)==null){"리마인더 삭제를 확인하지 못했습니다."};"리마인더 삭제·재조회 확인"}
                 "list_calendar_events"->listCalendar(call)
@@ -255,12 +255,27 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             })}})
         },"이미 기기에서 전사해 저장한 녹음 자료의 일부 발췌 · 미전사 파일이나 모든 녹음의 분석 결과가 아님")
     }
+    private fun noteMutationReceipt(note:com.user.localagent.data.NoteRecord):String=buildJsonObject {
+        put("status","ok");put("id",note.id);put("storedAndReadBack",true)
+        put("note",buildJsonObject {
+            put("id",note.id);put("title",note.title);put("collection",note.collection);put("text",note.body)
+            put("updatedAt",note.updatedAt);put("truncated",false)
+        })
+    }.toString()
+    private fun reminderMutationReceipt(record:com.user.localagent.data.ReminderRecord,message:String):String=buildJsonObject {
+        put("status","ok");put("id",record.id);put("storedAndReadBack",true);put("queueVerified",true);put("notificationDelivered",false)
+        put("message",message)
+        put("reminder",buildJsonObject {
+            put("id",record.id);put("title",record.title);put("group",record.group);put("atEpochMillis",record.atEpochMillis);put("updatedAt",record.updatedAt)
+        })
+    }.toString()
     private suspend fun searchNotesBounded(call:ToolCall):String {
         val items=repository.searchUserNotes(call.s("query"),call.s("scope"),call.i("limit",5))
         return scoped("ordinary_notes","bounded_note_excerpts",buildJsonObject {
+            put("query",call.s("query"));put("queryMatch","literal_substring");put("collectionFilter",call.s("scope"));put("returnedCount",items.size)
             put("limit",5);put("maxExcerptChars",1000)
             put("notes",buildJsonArray {items.forEach {item->add(buildJsonObject {
-                put("id",item.id);put("collection",clip(item.collection,80));put("title",clip(item.title,100));put("text",clip(item.body,1000));put("truncated",item.body.length>1000)
+                put("id",item.id);put("collection",clip(item.collection,80));put("title",clip(item.title,100));put("text",clip(item.body,1000));put("updatedAt",item.updatedAt);put("truncated",item.body.length>1000)
             })}})
         },"일반 메모 발췌 · 대화 가져오기·SMS 원문·녹음 전사 자료는 전용 읽기 도구로 조회")
     }

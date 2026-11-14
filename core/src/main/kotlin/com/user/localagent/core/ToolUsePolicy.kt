@@ -20,7 +20,10 @@ object ToolUsePolicy {
     /** Compact argument view of the offered tools for the model; shared by the app and the PC evaluation loop. */
     fun compactCatalog(names:Set<String>):String = buildJsonArray {names.sorted().forEach {name->
         val definition=ToolRegistry.definitions.getValue(name)
-        add(buildJsonObject {put("tool",name);put("fields",buildJsonObject {definition.arguments.forEach {(key,spec)->put(key,"${spec.type}${if(spec.required)" required"else" optional"}")}});put("description",definition.description.take(180))})
+        add(buildJsonObject {put("tool",name);put("fields",buildJsonObject {definition.arguments.forEach {(key,spec)->put(key,"${spec.type}${if(spec.required)" required"else" optional"}")}});put("description",definition.description.take(180))
+            val described=definition.arguments.filterValues{it.description.isNotBlank()}
+            if(described.isNotEmpty())put("argumentDescriptions",buildJsonObject{described.forEach{(key,spec)->put(key,spec.description)}})
+        })
     }}.toString()
 
     /**

@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-15 checkpoint1062 / strict post-mutation target readback
+
+Installed main SHA `8ef8f9c7ec6619c5801e3b15f468c4e223a8e5204d4bc81646531bb9907b41c4`, test SHA `a614fd8b619c31d98a743a5441471e313cc1231f24bb76467eb184bc3a4de6f4`, independently matched without data clearing. Core756/app613=1369 JVM PASS, failures/errors/skips0; build4 release/test assembly/signatures PASS; lint0 errors/144 warnings/1 hint. Three earlier compile attempts exceeded the large request coroutine's JVM method size; prompt/planning and a non-inline bounded round boundary were extracted with existing termination/budget rules retained.623 input hashes are frozen for this candidate.
+
+The candidate fixes inconsistent storage/PC-tool privacy normalization, conveys argument semantics, emits actual structured note/reminder receipts and checks later same-target/version/content readback within captured tools. A legacy summary is insufficient proof. The note model test now reproduces the executed query, collection filter and limit during independent readback, closing an old potential false pass. All42 controlled phone tests passed again, zero skipped; all623 inputs remained unchanged. Actual-model capability inspection passed1/1 with cleanup verified in124546ms (1061:200938ms); three structured generations and no final generate_chat were observed. This single comparison is not a general performance benchmark. The other five positive workflows are still running. Pinned direct-overlay authenticated health passed71ms; no external-network handoff claim.
+
+Static cross-review identified follow-up P1: after a good readback, a newer partial/malformed same-target observation can be dropped and leave the older proof valid. P2: review preflight counts before common-writer context/hints/summary changes, so exact final structured-token accounting is not established. Fixes/regressions are staged outside this installed candidate; no claim of covering those sequences in the42 tests or approving commercial readiness is made.
+
 ## 2026-11-15 checkpoint1061 / planning diagnostics and actual-model evaluation
 
 Actually installed main SHA `2f196b057cdec55a1a50b1390c2252911582adb935c431e269373d199c14b35f`, test SHA `bcd20da999f2d42dba39727ebd2b683ca2635827e06e1ee3d48ff2792b9ea4e4`, independently matched without data clearing. Core718/app607=1325 JVM PASS, zero failures/errors/skips; release/test build/signatures PASS; lint0 errors/144 warnings/1 hint. The42 controlled phone checks passed again, zero skipped. Direct pinned Tailscale health182ms is a transport check, not external-network handoff or inference throughput.

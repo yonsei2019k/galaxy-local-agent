@@ -11,12 +11,13 @@ data class ToolResult(val id:String,val success:Boolean,val content:String,val v
     init {require(!effectNotApplied||!success&&verification==VerificationState.FAILED)}
 }
 enum class Risk { LOW, MEDIUM, HIGH }
-data class Argument(val type:String,val required:Boolean=true,val maxLength:Int=4000)
+data class Argument(val type:String,val required:Boolean=true,val maxLength:Int=4000,val description:String="")
 data class ToolDefinition(val name:String,val risk:Risk,val arguments:Map<String,Argument>,val description:String="",val timeoutMillis:Long=30_000)
 
 object ToolRegistry {
     val supportedMessengerPackages=setOf("com.tionsoft.meettalk.eun","com.meditong.gw","com.kakao.talk","org.telegram.messenger","org.telegram.messenger.web")
-    private fun text(required:Boolean=true,max:Int=4000)=Argument("string",required,max)
+    private fun text(required:Boolean=true,max:Int=4000,description:String="")=Argument("string",required,max,description)
+    private const val collectionHint="Exact note collection/reminder group, not an access scope or targetType. Omit optional filters if unknown; never invent 'all' or 'PERSONAL_RECORD'."
     /**
      * Descriptions for the core phone tools. They were empty, so the model guessed what each tool does
      * (found during scenario preparation). Wording states the real boundary of each tool.
@@ -25,10 +26,10 @@ object ToolRegistry {
         "get_current_datetime" to "Current date, time and weekday in Asia/Seoul. Use before computing relative dates such as tomorrow or in 45 days.",
         "list_calendar_events" to "Read events from the phone's calendars in an ISO-offset time range (start inclusive, end exclusive). Read-only.",
         "prepare_calendar_event" to "Open the phone's calendar with a filled-in new event for the owner to confirm and save. Not saved until the owner confirms.",
-        "create_reminder" to "Save a reminder in this app that notifies at an ISO-offset datetime. Compute relative times from get_current_datetime first.",
+        "create_reminder" to "Save an app reminder at an ISO-offset datetime. Use a supplied absolute datetime directly; calculate only relative dates from get_current_datetime.",
         "create_alarm" to "Open the phone's clock app with an alarm at hour (0-23) and minute; optional label and repeat days. The clock app confirms setting it.",
         "save_note" to "Save a private note. Exactly one of content or contentQuoteId; select a current owner quote ID for exact copy without rewriting. Returns id after storage/readback.",
-        "search_notes" to "Search this app's saved notes by text. Returns ids and bounded excerpts.",
+        "search_notes" to "Search literal text in saved note titles/bodies. Preserve exact query spaces. Omit scope unless the actual collection is known. Empty results do not verify a saved/updated note.",
         "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person.",
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
         "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
@@ -77,12 +78,12 @@ object ToolRegistry {
         read("search_audio_transcripts","Read at most 3 short excerpts from existing locally transcribed recording notes. Omit query for recent excerpts. Excerpts may truncate transcripts; this does not process untranscribed recordings or establish an analysis of every file.","query" to text(false,500),"limit" to Argument("integer",false)),
         def("list_calendar_events",Risk.LOW,"start" to text(),"end" to text(),"calendarId" to text(false,80)),
         def("prepare_calendar_event",Risk.MEDIUM,"title" to text(max=300),"start" to text(),"end" to text(),"description" to text(false),"location" to text(false,500)),
-        def("create_reminder",Risk.MEDIUM,"title" to text(max=300),"datetime" to text(),"scope" to text(false,80)),
+        def("create_reminder",Risk.MEDIUM,"title" to text(max=300),"datetime" to text(description="Absolute ISO-offset datetime. A supplied absolute value needs no relative-date calculation or clarification."),"scope" to text(false,80,collectionHint)),
         read("list_reminders","List reminders only in the current chat/project data scope, returning actual ids, title, datetime, group and delivery status. Optional scope filters the reminder group; includeCompleted includes delivered records. Queue presence is not notification delivery.","scope" to text(false,80),"limit" to Argument("integer",false),"includeCompleted" to Argument("boolean",false)),
         read("get_agent_capabilities","Inspect current allowed tools and actual permission/model/workspace prerequisites without changing settings or making network requests. Registration or paired-PC configuration is not proof a workflow ran or a connector is reachable."),
         def("create_alarm",Risk.MEDIUM,"hour" to Argument("integer"),"minute" to Argument("integer"),"label" to text(false,300),"days" to Argument("array",false)),
-        def("save_note",Risk.MEDIUM,"content" to text(false,12000),"contentQuoteId" to text(false,64),"title" to text(false,300),"scope" to text(false,80)),
-        def("search_notes",Risk.LOW,"query" to text(max=500),"scope" to text(false,80),"limit" to Argument("integer",false)),
+        def("save_note",Risk.MEDIUM,"content" to text(false,12000),"contentQuoteId" to text(false,64),"title" to text(false,300),"scope" to text(false,80,collectionHint)),
+        def("search_notes",Risk.LOW,"query" to text(max=500,description="Literal substring of actual title/body, preserving spaces. For readback, use the exact saved title and confirm the returned id."),"scope" to text(false,80,collectionHint),"limit" to Argument("integer",false)),
         def("search_contacts",Risk.LOW,"query" to text(max=300),"limit" to Argument("integer",false)),
         def("prepare_sms",Risk.MEDIUM,"phoneNumber" to text(max=40),"message" to text(max=4000)),
         def("prepare_email",Risk.MEDIUM,"to" to text(max=320),"subject" to text(max=300),"body" to text(max=12000)),
@@ -91,8 +92,8 @@ object ToolRegistry {
         def("save_memory",Risk.MEDIUM,"content" to text(max=4000),"kind" to text(false,40)),
         def("search_memories",Risk.LOW,"query" to text(max=500),"limit" to Argument("integer",false)),
         def("delete_memory",Risk.HIGH,"id" to text(max=100)),
-        def("update_note",Risk.MEDIUM,"id" to text(max=100),"content" to text(max=12000),"title" to text(false,300),"scope" to text(max=80)),
-        def("update_reminder",Risk.MEDIUM,"id" to text(max=100),"scope" to text(max=80),"title" to text(false,300),"datetime" to text(false)),
+        def("update_note",Risk.MEDIUM,"id" to text(max=100),"content" to text(max=12000),"title" to text(false,300),"scope" to text(max=80,description="Preserve the actual note's collection returned by search_notes; never infer from targetType.")),
+        def("update_reminder",Risk.MEDIUM,"id" to text(max=100),"scope" to text(max=80,description="Preserve the actual reminder group returned by list_reminders."),"title" to text(false,300),"datetime" to text(false)),
         def("delete_note",Risk.HIGH,"id" to text(max=100)),
         def("delete_reminder",Risk.HIGH,"id" to text(max=100)),
         def("list_messenger_notifications",Risk.LOW,"packageName" to text(max=80),"limit" to Argument("integer",false)),
@@ -188,6 +189,7 @@ object ToolRegistry {
                     put("type","object");put("additionalProperties",false)
                     put("properties",buildJsonObject {d.arguments.forEach {(key,spec)->put(key,GoalToolCatalog.argumentSchema(name,key)?:PrivateAnalysisToolCatalog.argumentSchema(name,key)?:OfficeToolCatalog.argumentSchema(name,key)?:buildJsonObject {
                         put("type",spec.type)
+                        if(spec.description.isNotBlank())put("description",spec.description)
                         if(spec.type=="string")put("maxLength",spec.maxLength)
                         if(key in setOf("start","end","datetime"))put("format","date-time")
                         if(key=="contentSha256")put("pattern","^[a-fA-F0-9]{64}$")
