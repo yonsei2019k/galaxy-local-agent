@@ -78,11 +78,17 @@ class ChatRunModeGoalStateTest {
             original.copy(criteria=listOf(GoalCriterion(id="different-id",text=original.criteria.single().text))))
             .forEach {changed->assertTrue(inheritVerifiedGoalSteps(changed,listOf(source),"synthetic-binding").isEmpty())}
     }
-    @Test fun unrelatedScopePreparedOrMalformedProofCannotSuppressNewWork(){
+    @Test fun unrelatedScopeOrPreparedProofCannotSuppressNewWork(){
         val goal=goal().copy(linkedRunIds=listOf("run"));val source=evidenceSource(goal)
         assertTrue(inheritVerifiedGoalSteps(goal,listOf(source.copy(threadId="other")),"synthetic-binding").isEmpty())
         assertTrue(inheritVerifiedGoalSteps(goal,listOf(evidenceSource(goal,listOf(writeStep(VerificationState.PREPARED)))),"synthetic-binding").isEmpty())
-        assertTrue(inheritVerifiedGoalSteps(goal,listOf(source.copy(contextJson="{invalid")),"synthetic-binding").isEmpty())
+    }
+    @Test fun malformedLinkedContextCannotEraseDuplicateWriteGuards(){
+        val goal=goal().copy(linkedRunIds=listOf("run"));val source=evidenceSource(goal)
+        assertTrue(runCatching {inheritVerifiedGoalSteps(goal,listOf(source.copy(contextJson="{invalid")),"synthetic-binding")}.isFailure)
+        val original=Json.parseToJsonElement(source.contextJson).jsonObject
+        val malformed=JsonObject(original+("readbackObligations" to buildJsonObject {put("version",1);put("authority","write")}))
+        assertTrue(runCatching {inheritVerifiedGoalEvidence(goal,listOf(source.copy(contextJson=malformed.toString())),"synthetic-binding")}.isFailure)
     }
     @Test fun ongoingSameGoalMustFinishBeforeAnotherRunCanBeQueued(){
         val goal=goal().copy(linkedRunIds=listOf("run"))

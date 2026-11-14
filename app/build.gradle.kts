@@ -34,6 +34,9 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     sourceSets["main"].assets.srcDir("../public")
+    // Share private QA-report helpers between JVM and instrumentation tests only.
+    sourceSets.named("test") { kotlin.directories += "src/sharedTest/java" }
+    sourceSets.named("androidTest") { kotlin.directories += "src/sharedTest/java" }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
 }
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }

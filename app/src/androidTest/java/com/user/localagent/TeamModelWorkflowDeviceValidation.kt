@@ -139,6 +139,15 @@ class TeamModelWorkflowDeviceValidation {
         var pcSeen=false;var ownerInterrupted=false;var cleanupFailure:Throwable?=null;var caught:Throwable?=null
         val engine=AtomicReference<RecordingEngine?>();var steps=emptyList<HarnessStep>();var body="";var status:String?=null;var code:String?=null
         val approvals=mutableListOf<String>();val fixtureHashes=linkedMapOf<String,String>()
+        val approvalDiagnostics=QaApprovalDiagnostics { snapshot ->
+            // PRIVATE AtomicFile report, persisted at capture and every guard before any exception.
+            progress(buildJsonObject {
+                put("kind",kind);put("round",round);put("qaStage","approval_diagnostic")
+                put("actualEngineStage",engine.get()?.stage);put("pcSeen",pcSeen)
+                put("elapsedMs",System.currentTimeMillis()-started)
+                snapshot.forEach { (key,value) -> put(key,value) }
+            })
+        }
         var modelLabel="";var revision:Long?=null
         val details=linkedMapOf<String,JsonElement>()
         try {
@@ -206,18 +215,39 @@ class TeamModelWorkflowDeviceValidation {
                 check(context.packageManager.getPackageInfo(context.packageName,0).longVersionCode==version){"Installed version changed"}
                 coordinator.executionForRun(ownRun)?.let{if(it.executionEngine.computeLocation.value==ComputeResource.PC)pcSeen=true}
                 coordinator.pendingActions.value.firstOrNull{it.runId==ownRun&&!it.decision.isCompleted}?.let{action->
-                    check(action.threadId==r.id&&action.projectId==p.id&&action.recipientChoices.isEmpty()){"QA approval binding mismatch"}
-                    check(action.call.name in allowed&&action.call.name in setOf("save_note","update_note","create_reminder","update_reminder","write_project_file")){"Unexpected approval tool"}
+                    val attempt=approvalDiagnostics.capture(action.call.name,action.call.arguments)
+                    approvalDiagnostics.assertCondition(attempt,"QA_APPROVAL_BINDING",action.threadId==r.id&&action.projectId==p.id&&action.recipientChoices.isEmpty())
+                    approvalDiagnostics.assertCondition(attempt,"QA_APPROVAL_TOOL",action.call.name in allowed&&action.call.name in setOf("save_note","update_note","create_reminder","update_reminder","write_project_file"))
                     val args=action.call.arguments
                     fun text(key:String)=(args[key] as? JsonPrimitive)?.content.orEmpty()
                     when(action.call.name){
-                        "save_note"->{check(kind in setOf("calculate_note","storage_report")&&text("title")==noteTitle);check(text("content")==if(kind=="calculate_note")"40500원"else storageBody){"Model changed the exact required note payload"}}
-                        "update_note"->{check(kind=="correct_note"&&text("id")==seed?.id&&text("content")==fixedBody);check(action.reviewText?.contains(seedBody)==true){"Current QA note must be present in approval preview"}}
-                        "create_reminder"->{check(kind=="reminder_lifecycle"&&text("title")==reminderTitle);check(OffsetDateTime.parse(text("datetime")).toInstant()==future.toInstant())}
-                        "update_reminder"->{val original=repository.listReminders(limit=50).single();check(kind=="reminder_lifecycle"&&text("id")==original.id&&text("title")==fixedReminderTitle);check(text("datetime").isBlank()||OffsetDateTime.parse(text("datetime")).toInstant()==future.toInstant());check(action.reviewText?.contains(original.title)==true)}
-                        "write_project_file"->{check(kind=="file_typo"&&text("path")=="handoff.txt"&&text("content")==afterFile&&text("expectedSha256")==fixtureHashes["handoff.txt"])}
+                        "save_note"->{
+                            approvalDiagnostics.assertCondition(attempt,"QA_SAVE_KIND",kind in setOf("calculate_note","storage_report"))
+                            approvalDiagnostics.assertCondition(attempt,"QA_SAVE_TITLE",text("title")==noteTitle)
+                            approvalDiagnostics.assertExactContent(attempt,"QA_SAVE_CONTENT_EXACT",if(kind=="calculate_note")"40500원"else storageBody,args["content"])
+                        }
+                        "update_note"->{
+                            approvalDiagnostics.assertCondition(attempt,"QA_UPDATE_NOTE_PAYLOAD",kind=="correct_note"&&text("id")==seed?.id&&text("content")==fixedBody)
+                            approvalDiagnostics.assertCondition(attempt,"QA_UPDATE_NOTE_PREVIEW",action.reviewText?.contains(seedBody)==true)
+                        }
+                        "create_reminder"->{
+                            approvalDiagnostics.assertCondition(attempt,"QA_CREATE_REMINDER_TARGET",kind=="reminder_lifecycle"&&text("title")==reminderTitle)
+                            approvalDiagnostics.markCheck("QA_CREATE_REMINDER_TIME_PARSE")
+                            approvalDiagnostics.assertCondition(attempt,"QA_CREATE_REMINDER_TIME",OffsetDateTime.parse(text("datetime")).toInstant()==future.toInstant())
+                        }
+                        "update_reminder"->{
+                            approvalDiagnostics.markCheck("QA_CURRENT_REMINDER_SINGLE")
+                            val original=repository.listReminders(limit=50).single()
+                            approvalDiagnostics.assertCondition(attempt,"QA_UPDATE_REMINDER_TARGET",kind=="reminder_lifecycle"&&text("id")==original.id&&text("title")==fixedReminderTitle)
+                            approvalDiagnostics.markCheck("QA_UPDATE_REMINDER_TIME_PARSE")
+                            approvalDiagnostics.assertCondition(attempt,"QA_UPDATE_REMINDER_TIME",text("datetime").isBlank()||OffsetDateTime.parse(text("datetime")).toInstant()==future.toInstant())
+                            approvalDiagnostics.assertCondition(attempt,"QA_UPDATE_REMINDER_PREVIEW",action.reviewText?.contains(original.title)==true)
+                        }
+                        "write_project_file"->approvalDiagnostics.assertCondition(attempt,"QA_WRITE_PROJECT_PAYLOAD",kind=="file_typo"&&text("path")=="handoff.txt"&&text("content")==afterFile&&text("expectedSha256")==fixtureHashes["handoff.txt"])
                     }
-                    action.remember.value=false;approvals+=action.call.name;action.decision.complete(true)
+                    action.remember.value=false;approvals+=action.call.name
+                    val submitted=action.decision.complete(true)
+                    approvalDiagnostics.approvalSubmitted(attempt,submitted)
                 }
                 val saved=store.run(ownRun)
                 if(System.currentTimeMillis()>=nextProgress){
@@ -231,20 +261,36 @@ class TeamModelWorkflowDeviceValidation {
             val request=QueuedChatRequest.fromJson(completed.contextJson);steps=request.previousSteps
             check(!request.allowCloudText&&request.capturedPcRevision==capturedRevision)
             for(message in store.messages(r.id).first().filter{it.role=="assistant"})body+=store.fullMessageText(message.id)+"\n"
+            approvalDiagnostics.markCheck("POST_RUN_COMPLETED")
             assertEquals("Clarification/pause/refusal is not a positively completed workflow","completed",completed.status)
+            approvalDiagnostics.markCheck("POST_ACTUAL_PC_ROUTE")
             assertTrue("Actual paired PC route was not observed",pcSeen)
+            approvalDiagnostics.markCheck("POST_ALL_GENERATIONS_PC")
             assertTrue("All actual generations must use local PC",engine.get()?.generatedOnPc()==true)
             assertTrue("No final answer was persisted",body.isNotBlank())
             assertTrue("Tool execution escaped captured project whitelist",steps.all{it.tool in allowed})
             assertFalse("External or unverified effects cannot pass positive QA",steps.any{it.evidence.state in setOf(VerificationState.PREPARED,VerificationState.UNVERIFIED)})
             val verified=steps.filter{it.evidence.state==VerificationState.VERIFIED}
-            fun sequence(vararg expected:String){var cursor=0;expected.forEach{name->val found=(cursor until verified.size).firstOrNull{verified[it].tool==name};assertNotNull("Missing required verified stage: "+name,found);cursor=checkNotNull(found)+1}}
+            fun sequence(vararg expected:String){var cursor=0;expected.forEach{name->approvalDiagnostics.markCheck("POST_SEQUENCE_"+name.uppercase(java.util.Locale.ROOT));val found=(cursor until verified.size).firstOrNull{verified[it].tool==name};assertNotNull("Missing required verified stage: "+name,found);cursor=checkNotNull(found)+1}}
             when(kind){
                 "calculate_note"->{sequence("calculate","save_note","search_notes");val calculation=verified.single{it.tool=="calculate"};assertEquals("12000*3+4500",calculation.arguments.getValue("expression").jsonPrimitive.content.filterNot{it.isWhitespace()||it in "()"});val calculated=Json.parseToJsonElement(OfficeToolEngine.execute(ToolCall("qa-independent-math-readback","calculate",calculation.arguments))).jsonObject;assertEquals("40500",calculated.getValue("value").jsonPrimitive.content);val notes=repository.notes.first();assertEquals(1,notes.size);val note=notes.single();assertEquals(noteTitle,note.title);assertEquals("40500원",note.body);assertEquals(note,repository.getNote(note.id));val search=verified.last{it.tool=="search_notes"};assertTrue(repository.searchUserNotes(search.arguments.getValue("query").jsonPrimitive.content,search.arguments["scope"]?.jsonPrimitive?.content.orEmpty(),search.arguments["limit"]?.jsonPrimitive?.intOrNull?:5).any{it.id==note.id});assertTrue(body.contains("40500원"));assertEquals(1,verified.count{it.tool=="save_note"})}
                 "correct_note"->{sequence("search_notes","update_note","search_notes");assertEquals(2,repository.notes.first().size);val current=checkNotNull(repository.getNote(checkNotNull(seed).id));assertEquals(noteTitle,current.title);assertEquals(fixedBody,current.body);assertEquals(keep,repository.getNote(checkNotNull(keep).id));val search=verified.last{it.tool=="search_notes"};assertTrue(repository.searchUserNotes(search.arguments.getValue("query").jsonPrimitive.content,search.arguments["scope"]?.jsonPrimitive?.content.orEmpty(),search.arguments["limit"]?.jsonPrimitive?.intOrNull?:5).any{it.id==checkNotNull(seed).id&&it.body==fixedBody});assertTrue(body.contains(fixedBody));assertEquals(1,verified.count{it.tool=="update_note"})}
                 "reminder_lifecycle"->{sequence("create_reminder","list_reminders","update_reminder","list_reminders");val current=repository.listReminders(limit=50).single();assertEquals(fixedReminderTitle,current.title);assertEquals(future.toInstant().toEpochMilli(),current.atEpochMillis);assertTrue(app.scheduler.verifyScheduled(current));val created=verified.single{it.tool=="create_reminder"};assertEquals(reminderTitle,created.arguments.getValue("title").jsonPrimitive.content);assertEquals(future.toInstant(),OffsetDateTime.parse(created.arguments.getValue("datetime").jsonPrimitive.content).toInstant());assertEquals(current.id,verified.single{it.tool=="update_reminder"}.arguments.getValue("id").jsonPrimitive.content);assertTrue(body.contains(fixedReminderTitle));details["reminderQueueVerified"]=JsonPrimitive(true);details["futureDeliveryVerified"]=JsonPrimitive(false)}
                 "file_typo"->{sequence("read_project_file","write_project_file","read_project_file");assertEquals(afterFile,ws.read("handoff.txt"));assertEquals(fixtureHashes["keep.txt"],fileHash(File(root,"keep.txt")));val write=verified.single{it.tool=="write_project_file"};assertEquals(fixtureHashes["handoff.txt"],write.arguments.getValue("expectedSha256").jsonPrimitive.content);assertEquals(afterFile,write.arguments.getValue("content").jsonPrimitive.content);assertEquals("handoff.txt",verified.last{it.tool=="read_project_file"}.arguments.getValue("path").jsonPrimitive.content);assertEquals(2,ws.list().size)}
-                "storage_report"->{sequence("inspect_project_storage","find_project_duplicates","save_note");assertTrue(verified.filter{it.tool in setOf("inspect_project_storage","find_project_duplicates")}.all{(it.arguments["path"] as? JsonPrimitive)?.content.orEmpty().isBlank()});val notes=repository.notes.first();assertEquals(1,notes.size);assertEquals(noteTitle,notes.single().title);assertEquals(storageBody,notes.single().body);assertEquals(3,ws.list().size);fixtureHashes.forEach{(name,hash)->assertEquals(hash,fileHash(File(root,name)))};assertTrue(body.contains(storageBody));details["binaryFixtureBytesEach"]=JsonPrimitive(photoBytes);details["exactDuplicateFixtureUnchanged"]=JsonPrimitive(true);details["visualSimilarityValidated"]=JsonPrimitive(false)}
+                "storage_report"->{
+                    sequence("inspect_project_storage","find_project_duplicates","save_note")
+                    approvalDiagnostics.markCheck("POST_STORAGE_PROJECT_ROOT")
+                    assertTrue(verified.filter{it.tool in setOf("inspect_project_storage","find_project_duplicates")}.all{(it.arguments["path"] as? JsonPrimitive)?.content.orEmpty().isBlank()})
+                    val notes=repository.notes.first()
+                    approvalDiagnostics.markCheck("POST_STORAGE_NOTE_COUNT");assertEquals(1,notes.size)
+                    approvalDiagnostics.markCheck("POST_STORAGE_NOTE_TITLE");assertEquals(noteTitle,notes.single().title)
+                    approvalDiagnostics.markCheck("POST_STORAGE_NOTE_EXACT_BODY");assertEquals(storageBody,notes.single().body)
+                    approvalDiagnostics.markCheck("POST_STORAGE_FILE_COUNT");assertEquals(3,ws.list().size)
+                    approvalDiagnostics.markCheck("POST_STORAGE_FIXTURE_HASHES");fixtureHashes.forEach{(name,hash)->assertEquals(hash,fileHash(File(root,name)))}
+                    approvalDiagnostics.markCheck("POST_STORAGE_FINAL_BODY");assertTrue(body.contains(storageBody))
+                    details["binaryFixtureBytesEach"]=JsonPrimitive(photoBytes)
+                    details["exactDuplicateFixtureUnchanged"]=JsonPrimitive(true);details["visualSimilarityValidated"]=JsonPrimitive(false)
+                }
                 "capabilities"->{sequence("get_agent_capabilities");assertEquals(1,verified.count{it.tool=="get_agent_capabilities"});assertTrue(repository.notes.first().isEmpty());assertTrue(repository.listReminders(limit=50).isEmpty());assertTrue(ws.list().isEmpty());details["prerequisiteMetadataObserved"]=JsonPrimitive(true);details["metadataProvesRuntimeReadiness"]=JsonPrimitive(false)}
             }
             details["positiveCompletionVerified"]=JsonPrimitive(true)
@@ -285,6 +331,7 @@ class TeamModelWorkflowDeviceValidation {
             put("engineFailure",engine.get()?.failure?:JsonNull);put("approvals",JsonArray(approvals.map(::JsonPrimitive)))
             put("steps",buildJsonArray{steps.forEach{step->add(buildJsonObject{put("tool",step.tool);put("arguments",step.arguments);put("verification",step.evidence.state.name);put("verificationSummary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied)})}})
             put("postconditions",JsonObject(details));put("cleanupVerified",cleanupFailure==null)
+            approvalDiagnostics.snapshot().forEach { (key,value) -> put(key,value) }
             caught?.let{put("error",it.javaClass.simpleName);put("message",it.message)}
             cleanupFailure?.let{put("cleanupError",it.javaClass.simpleName);put("cleanupMessage",it.message)}
         }

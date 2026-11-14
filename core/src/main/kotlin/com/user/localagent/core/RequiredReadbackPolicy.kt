@@ -11,7 +11,11 @@ object RequiredReadbackPolicy {
     /** Capture after mutation/readback while still holding the actual target's host mutation boundary. */
     data class Mutation(val binding:Binding,val stepIndex:Int,val tool:String,val after:Snapshot)
     /** Exact entries returned by this read invocation, before clipping; never a later replayed lookup. */
-    data class Read(val binding:Binding,val stepIndex:Int,val tool:String,val returned:List<Snapshot>,val completeForTarget:Boolean=true)
+    data class Read(val binding:Binding,val stepIndex:Int,val tool:String,val returned:List<Snapshot>,val completeForTarget:Boolean=true,
+        /** Observed identity whose current full state could not be proved. Never a fabricated Snapshot. */
+        val incompleteTargets:Set<Resource> = emptySet(),
+        /** Explicit path or previously returned identities of exactly the same typed query. */
+        val queriedTargets:Set<Resource> = emptySet())
     enum class Reason { NO_LATER_READ, MISSING_READ_PROOF, INCOMPLETE_READ, TARGET_NOT_RETURNED, VERSION_MISMATCH }
     enum class Blocker { REQUEST_TOOL_UNAVAILABLE, INVALID_HOST_PROOF, MISSING_MUTATION_PROOF, BUDGET_EXHAUSTED }
     data class Pending(val mutationStepIndex:Int,val expected:Snapshot,val readTool:String,val reason:Reason)
@@ -41,8 +45,9 @@ object RequiredReadbackPolicy {
             active.any {it.mutation==m.tool&&it.resourceKind==m.after.resource.kind}&&
             (m.after.resource.kind!="project_file"||binding.workspaceBinding!=null)
         fun validRead(r:Read)=r.binding==binding&&verified(r.stepIndex,r.tool)&&
-            active.any {it.read==r.tool}&&r.returned.all {snapshot->
-                active.any {it.read==r.tool&&it.resourceKind==snapshot.resource.kind}
+            active.any {it.read==r.tool}&&
+            (r.returned.map{it.resource}+r.incompleteTargets+r.queriedTargets).all {resource->
+                resource.stableId.isNotBlank()&&active.any {it.read==r.tool&&it.resourceKind==resource.kind}
             }
         // Duplicate, foreign, stale-run or mis-indexed proof must never be silently treated as current.
         if(mutations.any{!validMutation(it)}||reads.any{!validRead(it)}||
@@ -61,16 +66,18 @@ object RequiredReadbackPolicy {
             val afterReads=reads.filter{validRead(it)&&it.tool==relation.read&&it.stepIndex>mutation.stepIndex}
             // An unrelated later lookup cannot erase a successful target readback. A later observation
             // of this actual target can supersede it and reveal a changed version.
-            val after=afterReads.filter{r->r.returned.any{it.resource==mutation.after.resource}}
+            val after=afterReads.filter{r->r.returned.any{it.resource==mutation.after.resource}||
+                    mutation.after.resource in r.incompleteTargets||mutation.after.resource in r.queriedTargets}
                 .maxByOrNull{it.stepIndex}?:afterReads.maxByOrNull{it.stepIndex}
             val target=after?.returned?.filter {it.resource==mutation.after.resource}.orEmpty()
-            if(after?.completeForTarget==true&&target.size==1&&target.single()==mutation.after)continue
+            val incomplete=after?.let{!it.completeForTarget||mutation.after.resource in it.incompleteTargets}==true
+            if(after!=null&&!incomplete&&target.size==1&&target.single()==mutation.after)continue
             if(target.size>1)blockers+=Blocker.INVALID_HOST_PROOF
             val laterVerifiedReadExists=steps.withIndex().any{(index,s)->index>mutation.stepIndex&&s.tool==relation.read&&s.evidence.state==VerificationState.VERIFIED}
             val reason=when {
                 after==null&&laterVerifiedReadExists->Reason.MISSING_READ_PROOF
                 after==null->Reason.NO_LATER_READ
-                !after.completeForTarget->Reason.INCOMPLETE_READ
+                incomplete->Reason.INCOMPLETE_READ
                 target.isEmpty()->Reason.TARGET_NOT_RETURNED
                 else->Reason.VERSION_MISMATCH
             }

@@ -73,19 +73,22 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             }
             val queuedIds=app.repository.chat.queuedRuns().map {it.id}.toSet()
             check(goal.linkedRunIds.none {it in queuedIds}){"같은 목표의 이어쓰기 요청이 아직 대기 중입니다."}
-            val priorSteps=inheritVerifiedGoalSteps(goal,sources,binding)
+            val priorEvidence=inheritVerifiedGoalEvidence(goal,sources,binding)
+            val priorSteps=priorEvidence.steps
             val active=withContext(NonCancellable) {
                 goals.saveGuarded(access,goal.copy(status=GoalStatus.ACTIVE)).also {writtenGoal=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
+            val readbacks=priorEvidence.readbacks(com.user.localagent.core.RequiredReadbackObligations.Context(runId,access.threadId,access.projectId,access.scopeKey,binding))
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding
             var captured:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
                     allowTools=capturedAllowTools,mode=capturedMode,previousSteps=priorSteps,
-                    workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText).also {captured=it}.toJson().also {ownedContexts+=it}
+                    workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText,
+                    readbackObligations=readbacks).also {captured=it}.toJson().also {ownedContexts+=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val linked=withContext(NonCancellable) {

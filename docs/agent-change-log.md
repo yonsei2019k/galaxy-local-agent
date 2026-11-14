@@ -1,3 +1,51 @@
+## 2026-11-15 — 1066 설치·cold예외경로와59고유기기검사 PASS
+
+Root signed/install main2113fddd2aa797ecbda134b3e3c1d4cf83bee6c07ae0870236688af3b237ddb8/test0acde604a3423e1a705adcc0e6e060d4b0071d3512ac4aba703701bb427c2b95 독립바이트일치·데이터유지·direct pinned overlay PASS.1476JVM0fail/error/skip,release/test3m51/sign PASS,lint0/144/1. 원래cold취소·1MiB각각PASS,취소는별도프로세스2회추가PASS. 전체59고유JUnit PASS/skip0=기존42+readback4+writer17-중복4. syntheticengine 여부를실제PCinference로승격하지않는다. baseline/candidate31둘다JVM PASS였고실기경로개선만증명하며일반ART원인확정0.
+
+642source/10public/6config를고정하고실제PC모델storage_report부터재평가한다. 이전1062실모델5/6을새버전성공으로옮기지않는다. 모델실ActualPCcancel후보는bufferedDelta한계와typedprogress실제관측을분리하는staging만,도구실note broad177/v2narrow26 및calendaraccount/identity후보는미통합/미설치다. registry102,상용화/내부배포완료주장0. 빌드/서명/폰/실모델lease는root만유지한다.
+
+## 2026-11-15 — 1066 작은 장문 예외 경계 통합 (소스·검증 시작)
+
+1065최소안은1476JVM/release3m34/sign/hash/directoverlay통과후cold취소에서nativecrash했다. main22d199ae3218cc7d765703d86d2766e89df68175c606187e3d32c29165091e35/test32c7c5fb1bfdf9d6251386307328d5cc363dec37b849e2529c064ef326240d2d. 1064와달리WRITER_CANCEL_CAUGHT는기록됐지만finallygate없이`No pending exception expected: CancellationException`으로abort. 같은phase실패로설명하지않는다. MiB/전체suite/실모델은미실행. 테스트만복구용abc43c87aa48e45489d1ecaae095b7cfc157caaa1cc6d171e469202b06200aa2로갱신해정확bound QAfixture1개삭제검사를통과했다.
+
+Root는실패한자신의1065writer를보존한뒤,동결1064기준ART-BOUNDARY-11 후보f5c6d8159d3cf066e7478fcbffd88a2ffba410180bd8e46ffe0ba1b99d1803ed만대체통합했다. 기존generation/flush loop16605자불변,호출별WriteProgress·작은publicwrite의외부catch/finally·privatewriteParts로기계적분리했다. 초기화try밖/조기return의finally/break후durablefallback/기존권한·옵션·상한을유지. root독립31PASS2.052s,후보와원본모두31PASS라기기원인재현은아니다. 합성classpath JVM write33673bytes168handler→8345bytes31handler+writeParts14085bytes4handler는소스구조비교이며APK/ART성공은아직아니다.
+
+기존native취소검사를유지하고actualRoom+syntheticengine exact-review countnull pause/정확EOG2개를추가했다. 강한binding의NativeQaFixtureRecovery는테스트전용이며실제owner대화를대상으로삼지않는다.1066전체core/app/release/test와59고유native(기존42+readback4+writer17중중복4제외)를검증한다. registry102/새note도구·calendar수정안미통합,실제1066모델성공미주장.
+
+## 2026-11-15 — 1065 최소 예외 분기 구조 비교 후보 (소스)
+
+warm2진단도실패했으므로사전class로드는해결로채택하지않았다. Root는기존ExactReviewInputPause 처리본문을첫typedcatch에서마지막Throwable handler 내부type분기로만옮긴작은비교안을준비했다(writerSHA98945ba18841f4b3918dfb3bf134df90e29d3cd83bbc0c808041b4f1c402feeb). 나머지기존typedpause/타임아웃/cancel/finally/옵션/권한/도구계약을유지하며무조건완료/재시도/검사약화0. 원인확정·해결주장없이1065전체검사/새기기cold취소·1MiB로판정한다. 모델실의별도1064기준작은outerboundary기계적분리안은ignored staging병렬비교용으로유지하고미통합이다.
+
+## 2026-11-15 — 1064 설치 / 취소 실패 유지와 확장 장문 native abort
+
+1064 main6240b8426c173f8c9bb025f7a156205e5b1927d77907eabd44142610d6c4334c/testc4941669745c4b258c6e81952466c0662375838ff8cd9013d9a1abaeeb55aa84 독립 설치해시·데이터유지·direct pinned overlay PASS.1476JVM0fail/error/skip·release/test4m15·서명 PASS,lint0/144/1. 원래취소case는1회 다시FAIL, 새catch/finally진단0. 정상resourcepause대조는PASS+새gate40을남겨새코드실행을확인했다. 전체57PASS로승격하지 않았다.
+
+다른통제18+수신자2+postread1와후속35그룹앞6은PASS. 다음1MiB저장한도case는native ART abort `No pending exception expected: LongAnswerWriter$AnswerStoragePause`, exit nativecrash/status6으로종료돼그룹잔여29(해당case포함)를완료하지못했다. root는비공개crash/exit자료를보존했고기존QA fixture만강한title/시간/모델/요청binding검증으로회복하는test-only진단을준비한다. 새첫typedcatch 사전해석 warm통제는원래cold검사를대체하지않는다. 배포실의signedDEX읽기는newcode/type/handler범위존재를확인했으나컴파일러/ART결함을확정하지않았다. 모델실은작은외부예외경계후보만stage,도구실후보는여전히미통합이다. 실제1064모델평가0,내부배포승인0.
+
+## 2026-11-15 — 1064 취소 finalization 소스 통합 / 검증 시작
+
+Root가 모델실 동결 writer04bed81f/helper1df9f5be/testae1f4826 후보를 해시 확인 후 통합했다. helper의 STAGING ONLY 주석만 정리. appendChunk ACK 직후의 immutable snapshot으로 DB 최종조회 전에 CANCELLED/canContinue=false를 발행하고, 실제 재조회 성공때 durable 본문으로 갱신한다. 조회실패·callback실패·동일예외 self-suppression은 원래 취소/cause/suppressed를 보존하며 비공개 fixedcode로 구분한다. 취소 status는 저장확인 과장없이 '사용자 요청으로 중단'. 모든 finally의 내용없는7boolean gate코드는 현재Android 미확정 경로 조사용이며 원문/ID/주소를 기록하지 않는다. 일반 완료/일시정지/권한/registry102는 유지한다.
+
+root 독립 staging23검사 PASS(순수helper11+실제writer소스/FakeDB12). 원본writer의 native동등 무fault JVM 검사는 PASS라서1063 Android실패의 원인재현/DB원인확정이 아니다. 실제Room/폰·새APК·실모델 결과는 아직없다. 기존native 취소 assertion은 유지하고canContinue=false를 추가했다.1064 전체core/app/release/test와57고유 native(42기존+4readback+fullwriter15의중복4제외)를 진행한다. NonCancellable최종Room조회의시간한계는 별도후속이며 이번후보로 해결했다고 주장하지 않는다.
+
+## 2026-11-15 — 1063 설치 / 통제 기기45of46 / 취소 회귀 원인 조사
+
+Root build/sign/ADB/model/source 통합 독점 유지.1063 main9d85a769e94b5844e849bf573376c0e7b570aefcbd628b1854215d388cb83ba4 / initial test79f0395c82b43cfbe60455ab1f21f5c5973cd0aab49afc6820ec36cc8d4d94ed 설치 바이트 독립 대조, 데이터 초기화0.1465JVM 실패/오류/skip0, release/test 조립·서명·direct pinned overlay PASS, lint0/144/1. 통제 기기 고유46개 중45PASS/1FAIL(기존42 중41PASS, 새readback4JUnit/5scripts PASS). concurrency4/data12는 wrapper 중단 뒤 별도 통과. 실제1063 모델 평가는 보류했다.
+
+장문5번째 구간 취소는 기존4부 저장/호출5회는 보존했으나 UI가 CANCELLED 대신 CONTINUING으로 남는다. 단독3회도 같은실패. root는 기대값을 유지한채 catch에 고정 QA 진단만 추가하여 test APK만 재빌드·설치했고(main SHA불변), test SHAe8a903c572de5b975be230697f1d66d5dc26820b37ab2f3c03d253b90556e56e에서 다시1회 실패했다. 비공개 진단은 원래CancellationException만 있고 suppressed cleanup0이므로 Room최종조회가 원인이라고 확정하지 않는다. 모델실은 staging 후보/fault회귀, 배포실은 독립검토, 도구실은 note-read/patch 앱 연결후보만 준비한다. shared source/build/phone 승격은 root가 검토후 진행하며1063 내부배포 합격을 주장하지 않는다.
+
+## 2026-11-15 — 1062 actual5of6 종료 / 1063 source 통합 검증 중
+
+1062 실제모델6유형 중capability/계산저장검색/메모정정/리마인더/파일정정재조회5유형 PASS. storage는find_duplicates VERIFIED뒤정확메모본문 QA승인guard가제안을거부해저장0/실패(원제안미기록,수치·서식원인미확정). 전체QA cleanup확인.623입력/설치main·test SHA 재일치,direct pinnedoverlay60ms,PCbusy=false/cleanup=false. 이전1/6→이번5/6은이격리whitelist과제에한정되며102도구일반품질을증명하지않는다.
+
+root가세방의1063후속을수동통합했다. latepartial기준선33검사 중11실패재현→후보46PASS(전체JVM에중복합산하지않음). 동일target identity/유효querycoverage를보존해새partial/empty가oldgood를무효화한다. query의NL의미·철자/공백을바꾸지않고hostdefault만정규화. durable obligations는originalpair/actualsnapshot/source-stepdigest/normalized-querySHA를암호화Queue context에보존하며새plan축소로지우지않는다. oldwrite를allowedTools에추가하지않음. resume/steer join뒤최종DBcontext재읽기/sameGoalWork의sourceindex mapping을검증,legacy없는proof/모호한dedup/잘못된presentmetadata는failclosed. 독립57PASS와crossAPI6은원본패키지검사이며root전체JVM결과와별개다.
+
+writer는최종hint/summary/history/options후한불변객체로structuredcount→같은값generate,local-only optin/한번소비/완결EOG·cap검증.22독립회귀를포함. CANCEL은model검증된no-tools action만earlybranch로중지/기존receipt보존하며완료로바꾸지않는다. StorageModelDelivery는4096자내전체원본을보존,큰결과만명시partialfallback. 기존potentialDuplicateBytes를재계산/정답주입하지않음. 신규private QAapproval 기록은guard예외전에persist해다음storage실패를구분하며테스트조건완화0. 순수helper는sharedTest에만두어releaseapp에QA원문로깅경로를추가하지않는다.
+
+root처음통합JVM은shared Kotlin test소스경로설정으로compile실패했고AGP built-in Kotlin의kotlin sourceSet으로수정했다. 현재core791/app674=1465 실패/오류/skip0. Source639+public10+buildconfig6 SHA동결,release/lint/testAPK빌드진행중이며1063설치/폰/모델검증은아직없다. 새ReadbackResumeDeviceValidation4JUnit/5scripted runs는실제QAparent/Room note receipt→childcarry→fullcoordinator의legacy/narrow-read/match/empty/CANCEL을검사할코드다. 실제모델은사용하지않으며원소유자작업/설정/계정/연락처변경0을설계했다. root가검토copy했으나Androidcompile/실행은후속단계다.
+
+note-read-patch23순수후보는누락도구확인/후속설계일뿐1063에도미등록·미설치. 모든공유source/빌드/기기/실제모델창은root소유,다른방후보는동결인계완료. 외부효과~checkpoint의hardcrash틈새와제한적goal dedup 재개불가등잔여는상용완료로숨기지않는다.
+
 ## 2026-11-15 — 1062 대상 재조회 계약 통합·실제 설치
 
 root가 모델실23개/도구실12개 pure 회귀 후보와 직접 만든 actual raw-host receipt adapter6개 회귀를 통합했다(이 수들은 전체1369 JVM 안에 포함). private 도구 분류의 두 parser 불일치로 storage계획을 거부하던 결함을 typed공유metadata로 수정하되 legacycanonical제약은 유지했다. Argument.description을schema/compactcatalog에전달하고 literal note query/실제collection과 supplied absolute datetime을설명한다. scope='all'/targetType 별칭으로 조회권한을늘리지 않는다.

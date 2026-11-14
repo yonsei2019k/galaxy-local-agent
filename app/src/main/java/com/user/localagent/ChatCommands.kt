@@ -119,16 +119,24 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                 return@launch
             }
             val original=app.repository.chat.run(runId)?:error("원래 작업을 찾을 수 없습니다.")
-            val request=QueuedChatRequest.fromJson(original.contextJson)
+            val originalRequest=QueuedChatRequest.fromJson(original.contextJson)
             val running=requestJob
             pendingSteerRunId=runId
             approval.value?.takeIf {it.runId==runId}?.decision?.complete(false)
             if(!toolInFlight){executionEngine.cancel();running?.cancel(CancellationException("사용자 추가 지시"))}
             status.value="현재 실행 결과를 보존한 뒤 추가 지시를 적용합니다."
             running?.join()
+            // The running mutation's NonCancellable checkpoint may have committed after the dialog opened.
+            val finalRun=checkNotNull(app.repository.chat.run(runId))
+            val finalRequest=QueuedChatRequest.fromJson(finalRun.contextJson)
+            check(finalRequest.runId==originalRequest.runId&&finalRequest.threadId==originalRequest.threadId&&
+                finalRequest.branchId==originalRequest.branchId&&finalRequest.projectId==originalRequest.projectId&&
+                finalRequest.allowTools==originalRequest.allowTools&&finalRequest.mode==originalRequest.mode&&
+                finalRun.status !in setOf("queued","running","waiting_approval"))
+            val request=finalRequest
             val thread=app.repository.chat.thread(threadId)?:error("대화가 삭제되었습니다.")
             check(thread.activeBranchId==request.branchId&&thread.projectId==request.projectId){"대화 버전이나 프로젝트가 변경되었습니다."}
-            val steps=completedSteps[runId].orEmpty()
+            val steps=request.previousSteps
             val updated="${request.text}\n\n사용자의 최신 추가 지시:\n$text"
             require(updated.length<=12000){"원래 요청과 추가 지시가 너무 깁니다."}
             if(request.goal!=null)goalMutation.withLock {
@@ -140,10 +148,14 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                     capturedPcDataBinding=request.pcDataBinding,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText)
             }else queueMutation.withLock {
             var submitted:QueuedChatRequest?=null
+            val readbackFrom=com.user.localagent.core.RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,app.repository.chat.accessScope(threadId).scopeKey,request.workspaceBinding)
             app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,updated,request.modelId,request.thinking){user,newRun->
                 QueuedChatRequest(newRun.id,threadId,thread.activeBranchId,thread.projectId,updated,request.modelId,request.thinking,emptyList(),user.id,
                     allowTools=request.allowTools,mode=request.mode,previousSteps=steps,workspaceBinding=request.workspaceBinding,goal=request.goal,
-                    pcDataBinding=request.pcDataBinding,kakaoReadBinding=request.kakaoReadBinding,pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText).also {submitted=it}.toJson()
+                    pcDataBinding=request.pcDataBinding,kakaoReadBinding=request.kakaoReadBinding,pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
+                    readbackObligations=request.readbackObligations?.let {state->
+                        com.user.localagent.core.RequiredReadbackObligations.carry(state,readbackFrom,readbackFrom.copy(runId=newRun.id),request.previousSteps,steps,steps.indices.associateWith {it})
+                    }).also {submitted=it}.toJson()
             }
             queued.value=listOf(checkNotNull(submitted))+queued.value
             app.repository.chat.reorderQueuedRuns(queued.value.map {it.runId})

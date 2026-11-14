@@ -25,6 +25,7 @@ class LongAnswerFinishValidation {
         override val lastGeneration=MutableStateFlow<GenerationSummary?>(null)
         override val supportsStructuredOutput=true
         var calls=0;var cancellations=0;val prompts=mutableListOf<String>()
+        var structuredTokenCount:Int?=null;var structuredCounts=0
         override suspend fun load(path:String,options:InferenceOptions){}
         override fun generate(prompt:String):Flow<String> = error("Use typed synthetic events")
         override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<GenerationEvent> = flow {
@@ -34,6 +35,9 @@ class LongAnswerFinishValidation {
         }
         override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>)=generateChatEvents(userText,systemInstruction,history)
         override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int=1
+        override suspend fun countStructuredChatTokens(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Int? {
+            structuredCounts++;return structuredTokenCount
+        }
         override suspend fun unload(){}
         override fun cancel(){cancellations++}
     }
@@ -62,6 +66,30 @@ class LongAnswerFinishValidation {
             }
         }
     }
+
+    @Test fun exactReviewMissingCountPausesWithoutGeneration()=runBlocking<Unit>{fixture {app,request,model,user->
+        val engine=ScriptedEngine(emptyList())
+        val answer=LongAnswerWriter(app,request,{_,_->fail("No visible structured review")},{},engine)
+            .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 구조 검토",emptyList(),
+                structuredSchema="""{"type":"object"}""",display=false,exactManagedReview=true)
+        assertTrue(answer.paused);assertFalse(answer.exactReviewInputVerified);assertNull(answer.messageId)
+        assertEquals(0,engine.calls);assertEquals(1,engine.structuredCounts)
+        val run=requireNotNull(app.repository.chat.run(request.runId))
+        assertEquals("paused",run.status);assertEquals("EXACT_REVIEW_COUNT_UNAVAILABLE",run.errorCode)
+    }}
+
+    @Test fun exactReviewEogReturnsOnlyTheCountedStructuredResult()=runBlocking<Unit>{fixture {app,request,model,user->
+        val json="""{"type":"review_complete","summary":"합성 검토"}"""
+        val engine=ScriptedEngine(listOf(GenerationEvent.Delta(json),terminal(GenerationStopReason.EOG,false,json.length)))
+            .apply {structuredTokenCount=1}
+        val answer=LongAnswerWriter(app,request,{_,_->fail("No visible structured review")},{},engine)
+            .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 구조 검토",emptyList(),
+                structuredSchema="""{"type":"object"}""",display=false,exactManagedReview=true)
+        assertFalse(answer.paused);assertTrue(answer.exactReviewInputVerified);assertTrue(answer.toolEnvelope)
+        assertEquals(json,answer.text);assertNull(answer.messageId)
+        assertEquals(1,engine.calls);assertEquals(1,engine.structuredCounts)
+        assertEquals("running",app.repository.chat.run(request.runId)?.status)
+    }}
 
     @Test fun resourcePauseBeforeFirstVisibleMessagePersistsTheRunPause()=runBlocking<Unit>{fixture {app,request,model,user->
         val engine=ScriptedEngine(emptyList())
@@ -108,11 +136,19 @@ class LongAnswerFinishValidation {
         try {
             LongAnswerWriter(app,request,{_,view->state.set(view)},{},engine)
                 .write(model,InferenceOptions(maxOutputTokens=128),user,"합성 본문만 작성",emptyList())
-        }catch(_:CancellationException){cancelled=true}
+        }catch(error:CancellationException){
+            cancelled=true
+            // Fixed QA codes and exception types only; never write the owner request or error message.
+            FailureLog.record(app.applicationContext,"qa_writer_cancellation",error,"QA_WRITER_CANCELLED")
+            error.suppressed.forEach {cleanup->
+                FailureLog.record(app.applicationContext,"qa_writer_cancellation_cleanup",cleanup,"QA_WRITER_CANCEL_CLEANUP")
+            }
+        }
         assertTrue(cancelled);assertEquals(5,engine.calls)
         val id=requireNotNull(app.repository.chat.assistantForRun(request.runId)).id
         assertEquals(bodies.joinToString(""),app.repository.chat.fullMessageText(id))
         assertEquals(UiAnswerPhase.CANCELLED,state.get().phase)
+        assertFalse(state.get().canContinue)
         assertEquals(4,app.repository.chat.segmentsForMessage(id).size)
     }}
 

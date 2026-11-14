@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 
-internal data class WrittenAnswer(val text:String,val messageId:String?,val summary:GenerationSummary?,val paused:Boolean,val toolEnvelope:Boolean=false,val opaqueOutput:Boolean=false,val toolTruncated:Boolean=false)
+internal data class WrittenAnswer(val text:String,val messageId:String?,val summary:GenerationSummary?,val paused:Boolean,val toolEnvelope:Boolean=false,val opaqueOutput:Boolean=false,val toolTruncated:Boolean=false,val exactReviewInputVerified:Boolean=false)
 
 internal enum class GeneratedResponseKind { PROSE, TOOL, UNDECIDED }
 
@@ -187,29 +187,121 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
     private val chat=app.repository.chat
     private val context=app.applicationContext
 
-    @OptIn(FlowPreview::class)
-    suspend fun write(model:InstalledModel,initialOptions:InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
-        structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false):WrittenAnswer {
-        val started=clock()
-        require(partCharBudget in 1..ANSWER_PART_CHAR_BUDGET)
-        val deadline=started+limits.maxElapsedMillis
-        var messageId=resume?.messageId?:chat.assistantForRun(request.runId)?.id
-        // Reuse the reserved row and materialize any legacy fallback body before adding new segments.
-        messageId?.let {chat.beginAssistant(request.runId,it)}
-        var checkpoint=resume
-        val entire=StringBuilder(messageId?.let {chat.fullMessageText(it)}.orEmpty())
+    /** One invocation's write-ahead state; never shared by concurrent requests. */
+    private class WriteProgress {
+        var messageId:String?=null
+        var checkpoint:ContinuationSnapshot?=null
+        lateinit var entire:StringBuilder
         var lastSummary:GenerationSummary?=null
         var paused=false
         var finalDetail="생성 종료"
-        val previousParts=messageId?.let {chat.segmentsForMessage(it)}.orEmpty()
-        val parts=previousParts.map {UiAnswerPart(it.partNumber,chat.segmentText(it.id))}.toMutableList()
-        var nextPart=nextAnswerPart(resume?.nextPart,parts)
-        var hasSavedBody=hasSavedAnswerBody(entire.toString(),parts)
-        var rawOnly=structuredSchema!=null||!display
+        lateinit var parts:MutableList<UiAnswerPart>
+        var nextPart=1
+        var hasSavedBody=false
+        var acknowledgedParts:List<UiAnswerPart> = emptyList()
+        var rawOnly=false
         var failure:Throwable?=null
-        // Public research must not silently inherit a private conversation summary.
-        val branchExcerpt=if(request.mode=="research")"" else requestBranchSummary()
-        try {
+    }
+
+    suspend fun write(model:InstalledModel,initialOptions:InferenceOptions,user:String,system:String,history:List<InferenceTurn>,
+        structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false,exactManagedReview:Boolean=false):WrittenAnswer {
+        val started=clock()
+        require(partCharBudget in 1..ANSWER_PART_CHAR_BUDGET)
+        val deadline=started+limits.maxElapsedMillis
+        val progress=WriteProgress()
+        with(progress) {
+            messageId=resume?.messageId?:chat.assistantForRun(request.runId)?.id
+            // Reuse the reserved row and materialize any legacy fallback body before adding new segments.
+            messageId?.let {chat.beginAssistant(request.runId,it)}
+            checkpoint=resume
+            entire=StringBuilder(messageId?.let {chat.fullMessageText(it)}.orEmpty())
+            lastSummary=null
+            paused=false
+            finalDetail="생성 종료"
+            val previousParts=messageId?.let {chat.segmentsForMessage(it)}.orEmpty()
+            parts=previousParts.map {UiAnswerPart(it.partNumber,chat.segmentText(it.id))}.toMutableList()
+            nextPart=nextAnswerPart(resume?.nextPart,parts)
+            hasSavedBody=hasSavedAnswerBody(entire.toString(),parts)
+            acknowledgedParts= parts.toList()
+            rawOnly=structuredSchema!=null||!display
+            failure=null
+            // Public research must not silently inherit a private conversation summary.
+            val branchExcerpt=if(request.mode=="research")"" else requestBranchSummary()
+            try {
+                writeParts(progress,model,initialOptions,user,system,history,structuredSchema,display,resume,
+                    recoverTruncatedTool,exactManagedReview,deadline,branchExcerpt)?.let {return it}
+            }catch(error:ExactReviewInputPause){
+                paused=true;rawOnly=true
+                finalDetail="최종 검토 입력·종료 근거를 확인하지 못해 요청과 실행 결과를 보존하고 일시 정지했습니다. 자동 재실행하지 않았습니다."
+                FailureLog.record(context,"exact_review_input",error,error.code.name)
+                chat.updateRun(request.runId,"paused",errorCode=error.code.name)
+            }catch(error:TimeoutCancellationException){
+                engine.cancel();paused=true
+                if(!currentCoroutineContext().isActive){failure=error;finalDetail="사용자 요청으로 중단";throw error}
+                finalDetail="장시간 작성 내용을 저장했습니다 · 이어쓰기 가능"
+            }
+            catch(error:AnswerOpaquePause){
+                paused=true;rawOnly=true;finalDetail="형식이 불확실한 JSON 원문을 보존했습니다 · 자동 이어쓰기·실행 없음"
+                lastSummary=lastSummary?.copy(reason=GenerationStopReason.RESOURCE_LIMIT,evidence=GenerationEvidence.HOST,
+                    errorCode="OPAQUE_JSON_STORAGE_BUDGET")?:GenerationSummary(java.util.UUID.randomUUID().toString(),GenerationStopReason.RESOURCE_LIMIT,
+                    GenerationEvidence.HOST,null,initialOptions.maxOutputTokens,errorCode="OPAQUE_JSON_STORAGE_BUDGET")
+                return withContext(NonCancellable){preserveOpaqueOutput(error.received,error.partNumber,lastSummary)}
+            }
+            catch(error:AnswerStoragePause){
+                paused=true;finalDetail="한 구간의 저장 예산에 도달했습니다 · 받은 본문 전체 저장됨 · 이어쓰기 가능"
+                lastSummary=lastSummary?.copy(reason=GenerationStopReason.RESOURCE_LIMIT,evidence=GenerationEvidence.HOST,
+                    visibleChars=error.visibleChars,errorCode="ANSWER_PART_STORAGE_BUDGET")?:GenerationSummary(
+                    java.util.UUID.randomUUID().toString(),GenerationStopReason.RESOURCE_LIMIT,GenerationEvidence.HOST,null,
+                    initialOptions.maxOutputTokens,visibleChars=error.visibleChars,errorCode="ANSWER_PART_STORAGE_BUDGET")
+                withContext(NonCancellable){checkpoint?.let {chat.updateRunContext(request.runId,writerCheckpoint(request,it,lastSummary))}}
+            }
+            catch(error:AnswerResourcePause){paused=true;finalDetail="발열·메모리 상태로 저장 후 일시정지"}
+            catch(error:Throwable){failure=error;paused=true;finalDetail=if(error is CancellationException)"사용자 요청으로 중단"else"오류 후 작성 내용 저장됨";if(error is CancellationException)FailureLog.record(context,"writer_cancel_catch",error,"WRITER_CANCEL_CAUGHT");throw error}
+            finally {
+                FailureLog.record(context,"writer_finalization_gate",failure,CancelledAnswerFinalizer.finalizationCode(failure is CancellationException,hasSavedBody,rawOnly,messageId!=null,acknowledgedParts.isNotEmpty(),paused,checkpoint!=null))
+                withContext(NonCancellable){messageId?.takeIf {!rawOnly&&(hasSavedBody||paused&&checkpoint!=null)}?.let {id->
+                    val cancellation=failure as? CancellationException
+                    if(cancellation!=null){
+                        val durable=CancelledAnswerFinalizer.finish(cancellation,acknowledgedParts,
+                            reconcile={
+                                val text=chat.checkpointMessage(request.runId,id).text
+                                val saved=chat.segmentsForMessage(id).map {UiAnswerPart(it.partNumber,chat.segmentText(it.id))}
+                                CancelledAnswerReadback(text,saved)
+                            },publish={view->state(id,view)},
+                            diagnostic={stage,cleanup->FailureLog.record(context,"writer_cancel_"+stage.name.lowercase(),cleanup,
+                                if(stage==CancelledAnswerFinalizer.Stage.RECONCILE)"CANCELLED_STORAGE_RECONCILIATION_FAILED"else"CANCELLED_UI_CALLBACK_FAILED")})
+                        durable?.let {observed->entire.setLength(0);entire.append(observed.text);parts.clear();parts+=observed.parts}
+                    }else try{
+                        val durable=chat.checkpointMessage(request.runId,id).text
+                        val durableParts=chat.segmentsForMessage(id).map {UiAnswerPart(it.partNumber,chat.segmentText(it.id))}
+                        entire.setLength(0);entire.append(durable)
+                        parts.clear();parts+=durableParts
+                        val phase=when {failure!=null->UiAnswerPhase.FAILED;paused->UiAnswerPhase.PAUSED;else->UiAnswerPhase.COMPLETE}
+                        state(id,UiAnswerState(phase,parts.toList(),finalDetail,canContinue=paused&&checkpoint!=null))
+                        // The coordinator owns whole-run completion and all tool outcomes.
+                    }catch(cleanup:Throwable){val original=failure;if(original!=null)original.addSuppressed(cleanup)else throw cleanup}
+                }
+                // A pause before the first visible message still belongs to this run. Otherwise
+                // the coordinator's finally would turn the still-running row into completed.
+                if(paused&&failure==null&&chat.run(request.runId)?.status=="running")chat.updateRun(request.runId,"paused")
+                if(paused){
+                    val cancellation=failure as? CancellationException
+                    if(cancellation!=null)CancelledAnswerFinalizer.finishStatus(cancellation,finalDetail,status){FailureLog.record(context,"writer_cancel_status",it,"CANCELLED_STATUS_CALLBACK_FAILED")}
+                    else status(finalDetail)
+                }}
+            }
+            return WrittenAnswer(entire.toString(),visibleAnswerMessageId(messageId,hasSavedBody),lastSummary,paused)
+        }
+    }
+
+    /** Generation/flush loop; terminal handlers stay in the smaller caller coroutine. */
+    @OptIn(FlowPreview::class)
+    private suspend fun writeParts(progress:WriteProgress,model:InstalledModel,initialOptions:InferenceOptions,
+        user:String,system:String,history:List<InferenceTurn>,structuredSchema:String?,display:Boolean,
+        resume:ContinuationSnapshot?,recoverTruncatedTool:Boolean,exactManagedReview:Boolean,
+        deadline:Long,branchExcerpt:String):WrittenAnswer? {
+        with(progress) {
+            ExactStructuredReviewInput.requireApplicable(exactManagedReview,request.allowCloudText,structuredSchema,display,resume!=null)
             for(index in 0 until limits.maxParts){
                 currentCoroutineContext().ensureActive()
                 if(paused||index>0&&lastSummary?.mayBeTruncated!=true)break
@@ -245,7 +337,12 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     require(available>=128){"현재 요청과 필수 지침이 모델 문맥보다 큽니다. 원문을 자르지 않았습니다. 자료를 파일로 나누어 첨부해주세요."}
                     options=options.copy(maxOutputTokens=minOf(options.maxOutputTokens,available))
                 }
-                engine.load(model.path,options)
+                // Final branch summary/history/hint/output cap are fixed before the exact count.
+                val exactInput=if(exactManagedReview){
+                    ExactStructuredReviewInput.requireApplicable(true,request.allowCloudText,structuredSchema,display,continuing)
+                    ExactStructuredReviewInput.capture(prompt,compactSystem,turns,checkNotNull(structuredSchema),options)
+                }else null
+                if(exactInput==null)engine.load(model.path,options)
                 val partNumber=nextPart++
                 var segmentId:String?=null
                 var sequence=0
@@ -277,6 +374,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                         sequence++
                         pending.delete(0,delta.length)
                         partText+=delta
+                        acknowledgedParts=parts+UiAnswerPart(partNumber,partText)
                     }
                     lastFlush=clock()
                     val visibleParts=parts+UiAnswerPart(partNumber,partText)
@@ -303,7 +401,8 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 try {
                     withTimeout((deadline-clock()).coerceAtLeast(1)) {
                         coroutineScope {
-                            val events=(if(structuredSchema==null)engine.generateChatEvents(prompt,compactSystem,turns)
+                            val events=(if(exactInput!=null)exactInput.events(engine,model.path)
+                                else if(structuredSchema==null)engine.generateChatEvents(prompt,compactSystem,turns)
                                 else engine.generateStructuredEvents(prompt,compactSystem,structuredSchema,turns)).produceIn(this)
                             while(true){
                                 val item=withTimeoutOrNull(100){events.receiveCatching()}
@@ -352,12 +451,12 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 }catch(error:Throwable){
                     lastSummary=summary?:engine.lastGeneration.value?.takeIf {it.requestId!=previousSummaryId}
                     withContext(NonCancellable){
-                        try{flush()}catch(cleanup:Throwable){error.addSuppressed(cleanup)}
+                        try{flush()}catch(cleanup:Throwable){if(error is CancellationException)CancelledAnswerFinalizer.preserveFailure(error,cleanup){FailureLog.record(context,"writer_cancel_flush",it,"CANCELLED_FLUSH_FAILED")}else error.addSuppressed(cleanup)}
                         segmentId?.let {id->try{chat.finishSegment(id,when(error){
                             is AnswerResourcePause,is AnswerStoragePause,is TimeoutCancellationException->"interrupted"
                             is CancellationException->"cancelled"
                             else->"failed"
-                        })}catch(cleanup:Throwable){error.addSuppressed(cleanup)}}
+                        })}catch(cleanup:Throwable){if(error is CancellationException)CancelledAnswerFinalizer.preserveFailure(error,cleanup){FailureLog.record(context,"writer_cancel_segment",it,"CANCELLED_SEGMENT_FINISH_FAILED")}else error.addSuppressed(cleanup)}}
                     }
                     throw error
                 }
@@ -387,7 +486,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                         return withContext(NonCancellable){preserveOpaqueOutput(raw,partNumber,lastSummary)}
                     }
                     val envelope=structuredSchema!=null||(jsonCandidate&&kind!=GeneratedResponseKind.PROSE)
-                    return WrittenAnswer(raw.toString(),null,lastSummary,false,toolEnvelope=envelope)
+                    return WrittenAnswer(raw.toString(),null,lastSummary,false,toolEnvelope=envelope,exactReviewInputVerified=exactInput!=null)
                 }
                 val madeProgress=answerMadeProgress(entire.toString(),partText)
                 if(partText.isNotEmpty())entire.append(partText)
@@ -410,46 +509,8 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 finalDetail="장문 답변의 자동 작성 예산에 도달했습니다 · 본문 저장됨 · 이어쓰기 가능"
                 if(index+1<limits.maxParts){paused=false;status("출력 구간을 저장했습니다 · 남은 답변을 자동으로 이어 씁니다");delay(1)}
             }
-        }catch(error:TimeoutCancellationException){
-            engine.cancel();paused=true
-            if(!currentCoroutineContext().isActive){failure=error;finalDetail="중단 · 작성 내용 저장됨";throw error}
-            finalDetail="장시간 작성 내용을 저장했습니다 · 이어쓰기 가능"
         }
-        catch(error:AnswerOpaquePause){
-            paused=true;rawOnly=true;finalDetail="형식이 불확실한 JSON 원문을 보존했습니다 · 자동 이어쓰기·실행 없음"
-            lastSummary=lastSummary?.copy(reason=GenerationStopReason.RESOURCE_LIMIT,evidence=GenerationEvidence.HOST,
-                errorCode="OPAQUE_JSON_STORAGE_BUDGET")?:GenerationSummary(java.util.UUID.randomUUID().toString(),GenerationStopReason.RESOURCE_LIMIT,
-                GenerationEvidence.HOST,null,initialOptions.maxOutputTokens,errorCode="OPAQUE_JSON_STORAGE_BUDGET")
-            return withContext(NonCancellable){preserveOpaqueOutput(error.received,error.partNumber,lastSummary)}
-        }
-        catch(error:AnswerStoragePause){
-            paused=true;finalDetail="한 구간의 저장 예산에 도달했습니다 · 받은 본문 전체 저장됨 · 이어쓰기 가능"
-            lastSummary=lastSummary?.copy(reason=GenerationStopReason.RESOURCE_LIMIT,evidence=GenerationEvidence.HOST,
-                visibleChars=error.visibleChars,errorCode="ANSWER_PART_STORAGE_BUDGET")?:GenerationSummary(
-                java.util.UUID.randomUUID().toString(),GenerationStopReason.RESOURCE_LIMIT,GenerationEvidence.HOST,null,
-                initialOptions.maxOutputTokens,visibleChars=error.visibleChars,errorCode="ANSWER_PART_STORAGE_BUDGET")
-            withContext(NonCancellable){checkpoint?.let {chat.updateRunContext(request.runId,writerCheckpoint(request,it,lastSummary))}}
-        }
-        catch(error:AnswerResourcePause){paused=true;finalDetail="발열·메모리 상태로 저장 후 일시정지"}
-        catch(error:Throwable){failure=error;paused=true;finalDetail=if(error is CancellationException)"사용자 중단 · 작성 내용 저장됨"else"오류 후 작성 내용 저장됨";throw error}
-        finally {
-            withContext(NonCancellable){messageId?.takeIf {!rawOnly&&(hasSavedBody||paused&&checkpoint!=null)}?.let {id->
-                try{
-                    val durable=chat.checkpointMessage(request.runId,id).text
-                    val durableParts=chat.segmentsForMessage(id).map {UiAnswerPart(it.partNumber,chat.segmentText(it.id))}
-                    entire.setLength(0);entire.append(durable)
-                    parts.clear();parts+=durableParts
-                    val phase=when {failure is CancellationException->UiAnswerPhase.CANCELLED;failure!=null->UiAnswerPhase.FAILED;paused->UiAnswerPhase.PAUSED;else->UiAnswerPhase.COMPLETE}
-                    state(id,UiAnswerState(phase,parts.toList(),finalDetail,canContinue=paused&&checkpoint!=null))
-                    // The coordinator owns whole-run completion and all tool outcomes.
-                }catch(cleanup:Throwable){val original=failure;if(original!=null)original.addSuppressed(cleanup)else throw cleanup}
-            }
-            // A pause before the first visible message still belongs to this run. Otherwise
-            // the coordinator's finally would turn the still-running row into completed.
-            if(paused&&failure==null&&chat.run(request.runId)?.status=="running")chat.updateRun(request.runId,"paused")
-            if(paused)status(finalDetail)}
-        }
-        return WrittenAnswer(entire.toString(),visibleAnswerMessageId(messageId,hasSavedBody),lastSummary,paused)
+        return null
     }
     private fun resourcePressure():Boolean {
         resourcePressureOverride?.let{return it()}

@@ -18,6 +18,7 @@ data class QueuedChatRequest(
     val pcImageRecoveryAllowed:Boolean=false,
     val capturedPcRevision:Long?=null,
     val allowCloudText:Boolean=false,
+    val readbackObligations:RequiredReadbackObligations.State?=null,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -42,6 +43,7 @@ data class QueuedChatRequest(
         continuation?.let {put("continuation",it.json())}
         goal?.let {put("goal",it.toJson())}
         parentGoalStartRunId?.let {put("parentGoalStartRunId",it)}
+        readbackObligations?.let {put("readbackObligations",ChatReadbackObligationCodec.encode(it))}
     }.toString()
     companion object {
         fun fromJson(text:String):QueuedChatRequest {
@@ -60,7 +62,8 @@ data class QueuedChatRequest(
                 o["pcDataBinding"]?.jsonPrimitive?.contentOrNull,o["kakaoReadBinding"]?.jsonPrimitive?.contentOrNull,
                 o["pcImageRecoveryAllowed"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["capturedPcRevision"]?.takeUnless {it is JsonNull}?.let {require(it is JsonPrimitive&&!it.isString);it.long},
-                o["allowCloudText"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false)
+                o["allowCloudText"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
+                o["readbackObligations"]?.let(ChatReadbackObligationCodec::decode))
         }
     }
 }
