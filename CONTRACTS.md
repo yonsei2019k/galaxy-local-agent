@@ -1,10 +1,20 @@
 # Galaxy Local Agent implementation contracts
 
+## Phone-owned external cloud tool execution1088
+
+A fresh ordinary request may explicitly select the cloud-phone model and capture separate external-agent permission/revision plus the existing PC revision. Legacy/queued/read-only/resume/goal/attachment restrictions do not acquire current authority. Daily default inference stays local. Current normal catalog is a project-permitted subset of get_current_datetime/inspect_project_storage/save_note/search_notes/read_note; patch_note and PC folders are excluded from phone-only sessions.
+
+The paired pinned PC launches Codex with per-session agent capability in child environment only. Android holds a distinct phone capability; only the phone ACKs an optional ephemeral plan, claims calls and submits actual results. Accepted selected tools are bound to the actual ToolExecutor before plan ACK, after encrypted context/readback persistence. Intent is neither permission nor a persistent GoalStore goal. Existing risk/target/approval checks execute on the phone; cloud authority is checked before remembered grants and again before effects. Model guidance may describe this proposal/review protocol without inferring approval.
+
+Calls are serial/bounded/idempotent under one immutable parent/scope/digest. Provider cancellation/failure revokes queued calls before ACK/FINISHED; already claimed uncertain calls remain UNKNOWN and never replay automatically. Thirty-second phone-presence lease, TTL, eighteen-call budget and RAM-only restart revocation remain. No server/model JSON becomes a locally VERIFIED phone effect. Completion joins accepted requirements, actual local callback ledger, same-target readback, broker metadata and current parent authority before publishing; reported_done alone is insufficient. Cloud provider retention is not established by local RAM bounds.
+
+Actual1088 normal note save/search/full read, explicit decline and revoke-before-approved-effect are separately validated synthetic cases. Manual human UI approval, all phone tools, generic screen control, Studio/PC shared product conversations, Claude same-path execution and commercial readiness are not established. See PROJECT_STATE and docs/device-validation.md for precise installed/source/test evidence and retained failures.
+
 ## Bounded note readback clarification feedback1085
 
 One active execution may append static protocol feedback after a normal unpublished structured clarification only for a fresh note-only ACT request with one current exact durable patch receipt, a single pending NOTE_PATCH, a model-ACKed same-target/new-version partial AFTER page and its actual nextOffset, current read permission and remaining budget. Original query/source references remain unchanged. The model selects its next action; a repeated question uses the original pause path. Existing live cancel/steer/run/branch/project/disabled-read/approval checks are repeated. No automatic read, mutation, approval, completion, question-word classification, durable retry framework or budget increase is introduced. Old goals/steps/inherited obligations/continuations/mixed work retain prior behavior. The active-execution latch is not a run-lifetime-once promise.
 
-The current host's ACK-bound page must equal its parsed compact serialization; alternate/duplicate-key encodings decline feedback. Feedback before the first AFTER page and search-query owner references are source-only candidates, not installed features. Actual1085 repeats include one complete note workflow and two separately retained early-question failures; controlled once/twice tests do not prove general semantic recovery. PC/phone orchestration remains an unconnected offline prototype; see the2026-11-15 plan audit.
+The current host's ACK-bound page must equal its parsed compact serialization; alternate/duplicate-key encodings decline feedback. Feedback before the first AFTER page and search-query owner references are source-only candidates, not installed features. Actual1085 repeats include one complete note workflow and two separately retained early-question failures; controlled once/twice tests do not prove general semantic recovery. The pre-bridge1085 audit found an unconnected PC/phone prototype; the limited1088 connection above supersedes that historical status.
 
 ## Verified note-only finalization1084
 

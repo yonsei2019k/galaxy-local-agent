@@ -1,6 +1,16 @@
 # Device validation
 
-## 2026-11-15 installed1085
+## 2026-11-15 installed1088: actual cloud phone tools and negative boundaries
+
+Production d04359c796a700020415c2e4eee7716456e257f55e9c89bb15cd8c2d896846ad and current test8ca09d192ca1f7a8129ec3e381f29981a298801cdf997bbd6d09af17fdeb62fe retain original appID/signing/data and match installed base SHA. Full1088 3m43/core945+app911=1856 JVM PASS/0fail-error-skip/lint0errors145warnings1Hint/753 inputs. Later test-only replacements preserve byte-identical production; final phase6 full49s PASS. Pinned direct Tailscale checks pass with original identity/VPN/no LAN fallback; external-network handoff untested.
+
+Actual ordinary singleton app.runs.send through PC Codex/MCP/phone ToolExecutor: save→search→same-note whole read PASS29685ms with fixture approval1/exact body and keep-note preservation/actual callbacks3/readback/closed-session receipt/final answer and native JSON byte/SHA/cleanup/preferences/independent empty-idle. Decline PASS16323ms: owner fixture denies save1, parent cancelled, no save/grant, keep unchanged, empty progress row distinguished from an answer, cleanup/idle. Revoke PASS15439ms: revoke external permission while save approval waits, then approve with remember=true, parent failed, no save/grant, cleanup/idle. These are synthetic guarded fixture decisions, not manual human UI approvals. Same APK controlled clock/project bridge1 PASS1.269s is separate from actual cloud evidence.
+
+Retained failures:1087 ordinary35.062s saves/searches but fails read;1088 two pre-guidance attempts pause without approval, the second exact answer duplicates owner confirmation. After explicit proposal/review protocol guidance, the first actual repeat passes; no general model-quality or controlled speed gain is claimed. Initial decline oracle fails on a valid cancelled empty progress row before a distinct corrected repeat passes. First recovery has two native test crashes/AOT no fix/later retained-ledger safe rejection; final exact prior-audit SHA and known note/message/workspace absence plus unchanged failed empty-context terminal ledger are verified. Original failed reports stay unchanged. Unknown exact original pre-first-test selection/preferences restoration is not promoted. Details and private artifact references are in agent-change-log/PROJECT_STATE.
+
+Cloud normal support is initially five scoped tools. Studio/PC shared product rooms, ordinary PC workspace UI, Claude direct-MCP and Coupang/TMAP/Kakao screen workflows remain separate execution gaps. Three development rooms do not prove product conversation integration.
+
+## Historical 2026-11-15 installed1085
 
 Full7m03/core945+app877=1822 JVM PASS/0fail-error-skip/lint0errors144warnings1Hint/738 frozen inputs. Signed main d899eb6fd1ba01e9b7b6070948e0c1dbf3bb1dece2bd56180c7a150bcde2471a/test2c1990ea4acbf80183a46ec0d3c9b0c1b7716d144c8db9736ca8126e3105cf58 installed with exact base hashes/original identity/data retained. Original authenticated pinned direct Tailscale88ms PASS, VPN/no LAN fallback; external-network handoff untested. Initial internal-symbol compile failure log retained separately before final correction/build.
 
