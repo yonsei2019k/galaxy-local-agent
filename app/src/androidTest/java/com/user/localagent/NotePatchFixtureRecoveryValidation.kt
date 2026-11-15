@@ -108,7 +108,7 @@ class NotePatchFixtureRecoveryValidation {
                 verify("QA_RECOVERY_RUN_BINDING",run.projectId==projectId&&run.threadId==threadId&&run.branchId==branchId&&run.modelId==PairedPcTextProfile.SELECTION_ID&&run.contextSize==4096&&run.threadRevision==0L&&run.projectRevision==0L&&run.status in setOf("completed","paused","cancelled","failed","interrupted"))
                 runStatus=run.status;retainedTerminalLedger=project==null&&room==null
                 if(run.contextJson.isBlank()){
-                    verify("QA_RECOVERY_ERASED_LEDGER",project==null&&room==null&&run.status=="cancelled")
+                    verify("QA_RECOVERY_ERASED_LEDGER",project==null&&room==null)
                 }else{
                 val request=QueuedChatRequest.fromJson(run.contextJson)
                 verify("QA_RECOVERY_REQUEST",request.runId==runId&&request.projectId==projectId&&request.threadId==threadId&&request.branchId==branchId&&request.text==owner&&

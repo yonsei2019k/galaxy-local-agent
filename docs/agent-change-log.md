@@ -1,3 +1,17 @@
+## 2026-11-15 — 1075 build1707·서명 완료 / 폰 연결 끊김으로 설치 대기
+
+Full build5m53 PASS, core881/app826=1707 JVM0fail-error-skip, lint0errors/144warnings/1hint다.697source+10public+6build=713입력을 서명 전과 최종 대조했다. signed main ed24e15bab5c8b6121ee29ee3a6c6a090c5b3661e36a4a4f7b2f94dc03526767/testb85edd7c7a20de1193dfcc8f494c06390d69657df4be31b8e2f0ab3ff685c36d를 준비했으나 PrepareDeveloperInstall의 최초 기기 확인에서 paired phone unreachable로 중단했다. 기기 설치·데이터 변경은 없으며 연결된 transport/mDNS service가0이었다. 기존 endpoint 재접속과 다른 연결0 확인 후 ADB server 재시작도 실패했다. 사용자의 기존 무선 디버깅/USB 상태 확인을 비동기 요청했다.1074 main3717/test66fe가 마지막 실제 설치 증거이고1075 기기/실제 note 성공은 없다. 빌드 후 이 문서 갱신은 원 빌드 입력과 구분한다.
+
+별도 성능 조사에서는 Qwen 원본 모델과 ggml-org가 직접 게시한4B GGUF의 고정 revision/LFS fullSHA/크기/라이선스·실제 파일 스트림 해시·독립 재읽기 해시를 확인해 ignored 후보로만 받았다. 모델은 Git/APK에 넣지 않았다. 기존9B 좌표를 바꾸지 않고 임시 별도 alias로 실제 fullSHA/8K load와 기존 owner/cancel/slot/idle 경계를 보존했다. 순수16회귀·pycompile 후 plain/structured12회의 정확답·정상 terminal·정리를 확인했다. first9.646초(hash5.469/native4.140)/warm-hash3.261초(native3.219), plain0.591..0.834초/structured0.904..0.920초, GPU여유약1.1GiB다. 단일 native7259토큰 입력 generation8.204초와 explicit deep768(+900) generation12.949초/855reason문자/guard재열기0/정답·terminal·cleanup도 PASS다. 전체 앱 속도·일반 추론 품질 개선율은 아니다.
+
+같은 고정6요청×2조건의 실제4B 의미 비교는12계획/12시작/12기록/0미시작/정리true다. current4/6 PASS이며 정상 연결은 target누락, 연결실행은 question누락으로 FAIL한다. conditional-goal-first는3 PASS/1target검토/2action불일치다. 기존9B 실패와 조건 차이는 보존하고 작은 모델을 기본값으로 채택하지 않았다. 실험 후 실제 worker를 canonical 계측31 engines6d52cb12/owned64623369/default9B로 복구했고 인증된 empty/idle을 확인했다. 별도 모델 alias·Android 선택·권한·큐 해석을 제품에 반영하지 않았다.
+
+## 2026-11-15 — 1075 작은 직접실행 집합의 인자 정의 누락 소스 수정 / 당시 검증 전
+
+1074를4977183에 보존한 뒤 root가 frozen catalog patchdd15d5ea/manifest06a508aa와 각 baseline/payload를 대조해 통합했다. 기존 direct 비교에서 상세 선택이 비어 있고 현재 허용 도구가1..6개이며 실제 compactCatalog가 min(호스트 예산,6000 UTF-16) 미만일 때만 그 동일 허용 집합의 인자 정의를 제공한다. semantic 기본 경로/기존 지침 선택/큰 도구 집합/권한/scope/승인/모델 선택/실행 루프 한도는 유지한다. 등록 도구 추가나 특정 요청 문구 분기는 없다. 실제 인자·예산 경계·범위·immutable snapshot의 JVM8은 작성 상태이며 아직 실행하지 않았다.
+
+Canary Probe는 실제 delegate 직전 system의 유일한 호스트 카탈로그 marker 위치에 컴파일된 동일 허용 집합 JSON이 정확히 놓였는지 고정 bool/횟수만 관측한다. 모델 출력과 원문은 바꾸거나 보고하지 않으며 이 관측은 권한·실제 실행·renderer 검증을 뜻하지 않는다. 직접 비교 성공 조건에는 실제 전달 관측도 추가했다. 복구의 erased ledger는 앞서 별도로 검증한 terminal enum을 유지한 채 프로젝트·대화가 없고 envelope가 비어 있는 상태를 허용하도록 정정한다. completed→cancelled 변환을 요구하지 않으며 원1074 후속 검사 FAIL은 보존한다. 이 소스는 아직1075 빌드/설치/기기/실제 모델 검증 전이다.
+
 ## 2026-11-15 — 1074 설치·1699JVM·44폰 PASS / 실제 실패와 정확 복구 분리
 
 Full build6m10 PASS, core873은 소스 불변의 Gradle cache/app826은 fresh이며 합1699/0fail-error-skip, lint0errors/144warnings/1hint다.710입력 대조 후 원래 서명/ID/데이터를 유지해 main3717a82c75abf284d91fe3800d323dcdae6da13f8b086fa320a01dee6ab4d860/testf18027238c788887f4958d6eef7cb19e972327171b066dc3bb3ac879d27aa49c를 설치했다. 동일 phase1 test의 I/O5/LongAnswerFinish17/ChatData12/notes10=44 PASS이며 예전94를 새 결과로 합산하지 않는다. SQLCipher 실제 행 trigger로 동일본문0/변경1/옛무조건 no-op 양성대조/전체본문·metadata·취소 reconciliation·재열기를 확인했다. 동일24구간 조회5쌍 중앙값48.177813→24.88918ms, 별도10회 SHA연산묶음5쌍8.729609→3.804687ms다. 실제 파일 fresh read/CAS/readback/정리는 유지하고 전체 저장·모델 시간 개선율로 승격하지 않는다.

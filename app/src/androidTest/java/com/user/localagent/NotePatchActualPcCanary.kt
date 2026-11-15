@@ -31,9 +31,11 @@ import org.junit.runner.RunWith
  * The private AtomicFile report is also a recovery locator; no owner note/content is read. */
 @RunWith(AndroidJUnit4::class)
 class NotePatchActualPcCanary {
-    private class Probe(private val real:AutomaticComputeEngine,private val request:QueuedChatRequest):ComputeExecutionEngine by real,PairedPcTextLoader {
+    private class Probe(private val real:AutomaticComputeEngine,private val request:QueuedChatRequest,expectedTools:Set<String>):ComputeExecutionEngine by real,PairedPcTextLoader {
         private val lock=Any()
         private var loads=0;private var receipts=0;private var generations=0;private var allPc=true
+        private val expectedCatalog=ToolUsePolicy.compactCatalog(expectedTools)
+        private val catalogs=mutableListOf<JsonObject>()
         override suspend fun load(path:String,options:InferenceOptions){error("QA_UNEXPECTED_FILE_LOADER")}
         override suspend fun loadPairedPcText(target:PairedPcText,options:InferenceOptions):PairedPcLoadReceipt {
             check(request.modelId==PairedPcTextProfile.SELECTION_ID&&!request.allowCloudText&&request.capturedPcRevision==target.authorizationRevision){"QA_TYPED_AUTHORITY"}
@@ -42,17 +44,24 @@ class NotePatchActualPcCanary {
             check(receipt.matches(target,options.contextSize)){"QA_TYPED_RECEIPT"}
             synchronized(lock){receipts++};return receipt
         }
-        private fun observe(action:()->Flow<GenerationEvent>):Flow<GenerationEvent> = flow {
-            synchronized(lock){generations++;allPc=allPc&&real.executionLocation=="pc"}
+        private fun observe(system:String,structured:Boolean,action:()->Flow<GenerationEvent>):Flow<GenerationEvent> = flow {
+            val marker="\n현재 제공한 도구 인자 정의: ";val at=system.indexOf(marker);val start=at+marker.length
+            val unique=at>=0&&system.indexOf(marker,start)<0
+            fun exact(value:String)=unique&&system.startsWith(value,start)&&(start+value.length==system.length||system[start+value.length]=='\n')
+            synchronized(lock){generations++;allPc=allPc&&real.executionLocation=="pc"
+                if(catalogs.size<64)catalogs+=buildJsonObject{put("generation",generations);put("roundCatalogMarker",unique)
+                    put("expectedAllowedArgumentsMatched",exact(expectedCatalog));put("emptyCatalog",exact("[]"));put("structured",structured)}
+            }
             emitAll(action()) // Actual output is never rewritten, scripted, replayed or repaired here.
         }
         override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>)=
-            observe{real.generateChatEvents(userText,systemInstruction,history)}
+            observe(systemInstruction,false){real.generateChatEvents(userText,systemInstruction,history)}
         override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>)=
-            observe{real.generateStructuredEvents(userText,systemInstruction,schema,history)}
+            observe(systemInstruction,true){real.generateStructuredEvents(userText,systemInstruction,schema,history)}
         fun facts():JsonObject=synchronized(lock){buildJsonObject{
             put("typedLoadCount",loads);put("matchingReceiptCount",receipts);put("generationCount",generations)
             put("allTypedReceiptsMatched",loads>0&&loads==receipts);put("allGenerationsPc",generations>0&&allPc)
+            put("generationCatalogs",JsonArray(catalogs.toList()))
         }}
     }
     private fun reportableTerminalErrorCode(raw:String?):String?=when(raw){
@@ -201,7 +210,7 @@ class NotePatchActualPcCanary {
                         request.capturedPcRevision==revision&&!request.allowCloudText&&request.allowTools){"QA_REQUEST_BINDING"}
                     check(selectedRequest.compareAndSet(null,request)){"QA_ADDITIONAL_REQUEST"};ownRun=request.runId
                     Probe(AutomaticComputeEngine(context,ownerRunId=request.runId,beforePhoneLoad={error("QA_PHONE_FALLBACK")},
-                        capturedPcRevision=request.capturedPcRevision,allowCloudText=false),request).also{probe.set(it)}
+                        capturedPcRevision=request.capturedPcRevision,allowCloudText=false),request,allowed).also{probe.set(it)}
                 },externalIntentLauncher={error("QA_EXTERNAL_INTENT")})}.also{runner=it}
             withContext(Dispatchers.Main){coordinator.selectThread(r.id)}
             withTimeout(15_000){while(!coordinator.selectionReady.value)delay(50)}
@@ -258,6 +267,8 @@ class NotePatchActualPcCanary {
             verify("QA_ORIGINAL_REQUEST_PRESERVED",request.runId==captured.runId&&request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&
                 request.text==owner&&request.allowTools&&!request.allowCloudText&&request.capturedPcRevision==revision&&request.modelId==PairedPcTextProfile.SELECTION_ID)
             val facts=checkNotNull(probe.get()).facts();verify("QA_ACTUAL_PC_AND_RECEIPTS",facts["allGenerationsPc"]?.jsonPrimitive?.boolean==true&&facts["allTypedReceiptsMatched"]?.jsonPrimitive?.boolean==true)
+            if(directNextAction)verify("QA_DIRECT_ARGUMENT_CATALOG",facts.getValue("generationCatalogs").jsonArray.any{
+                it.jsonObject.getValue("roundCatalogMarker").jsonPrimitive.boolean&&it.jsonObject.getValue("expectedAllowedArgumentsMatched").jsonPrimitive.boolean})
             verify("QA_NO_UNKNOWN_EFFECTS",steps.all{it.tool in allowed}&&steps.none{it.evidence.state in setOf(VerificationState.PREPARED,VerificationState.UNVERIFIED)})
             val verified=steps.withIndex().filter{it.value.evidence.state==VerificationState.VERIFIED&&!it.value.evidence.effectNotApplied}
             val patches=verified.filter{it.value.tool=="patch_note"}

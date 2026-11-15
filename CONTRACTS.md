@@ -4,6 +4,10 @@ Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.
 
+## Bounded direct argument coverage1075
+
+Only an empty detailed selection in the existing direct-comparison path can expand to its same currently allowed set, and only for1..6 tools whose actual compact definitions fit below min(host budget,6000 UTF-16). Non-direct paths, existing selections and larger/over-budget sets retain their previous definitions. Returned snapshots cannot acquire later caller additions. Definitions are prompt data, never registration, consent, scope or execution authority. Calls still pass the existing actual tool/argument/scope/approval/evidence checks. This is built and signed but not yet device-validated.
+
 ## Checkpoint persistence1074
 
 Checkpoint SQL updates messages.text only when its persisted text differs. Every checkpoint still performs the original transaction, run/message binding, full current chunk reread, assembly and persisted return. No receipt, revision, terminal status, approval, scope or cancellation reconciliation is skipped. Actual SQLCipher row-trigger controls distinguish the removed same-text write from real changed-text writes and verify cancellation/reopen behavior. Benchmark query/hash computation figures remain separate from whole-save or whole-app latency.

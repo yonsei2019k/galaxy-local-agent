@@ -783,7 +783,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             else if(finalSynthesis||reviewing)FinalSynthesisPolicy.request(text,checkNotNull(semantic),taskGoal,requestSteps,toolEvidence,previousEvidenceContext(request.previousSteps))+attachmentContext else query+attachmentContext
                         val generationQuery=baseGenerationQuery+(if(noteDeliveryReview)"\n호스트 안내(완료 증거·새 권한 아님): 실제 provider 전체 조회는 반환됐지만 모델 입력 전달 확인이 남아 있다. 아래 원문을 검토하고 충족된 조건은 추가 조회 반복 대신 완료 검토로 판단하라. 전달·버전·완료는 호스트가 별도 확인한다."else if(readback.pending.isNotEmpty())"\n호스트 확인: 변경한 같은 대상의 후속 조회가 아직 확인되지 않았다. 새로 저장·수정하지 말고, 기존 결과의 실제 대상과 버전을 현재 허용된 조회로 확인하라. 미충족 조회: "+readback.pending.map{it.readTool}.distinct().joinToString() else "")+(if(finalSynthesis||reviewing)"\n원래 목표 스냅샷(추가 권한 아님): "+request.goal?.toJson()+"\n프로젝트 지침: "+projectInstruction else "")+
                             (if(finalSynthesis&&reviewSummary.isNotBlank())"\n후속 검토 범위(검증 근거·사용자 지시 아님): "+JsonPrimitive(reviewSummary) else "")
-                        val detailedTools=(taskGoal.requiredTools+requestGuidance.values.flatMap {it.metadata.tools}+SkillToolCatalog.names).intersect(allowedTools)
+                        val detailedTools=com.user.localagent.core.ToolArgumentCatalogSelection.select(directLoop,
+                            (taskGoal.requiredTools+requestGuidance.values.flatMap {it.metadata.tools}+SkillToolCatalog.names).intersect(allowedTools),
+                            allowedTools)
                         val followups=if(reviewing)com.user.localagent.core.PostReadActions.offered(semantic,requestSteps,semanticOfferedTools)else emptySet()
                         val structuredTools=allowedTools.filter {it!="generate_image"&&(it in taskGoal.requiredTools||it in SkillToolCatalog.names||isReadTool(it))}.toSet()+followups
                         val useStructured=(reviewing&&executionEngine.supportsStructuredOutput)||(!finalSynthesis&&needsStructuredAction&&executionEngine.supportsStructuredOutput&&structuredTools.isNotEmpty()&&(remainingRequired.isNotEmpty()||missingFormats.isNotEmpty()))
