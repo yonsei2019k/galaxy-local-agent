@@ -535,6 +535,7 @@ private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: Str
     var expanded by remember { mutableStateOf(false) }
     val usable = models.filter { it.verified && it.runtime in setOf("litertlm","gguf") }
     val label = when(selectedId){
+        com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID->com.user.localagent.externalagent.ExternalAgentSettings.TITLE
         com.user.localagent.models.PairedPcTextProfile.SELECTION_ID->com.user.localagent.models.PairedPcTextProfile.TITLE
         com.user.localagent.models.PairedPcFast4BProfile.SELECTION_ID->com.user.localagent.models.PairedPcFast4BProfile.TITLE
         "auto"->if(pairedPcTextAvailable)"PC · 자동"else"자동"
@@ -562,6 +563,12 @@ private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: Str
                 modifier = Modifier.testTag("model_option_auto"),
                 trailingIcon = { if (selectedId == "auto") Text("✓", color = ZipHapColors.TextSecondary) },
             )
+            DropdownMenuItem(text={Text(com.user.localagent.externalagent.ExternalAgentSettings.TITLE)},
+                onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)},
+                modifier=Modifier.testTag("model_option_cloud_phone_agent"))
+            if(selectedId==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)DropdownMenuItem(
+                text={Text("클라우드 도구 연결 해제")},
+                onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.DISABLE_ID)})
             if(pairedPcTextAvailable)DropdownMenuItem(
                 text={Text(com.user.localagent.models.PairedPcTextProfile.TITLE)},
                 onClick={expanded=false;onModelChange(com.user.localagent.models.PairedPcTextProfile.SELECTION_ID)},

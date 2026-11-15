@@ -8,6 +8,24 @@ import com.user.localagent.inference.InferenceOptions
 import com.user.localagent.inference.InferenceTurn
 
 class ChatRunStateTest {
+    @Test fun cloudPhoneAuthorityIsExplicitAndSurvivesOnlyAnExactNewSnapshot(){
+        val base=QueuedChatRequest("r","t","b",null,"합성 요청","paired-pc-cloud-agent-v1",false,emptyList(),"u")
+        val old=Json.parseToJsonElement(base.toJson()).jsonObject
+        val legacy=QueuedChatRequest.fromJson(JsonObject(old-filterSet()).toString())
+        assertFalse(legacy.allowExternalAgent);assertNull(legacy.externalAgentRevision)
+        val captured=base.copy(capturedPcRevision=4,allowExternalAgent=true,externalAgentRevision=8)
+        val restored=QueuedChatRequest.fromJson(captured.toJson())
+        assertTrue(restored.allowExternalAgent);assertEquals(8L,restored.externalAgentRevision)
+        assertEquals(4L,restored.capturedPcRevision)
+        assertTrue(runCatching{base.copy(allowExternalAgent=true)}.isFailure)
+    }
+    private fun filterSet()=setOf("allowExternalAgent","externalAgentRevision")
+
+    @Test fun stringCloudConsentCannotBecomePermissionDuringRestore(){
+        val base=QueuedChatRequest("r","t","b",null,"합성 요청","model",false,emptyList(),"u")
+        val value=Json.parseToJsonElement(base.toJson()).jsonObject
+        assertTrue(runCatching{QueuedChatRequest.fromJson(JsonObject(value+mapOf("allowExternalAgent" to JsonPrimitive("true"))).toString())}.isFailure)
+    }
     @Test fun continuationKeepsDevicePlacementAndExecutionOptionsAcrossRestart(){
         val options=InferenceOptions(contextSize=8192,maxOutputTokens=2048,backend="GPU",thinking=true,cpuThreads=2,deviceOnly=true,audioEnabled=true,visionEnabled=true,projectorPath="private/projector.gguf")
         val snapshot=ContinuationSnapshot("answer-a","model-a","original 🙂","system",listOf(InferenceTurn("user","history")),options,3)

@@ -1,0 +1,24 @@
+{
+  "note": "Synthetic wire only. No runtime owner, device, token, capability, address, request text or personal result is stored here.",
+  "register": {
+    "version": 1,
+    "parentRunId": "00000000-0000-0000-0000-000000000001",
+    "projectBinding": "synthetic-project-binding",
+    "authorityRevision": 7,
+    "allowExternalAgent": true,
+    "expiresAfterMs": 60000,
+    "phoneTools": [{"name": "get_current_datetime", "description": "Synthetic clock descriptor", "inputSchema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}}],
+    "pcWorkspaceProfile": null,
+    "requestDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "propose": {"callId": "00000000-0000-0000-0000-000000000002", "tool": "get_current_datetime", "arguments": {}},
+  "claim": {"callId": "00000000-0000-0000-0000-000000000002", "sequence": 1, "revision": 2},
+  "report": {"callId": "00000000-0000-0000-0000-000000000002", "sequence": 1, "revision": 3, "result": {"success": true, "content": "2035-01-02T09:00:00+09:00", "verification": "VERIFIED", "effectNotApplied": false}},
+  "control": {"revision": 4},
+  "optionalPlan": {
+    "registerOverrides": {"requirePlan": true, "pcWorkspaceProfile": "phone-only"},
+    "proposal": {"goal": "Read the synthetic clock", "requiredTools": ["get_current_datetime"], "constraints": ["Read only"]},
+    "ackTemplate": {"planDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "accepted": true},
+    "note": "ackTemplate contains a placeholder only. Compute digest from the captured registration and proposal before ACK. Proposal revision2, ACK revision3, first call revision4/sequence1; first claim revision5. Existing top-level false/omitted fixture remains unchanged."
+  }
+}

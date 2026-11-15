@@ -12,6 +12,9 @@ from security import HOME,load,private_v4
 from engines import Busy,ReferenceUnavailable
 from owned_engines import OwnedEngines,OwnershipMismatch,RequestNotActive,ComputeCancelled,owner_value
 from pairing import Pairing
+from agent_bridge import AgentBridge,BridgeError
+from agent_provider_supervisor import AgentProviderSupervisor,load_config as load_agent_provider
+from pathlib import Path
 
 from recovery_engines import RecoveryEngines
 from overlay_endpoint import overlay_endpoint
@@ -29,6 +32,10 @@ def resident(header):
   return {'llmResident':{'modelId':ENGINE.llm_alias,'contextSize':ENGINE.llm_ctx,'ownerMatches':bool(mine)}}
  except Exception:return {'llmResident':None}
 def note(path,status,error):
+ # Session locators, tool data and capabilities never enter the persistent request log.
+ if path.startswith('/v1/agent/'):
+  if status in (200,201) and not error:return
+  path='/v1/agent'
  # Successful image progress polls are ~95% of traffic and carry no diagnostic value.
  if status==200 and not error and POLL.match(path.split('?')[0]):return
  try:
@@ -38,6 +45,26 @@ def note(path,status,error):
    with open(LOG,'a',encoding='utf-8') as out:out.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {path} {status} {error}\n")
  except OSError:pass
 CONFIG=load();TOKEN=CONFIG['token']
+def agent_workspace_profiles():
+ # Host configuration only. Missing/invalid profiles never widen a workspace scope.
+ try:
+  source=HOME/'agent-workspaces.json'
+  if not source.is_file() or source.stat().st_size>16384:return {}
+  def unique(items):
+   value={}
+   for key,item in items:
+    if key in value:raise ValueError('DUPLICATE_PROFILE')
+    value[key]=item
+   return value
+  profiles=json.loads(source.read_text(encoding='utf-8'),object_pairs_hook=unique)
+  if not isinstance(profiles,dict) or len(profiles)>8:raise ValueError('PROFILE_CONFIG')
+  if not all(isinstance(key,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,63}',key) and
+             isinstance(value,str) and len(value)<=4096 and Path(value).is_absolute() and Path(value).is_dir() for key,value in profiles.items()):raise ValueError('PROFILE_CONFIG')
+  return profiles
+ except (OSError,ValueError,UnicodeError):return {}
+try:AGENT_BRIDGE=AgentBridge(workspace_profiles=agent_workspace_profiles())
+except (BridgeError,OSError):AGENT_BRIDGE=AgentBridge(workspace_profiles={})
+AGENT_PROVIDER=AgentProviderSupervisor(AGENT_BRIDGE,load_agent_provider(HOME))
 ENGINE=RecoveryEngines(hashlib.sha256(TOKEN.encode()).hexdigest());PAIRING=Pairing(CONFIG)
 from media_engine import MediaEngine
 from engines import gpu_busy
@@ -75,10 +102,43 @@ class Handler(BaseHTTPRequestHandler):
    request=self.body(4096)
    self.reply(PAIRING.start(self.client_address[0],request) if path.endswith('/start') else PAIRING.finish(self.client_address[0],request));return
   if not self.authorized():self.reply({'error':'UNAUTHORIZED'},401);return
-  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id']}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
+  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id'],'deviceToolBridge':{'version':1,'restartPolicy':'RAM_ONLY_RESTART_REVOKES','bootstrapLoopbackOnly':True}|AGENT_PROVIDER.health()}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
   owners=self.headers.get_all('X-ZipHap-Compute-Owner',[])
   if len(owners)>1:raise ValueError('DUPLICATE_OWNER')
   owner=owner_value(owners[0] if owners else None)
+  if path=='/v1/control/agent-bootstrap':
+   # Private host IPC, not a remote phone/MCP capability-minting endpoint.
+   if self.command!='POST' or self.client_address[0]!='127.0.0.1':self.reply({'error':'LOCAL_CONTROL_ONLY'},403);return
+   if self.headers.get_all('X-ZipHap-Agent-Capability',[]) or self.headers.get_all('X-ZipHap-Phone-Capability',[]):raise ValueError('HOST_CONTROL_ONLY')
+   request=self.body(4096)
+   if set(request)!={'sessionId'}:raise ValueError('BOOTSTRAP_SHAPE')
+   try:self.reply(AGENT_BRIDGE.bootstrap_agent(owner,request['sessionId'],local_authenticated=True))
+   except BridgeError as error:self.reply({'error':error.code},error.status)
+   return
+  if path.startswith('/v1/agent/'):
+   phone_caps=self.headers.get_all('X-ZipHap-Phone-Capability',[])
+   agent_caps=self.headers.get_all('X-ZipHap-Agent-Capability',[])
+   if len(phone_caps)+len(agent_caps)>1:raise ValueError('DUPLICATE_CAPABILITY')
+   values=phone_caps+agent_caps
+   capability=values[0] if values else None
+   if capability is not None and (len(capability)>512 or not re.fullmatch(r'[A-Za-z0-9_-]{32,512}',capability)):raise ValueError('CAPABILITY_FORMAT')
+   request=self.body(262144) if self.command=='POST' else None
+   host=re.fullmatch(r'/v1/agent/sessions/([0-9a-f-]{36})/(launch|provider|provider-cancel|evidence)',path)
+   if host:
+    if len(phone_caps)!=1 or agent_caps:self.reply({'error':'PHONE_CONTROL_ONLY'},403);return
+    sid=str(uuid.UUID(host[1]));action=host[2]
+    try:
+     if self.command=='POST' and action=='launch' and set(request)=={'ownerRequest'}:
+      value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'])
+     elif self.command=='GET' and action=='provider':value=AGENT_PROVIDER.status(owner,sid,capability)
+     elif self.command=='POST' and action=='provider-cancel' and request=={}:value=AGENT_PROVIDER.cancel(owner,sid,capability)
+     elif self.command=='GET' and action=='evidence':value=AGENT_BRIDGE.task_evidence(owner,sid,capability)
+     else:raise ValueError('PROVIDER_ROUTE')
+     self.reply(value)
+    except BridgeError as error:self.reply({'error':error.code},error.status)
+    return
+   status,value=AGENT_BRIDGE.dispatch_authenticated(self.command,path,owner,request,capability)
+   self.reply(value,status);return
   if self.command=='POST' and path=='/v1/images':self.reply(ENGINE.image(self.body(),owner),202);return
   match=re.fullmatch(r'/v1/images/([0-9a-f-]{36})(/png|/ack|/resume|/suspend|/reference)?',path)
   if match:
@@ -165,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
   except Exception as error:
    tb=error.__traceback__
    while tb and tb.tb_next:tb=tb.tb_next
-   note('failure '+self.path,0,type(error).__name__+(f' at {tb.tb_frame.f_code.co_filename.rsplit(chr(92),1)[-1]}:{tb.tb_lineno}' if tb else ''))
+   note('failure',0,type(error).__name__+(f' at {tb.tb_frame.f_code.co_filename.rsplit(chr(92),1)[-1]}:{tb.tb_lineno}' if tb else ''))
    try:self.reply({'error':'PC_COMPUTE_FAILED'},503)
    except Exception:self.close_connection=True
  do_GET=do_POST=do_DELETE=handle_request

@@ -5,6 +5,7 @@ import com.user.localagent.inference.loadTarget
 
 import android.Manifest
 import android.content.Intent
+import com.user.localagent.externalagent.*
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -203,6 +204,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private val requestSteps=mutableListOf<HarnessStep>()
     private val observedOutcomes=mutableListOf<com.user.localagent.core.ObservedToolOutcome>()
     private var requestReadbackObligations:com.user.localagent.core.RequiredReadbackObligations.State?=null
+    private var externalEffectGuard:(suspend()->Unit)?=null
     private var requestDirectSelectedTools:Set<String> = emptySet()
     val modelOptions=MutableStateFlow(InferenceOptions())
     val preferredModelId=MutableStateFlow("auto")
@@ -431,8 +433,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val binding=app.workspaceFor(thread.projectId).bindingFingerprint()
             val pcBinding=capturePcDataBindingForNewRun(threadId)
             val pcTextAuthority=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
+            val externalAuthority=ExternalAgentSettings.get(context).capture()
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,model,thinking,runId=reservedRunId){user,run->
-                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,model,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=pcTextAuthority.allowCloudText).also {submitted=it}.toJson()
+                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,model,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=pcTextAuthority.allowCloudText,
+                    allowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -634,6 +638,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val requestProgress=makeRequestProgress(request,workTraceSession)
                 liveComputeProgress=observeComputeProgress(request,workTraceSession,this)
                 prepareRequestTools(request,requestProgress){lease=it}
+                if(request.modelId==ExternalAgentSettings.MODEL_ID){executeCloudPhoneRequest(request);return@launch}
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"프로젝트·자료 범위와 작업 모드를 준비했습니다.")
                 if(usableAttachments.isNotEmpty())app.chatAttachments.recoverRequest(request.runId,request.threadId,usableAttachments)
                 lines.value=app.repository.chat.messages(request.threadId,request.branchId).first().takeWhileInclusive {it.id!=request.userMessageId}.map {ChatLine(it.id,it.role,it.text)}
@@ -1021,6 +1026,129 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
             } finally {
                 finishRequestResources(request,lease,liveComputeProgress,updateLease,interruptedTerminalState,prerequisitePauseReason)
+            }
+        }
+    }
+
+    /** Cloud owns interpretation/next actions; this parent retains scope, approval and evidence. */
+    private suspend fun executeCloudPhoneRequest(request:QueuedChatRequest) {
+        if(!request.allowExternalAgent||request.externalAgentRevision==null||request.capturedPcRevision==null||
+            !request.allowTools||request.continuation!=null||request.previousSteps.isNotEmpty()||request.goal!=null||
+            request.readbackObligations!=null||request.attachments.isNotEmpty()||request.mode !in setOf("act","debug")){
+            publishActionFinal(request,emptySet(),"이 요청에는 새 클라우드 도구 권한이 없거나 아직 지원하지 않는 첨부·이어가기 조건이 있습니다. 원문을 보존했습니다. 모델과 권한을 확인한 뒤 새 요청으로 보내주세요.",true);return
+        }
+        val externalSettings=ExternalAgentSettings.get(context)
+        val pcSettings=com.user.localagent.compute.PcComputeSettings.get(context)
+        val disabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+        val tools=ExternalAgentContract.NORMAL_PHONE_TOOLS.filterTo(linkedSetOf()) {it !in disabled&&AgentWorkModePolicy.allows(AgentWorkMode.parse(request.mode),it)}
+        check(tools.isNotEmpty()){"현재 프로젝트에서 사용할 클라우드 휴대폰 도구가 없습니다."}
+        val scope=app.repository.chat.accessScope(request.threadId)
+        val binding=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scope.scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
+        val capture=ExternalAgentCapture(request.runId,request.threadId,request.branchId,request.projectId,binding,
+            request.externalAgentRevision,ExternalAgentContract.sha(request.text),tools,true,expiresAfterMs=360_000,
+            pcWorkspaceProfile="phone-only",requirePlan=true)
+        var plan:ExternalAgentPlan?=null
+        var taskGoal:com.user.localagent.core.TaskGoal?=null
+        val actual=linkedMapOf<String,PhoneAgentExecution>()
+        suspend fun authority():ExternalAgentLiveAuthority {
+            val external=externalSettings.capture();val pc=pcSettings.captureTextAuthority()
+            val thread=app.repository.chat.thread(request.threadId);val run=app.repository.chat.run(request.runId)
+            val currentDisabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+            val active=activeRequest?.runId==request.runId&&requestJob?.isActive==true&&pendingSteerRunId!=request.runId&&
+                run?.status=="running"&&run.threadId==request.threadId&&run.branchId==request.branchId&&run.projectId==request.projectId&&
+                thread?.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
+                app.repository.chat.accessScope(request.threadId)==scope&&executionWorkspace?.bindingFingerprint()==request.workspaceBinding
+            return ExternalAgentLiveAuthority(request.runId,request.threadId,request.branchId,request.projectId,binding,external.revision,
+                external.enabled&&external.revision==request.externalAgentRevision&&pc.revision==request.capturedPcRevision,
+                tools-currentDisabled,active=active,cancelled=!currentCoroutineContext().isActive,awaitingApproval=approval.value!=null)
+        }
+        val client=PcExternalAgentClient(capture,PcAgentBridgeTransport(context,request.runId))
+        val controller=ExternalAgentController(capture,client,::authority,
+            execute={call->
+                check(authority().permits(capture)&&call.name in requestAuthorizedTools)
+                runTool(call)
+            },recordActual={entry->
+                check(actual.put(entry.proposal.callId,entry)==null)
+                check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
+                persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
+            },onPlan={proposed->
+                check(authority().permits(capture))
+                if("save_note" in proposed.requiredTools&&"search_notes" !in proposed.requiredTools)false else {
+                    plan=proposed;requestAuthorizedTools=proposed.requiredTools.intersect(tools)
+                    checkNotNull(requestTools).bindAvailableTools(requestAuthorizedTools)
+                    requestDirectSelectedTools=requestAuthorizedTools
+                    taskGoal=com.user.localagent.core.TaskGoal(request.text,listOf(proposed.goal)+proposed.constraints,
+                        com.user.localagent.core.WorkSegments.STEP_BUDGET,requestAuthorizedTools)
+                    val stored=checkNotNull(app.repository.chat.run(request.runId))
+                    val old=Json.parseToJsonElement(stored.contextJson).jsonObject
+                    val checkpoint=buildJsonObject {
+                        put("planDigest",proposed.planDigest);put("requestDigest",proposed.requestDigest);put("goal",proposed.goal)
+                        put("requiredTools",buildJsonArray{proposed.requiredTools.forEach{add(it)}})
+                        put("constraints",buildJsonArray{proposed.constraints.forEach{add(it)}})
+                    }
+                    app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("externalAgentPlan" to checkpoint)).toString())
+                    persistStepEvidence()
+                    workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,proposed.goal,com.user.localagent.data.WorkSummarySource.MODEL_PLAN)
+                    authority().permits(capture)
+                }
+            })
+        var closed=false
+        var bridgeSessionId:String?=null
+        externalEffectGuard={check(authority().permits(capture)){"클라우드 도구 권한이나 실행 대상이 변경되었습니다."}}
+        try {
+            controller.start().also{bridgeSessionId=it.sessionId}
+            status.value="클라우드 모델이 요청을 해석하고 있습니다."
+            check(authority().permits(capture))
+            client.launchProvider(request.text)
+            val provider=withTimeout(330_000) {
+                while(true){
+                    check(authority().permits(capture)){"클라우드 도구 권한이나 실행 대상이 변경되었습니다."}
+                    val value=client.providerStatus()
+                    if(value.getValue("state").jsonPrimitive.content=="FINISHED")return@withTimeout value
+                    controller.pumpOnce()
+                    if(controller.phase !in setOf(ExternalAgentController.Phase.ACTIVE,ExternalAgentController.Phase.RESULT_PENDING))return@withTimeout value
+                    delay(250)
+                }
+                @Suppress("UNREACHABLE_CODE") error("BRIDGE_PROVIDER_LOOP")
+            }
+            val report=provider["report"]?.takeUnless{it is JsonNull}?.jsonObject
+            if(report==null){publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다. 실제 확인한 결과만 보존했습니다.",true);return}
+            val resultState=report.getValue("state").jsonPrimitive.content
+            if(resultState=="needs_input"){
+                val question=report.getValue("question").jsonPrimitive.content
+                publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"요청을 마치려면 추가 정보가 필요합니다."},true);return
+            }
+            val accepted=plan
+            val evidence=client.taskEvidence()
+            val hostComplete=accepted!=null&&ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),checkNotNull(bridgeSessionId))&&
+                (if(accepted.requiredTools.isEmpty())requestSteps.isEmpty() else taskGoal?.let{checkedTaskFinish(request,it,requestAuthorizedTools) is HarnessDecision.Finish}==true)
+            if(resultState!="reported_done"||!hostComplete){
+                publishActionFinal(request,requestAuthorizedTools,"클라우드 모델의 종료 응답과 별도로 실행·후속 조회 근거가 충분하지 않아 일시 정지했습니다. 전체 완료는 확인하지 않았습니다.",true);return
+            }
+            check(authority().permits(capture))
+            controller.close();closed=true
+            check(authority().permits(capture))
+            val answerText=report.getValue("answer").jsonPrimitive.content
+            val final=if(com.user.localagent.core.ActionCompletionReport.manages(requestAuthorizedTools,observedOutcomes))
+                com.user.localagent.core.ActionCompletionReport.render(requestAuthorizedTools,observedOutcomes)
+                else if(requestAuthorizedTools.isEmpty())"도구 실행 없이 생성한 답변:\n$answerText"
+                else "확인한 도구: ${requestAuthorizedTools.sorted().joinToString()}\n$answerText"
+            persistStepEvidence();answer(final)
+            val beforeClose=checkNotNull(app.repository.chat.run(request.runId))
+            val closeContext=Json.parseToJsonElement(beforeClose.contextJson).jsonObject
+            app.repository.chat.updateRunContext(request.runId,JsonObject(closeContext+mapOf("externalAgentReceipt" to buildJsonObject{
+                put("sessionClosed",true);put("planDigest",checkNotNull(accepted).planDigest)
+                put("actualPhoneCalls",actual.size);put("pcCalls",0);put("phoneEvidenceImported",false)
+                put("providerMs",report.getValue("elapsedMs"))
+            })).toString())
+            app.repository.chat.updateRun(request.runId,"completed")
+            workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
+            status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
+        } finally {
+            externalEffectGuard=null
+            if(!closed)withContext(NonCancellable){
+                runCatching{withTimeout(5000){client.cancelProvider()}}
+                runCatching{controller.cancel()}
             }
         }
     }
@@ -1993,6 +2121,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             noteOwnerAccepted=call.name=="patch_note"
             check(app.repository.chat.run(action.runId)?.let {it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true){"실행 대상이 변경되어 이전 승인을 적용하지 않았습니다."}
             if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)tools.confirmCalendarOwner(call,targetReview)
+            currentCoroutineContext().ensureActive()
+            externalEffectGuard?.invoke() // Revoked requests cannot persist a remembered grant either.
             if(action.remember.value && CapabilityPolicy.canPreapprove(call.name))app.repository.addGrant(GrantRecord("builtin",codeHash,call.name,call.arguments["scope"]?.jsonPrimitive?.content?:"default"))
         }
         currentCoroutineContext().ensureActive()
@@ -2002,6 +2132,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(noteOwnerAccepted)tools.confirmNoteOwner(call)
         traceAttempt?.let{workTraceSession?.start(it)}
         currentCoroutineContext().ensureActive()
+        externalEffectGuard?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
         val intent=tools.prepareIntent(call)
         if(intent != null) {
             withContext(Dispatchers.Main) { externalIntentLauncher?.invoke(intent)?:context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }

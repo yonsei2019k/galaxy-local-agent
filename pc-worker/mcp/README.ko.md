@@ -8,9 +8,11 @@ Claude Code나 Codex가 지휘자(계획·판단·최종 검토)로 남고, 토�
 |---|---|
 | 외부 Codex/Claude → 이 MCP → PC 로컬 모델 | 이 디렉터리의 실제 구현. 아래 네 도구로 텍스트 작업을 위임한다. 외부 클라이언트 연결·등록과 실제 모델 실행은 별도 검증한다. |
 | 외부 에이전트 → 그 에이전트에 연결된 MCP 도구 | 해당 호스트의 설정·인증·허용 도구에 달려 있다. 이 서버의 네 도구가 다른 MCP의 권한이나 접속을 제공하지 않는다. |
-| ZipHap 스마트폰 비서 → PC 에이전트 통합 오케스트레이션 | 추가 제품 방향. 작업·프로젝트·권한·승인·취소·실제 결과를 묶는 별도 broker/agent adapter가 필요하다. 이 개발 위임 MCP를 그 구현 완료로 표시하지 않는다. |
+| ZipHap 스마트폰 비서 → PC 에이전트 → 폰 도구 | 별도 `device_tools_mcp.py`/broker/provider/Android client가 추가됐다.1088 실제 일반 대화 메모 저장·검색·읽기와 승인 거절/권한 철회가 검증됐으며 초기5도구만 지원한다. 이 개발 위임 MCP의 네 도구와 구분한다. Studio/PC 공유 대화방·Claude 직접 도구 경로는 미완이다. |
 | 앱의 개인 브리핑 → 외부 Codex | `scripts/briefing_companion.py`는 현재 외부 도구를 차단하고 `mcp_tool_call`이 있으면 결과를 거부한다. 이를 범용 MCP 우회 연결로 사용하지 않는다. |
 | Android APK 자체의 범용 MCP 호스팅 | 이 서버로 구현되지 않는다. PC의 실행 환경과 Android 도구·권한은 별도다. |
+
+폰 도구용 MCP는 승인된 요청마다 PC 호스트가 만든 capability를 하위 프로세스 환경으로 전달한다. 전역 MCP 설정에 세션 비밀값을 저장하거나 이 개발 위임 서버의 권한을 재사용하지 않는다. 운영·검증 범위는 [클라우드 폰 도구 연결](../../docs/architecture/cloud-phone-agent.ko.md), 최신 설치/실기 근거는 PROJECT_STATE와 agent-change-log를 따른다.
 
 ## 도구
 

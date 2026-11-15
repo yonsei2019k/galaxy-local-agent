@@ -159,12 +159,22 @@ class MainActivity : ComponentActivity() {
     private fun send(text:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text)}
     private fun sendToThread(text:String,threadId:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text,threadId)}
     private fun chooseModel(id:String)=app.runs.chooseModel(id)
+    private val externalAgentConsentThread=mutableStateOf<String?>(null)
     private fun chooseConversationModel(id:String,threadId:String){
+        if(id==com.user.localagent.externalagent.ExternalAgentSettings.DISABLE_ID){
+            com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(false)
+            app.runs.chooseModel("auto",threadId);status.value="클라우드 도구 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다.";return
+        }
         if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId||busy.value||app.imageStudio.state.value.running||RuntimeGate.inference.get()||RuntimeGate.benchmark.get()){
             status.value="현재 작업을 마치고 선택한 대화를 확인한 뒤 모델을 바꿔주세요.";return
         }
         val pairedText=com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(id)!=null&&com.user.localagent.compute.PcComputeSettings.get(this).state.value.let{it.paired&&!it.claudeText}
-        if(!pairedText&&app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치된 로컬 모델 또는 등록한 PC 텍스트 모델을 선택해주세요.";return}
+        if(id==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID){
+            if(!com.user.localagent.compute.PcComputeSettings.get(this).state.value.paired){status.value="설정에서 개인 PC를 먼저 연결해주세요.";return}
+            if(!com.user.localagent.externalagent.ExternalAgentSettings.get(this).capture().enabled){externalAgentConsentThread.value=threadId;return}
+            app.runs.chooseModel(id,threadId);status.value="다음 요청에서 클라우드 모델이 승인된 휴대폰 도구를 사용합니다.";return
+        }
+        if(id!="auto"&&!pairedText&&app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치된 로컬 모델 또는 등록한 PC 텍스트 모델을 선택해주세요.";return}
         // A preference change is synchronous. The next serialized request owns runtime loading.
         app.runs.chooseModel(id,threadId)
         status.value="이 대화의 다음 요청에 선택한 모델을 사용합니다."
@@ -174,6 +184,16 @@ class MainActivity : ComponentActivity() {
     private fun invalidateKnowledgeContext()=app.runs.invalidateKnowledgeContext()
     private fun actionSummary(action:ToolCall)=app.runs.actionSummary(action)
     @Composable private fun AppScreen() {
+        externalAgentConsentThread.value?.let {threadId->AlertDialog(
+            onDismissRequest={externalAgentConsentThread.value=null},title={Text("클라우드 도구 연결")},
+            text={Text("이 모델로 새로 보내는 요청과 허용된 도구 결과가 연결된 개인 PC의 Codex를 통해 클라우드에 전달됩니다. 현재는 시간·프로젝트 저장소 조회와 메모 저장·검색·읽기를 지원합니다. 변경 작업은 기존 실행 확인을 거치며 로컬 모델은 계속 선택할 수 있습니다.")},
+            confirmButton={TextButton(onClick={
+                if(app.runs.selectedThreadId.value==threadId&&!busy.value){
+                    com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(true)
+                    app.runs.chooseModel(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID,threadId)
+                }
+                externalAgentConsentThread.value=null
+            }){Text("연결하고 선택")}},dismissButton={TextButton(onClick={externalAgentConsentThread.value=null}){Text("취소")}})}
         var tab by rememberSaveable {mutableIntStateOf(0)}
         var imageStudioStatus by rememberSaveable {mutableStateOf("")}
         val requested by requestedTab.collectAsState()
@@ -255,7 +275,7 @@ class MainActivity : ComponentActivity() {
             ),
         )
         Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
-            if(tab==0)ChatWorkspace(messages,working||preparingAttachments,state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chat.chooseModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
+            if(tab==0)ChatWorkspace(messages,working||preparingAttachments,state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chooseConversationModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
                 {if(steerRunId!=null)chat.stopRun(steerRunId,composerThreadId)else if(preparingAttachments)attachmentJob?.cancel()else roomAuxiliary?.let {chat.stopAuxiliary(it.operationId,it.threadId)}},
                 {index->if(index==-1){chat.newThread();tab=0}else {tab=index.coerceIn(0,10);if(tab==0)refreshVisibleHistory()}},
                 Modifier.fillMaxSize().padding(padding),projectName=project.name,onProjectClick={tab=10},onAttach={
@@ -328,6 +348,10 @@ class MainActivity : ComponentActivity() {
         var hashTarget by remember {mutableStateOf<String?>(null)}
         var expectedHash by remember {mutableStateOf("")}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            item {TextButton(onClick={
+                com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity).setEnabled(false)
+                status.value="클라우드 도구 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
+            }){Text("클라우드 도구 연결 해제")}}
             item { InfoCard("PC와 휴대폰에서 나누어 계산","연결한 PC가 계산 중이면 다른 대화의 작업 하나를 휴대폰에서 진행할 수 있습니다. 휴대폰에는 모델 하나씩만 올립니다. 모델 파일은 APK와 별도로 내려받습니다.") }
             item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
             item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});FilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}

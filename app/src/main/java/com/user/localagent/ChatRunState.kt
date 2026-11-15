@@ -19,6 +19,8 @@ data class QueuedChatRequest(
     val capturedPcRevision:Long?=null,
     val allowCloudText:Boolean=false,
     val readbackObligations:RequiredReadbackObligations.State?=null,
+    val allowExternalAgent:Boolean=false,
+    val externalAgentRevision:Long?=null,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -28,6 +30,8 @@ data class QueuedChatRequest(
         kakaoReadBinding?.let {require(runCatching{java.util.UUID.fromString(it).toString()==it}.getOrDefault(false))}
         require(capturedPcRevision==null||capturedPcRevision>=0)
         require(!allowCloudText||capturedPcRevision!=null){"클라우드 사용은 현재 요청에 캡처한 명시 권한이 필요합니다."}
+        require(externalAgentRevision==null||externalAgentRevision>=0)
+        require(!allowExternalAgent||(externalAgentRevision!=null&&capturedPcRevision!=null))
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
@@ -44,6 +48,7 @@ data class QueuedChatRequest(
         goal?.let {put("goal",it.toJson())}
         parentGoalStartRunId?.let {put("parentGoalStartRunId",it)}
         readbackObligations?.let {put("readbackObligations",ChatReadbackObligationCodec.encode(it))}
+        put("allowExternalAgent",allowExternalAgent);put("externalAgentRevision",externalAgentRevision)
     }.toString()
     companion object {
         fun fromJson(text:String):QueuedChatRequest {
@@ -63,7 +68,9 @@ data class QueuedChatRequest(
                 o["pcImageRecoveryAllowed"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["capturedPcRevision"]?.takeUnless {it is JsonNull}?.let {require(it is JsonPrimitive&&!it.isString);it.long},
                 o["allowCloudText"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
-                o["readbackObligations"]?.let(ChatReadbackObligationCodec::decode))
+                o["readbackObligations"]?.let(ChatReadbackObligationCodec::decode),
+                o["allowExternalAgent"]?.let{require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
+                o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long})
         }
     }
 }
