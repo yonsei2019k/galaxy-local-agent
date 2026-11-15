@@ -34,7 +34,9 @@ class NoteReadPatchHost(private val binding:NoteReadBinding,private val store:No
         verifyLive();val identity=identity(call)
         // A receipt retry only observes an existing effect; it cannot start a new edit.
         store.reconcile(identity)?.let{return it.json().toString()}
-        val source=store.read(identity.id);val plan=session.previewPatch(source,NoteReadPatchToolCatalog.patchRequest(call))
+        val source=store.read(identity.id)
+        val request=NoteReadPatchToolCatalog.patchRequest(call)
+        val plan=try{session.previewPatch(source,request)}catch(error:NotePatchRejected){throw NotePatchPreviewRejected(error)}
         val text=preview(source,plan);reviews[identity.operationId]=text;approvals.remove(identity.operationId)
         return text
     }

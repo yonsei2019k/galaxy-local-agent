@@ -127,7 +127,10 @@ class AutomaticComputeEngine internal constructor(
         val loader=pc as? PairedPcTextLoader
             ?:throw com.user.localagent.models.InferencePrerequisiteMissing(com.user.localagent.models.InferencePrerequisiteReason.PC_LOADER_UNAVAILABLE)
         requestedPath=null;requestedOptions=options
-        if(!pcPreflight())throw PcRequired()
+        // The concrete typed loader performs a fresh authenticated availability/authority check below.
+        // Only an already-active PC in this same request-owned lease avoids the duplicate outer probe.
+        val sameBoundProductionPc=pc is PcInferenceEngine&&active===pc&&resource.location.value==ComputeResource.PC
+        if(!sameBoundProductionPc&&!pcPreflight())throw PcRequired()
         currentCoroutineContext().ensureActive()
         check(bind(pc,ComputeResource.PC))
         val receipt=loader.loadPairedPcText(target,options)

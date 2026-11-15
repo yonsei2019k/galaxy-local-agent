@@ -185,6 +185,88 @@ class NoteReadPatchDeviceValidation {
         assertEquals(f.seed.title,actual.title);assertEquals(f.seed.collection,actual.collection)
         assertTrue(actual.updatedAt>f.seed.updatedAt)
     }}
+    @Test fun actualEmptySearchScopeMatchesOmittedWithinCapturedProjectWithoutProtectedNotes()=runBlocking(Dispatchers.IO){fixture{f,_->
+        val query="QA scoped lookup ${UUID.randomUUID()}"
+        val first=f.scoped.saveNote("$query first","QA first body","qa-search-first")
+        val second=f.scoped.saveNote("$query second","QA second body","qa-search-second")
+        val protected=f.scoped.saveNote("$query protected","QA protected body",InternalNoteCollections.protected.first())
+        val project=f.repo.chat.createProject("QA other lookup project")
+        val thread=f.repo.chat.createThread(project.id,"QA other lookup thread")
+        val foreignRepo=f.repo.forThread(thread.id)
+        val foreign=foreignRepo.saveNote("$query foreign","QA foreign body",first.collection)
+        val owner=f.repo.saveNote("$query owner","QA owner body",first.collection)
+        val tools=f.tools(f.host()).also{it.bindAvailableTools(setOf("search_notes","read_note","patch_note"))}
+        fun lookup(scope:String?)=ToolCall("qa-search","search_notes",buildJsonObject{
+            put("query",query);put("limit",5);if(scope!=null)put("scope",scope)
+        })
+        suspend fun search(scope:String?):ToolResult {
+            val call=lookup(scope);ToolRegistry.validate(call)
+            return tools.execute(call).also{assertTrue(it.content,it.success);assertEquals(VerificationState.VERIFIED,it.verification)}
+        }
+        fun details(result:ToolResult)=Json.parseToJsonElement(result.content).jsonObject.getValue("details").jsonObject
+        fun ids(result:ToolResult)=details(result).getValue("notes").jsonArray.map{it.jsonObject.getValue("id").jsonPrimitive.content}.toSet()
+        val omitted=search(null);val empty=search("")
+        assertEquals(omitted.content,empty.content)
+        assertEquals(setOf(first.id,second.id),ids(empty))
+        assertEquals(2,details(empty).getValue("returnedCount").jsonPrimitive.int)
+        assertEquals("",details(empty).getValue("collectionFilter").jsonPrimitive.content)
+        assertTrue(ids(empty).intersect(setOf(protected.id,foreign.id,owner.id)).isEmpty())
+        val filtered=search(first.collection)
+        assertEquals(setOf(first.id),ids(filtered))
+        assertEquals(first.collection,details(filtered).getValue("collectionFilter").jsonPrimitive.content)
+        assertTrue(ids(search("qa-nonexistent-collection")).isEmpty()) // No fallback for an invented nonempty scope.
+        assertTrue(ids(search(protected.collection)).isEmpty())
+        for(blank in listOf(" ","\t\n")){
+            assertTrue(runCatching{ToolRegistry.validate(lookup(blank))}.isFailure)
+            assertFalse(tools.execute(lookup(blank)).success)
+        }
+        for(call in listOf(f.read(),f.patch()))for(blank in listOf(""," ","\t\n")){
+            val invalid=call.copy(arguments=JsonObject(call.arguments+mapOf("scope" to JsonPrimitive(blank))))
+            assertTrue(runCatching{ToolRegistry.validate(invalid)}.isFailure)
+            assertFalse(tools.execute(invalid).success)
+        }
+        for(note in listOf(first,second,protected,f.seed))assertEquals(note,f.scoped.getNote(note.id))
+        assertEquals(foreign,foreignRepo.getNote(foreign.id));assertEquals(owner,f.repo.getNote(owner.id))
+    }}
+    @Test fun actualPreviewRejectionIsUnappliedButReceiptFailureRemainsUncertain()=runBlocking(Dispatchers.IO){fixture{f,_->
+        val tools=f.tools(f.host());f.deliver(tools)
+        val rejected=f.patch(old="QA missing literal")
+        val error=runCatching{tools.reviewForAction(rejected)}.exceptionOrNull()
+        assertTrue(error is NotePatchPreviewRejected)
+        assertEquals("OLD_TEXT_NOT_FOUND",error?.message)
+        val result=NotePatchFailureEvidence.result(rejected,error as Exception)
+        assertFalse(result.success);assertEquals(VerificationState.FAILED,result.verification);assertTrue(result.effectNotApplied)
+        val failed=HarnessStep(rejected,StepEvidence(rejected.name,result.verification,result.verificationSummary,effectNotApplied=result.effectNotApplied))
+        val goal=TaskGoal("QA exact observed note correction",listOf("Exact approved edit and readback"),6,setOf("patch_note"))
+        assertTrue(TaskHarness.decide(goal,listOf(failed),true) is HarnessDecision.Stop)
+        assertTrue(TaskHarness.beforeStep(goal,listOf(failed),f.patch()) is HarnessDecision.Advance)
+        assertTrue(TaskHarness.beforeStep(goal,listOf(failed),rejected) is HarnessDecision.Stop) // Same-call limit remains.
+        assertEquals(f.seed,f.scoped.getNote(f.seed.id))
+        val real=f.scoped.notePatchTransactions(f.binding)
+        val reconcileFault=object:NotePatchTransactions {
+            override suspend fun <T> transaction(requireRunning:Boolean,block:suspend NotePatchTransaction.()->T):T {
+                throw NotePatchRejected("QA_RECONCILE_FAULT")
+            }
+        }
+        val reconcileError=runCatching{f.tools(f.host(reconcileFault)).reviewForAction(f.patch())}.exceptionOrNull()
+        assertTrue(reconcileError is NotePatchRejected);assertFalse(reconcileError is NotePatchPreviewRejected)
+        assertFalse(NotePatchFailureEvidence.result(f.patch(),reconcileError as Exception).effectNotApplied)
+        val receiptFault=object:NotePatchTransactions {
+            override suspend fun <T> transaction(requireRunning:Boolean,block:suspend NotePatchTransaction.()->T):T=real.transaction(requireRunning){
+                val actual=this
+                block(object:NotePatchTransaction by actual {
+                    override suspend fun putReceipt(operationId:String,json:String){throw NotePatchRejected("QA_RECEIPT_FAULT")}
+                })
+            }
+        }
+        val uncertainTools=f.tools(f.host(receiptFault));f.approve(uncertainTools)
+        val uncertain=uncertainTools.execute(f.patch())
+        assertFalse(uncertain.success);assertEquals(VerificationState.FAILED,uncertain.verification);assertFalse(uncertain.effectNotApplied)
+        val uncertainStep=HarnessStep(f.patch(),StepEvidence("patch_note",uncertain.verification,uncertain.verificationSummary,effectNotApplied=uncertain.effectNotApplied))
+        assertTrue(TaskHarness.beforeStep(goal,listOf(uncertainStep),f.patch(new="other correction")) is HarnessDecision.Stop)
+        assertTrue(TaskHarness.decide(goal,listOf(uncertainStep),true) is HarnessDecision.Stop)
+        assertEquals(f.seed,f.scoped.getNote(f.seed.id)) // Actual encrypted transaction rolls back; classification stays conservative.
+    }}
     @Test fun actualNoOpDoesNotIncrementNoteRevision()=runBlocking(Dispatchers.IO){fixture{f,_->
         val tools=f.tools(f.host());val call=f.patch(new="needle");f.approve(tools,call)
         val result=tools.execute(call);assertTrue(result.success);assertFalse(NotePatchReceipt.parse(result.content).changed)

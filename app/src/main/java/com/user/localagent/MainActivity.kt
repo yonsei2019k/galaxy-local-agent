@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity() {
         if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId||busy.value||app.imageStudio.state.value.running||RuntimeGate.inference.get()||RuntimeGate.benchmark.get()){
             status.value="현재 작업을 마치고 선택한 대화를 확인한 뒤 모델을 바꿔주세요.";return
         }
-        val pairedText=id==com.user.localagent.models.PairedPcTextProfile.SELECTION_ID&&com.user.localagent.compute.PcComputeSettings.get(this).state.value.let{it.paired&&!it.claudeText}
+        val pairedText=com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(id)!=null&&com.user.localagent.compute.PcComputeSettings.get(this).state.value.let{it.paired&&!it.claudeText}
         if(!pairedText&&app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치된 로컬 모델 또는 등록한 PC 텍스트 모델을 선택해주세요.";return}
         // A preference change is synchronous. The next serialized request owns runtime loading.
         app.runs.chooseModel(id,threadId)

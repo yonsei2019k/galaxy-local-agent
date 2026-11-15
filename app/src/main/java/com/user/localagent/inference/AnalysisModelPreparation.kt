@@ -50,6 +50,13 @@ class PreparedAnalysisModel private constructor(
             actual: PairedPcText, options: InferenceOptions, receipt: PairedPcLoadReceipt,
             owner: String): PreparedAnalysisModel {
             check(owner.isNotBlank() && receipt.matches(actual, options.contextSize))
+            val fast = PairedPcTextProfileDescriptor.FAST_4B_V1
+            if (actual.profile == fast || (requested as? PairedPcText)?.profile == fast) {
+                check(requested is PairedPcText && requested.id == actual.id &&
+                    requested.authorizationRevision == actual.authorizationRevision) {
+                    "4B 비교 분석은 원래 명시한 모델과 PC 사용 권한을 유지해야 합니다."
+                }
+            }
             return PreparedAnalysisModel(engine, requested, receipt.modelSha256, receipt.contextSize,
                 receipt.profileId, "authenticated_local_pc", owner, receipt.authorizationRevision, true)
         }

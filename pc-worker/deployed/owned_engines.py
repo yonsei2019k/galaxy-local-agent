@@ -93,6 +93,7 @@ class OwnedEngines(Engines):
   alias=body['modelId'];prefix=body['modelShaPrefix'];context=body['contextSize']
   if alias not in GEMMAS or not isinstance(prefix,str) or not re.fullmatch('[a-f0-9]{12,64}',prefix) or type(context)!=int or context not in (4096,8192):raise ValueError('LLM_PROFILE')
   if not GEMMAS[alias][1].startswith(prefix):raise ValueError('MODEL_SHA_MISMATCH')
+  if alias=='pc-text-4b' and prefix!=GEMMAS[alias][1]:raise ValueError('MODEL_SHA_MISMATCH')
   if not self.lock.acquire(timeout=30):raise Busy()
   record=None;success=False
   try:

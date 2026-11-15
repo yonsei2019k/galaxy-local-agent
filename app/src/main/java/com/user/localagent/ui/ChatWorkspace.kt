@@ -536,6 +536,7 @@ private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: Str
     val usable = models.filter { it.verified && it.runtime in setOf("litertlm","gguf") }
     val label = when(selectedId){
         com.user.localagent.models.PairedPcTextProfile.SELECTION_ID->com.user.localagent.models.PairedPcTextProfile.TITLE
+        com.user.localagent.models.PairedPcFast4BProfile.SELECTION_ID->com.user.localagent.models.PairedPcFast4BProfile.TITLE
         "auto"->if(pairedPcTextAvailable)"PC · 자동"else"자동"
         else->usable.find { it.id == selectedId }?.let(::shortModelLabel) ?: "모델 선택"
     }
@@ -565,6 +566,11 @@ private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: Str
                 text={Text(com.user.localagent.models.PairedPcTextProfile.TITLE)},
                 onClick={expanded=false;onModelChange(com.user.localagent.models.PairedPcTextProfile.SELECTION_ID)},
                 modifier=Modifier.testTag("model_option_paired_pc_text"),
+            )
+            if(pairedPcTextAvailable)DropdownMenuItem(
+                text={Text(com.user.localagent.models.PairedPcFast4BProfile.TITLE)},
+                onClick={expanded=false;onModelChange(com.user.localagent.models.PairedPcFast4BProfile.SELECTION_ID)},
+                modifier=Modifier.testTag("model_option_paired_pc_text_fast4b"),
             )
             usable.forEach { model ->
                 DropdownMenuItem(

@@ -67,7 +67,9 @@ class StuckRecovery {
     fun onRepeat():Action=when(++repeats){1->Action.REMIND;2->Action.REDIRECT;else->Action.STOP}
     fun prompt(action:Action,tool:String):String=when(action){
         Action.REMIND->"직전과 같은 $tool 호출이라 실행하지 않았다. 이미 받은 결과를 다시 읽고, 그 결과로 답하거나 아직 확인하지 않은 다른 단계를 골라라."
-        Action.REDIRECT->"같은 호출을 두 번 반복했다. $tool 은 다시 쓰지 말고 다른 도구를 쓰거나, 지금까지의 근거로 최종 답변을 작성하라. 확인하지 못한 부분은 확인하지 못했다고 밝혀라."
+        Action.REDIRECT->if(ToolReadPolicy.isReadOnly(tool))
+            "같은 $tool 도구와 같은 인자의 호출을 두 번 반복했다. 그 조합을 다시 요청하지 마라. 실제 결과를 보고 원래 허용 범위에서 다른 인자가 필요한 읽기는 선택할 수 있다. 수행하지 않은 변경이나 확인은 완료로 말하지 마라."
+            else "같은 호출을 두 번 반복했다. $tool 은 다시 쓰지 말고 다른 도구를 쓰거나, 지금까지의 근거로 최종 답변을 작성하라. 확인하지 못한 부분은 확인하지 못했다고 밝혀라."
         Action.STOP->""
     }
     companion object {const val STOP_CODE="stuck_repeated_action"}
@@ -171,7 +173,7 @@ object TaskHarness {
         val unresolvedFailure=steps.withIndex().any {(index,step)->
             step.evidence.state==VerificationState.FAILED&&steps.drop(index+1).none {later->
                 later.evidence.state==VerificationState.VERIFIED&&later.tool==step.tool&&
-                    (readOnly(step.tool)||(rejectedBeforeEffect(step)&&recoveryTarget(later)==recoveryTarget(step)))
+                    (readOnly(step.tool)||(rejectedBeforeEffect(step)&&!later.evidence.effectNotApplied&&recoveryTarget(later)==recoveryTarget(step)))
             }
         }
         if(unresolvedFailure)return HarnessDecision.Stop("아직 복구·검증되지 않은 실행이 있어 작업 완료를 확인할 수 없습니다.")
@@ -196,6 +198,11 @@ object TaskHarness {
         if(goal.requiredTools.isEmpty()&&!safeRead)return HarnessDecision.Stop("확인된 사용자 작업 목표에 포함되지 않은 변경·외부 행동입니다.")
         if(call.name !in goal.requiredTools&&!safeRead)return HarnessDecision.Stop("요청한 목표에 포함되지 않은 변경·외부 행동입니다.")
         val proposed=HarnessStep(call,StepEvidence(call.name,VerificationState.UNVERIFIED,"실행 전 검사"))
+        if(!safeRead&&steps.withIndex().any{(index,failed)->
+            failed.tool=="patch_note"&&rejectedBeforeEffect(failed)&&
+                steps.drop(index+1).none{it.tool=="patch_note"&&it.evidence.state==VerificationState.VERIFIED&&!it.evidence.effectNotApplied&&recoveryTarget(it)==recoveryTarget(failed)}&&
+                (call.name!="patch_note"||recoveryTarget(proposed)!=recoveryTarget(failed))
+        })return HarnessDecision.Stop("거부된 같은 메모와 컬렉션의 교정된 수정만 재시도할 수 있습니다.")
         loopReason(steps+proposed)?.let {return HarnessDecision.Stop(it,repeated=true)}
         return HarnessDecision.Advance("목표에 필요한 단계이며 실행 결과는 이후 별도로 검증합니다.")
     }
@@ -207,6 +214,11 @@ object TaskHarness {
     private fun recoveryTarget(step:HarnessStep):String? {
         fun text(key:String)=(step.arguments[key] as? JsonPrimitive)?.takeIf{it.isString}?.content?.takeIf{it.isNotBlank()}
         return when(step.tool){
+            "patch_note"->{
+                val id=text("id")?:return null;val collection=text("scope")?:return null
+                if(id.length>100||collection.length>80||'\u0000' in id||'\u0000' in collection||collection in InternalNoteCollections.protected)return null
+                buildJsonObject{put("id",id);put("scope",collection)}.toString()
+            }
             "update_note","update_reminder"->text("id")
             "write_project_file"->{
                 // A creation without an observed existing-file hash is not an update recovery.

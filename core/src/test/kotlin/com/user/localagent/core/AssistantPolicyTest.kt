@@ -5,6 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AssistantPolicyTest {
+    @Test fun toolSelectionShowsTheCallFormatWithoutRequiringAnUnavailableSkillTool(){
+        val notes=setOf("search_notes","read_note","patch_note")
+        val prompt=AssistantPolicy.buildToolSelection(notes,"2026-11-15T12:00:00+09:00")
+        assertTrue(prompt.contains("\"type\":\"tool_call\""))
+        assertTrue(prompt.contains("\"type\":\"clarification\""))
+        assertFalse(prompt.contains("Read a relevant skill first"))
+        assertTrue(AssistantPolicy.buildToolSelection(notes+"read_skill","now").contains("Read a relevant skill first"))
+    }
     @Test fun structuredSelectionKeepsAuthorityRulesInAShorterPrompt(){
         val selected=setOf("calculate","list_skills","read_skill")
         val prompt=AssistantPolicy.buildToolSelection(selected,"2026-11-01T08:30:00+09:00")

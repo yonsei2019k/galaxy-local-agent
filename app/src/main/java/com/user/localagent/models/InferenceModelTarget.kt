@@ -26,9 +26,12 @@ object PairedPcTextProfile {
 }
 
 /** No file path or downloaded/verified flag. Actual preparation belongs to the request engine. */
-class PairedPcText private constructor(val authorizationRevision: Long) : InferenceModelTarget {
-    override val id = PairedPcTextProfile.SELECTION_ID
-    override val title = PairedPcTextProfile.TITLE
+class PairedPcText private constructor(
+    val authorizationRevision: Long,
+    internal val profile: PairedPcTextProfileDescriptor,
+) : InferenceModelTarget {
+    override val id = profile.selectionId
+    override val title = profile.title
     override val runtime = "paired_pc_text"
     override fun requireSelectable() { check(authorizationRevision >= 0) }
     override fun toString() = "PairedPcText(host logical profile)"
@@ -37,10 +40,10 @@ class PairedPcText private constructor(val authorizationRevision: Long) : Infere
         /** Inputs come from the captured request and current host settings, never model output. */
         fun forRequest(selectionId: String, capturedRevision: Long?, allowCloudText: Boolean,
                        currentRevision: Long, paired: Boolean): PairedPcText? {
-            if (selectionId != "auto" && selectionId != PairedPcTextProfile.SELECTION_ID) return null
+            val profile = PairedPcTextProfileDescriptor.forSelection(selectionId) ?: return null
             if (allowCloudText) return null // Preserve the separate explicitly authorized cloud route.
             if (capturedRevision == null) {
-                if (selectionId == PairedPcTextProfile.SELECTION_ID)
+                if (selectionId != "auto")
                     throw InferencePrerequisiteMissing(InferencePrerequisiteReason.ORIGINAL_PC_AUTHORITY_MISSING)
                 return null // A legacy auto queue does not acquire today's pairing.
             }
@@ -48,7 +51,7 @@ class PairedPcText private constructor(val authorizationRevision: Long) : Infere
                 throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_AUTHORITY_CHANGED)
             if (!paired) throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_PAIRING_REQUIRED)
             require(capturedRevision >= 0)
-            return PairedPcText(capturedRevision)
+            return PairedPcText(capturedRevision, profile)
         }
     }
 }
@@ -59,6 +62,8 @@ enum class InferencePrerequisiteReason(val code: String, val notice: String) {
     ORIGINAL_PC_AUTHORITY_MISSING("inference_original_pc_authority_missing", "이 요청의 원래 PC 사용 권한을 확인하지 못했습니다. 현재 설정을 확인한 뒤 새로 요청해주세요."),
     PC_AUTHORITY_CHANGED("inference_pc_authority_changed", "요청 이후 PC 사용 권한이 바뀌어 실행하지 않았습니다. 현재 설정을 확인한 뒤 새로 요청해주세요."),
     PC_LOADER_UNAVAILABLE("inference_pc_loader_unavailable", "이 실행 경로에는 PC 텍스트 모델 준비 기능이 연결되지 않았습니다."),
+    PC_PROFILE_CONTRACT_UNAVAILABLE("inference_pc_profile_contract_unavailable", "선택한 PC 모델의 생성 설정 확인 기능이 준비되지 않았습니다. PC 작업기를 업데이트한 뒤 다시 요청해주세요."),
+    PC_MODEL_SELECTION_CHANGED("inference_pc_model_selection_changed", "원래 요청과 이어쓰기의 모델이 달라 실행하지 않았습니다. 사용할 모델을 확인한 뒤 새로 요청해주세요."),
     PC_ANALYSIS_PROVENANCE_UNAVAILABLE("inference_pc_analysis_provenance_unavailable", "이 분석 경로는 실제 PC 모델의 검증 기록 연결이 준비되지 않아 분석을 실행하지 않았습니다.");
 }
 
@@ -84,7 +89,7 @@ object InferencePrerequisiteFinalization {
 class PairedPcLoadReceipt private constructor(val profileId: String, val modelSha256: String,
     val contextSize: Int, val authorizationRevision: Long) {
     fun matches(target: PairedPcText, context: Int) = profileId == target.id &&
-        modelSha256 == PairedPcTextProfile.MODEL_SHA256 && contextSize == context &&
+        modelSha256 == target.profile.modelSha256 && contextSize == context &&
         authorizationRevision == target.authorizationRevision
     override fun toString() = "PairedPcLoadReceipt(verified host profile)"
     companion object {
@@ -97,7 +102,7 @@ class PairedPcLoadReceipt private constructor(val profileId: String, val modelSh
         }
         fun fromAuthenticatedLoad(target: PairedPcText, modelId: String?, modelSha256: String?,
                                   contextSize: Int?, structured: Boolean?, expectedContext: Int): PairedPcLoadReceipt {
-            require(modelId == PairedPcTextProfile.MODEL_ID && modelSha256 == PairedPcTextProfile.MODEL_SHA256)
+            require(target.profile.matchesModelIdentity(modelId, modelSha256))
             require(expectedContext in setOf(4096, 8192) && contextSize == expectedContext && structured == true)
             return PairedPcLoadReceipt(target.id, requireNotNull(modelSha256), expectedContext, target.authorizationRevision)
         }

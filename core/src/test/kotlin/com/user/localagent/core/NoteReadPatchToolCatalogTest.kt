@@ -27,4 +27,17 @@ class NoteReadPatchToolCatalogTest {
         rejected{NoteReadPatchToolCatalog.validate(call(extra=buildJsonObject{put("scope",InternalNoteCollections.protected.first())}))}
         rejected{NoteReadPatchToolCatalog.validate(ToolCall("demo","read_note",buildJsonObject{put("id","note-demo")}))}
     }
+    @Test fun modelCatalogExplainsDefaultPageAndObservedContinuationWithoutGrantingWholeRead(){
+        val compact=Json.parseToJsonElement(ToolUsePolicy.compactCatalog(setOf("read_note","patch_note"))).jsonArray
+        val read=compact.single{it.jsonObject.getValue("tool").jsonPrimitive.content=="read_note"}.jsonObject
+        assertTrue(read.getValue("description").jsonPrimitive.content.contains("default900"))
+        assertTrue(read.getValue("description").jsonPrimitive.content.contains("nextOffset"))
+        assertTrue(read.getValue("description").jsonPrimitive.content.contains("never prove whole"))
+        val arguments=read.getValue("argumentDescriptions").jsonObject
+        assertTrue(arguments.getValue("offset").jsonPrimitive.content.contains("observed nextOffset"))
+        assertTrue(arguments.getValue("limit").jsonPrimitive.content.contains("omit for default900"))
+        val patch=compact.single{it.jsonObject.getValue("tool").jsonPrimitive.content=="patch_note"}.jsonObject
+        assertTrue(patch.getValue("argumentDescriptions").jsonObject.getValue("oldText").jsonPrimitive.content.contains("ONE currently delivered"))
+    }
+
 }

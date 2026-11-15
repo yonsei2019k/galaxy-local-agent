@@ -3,6 +3,7 @@ import base64
 import ctypes
 import hashlib
 import json
+import os
 import re
 import shutil
 import socket
@@ -17,6 +18,7 @@ from pathlib import Path
 from security import HOME,TOOLS
 from windows_budget import constrain
 from native_memory_image import NativeMemoryImage
+from pc_text_profiles import configured_fast4b_models
 
 FLAGS=subprocess.CREATE_NO_WINDOW|subprocess.BELOW_NORMAL_PRIORITY_CLASS
 from image_profiles import DEFAULT_ID,profile,public_models,reference_models
@@ -28,6 +30,7 @@ GEMMAS={
  'gemma-e4b':(GEMMA_ROOT/'gemma-e4b.gguf','d0027dd3a9128d9323e9f282c8bf010a8526c46477584535991dc1a869b56e96'),
  'pc-text':(Path(r'D:\ZipHap\Compute\Models\Qwen3.5-9B-Q4_K_M.gguf'),'03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8'),
 }
+GEMMAS.update(configured_fast4b_models(os.environ))
 THINKING_ALLOWANCE=900
 THINK_LIMIT=300
 
@@ -50,13 +53,13 @@ def validate_text_request(request,kind):
 def prepare_text_payload(request,alias,for_count=False):
  validate_text_request(request,'tokens' if for_count else 'chat')
  messages=[dict(message) for message in request['messages']]
- if alias=='pc-text':
+ if alias in ('pc-text','pc-text-4b'):
   messages=[dict(m,content=_TEXT_LANGUAGE_RULE+'\n'+m['content']) if m['role']=='system' else m for m in messages]
   if not any(m['role']=='system' for m in messages):messages=[{'role':'system','content':_TEXT_LANGUAGE_RULE}]+messages
  maximum=request.get('maxTokens')
  requested=request.get('thinking')
  # False is an explicit override. True/absent retain the existing bounded auto policy.
- automatic=alias=='pc-text' and request.get('schema') is None and maximum is not None and maximum>512
+ automatic=alias in ('pc-text','pc-text-4b') and request.get('schema') is None and maximum is not None and maximum>512
  effective=None if for_count and maximum is None and 'thinking' not in request else (False if requested is False else automatic)
  extra=None if effective is None else (THINKING_ALLOWANCE if effective else 0)
  payload={'messages':messages,'stream':True,'stream_options':{'include_usage':True},'cache_prompt':False,
@@ -257,6 +260,7 @@ class Engines:
   if alias not in GEMMAS or not isinstance(prefix,str) or not re.fullmatch('[a-f0-9]{12,64}',prefix) or context not in (4096,8192):raise ValueError('LLM_PROFILE')
   path,sha=GEMMAS[alias]
   if not sha.startswith(prefix):raise ValueError('MODEL_SHA_MISMATCH')
+  if alias=='pc-text-4b' and prefix!=sha:raise ValueError('MODEL_SHA_MISMATCH')
 
   timings={'version':1,'scope':'base_engine_load','residentReused':False,
            'lockWaitMs':None,'stopPreviousMs':0.0,'verifyFileMs':0.0,

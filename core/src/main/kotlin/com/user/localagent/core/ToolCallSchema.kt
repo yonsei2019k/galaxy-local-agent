@@ -31,8 +31,11 @@ object ToolCallSchema {
         val properties=original.getValue("properties").jsonObject.mapValues {(key,value)->
             val changes=value.jsonObject.toMutableMap()
             val spec=definition.arguments.getValue(key)
-            if(spec.type=="string"&&spec.required){
-                val explicitEmpty=name=="patch_note"&&key=="newText"&&value.jsonObject["minLength"]?.jsonPrimitive?.intOrNull==0
+            // Only search_notes accepts an exactly empty optional collection filter as omitted.
+            // This does not change host access scope or any required read/write target scope.
+            if(spec.type=="string"&&(spec.required||key=="scope")){
+                val explicitEmpty=(name=="patch_note"&&key=="newText"&&value.jsonObject["minLength"]?.jsonPrimitive?.intOrNull==0)||
+                    (name=="search_notes"&&key=="scope"&&!spec.required)
                 changes["minLength"]=JsonPrimitive(if(explicitEmpty)0 else maxOf(changes["minLength"]?.jsonPrimitive?.intOrNull?:0,1))
             }
             val enumeration=when {
@@ -56,6 +59,27 @@ object ToolCallSchema {
         }
         if(name=="write_project_file"&&projectWrites!=null)return projectWrites.arguments(
             JsonObject(original+mapOf("properties" to JsonObject(properties),"additionalProperties" to JsonPrimitive(false))))
+        if(name=="patch_note"){
+            val spans=ownerRequest?.let(OwnerTextSources::literalSpans).orEmpty()
+            val oldRefs=spans.filter{it.text.isNotEmpty()&&it.text.length<=900}
+            val newRefs=spans.filter{it.text.length<=2000}
+            val payloads=setOf("oldText","oldTextQuoteId","newText","newTextQuoteId")
+            val oldChoices=listOf("oldText")+if(oldRefs.isNotEmpty())listOf("oldTextQuoteId")else emptyList()
+            val newChoices=listOf("newText")+if(newRefs.isNotEmpty())listOf("newTextQuoteId")else emptyList()
+            fun variant(old:String,new:String)=buildJsonObject{
+                put("type","object");put("additionalProperties",false)
+                put("properties",JsonObject(properties.filterKeys{it !in payloads||it==old||it==new}.toMutableMap().apply{
+                    for((key,refs) in listOf(old to oldRefs,new to newRefs))if(key.endsWith("QuoteId")){
+                        put(key,JsonObject(getValue(key).jsonObject+mapOf("enum" to JsonArray(refs.map{JsonPrimitive(it.id)}))))
+                    }
+                }))
+                put("required",buildJsonArray{
+                    definition.arguments.filterValues{it.required}.keys.forEach{add(it)};add(old);add(new)
+                })
+            }
+            val variants=oldChoices.flatMap{old->newChoices.map{new->variant(old,new)}}
+            return if(variants.size==1)variants.single()else buildJsonObject{put("oneOf",JsonArray(variants))}
+        }
         if(name=="save_note"){
             val quotes=ownerRequest?.let(OwnerTextSources::quotes).orEmpty()
             fun variant(payload:String)=buildJsonObject{

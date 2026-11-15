@@ -26,12 +26,17 @@ internal fun pcThinkingWireSupported(health:JsonObject?):Boolean {
     val strict=value["strictThinkingBool"] as? JsonPrimitive?:return false
     return !version.isString&&version.intOrNull==1&&!strict.isString&&strict.booleanOrNull==true
 }
+/** A new comparison profile requires the authenticated v1 wire contract; legacy compatibility is unchanged. */
+internal fun pcTextProfileWireSupported(target:com.user.localagent.models.PairedPcText,health:JsonObject?):Boolean =
+    target.profile==com.user.localagent.models.PairedPcTextProfileDescriptor.LEGACY_V1 || pcThinkingWireSupported(health)
+
 internal fun pcThinkingReceiptMatches(receipt:JsonObject,id:String,model:String,cap:Int,context:Int,
     thinking:Boolean,hasSchema:Boolean):Boolean {
     fun integer(key:String)=(receipt[key] as? JsonPrimitive)?.takeUnless{it.isString}?.intOrNull
     fun flag(key:String)=(receipt[key] as? JsonPrimitive)?.takeUnless{it.isString}?.booleanOrNull
     fun text(key:String)=(receipt[key] as? JsonPrimitive)?.takeIf{it.isString}?.content
-    val effective=thinking&&model=="pc-text"&&!hasSchema&&cap>512
+    val profile=com.user.localagent.models.PairedPcTextProfileDescriptor.forModelAlias(model)
+    val effective=thinking&&profile!=null&&!hasSchema&&cap>512
     val extra=if(effective)900 else 0
     val hash=text("preparedInputSha256");val modelSha=text("modelSha256")
     return integer("wireVersion")==1&&text("requestId")==id&&text("modelId")==model&&
@@ -39,7 +44,7 @@ internal fun pcThinkingReceiptMatches(receipt:JsonObject,id:String,model:String,
         flag("requestedThinking")==thinking&&flag("appliedThinking")==effective&&
         integer("extraReasoningTokens")==extra&&flag("legacyMayReopen")==effective&&
         hash!=null&&Regex("[a-f0-9]{64}").matches(hash)&&modelSha!=null&&Regex("[a-f0-9]{64}").matches(modelSha)&&
-        (model!="pc-text"||modelSha==com.user.localagent.models.PairedPcTextProfile.MODEL_SHA256)
+        (profile==null||modelSha==profile.modelSha256)
 }
 
 /** The paired PC computes text only. Request state, authority and persistence stay on the phone. */
@@ -144,16 +149,19 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             beginLoadEpoch();structured=false
             val connection=transport.available(computeOwner,waitForRestart=true)?:throw PcUnavailable()
             requireAuthority(connection)
-            val profile=com.user.localagent.models.PairedPcTextProfile
+            val profile=target.profile
+            if(!pcTextProfileWireSupported(target,transport.lastHealth))
+                throw com.user.localagent.models.InferencePrerequisiteMissing(
+                    com.user.localagent.models.InferencePrerequisiteReason.PC_PROFILE_CONTRACT_UNAVAILABLE)
             // A residency hint alone is not this request's authenticated load receipt.
             val reply=transport.json(connection,"/v1/llm/load","POST",buildJsonObject {
-                put("modelId",profile.MODEL_ID);put("modelShaPrefix",profile.MODEL_SHA256);put("contextSize",options.contextSize)
+                put("modelId",profile.modelId);put("modelShaPrefix",profile.modelSha256);put("contextSize",options.contextSize)
             },100_000,computeOwner)
             requireAuthority(connection)
             val receipt=com.user.localagent.models.PairedPcLoadReceipt.fromAuthenticatedLoadReply(target,reply,options.contextSize)
             currentCoroutineContext().ensureActive()
-            config=connection;alias=profile.MODEL_ID;this@PcInferenceEngine.options=options;path=null;logicalTextTarget=target;structured=true
-            status.value="PC 계산 준비됨 · ${profile.TITLE}";metrics.value=null;generation.value=null
+            config=connection;alias=profile.modelId;this@PcInferenceEngine.options=options;path=null;logicalTextTarget=target;structured=true
+            status.value="PC 계산 준비됨 · ${profile.title}";metrics.value=null;generation.value=null
             receipt
         }}
     private fun messages(user:String,system:String,history:List<InferenceTurn>):JsonArray=buildJsonArray {

@@ -31,7 +31,7 @@ object ToolRegistry {
         "create_reminder" to "Save an app reminder at an ISO-offset datetime. Use a supplied absolute datetime directly; calculate only relative dates from get_current_datetime.",
         "create_alarm" to "Open the phone's clock app with an alarm at hour (0-23) and minute; optional label and repeat days. The clock app confirms setting it.",
         "save_note" to "Save a private note: title=optional heading; content=complete body/report. contentQuoteId only for complete owner BODY copied verbatim. One payload; read back.",
-        "search_notes" to "Search literal text in saved note titles/bodies. Preserve exact query spaces. Omit scope unless the actual collection is known. Empty results do not verify a saved/updated note.",
+        "search_notes" to "Find notes by literal title/body. Returns id, collection and updatedAt for read_note/patch_note; obtain these via search, not owner questions. Preserve query spaces; omit unknown scope.",
         "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person.",
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
         "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
@@ -90,7 +90,7 @@ object ToolRegistry {
             "contentQuoteId" to text(false,64,description="Only a complete owner-quoted BODY requested verbatim; not titles, suffixes, search terms or format fragments."),
             "title" to text(false,300,description="Optional heading; preserve the owner's requested title separately from the body."),
             "scope" to text(false,80,collectionHint)),
-        def("search_notes",Risk.LOW,"query" to text(max=500,description="Literal substring of actual title/body, preserving spaces. For readback, use the exact saved title and confirm the returned id."),"scope" to text(false,80,collectionHint),"limit" to Argument("integer",false)),
+        def("search_notes",Risk.LOW,"query" to text(max=500,description="Literal substring of actual title/body, preserving spaces. For readback, use the exact saved title and confirm the returned id."),"scope" to text(false,80,description="Optional exact collection filter, not an access scope. Omitted or exactly empty means no collection filter within existing permission. Whitespace is invalid; never invent a collection."),"limit" to Argument("integer",false)),
         def("search_contacts",Risk.LOW,"query" to text(max=300),"limit" to Argument("integer",false)),
         def("prepare_sms",Risk.MEDIUM,"phoneNumber" to text(max=40),"message" to text(max=4000)),
         def("prepare_email",Risk.MEDIUM,"to" to text(max=320),"subject" to text(max=300),"body" to text(max=12000)),
@@ -131,7 +131,7 @@ object ToolRegistry {
             val value=call.arguments[key]
             require(!spec.required || value!=null){"필수 인자가 없습니다: $key"}
             if(value!=null) when(spec.type) {
-                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (call.name=="patch_note" && (key=="newText" || (key=="oldText"&&value.content.isNotEmpty()))) || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
+                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (call.name=="search_notes" && key=="scope" && !spec.required && value.content.isEmpty()) || (call.name=="patch_note" && (key=="newText" || (key=="oldText"&&value.content.isNotEmpty()))) || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
                 "integer" -> require(value is JsonPrimitive && !value.isString && (value.intOrNull!=null || (key=="seed"&&call.name=="generate_image"&&value.longOrNull!=null))){"$key 정수 필요"}
                 "boolean" -> require(value is JsonPrimitive&&!value.isString&&value.booleanOrNull!=null){"$key 참/거짓 값 필요"}
                 "array" -> when {
@@ -207,6 +207,11 @@ object ToolRegistry {
                         if(spec.type=="array")put("items",buildJsonObject{put("type","integer")})
                     })}})
                     put("required",buildJsonArray {d.arguments.filterValues {it.required}.keys.forEach {add(it)}})
+                    if(name=="patch_note")put("oneOf",buildJsonArray{
+                        for(old in listOf("oldText","oldTextQuoteId"))for(new in listOf("newText","newTextQuoteId"))add(buildJsonObject{
+                            put("required",buildJsonArray{add(old);add(new)})
+                        })
+                    })
                     if(name=="save_note")put("oneOf",buildJsonArray{listOf("content","contentQuoteId").forEach{field->add(buildJsonObject{put("required",buildJsonArray{add(field)})})}})
                 })
             })

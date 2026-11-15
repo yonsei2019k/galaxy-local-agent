@@ -4,9 +4,26 @@ Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.
 
-## Bounded direct argument coverage1075
+## Bounded note patch context and preview recovery1080
 
-Only an empty detailed selection in the existing direct-comparison path can expand to its same currently allowed set, and only for1..6 tools whose actual compact definitions fit below min(host budget,6000 UTF-16). Non-direct paths, existing selections and larger/over-budget sets retain their previous definitions. Returned snapshots cannot acquire later caller additions. Definitions are prompt data, never registration, consent, scope or execution authority. Calls still pass the existing actual tool/argument/scope/approval/evidence checks. This is built and signed but not yet device-validated.
+Owner-selected old/new literal references are alternatives to literal patch arguments, with exact XOR per role. References are bound to the complete current owner request and quote positions; host resolution preserves id/scope/revision and revalidates the literal call. References grant no target choice, read proof, consent or execution authority. Original current-query intact issued page, exact unique literal, version/CAS, diff approval and fresh same-target readback checks remain.
+
+Request-local intact VERIFIED note wrappers are retained without clipping within6000 serialized UTF16 characters/16 pages, with newest range/token and snapshot handling. Overflow removes whole pages and requires reread; ordinary WorkNote policy is unchanged. Retention hints cannot authenticate a token; NoteReadPatchSession remains the authority and rejects missing current-query source. Only a typed rejection from pure session.previewPatch before approval or mutation sets host effectNotApplied. Reconcile/read/execute/commit failures remain uncertain. A corrected mutation retry is restricted to the exact same note id and scope; failed evidence is cleared for completion only by actual later VERIFIED same-target effect. Same-call/step limits, cancellation and permissions remain unchanged.
+
+## Explicit4B profile and completed1082 note workflow
+
+The separately selected paired-pc-text-fast4b-v1 maps only to pc-text-4b/full217002fa8008ef4fc6d548353a3aebef055a96e6ff8e0e2c0953ef8254a89c14. Legacy paired-pc-text-v1 and auto remain pc-text/full03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8. Actual authenticated load receipts bind profile/hash/context/captured revision;4B requires v1 generation wire validation. Neither profile falls back to a different model or cloud on failure. Continuations cannot relabel4B as another selection. One native child and existing owner/cancel/idle policies remain.
+
+Pending note-page delivery review uses the actual current raw query; strict FinalSynthesisPolicy input is built only when truly eligible. Partial pages are never promoted to complete payloads. Current issued-page delivery, normal-return acknowledgement and same-snapshot whole readback remain separate gates. Default9B and explicit4B completed the actual guarded note workflow on1082; that limited device evidence does not establish general model quality or human approval UI.
+
+## Direct next-action protocol1076 (1082 small-catalog note workflow validated)
+
+Only the existing opt-in direct comparison, structured-capable engine,1..6 registered tools, complete matching argument detail set and actual compact catalog<6000 UTF-16 enter this protocol. Its schema preserves existing tool/clarification branches and adds the exact fieldless {"type":"answer"} signal. Full JSON document, typed discriminator, duplicate-key and length checks apply; prose/fences/trailing documents are never extracted. Tool calls still pass original registry/request/scope/approval/readback checks. The answer signal grants no authority and does not finish the task: it opens the existing bounded prose writer once, blocks further tool proposals in that writing phase and retains finish/evidence gates. Existing semantic/default paths, no-tools/read-only restrictions and queued authority snapshots stay intact. Immutable9B/auto identities are unchanged.
+## Bounded direct argument coverage1075 and continuity1082
+
+For the semantic-absent direct comparison, complete currently allowed catalogs still fitting the existing6-tool/6000-UTF16 bounds remain available after model-selected action criteria become nonempty. This prevents the decoder protocol from dropping into prose before required readback. Other semantic paths and oversized catalogs retain the previous selection. Model-selected mutations checkpoint their existing readback pairs before effects; lookup-only ACT remains conservatively uncompleted in this experimental path. Its step bound is the existing segmented18, not an unbounded loop.
+
+Only an empty detailed selection in the existing direct-comparison path can expand to its same currently allowed set, and only for1..6 tools whose actual compact definitions fit below min(host budget,6000 UTF-16). Non-direct paths, existing selections and larger/over-budget sets retain their previous definitions. Returned snapshots cannot acquire later caller additions. Definitions are prompt data, never registration, consent, scope or execution authority. Calls still pass the existing actual tool/argument/scope/approval/evidence checks. 1075 actual adapter input confirms the full allowed argument definitions were delivered, but both direct and default semantic note tasks failed. Delivery proof is not tool execution or goal completion.
 
 ## Checkpoint persistence1074
 

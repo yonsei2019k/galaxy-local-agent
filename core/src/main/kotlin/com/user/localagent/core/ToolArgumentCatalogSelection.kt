@@ -7,6 +7,15 @@ object ToolArgumentCatalogSelection {
     const val MAX_FALLBACK_TOOLS = 6
     const val MAX_CATALOG_UTF16 = 6000
 
+    /** Keep the bounded direct protocol available after selected goal criteria become nonempty. */
+    fun forProtocol(directLoop:Boolean, selected:Set<String>, allowed:Set<String>,
+                    maxUtf16:Int=MAX_CATALOG_UTF16, preferFull:Boolean=true):Set<String> {
+        val original=select(directLoop,selected,allowed,maxUtf16)
+        if(!directLoop||!preferFull)return original
+        val full=select(true,emptySet(),allowed,maxUtf16)
+        return if(full.isNotEmpty()&&full==allowed)full else original
+    }
+
     fun select(directLoop:Boolean, selected:Set<String>, allowed:Set<String>,
                maxUtf16:Int=MAX_CATALOG_UTF16):Set<String> {
         require(maxUtf16>=0)

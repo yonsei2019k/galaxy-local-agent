@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.os.SystemClock
+import android.os.Bundle
 import android.util.AtomicFile
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,37 +32,117 @@ import org.junit.runner.RunWith
  * The private AtomicFile report is also a recovery locator; no owner note/content is read. */
 @RunWith(AndroidJUnit4::class)
 class NotePatchActualPcCanary {
-    private class Probe(private val real:AutomaticComputeEngine,private val request:QueuedChatRequest,expectedTools:Set<String>):ComputeExecutionEngine by real,PairedPcTextLoader {
+    private class Probe(private val real:AutomaticComputeEngine,private val request:QueuedChatRequest,private val profile:PairedPcTextProfileDescriptor,expectedTools:Set<String>,
+        private val captureGuard:suspend()->Boolean,private val captureDirectory:File):ComputeExecutionEngine by real,PairedPcTextLoader {
         private val lock=Any()
         private var loads=0;private var receipts=0;private var generations=0;private var allPc=true
+        private var lastReceipt:PairedPcLoadReceipt?=null
+        private val loadProfileEvidence=mutableListOf<JsonObject>()
+        private val generationProfileEvidence=mutableListOf<JsonObject>()
         private val expectedCatalog=ToolUsePolicy.compactCatalog(expectedTools)
         private val catalogs=mutableListOf<JsonObject>()
+        private val visibleCaptures=mutableListOf<JsonObject>()
         override suspend fun load(path:String,options:InferenceOptions){error("QA_UNEXPECTED_FILE_LOADER")}
         override suspend fun loadPairedPcText(target:PairedPcText,options:InferenceOptions):PairedPcLoadReceipt {
-            check(request.modelId==PairedPcTextProfile.SELECTION_ID&&!request.allowCloudText&&request.capturedPcRevision==target.authorizationRevision){"QA_TYPED_AUTHORITY"}
-            synchronized(lock){loads++}
+            check(request.modelId==profile.selectionId&&target.id==profile.selectionId&&target.profile==profile&&!request.allowCloudText&&request.capturedPcRevision==target.authorizationRevision){"QA_TYPED_AUTHORITY"}
+            synchronized(lock){loads++;lastReceipt=null}
+            val loadStarted=SystemClock.elapsedRealtime()
             val receipt=real.loadPairedPcText(target,options)
-            check(receipt.matches(target,options.contextSize)){"QA_TYPED_RECEIPT"}
-            synchronized(lock){receipts++};return receipt
+            check(receipt.matches(target,options.contextSize)&&receipt.profileId==profile.selectionId&&
+                receipt.modelSha256==profile.modelSha256&&receipt.contextSize==options.contextSize&&
+                receipt.authorizationRevision==request.capturedPcRevision){"QA_TYPED_RECEIPT"}
+            synchronized(lock){
+                receipts++;lastReceipt=receipt
+                if(loadProfileEvidence.size<64)loadProfileEvidence+=buildJsonObject{
+                    put("load",loads);put("observedProfileId",receipt.profileId);put("observedModelSha256",receipt.modelSha256)
+                    put("observedLoadElapsedMs",SystemClock.elapsedRealtime()-loadStarted)
+                    put("observedContextSize",receipt.contextSize);put("authorizationRevisionMatched",receipt.authorizationRevision==request.capturedPcRevision)
+                    put("typedReceiptDirectlyObserved",true);put("profileAndFullShaMatched",true)
+                }
+            };return receipt
         }
-        private fun observe(system:String,structured:Boolean,action:()->Flow<GenerationEvent>):Flow<GenerationEvent> = flow {
+        private fun observe(user:String,system:String,history:List<InferenceTurn>,structured:Boolean,schema:String?=null,action:()->Flow<GenerationEvent>):Flow<GenerationEvent> = flow {
             val marker="\n현재 제공한 도구 인자 정의: ";val at=system.indexOf(marker);val start=at+marker.length
             val unique=at>=0&&system.indexOf(marker,start)<0
             fun exact(value:String)=unique&&system.startsWith(value,start)&&(start+value.length==system.length||system[start+value.length]=='\n')
-            synchronized(lock){generations++;allPc=allPc&&real.executionLocation=="pc"
+            val generation=synchronized(lock){generations++;allPc=allPc&&real.executionLocation=="pc"
                 if(catalogs.size<64)catalogs+=buildJsonObject{put("generation",generations);put("roundCatalogMarker",unique)
-                    put("expectedAllowedArgumentsMatched",exact(expectedCatalog));put("emptyCatalog",exact("[]"));put("structured",structured)}
+                    put("expectedAllowedArgumentsMatched",exact(expectedCatalog));put("emptyCatalog",exact("[]"));put("structured",structured)
+                    put("hostIntentPlanMarker",system.contains("host_intent_plan")||user.contains("host_intent_plan")||history.any{it.text.contains("host_intent_plan")}||schema?.contains("host_intent_plan")==true)}
+                generations
             }
-            emitAll(action()) // Actual output is never rewritten, scripted, replayed or repaired here.
+            val generationLoad=synchronized(lock){lastReceipt?.takeIf{loads>0&&loads==receipts}}
+            val loadBound=generationLoad!=null&&real.executionLocation=="pc"
+            val generationProfileBound=generationLoad!=null&&loadBound&&request.modelId==profile.selectionId&&!request.allowCloudText&&
+                generationLoad.profileId==profile.selectionId&&generationLoad.modelSha256==profile.modelSha256&&
+                generationLoad.authorizationRevision==request.capturedPcRevision
+            var visibleEventSeen=false;var normalFinishedSeen=false
+            val capture=if(generation<=16&&loadBound)try{captureGuard()}catch(cancel:CancellationException){throw cancel}catch(_:Throwable){false}else false
+            val prefix=if(capture)StringBuilder()else null
+            val generationStarted=SystemClock.elapsedRealtime()
+            try{action().collect{event->
+                if(event is GenerationEvent.Delta&&event.text.isNotEmpty())visibleEventSeen=true
+                if(event is GenerationEvent.Finished&&event.summary.reason in setOf(GenerationStopReason.EOG,GenerationStopReason.MAX_OUTPUT))normalFinishedSeen=true
+                if(event is GenerationEvent.Delta&&prefix!=null&&prefix.length<32770)
+                    prefix.append(event.text,0,minOf(event.text.length,32770-prefix.length))
+                emit(event) // Original object/order/content, including Finished and cancellation, remain unchanged.
+            }}finally{
+                synchronized(lock){if(generationProfileEvidence.size<64)generationProfileEvidence+=buildJsonObject{
+                    put("generation",generation);put("expectedProfileId",profile.selectionId)
+                    put("observedGenerationElapsedMs",SystemClock.elapsedRealtime()-generationStarted)
+                    put("expectedGenerationModelAlias",profile.modelId);put("expectedGenerationModelSha256",profile.modelSha256)
+                    put("currentTypedLoadProfileBound",generationProfileBound)
+                    put("visibleEventSeen",visibleEventSeen);put("normalFinishedSeen",normalFinishedSeen)
+                    put("generationWireReceiptDirectlyObserved",false)
+                    put("generationIdentityEvidenceKind",if(profile==PairedPcTextProfileDescriptor.FAST_4B_V1)"PRODUCTION_REQUIRED_WIRE_VALIDATOR_GATE_DERIVED"else"LEGACY_WIRE_OPTIONAL_NOT_PROVEN")
+                    put("generationAliasAndFullShaGatePassedDerived",if(profile==PairedPcTextProfileDescriptor.FAST_4B_V1)
+                        JsonPrimitive(generationProfileBound&&real.executionLocation=="pc"&&(visibleEventSeen||normalFinishedSeen))else JsonNull)
+                }}
+                if(generation<=16){
+                    var savedBytes:Int?=null;var savedSha:String?=null;var captured=false
+                    if(prefix!=null)withContext(NonCancellable){runCatching {
+                        check(captureGuard())
+                        val bound=synchronized(lock){loads>0&&loads==receipts&&real.executionLocation=="pc"}
+                        check(bound)
+                        // A bounded look-ahead avoids splitting a surrogate pair at the character buffer cap.
+                        if(prefix.isNotEmpty()&&Character.isHighSurrogate(prefix.last()))prefix.setLength(prefix.length-1)
+                        val bytes=prefix.toString().toByteArray(Charsets.UTF_8)
+                        var length=minOf(bytes.size,32768)
+                        if(length<bytes.size)while(length>0&&(bytes[length].toInt()and 0xC0)==0x80)length--
+                        val saved=bytes.copyOf(length)
+                        check(captureDirectory.mkdirs()||captureDirectory.isDirectory)
+                        val destination=File(captureDirectory,"visible-generation-$generation.txt")
+                        val target=AtomicFile(destination)
+                        val stream=target.startWrite()
+                        try{stream.write(saved);target.finishWrite(stream)}catch(error:Throwable){target.failWrite(stream);throw error}
+                        check(destination.readBytes().contentEquals(saved))
+                        savedBytes=saved.size
+                        savedSha=MessageDigest.getInstance("SHA-256").digest(saved).joinToString(""){"%02x".format(it.toInt()and 255)}
+                        captured=true
+                    }}
+                    synchronized(lock){visibleCaptures+=buildJsonObject{
+                        put("generation",generation);put("structured",structured);put("captured",captured)
+                        put("savedBytes",savedBytes);put("sha256",savedSha)
+                    }}
+                }
+            }
         }
         override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>)=
-            observe(systemInstruction,false){real.generateChatEvents(userText,systemInstruction,history)}
+            observe(userText,systemInstruction,history,false){real.generateChatEvents(userText,systemInstruction,history)}
         override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>)=
-            observe(systemInstruction,true){real.generateStructuredEvents(userText,systemInstruction,schema,history)}
+            observe(userText,systemInstruction,history,true,schema){real.generateStructuredEvents(userText,systemInstruction,schema,history)}
         fun facts():JsonObject=synchronized(lock){buildJsonObject{
             put("typedLoadCount",loads);put("matchingReceiptCount",receipts);put("generationCount",generations)
             put("allTypedReceiptsMatched",loads>0&&loads==receipts);put("allGenerationsPc",generations>0&&allPc)
             put("generationCatalogs",JsonArray(catalogs.toList()))
+            put("generationVisibleCaptures",JsonArray(visibleCaptures.toList()))
+            put("typedLoadProfileEvidence",JsonArray(loadProfileEvidence.toList()))
+            put("generationProfileEvidence",JsonArray(generationProfileEvidence.toList()))
+            put("generationWireReceiptDirectlyObserved",false)
+            put("profileEvidenceTruncated",receipts>64||generations>64)
+            put("allFast4bGenerationIdentityGatesPassedDerived",if(profile==PairedPcTextProfileDescriptor.FAST_4B_V1)
+                JsonPrimitive(generations>0&&generationProfileEvidence.size==generations&&generationProfileEvidence.all{
+                    it["generationAliasAndFullShaGatePassedDerived"]?.jsonPrimitive?.booleanOrNull==true})else JsonNull)
         }}
     }
     private fun reportableTerminalErrorCode(raw:String?):String?=when(raw){
@@ -108,16 +189,75 @@ class NotePatchActualPcCanary {
         else->"UNMAPPED"
     }
     private fun sha(text:String)=MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it.toInt()and 255)}
-    private fun atomic(file:File,value:JsonObject){
-        check(file.parentFile?.isDirectory==true||file.parentFile?.mkdirs()==true){"QA_REPORT_DIRECTORY"}
-        val target=AtomicFile(file);val stream=target.startWrite()
-        try{stream.write(value.toString().toByteArray(Charsets.UTF_8));target.finishWrite(stream)}catch(error:Throwable){target.failWrite(stream);throw error}
+    private fun patchDiagnostics(steps:List<HarnessStep>,expectedId:String?,collection:String,before:String,expectedOld:String,expectedNew:String):JsonArray=
+        JsonArray(steps.withIndex().filter{it.value.tool=="patch_note"}.take(4).map{indexed->
+            val step=indexed.value
+            fun text(key:String)=(step.arguments[key] as? JsonPrimitive)?.takeIf{it.isString}?.content
+            val old=text("oldText");val replacement=text("newText")
+            buildJsonObject {
+                put("stepIndex",indexed.index);put("evidenceState",step.evidence.state.name);put("effectNotApplied",step.evidence.effectNotApplied)
+                put("oldTextUtf16Length",old?.length);put("oldTextUtf8Sha256",old?.let{sha(it)})
+                put("newTextUtf16Length",replacement?.length);put("newTextUtf8Sha256",replacement?.let{sha(it)})
+                put("oldTextMatchesExpected",old?.let{it==expectedOld})
+                put("oldTextContainedInOriginalBefore",old?.let{it.isNotEmpty()&&before.contains(it)})
+                put("newTextMatchesExpected",replacement?.let{it==expectedNew})
+                put("idMatchesExpected",text("id")?.let{expectedId!=null&&it==expectedId})
+                put("scopeMatchesExpected",text("scope")?.let{it==collection})
+            }
+        })
+    /** Reporting must never prevent the original fixture cleanup. Only fixed metadata leaves the private report. */
+    private class ReportJournal(private val file:File){
+        var attempts=0;private set
+        var failureCount=0;private set
+        var failure:Throwable?=null;private set
+        private var firstFailureStage:String?=null
+        private var lastFailureClass:String?=null
+        private var lastReceipt:Bundle?=null
+        fun publish(stage:String,snapshot:()->JsonObject):Boolean {
+            attempts++
+            return try {
+                val value=JsonObject(snapshot()+buildJsonObject{
+                    put("reportPublicationAttempt",attempts);put("reportPublicationFailureCount",failureCount)
+                    put("reportPublicationFailureCode",if(failure==null)null else "QA_REPORT_PUBLICATION_FAILED")
+                    put("firstReportPublicationFailureStage",firstFailureStage);put("lastReportPublicationFailureClass",lastFailureClass)
+                })
+                val bytes=value.toString().toByteArray(Charsets.UTF_8)
+                check(file.parentFile?.isDirectory==true||file.parentFile?.mkdirs()==true){"QA_REPORT_DIRECTORY"}
+                val target=AtomicFile(file);val stream=target.startWrite()
+                try{stream.write(bytes);target.finishWrite(stream)}catch(error:Throwable){target.failWrite(stream);throw error}
+                check(file.readBytes().contentEquals(bytes)){"QA_REPORT_READBACK"}
+                lastReceipt=Bundle().apply {
+                    putString("noteCanaryReportStage",stage);putInt("noteCanaryReportAttempt",attempts)
+                    putInt("noteCanaryReportBytes",bytes.size)
+                    putString("noteCanaryReportSha256",MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it.toInt()and 255)})
+                    putBoolean("noteCanaryReportReadbackVerified",true)
+                }
+                true
+            }catch(error:Throwable){
+                failureCount++;if(failure==null){failure=error;firstFailureStage=stage}
+                lastFailureClass=error.javaClass.simpleName.take(120)
+                false
+            }
+        }
+        fun emitFinalReceipt(){
+            val receipt=lastReceipt?.takeIf{it.getString("noteCanaryReportStage")=="finished"}?:Bundle().apply{
+                putString("noteCanaryReportStage","final_report_unverified");putBoolean("noteCanaryReportReadbackVerified",false)
+            }
+            // No raw messages, inputs, exception text or owner identifiers in instrumentation status.
+            receipt.putInt("noteCanaryReportFailureCount",failureCount)
+            runCatching{InstrumentationRegistry.getInstrumentation().sendStatus(2,receipt)}
+        }
     }
 
     @Test fun normalRequestEditsOnlyTheObservedNoteAndReadsTheSavedVersion()=runBlocking(Dispatchers.Default){
         val args=InstrumentationRegistry.getArguments()
         assumeTrue("notePatchActualPcApproved=true required",args.getString("notePatchActualPcApproved")=="true")
         val directNextAction=args.getString("notePatchDirectNextAction")?.let{check(it in setOf("true","false")){"QA_INVALID_DIRECT_VARIANT"};it=="true"}?:false
+        val fast4bComparison=if(args.containsKey("notePatchFast4bComparison")){
+            val raw=args.getString("notePatchFast4bComparison")
+            check(raw in setOf("true","false")){"QA_INVALID_FAST4B_VARIANT"};raw=="true"
+        }else false
+        val profile=if(fast4bComparison)PairedPcTextProfileDescriptor.FAST_4B_V1 else PairedPcTextProfileDescriptor.LEGACY_V1
         val base=InstrumentationRegistry.getInstrumentation().targetContext
         val expected=checkNotNull(args.getString("notePatchActualPcExpectedVersion")?.toLongOrNull()){"QA_EXPECTED_VERSION"}
         check(base.packageManager.getPackageInfo(base.packageName,0).longVersionCode==expected){"QA_INSTALLED_VERSION"}
@@ -142,9 +282,14 @@ class NotePatchActualPcCanary {
         val targetTitle="$prefix-target";val keepTitle="$prefix-keep"
         val owner="제목 '$targetTitle' 메모를 찾아 현재 원문을 읽고, 인수 시각의 '$oldText'만 '$newText'로 고쳐줘. "+
             "제목과 다른 줄, 줄바꿈, 연속 공백과 이모지는 그대로 유지해. 다른 메모는 바꾸지 마. 저장된 같은 메모를 다시 읽어 수정 결과를 확인하고 알려줘."
-        val report=File(checkNotNull(base.getExternalFilesDir(null)),if(directNextAction)"diagnostics/note-patch-actual-pc-canary-direct-next-action.json"else"diagnostics/note-patch-actual-pc-canary.json")
+        val reportName=if(fast4bComparison){
+            if(directNextAction)"diagnostics/note-patch-actual-pc-canary-fast4b-direct-next-action.json"else"diagnostics/note-patch-actual-pc-canary-fast4b.json"
+        }else if(directNextAction)"diagnostics/note-patch-actual-pc-canary-direct-next-action.json"else"diagnostics/note-patch-actual-pc-canary.json"
+        val report=File(checkNotNull(base.getExternalFilesDir(null)),reportName)
+        val reportJournal=ReportJournal(report)
         val started=SystemClock.elapsedRealtime();var stage="before_fixture";var lastCheck="QA_NOT_STARTED"
         var firstFailureCheckCode:String?=null;var terminalErrorCode:String?=null;var terminalErrorCodeCaptured=false
+        var terminalAnswerCaptured=false;var terminalAnswerWholeLen:Int?=null;var terminalAnswerSavedLen:Int?=null;var terminalAnswerSha256:String?=null
         var project:ProjectRecord?=null;var room:ChatThreadRecord?=null;var repository:LocalRepository?=null
         var workspace:ProjectWorkspace?=null;var workspaceBinding:String?=null;var privateRoot:File?=null
         var seed:NoteRecord?=null;var keep:NoteRecord?=null;var runner:ChatRunCoordinator?=null;var ownRun:String?=null
@@ -161,12 +306,17 @@ class NotePatchActualPcCanary {
             verify("QA_HEALTH_IDENTITY",it["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&it["serverId"]?.jsonPrimitive?.content==connection.serverId)}}
         fun idle(value:JsonObject)=value["compute_busy"]?.jsonPrimitive?.booleanOrNull==false&&value["cleanup_pending"]?.jsonPrimitive?.booleanOrNull==false&&
             (value["llmResident"]==null||value["llmResident"] is JsonNull)
-        fun publish(){atomic(report,buildJsonObject{
+        fun publish(bestEffort:Boolean=false):Boolean {
+            val saved=reportJournal.publish(stage){buildJsonObject{
             put("requestLoopVariant",if(directNextAction)"DIRECT_NEXT_ACTION_OPT_IN"else"ORIGINAL_SEMANTIC")
+            put("fast4bComparison",fast4bComparison);put("expectedModelSelection",profile.selectionId)
+            put("expectedModelAlias",profile.modelId);put("expectedModelSha256",profile.modelSha256)
             put("directPreferenceObserved",directPreferenceObserved);put("privatePreferencesRestored",privatePreferencesRestored)
             put("schema",1);put("kind","actual_pc_normal_send_note_patch_canary");put("versionCode",expected);put("stage",stage);put("lastCheckCode",lastCheck)
             put("firstFailureCheckCode",firstFailureCheckCode);put("terminalErrorCodeCaptured",terminalErrorCodeCaptured);put("terminalErrorCode",terminalErrorCode)
-            put("passed",validated&&cleanup&&failure==null&&cleanupFailure==null);put("runStatus",status);put("cleanupVerified",cleanup);put("postRunIdleVerified",finalIdle)
+            put("terminalAnswerCaptured",terminalAnswerCaptured);put("terminalAnswerWholeLen",terminalAnswerWholeLen)
+            put("terminalAnswerSavedLen",terminalAnswerSavedLen);put("terminalAnswerSha256",terminalAnswerSha256)
+            put("passed",validated&&cleanup&&failure==null&&cleanupFailure==null&&reportJournal.failure==null);put("runStatus",status);put("cleanupVerified",cleanup);put("postRunIdleVerified",finalIdle)
             put("normalSendSelectorUsed",true);put("choiceOverrideUsed",false);put("emptyPhoneModelListProven",false)
             put("approvalMethod","actual_PendingAction_guarded_fixture_consent");put("humanOrComposeApprovalProven",false)
             put("modelOutputOrPlanInjected",false);put("allowCloudText",false);put("ownerInterrupted",ownerInterrupted)
@@ -179,16 +329,25 @@ class NotePatchActualPcCanary {
                 put("threadId",room?.id);put("branchId",room?.activeBranchId);put("runId",ownRun);put("seedId",seed?.id);put("keepId",keep?.id)
                 put("collection",collection);put("seedBeforeUpdatedAt",seed?.updatedAt);put("seedBeforeSha256",sha(before));put("seedAfterSha256",sha(after))
                 put("keepSha256",keep?.let{sha(it.body)});put("ownerRequestSha256",sha(owner));put("capturedPcRevision",revision)
-                put("modelSelection",PairedPcTextProfile.SELECTION_ID);put("useOwnerMemory",false);put("learnOwnerFacts",false)})
+                put("modelSelection",profile.selectionId);put("useOwnerMemory",false);put("learnOwnerFacts",false)})
             probe.get()?.facts()?.forEach{(k,v)->put(k,v)}
             put("verifiedTools",JsonArray(steps.filter{it.evidence.state==VerificationState.VERIFIED}.map{JsonPrimitive(it.tool)}))
+            put("patchDiagnostics",patchDiagnostics(steps,seed?.id,collection,before,oldText,newText))
             put("elapsedMs",SystemClock.elapsedRealtime()-started)
             failure?.let{put("failureClass",it.javaClass.simpleName)};cleanupFailure?.let{put("cleanupFailureClass",it.javaClass.simpleName)}
-        })}
-        publish()
+            put("cleanupFailureCode",if(cleanupFailure==null)null else "QA_CLEANUP_FAILED")
+            }}
+            if(!saved&&!bestEffort)throw checkNotNull(reportJournal.failure)
+            return saved
+        }
+        fun deferExpectedFailure(code:String){
+            lastCheck=code;if(firstFailureCheckCode==null)firstFailureCheckCode=code
+            failure=IllegalStateException(code);stage="failure_observed";publish(true)
+        }
         try{
+            publish()
             verify("QA_INITIAL_PC_IDLE",idle(health(null)));ownerQuiet()
-            val p=store.createProject(prefix,ProjectSettings(modelId=PairedPcTextProfile.SELECTION_ID,contextSize=8192,
+            val p=store.createProject(prefix,ProjectSettings(modelId=profile.selectionId,contextSize=8192,
                 useOwnerMemory=false,learnOwnerFacts=false,disabledTools=ToolRegistry.definitions.keys-allowed)).also{project=it;publish()}
             verify("QA_PROJECT_BINDING",p.workspaceKey==p.id&&p.workspaceKey !in setOf("default","personal"))
             val r=store.createThread(p.id,prefix).also{room=it;publish()}
@@ -206,15 +365,30 @@ class NotePatchActualPcCanary {
                 workerEngineFactory={request->
                     check(context.getSharedPreferences("chat-preferences",Context.MODE_PRIVATE).getBoolean("direct-next-action",false)==directNextAction){"QA_DIRECT_PREF_CAPTURE_CHANGED"}
                     directPreferenceObserved=true
-                    check(request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&request.modelId==PairedPcTextProfile.SELECTION_ID&&
+                    check(request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&request.modelId==profile.selectionId&&
                         request.capturedPcRevision==revision&&!request.allowCloudText&&request.allowTools){"QA_REQUEST_BINDING"}
                     check(selectedRequest.compareAndSet(null,request)){"QA_ADDITIONAL_REQUEST"};ownRun=request.runId
                     Probe(AutomaticComputeEngine(context,ownerRunId=request.runId,beforePhoneLoad={error("QA_PHONE_FALLBACK")},
-                        capturedPcRevision=request.capturedPcRevision,allowCloudText=false),request,allowed).also{probe.set(it)}
+                        capturedPcRevision=request.capturedPcRevision,allowCloudText=false),request,profile,allowed,
+                        captureGuard={runCatching {
+                            val fresh=checkNotNull(store.project(p.id));val thread=checkNotNull(store.thread(r.id));val run=checkNotNull(store.run(request.runId))
+                            val diagnosticParent=File(checkNotNull(base.getExternalFilesDir(null)),"diagnostics").canonicalFile
+                            val diagnosticDirectory=File(diagnosticParent,prefix).canonicalFile
+                            args.getString("notePatchActualPcApproved")=="true"&&selectedRequest.get()===request&&
+                                fresh.title==prefix&&fresh.workspaceKey==p.workspaceKey&&fresh.settings==p.settings&&!fresh.archived&&
+                                !fresh.settings.useOwnerMemory&&!fresh.settings.learnOwnerFacts&&
+                                ToolRegistry.definitions.keys-fresh.settings.disabledTools==allowed&&allowed==setOf("search_notes","read_note","patch_note")&&
+                                thread.projectId==p.id&&thread.activeBranchId==r.activeBranchId&&
+                                run.threadId==r.id&&run.branchId==r.activeBranchId&&run.projectId==p.id&&
+                                request.text==owner&&request.allowTools&&!request.allowCloudText&&request.capturedPcRevision==revision&&
+                                request.modelId==profile.selectionId&&
+                                diagnosticDirectory.parentFile==diagnosticParent&&diagnosticDirectory.name==prefix
+                        }.getOrDefault(false)},
+                        captureDirectory=File(checkNotNull(base.getExternalFilesDir(null)),"diagnostics/$prefix").canonicalFile).also{probe.set(it)}
                 },externalIntentLauncher={error("QA_EXTERNAL_INTENT")})}.also{runner=it}
             withContext(Dispatchers.Main){coordinator.selectThread(r.id)}
             withTimeout(15_000){while(!coordinator.selectionReady.value)delay(50)}
-            verify("QA_SELECTED_PROFILE",coordinator.preferredModelId.value==PairedPcTextProfile.SELECTION_ID)
+            verify("QA_SELECTED_PROFILE",coordinator.preferredModelId.value==profile.selectionId)
             stage="running_actual_request";publish()
             verify("QA_NORMAL_SEND_ACCEPTED",withContext(Dispatchers.Main){coordinator.send(owner,r.id)})
             val completed=withTimeout(600_000){
@@ -262,16 +436,47 @@ class NotePatchActualPcCanary {
             status=completed.status
             terminalErrorCode=reportableTerminalErrorCode(completed.errorCode);terminalErrorCodeCaptured=true
             val captured=checkNotNull(selectedRequest.get());val request=QueuedChatRequest.fromJson(completed.contextJson);steps=request.previousSteps
+            // Private synthetic-QA diagnostic only. Failure to capture never changes the original oracle.
+            runCatching {
+                check(args.getString("notePatchActualPcApproved")=="true")
+                val fresh=checkNotNull(store.project(p.id))
+                check(fresh.title==prefix&&fresh.workspaceKey==p.workspaceKey&&fresh.settings==p.settings&&!fresh.archived)
+                check(!fresh.settings.useOwnerMemory&&!fresh.settings.learnOwnerFacts&&
+                    ToolRegistry.definitions.keys-fresh.settings.disabledTools==allowed&&allowed==setOf("search_notes","read_note","patch_note"))
+                check(completed.id==captured.runId&&completed.id==ownRun&&completed.threadId==r.id&&completed.projectId==p.id&&completed.branchId==r.activeBranchId)
+                check(completed.status in setOf("completed","paused","failed","cancelled","interrupted"))
+                check(request.runId==captured.runId&&request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&
+                    request.text==owner&&request.allowTools&&!request.allowCloudText&&request.capturedPcRevision==revision&&request.modelId==profile.selectionId)
+                val message=store.assistantForRun(completed.id)?:return@runCatching
+                check(message.role=="assistant"&&message.threadId==r.id&&message.runId==completed.id&&message.branchId==r.activeBranchId)
+                val bytes=store.fullMessageText(message.id).toByteArray(Charsets.UTF_8)
+                var length=minOf(bytes.size,32768)
+                if(length<bytes.size)while(length>0&&(bytes[length].toInt()and 0xC0)==0x80)length--
+                val saved=bytes.copyOf(length)
+                val diagnostics=File(checkNotNull(base.getExternalFilesDir(null)),"diagnostics").canonicalFile
+                val directory=File(diagnostics,prefix).canonicalFile
+                check(directory.parentFile==diagnostics&&directory.name==prefix)
+                check(directory.mkdirs()||directory.isDirectory)
+                val companion=AtomicFile(File(directory,if(directNextAction)"terminal-assistant-direct.txt"else"terminal-assistant-default.txt"))
+                val stream=companion.startWrite()
+                try{stream.write(saved);companion.finishWrite(stream)}catch(error:Throwable){companion.failWrite(stream);throw error}
+                terminalAnswerWholeLen=bytes.size;terminalAnswerSavedLen=saved.size
+                terminalAnswerSha256=MessageDigest.getInstance("SHA-256").digest(saved).joinToString(""){"%02x".format(it.toInt()and 255)}
+                terminalAnswerCaptured=true
+            }
             stage="terminal_observed";publish()
+            if(completed.status!="completed")deferExpectedFailure("QA_RUN_COMPLETED")else{
             verify("QA_RUN_COMPLETED","completed"==completed.status)
             verify("QA_ORIGINAL_REQUEST_PRESERVED",request.runId==captured.runId&&request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&
-                request.text==owner&&request.allowTools&&!request.allowCloudText&&request.capturedPcRevision==revision&&request.modelId==PairedPcTextProfile.SELECTION_ID)
+                request.text==owner&&request.allowTools&&!request.allowCloudText&&request.capturedPcRevision==revision&&request.modelId==profile.selectionId)
             val facts=checkNotNull(probe.get()).facts();verify("QA_ACTUAL_PC_AND_RECEIPTS",facts["allGenerationsPc"]?.jsonPrimitive?.boolean==true&&facts["allTypedReceiptsMatched"]?.jsonPrimitive?.boolean==true)
+            if(fast4bComparison)verify("QA_FAST4B_GENERATION_PROFILE_GATE",facts["allFast4bGenerationIdentityGatesPassedDerived"]?.jsonPrimitive?.booleanOrNull==true)
             if(directNextAction)verify("QA_DIRECT_ARGUMENT_CATALOG",facts.getValue("generationCatalogs").jsonArray.any{
                 it.jsonObject.getValue("roundCatalogMarker").jsonPrimitive.boolean&&it.jsonObject.getValue("expectedAllowedArgumentsMatched").jsonPrimitive.boolean})
             verify("QA_NO_UNKNOWN_EFFECTS",steps.all{it.tool in allowed}&&steps.none{it.evidence.state in setOf(VerificationState.PREPARED,VerificationState.UNVERIFIED)})
             val verified=steps.withIndex().filter{it.value.evidence.state==VerificationState.VERIFIED&&!it.value.evidence.effectNotApplied}
             val patches=verified.filter{it.value.tool=="patch_note"}
+            if(patches.size!=1)deferExpectedFailure("QA_ONE_VERIFIED_PATCH")else{
             verify("QA_ONE_VERIFIED_PATCH",patches.size==1)
             val patch=patches.single();val original=checkNotNull(seed)
             verify("QA_SEARCH_THEN_ORIGINAL_READ",sameTargetSearch&&verified.any{read->read.index<patch.index&&read.value.tool=="read_note"&&
@@ -293,9 +498,11 @@ class NotePatchActualPcCanary {
             val answer=checkNotNull(store.assistantForRun(completed.id));verify("QA_FINAL_ANSWER_SUPPORTED",store.fullMessageText(answer.id).contains(newText))
             verify("QA_NO_FILE_OR_REMINDER_EFFECTS",ws.list().isEmpty()&&scoped.listReminders().isEmpty())
             verify("QA_FINAL_PC_IDLE",idle(health(completed.id)));finalIdle=true;validated=true;stage="actual_note_patch_verified";publish()
-        }catch(error:Throwable){failure=error;if(firstFailureCheckCode==null)firstFailureCheckCode="UNCLASSIFIED_FAILURE"}
+            }
+            }
+        }catch(error:Throwable){failure=error;if(firstFailureCheckCode==null)firstFailureCheckCode="UNCLASSIFIED_FAILURE";stage="failure_observed";publish(true)}
         finally{withContext(NonCancellable){
-            stage="cleanup";publish()
+            stage="cleanup";publish(true)
             try{
                 runner?.let{own->val job=room?.let{r->withContext(Dispatchers.Main){own.runningJobForThread(r.id).also{own.cancelThread(r.id)}}}
                     withTimeout(60_000){job?.join();while(own.hasActiveRuns.value)delay(50)};own.scope.cancel()}
@@ -329,8 +536,15 @@ class NotePatchActualPcCanary {
                 privatePreferencesRestored=true
                 verify("QA_PREFS_CLEANUP",base.deleteSharedPreferences(prefs))
             }catch(error:Throwable){cleanup=false;if(cleanupFailure==null)cleanupFailure=error else cleanupFailure?.addSuppressed(error)}
-            stage="finished";publish()
+            stage="finished"
+            if(!publish(true))publish(true) // One bounded retry records an earlier publication failure, without rerunning cleanup.
+            reportJournal.emitFinalReceipt()
         }}
-        failure?.let{throw it};cleanupFailure?.let{throw it};assertTrue(validated&&cleanup&&finalIdle)
+        val primary=failure?:cleanupFailure?:reportJournal.failure
+        primary?.let{original->
+            listOfNotNull(cleanupFailure,reportJournal.failure).filter{it!==original}.distinct().forEach{original.addSuppressed(it)}
+            throw original
+        }
+        assertTrue(validated&&cleanup&&finalIdle)
     }
 }
