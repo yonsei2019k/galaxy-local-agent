@@ -1,5 +1,15 @@
 # Device validation
 
+## 2026-11-15 installed1085
+
+Full7m03/core945+app877=1822 JVM PASS/0fail-error-skip/lint0errors144warnings1Hint/738 frozen inputs. Signed main d899eb6fd1ba01e9b7b6070948e0c1dbf3bb1dece2bd56180c7a150bcde2471a/test2c1990ea4acbf80183a46ec0d3c9b0c1b7716d144c8db9736ca8126e3105cf58 installed with exact base hashes/original identity/data retained. Original authenticated pinned direct Tailscale88ms PASS, VPN/no LAN fallback; external-network handoff untested. Initial internal-symbol compile failure log retained separately before final correction/build.
+
+Same installed73 controlled checks PASS: original46+extended23+note finalization/clarification4. New once/twice cases include semantic/direct subcases, actual scoped Room and current query readToken preservation with scripted engines; not actual model recovery. IO paired segment medians72.672422→29.504649ms and isolated ten-hash batch6.67332→3.333321ms/5rounds/equality+cleanup PASS; not whole app latency.
+
+Actual normal-send4B note3 attempts:30705ms/3gen/8typedloads FAIL(title copy error/search0/no approval/no patch);87303ms/8gen/23loads PASS(exact target/approval1/patch1/full AFTER model ACK/plain0/final receipt+8 visible+answer bytes/cleanup/preferences/idle);47398ms/5gen/14loads FAIL(approved exact patch1,then repeated confirmation before first AFTER read). The two original failed report idle=false values remain unchanged; exact receipts/all3+5 companions/fixture+preferences cleanup and separate independent empty idle were verified. Success has raw question0, so actual new feedback activation is unobserved. Synthetic isolated notes/3allowed tools/guarded fixture consent, not manual human approval or commercial readiness. No actual9B1085 or1085 cancellation run is claimed.
+
+Original20 planner-only4B compact9/20 versus strict20/20 core-parser acceptance has no tool effects and no complete workflow/semantic-quality implication. Each20recorded/load1/full wire+compiled/source bindings/own unload+idle PASS. Strict schema remains uninstalled. [Plan audit](architecture/progress-audit-2026-11-15.ko.md) records the still-unconnected PC/phone architecture and newly rerun38 pure prototype tests.
+
 ## 2026-11-15 installed1084
 
 Full3m49/core945+app870=1815 JVM PASS,0fail/error/skip,lint0errors144warnings1Hint;736 frozen inputs. Main3a3b9f59bdf65163fb9d41a5c37a1759ab7ab0346408bb37e9b137ff7c8cd7b4/test9e9e69845012192b6ed88eacd1f811916606227de6724b11c5fce7be8651330e signed/installed/baseSHA verified, data retained. Original pinned authenticated direct Tailscale health106ms PASS/VPN/no LAN fallback; external-network handoff untested.

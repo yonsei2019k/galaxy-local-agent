@@ -2,7 +2,18 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Installed1084; finalization optimization observed; intermittent readback clarification remains
+## Installed1085; dual-device plan audit identifies missing product integration
+
+User requested reconciliation with the original PC-agent/phone+PC-control plan. [The audit](docs/architecture/progress-audit-2026-11-15.ko.md) confirms it was included. Existing integrated design retains phone parent authority and PC child coordination; generic broker/provider/PC executor/Android client/shared-control/PC companion are not connected. Python protocol/state prototype remains offline only;38 pure tests freshly PASS. Three pinned development chats are not product execution integration. Priority returns to these central execution gaps; additional note candidates stay ignored/unintegrated.
+
+1085 full7m03/core945+app877=1822 JVM PASS/0fail-error-skip/lint0errors144warnings1Hint;738 frozen inputs. Main d899eb6fd1ba01e9b7b6070948e0c1dbf3bb1dece2bd56180c7a150bcde2471a/test2c1990ea4acbf80183a46ec0d3c9b0c1b7716d144c8db9736ca8126e3105cf58 signed/installed/exact base hashes/data retained; original pinned direct Tailscale88ms PASS, external handoff untested. Same installed73 controlled phone checks PASS, including4 note finalization/once/twice tests with semantic/direct subcases. First compile failed on an internal-module call; its log is retained, Root's canonical compact-page equality correction is in the final tested build.
+
+Actual1085 4B default matrix1/3: first30705ms FAIL(title query lost a character,0approval/0patch),repeat87303ms PASS(8gen/23typedloads/approval1/exact patch/whole AFTER ACK/final receipt and companions/cleanup/preferences/idle),third47398ms FAIL(after verified patch1,asked confirmation before the first AFTER read). Both failures remain paused/awaiting_owner_input with their original idle=false; fixture/preferences cleanup and separate independent empty/idle verified. No false completion. Successful repeat had no clarification, so actual new-feedback activation is unobserved; controlled phone evidence is separate. No actual9B1085 run is claimed. These are isolated synthetic notes with3allowed tools, not broad product quality.
+
+Separate4B planner-only original20 single-call screen: compact9/20 versus existing strict action-oneOf20/20 parser accepts,20/20 recorded each,load1each,exact receipt/compiled bindings/own cleanup/idle PASS. Tool effects0; strict semantic review and production2-attempt speed benefit unproven. No schema promotion or4B default promotion. The installed model profile/permission/queue boundaries remain unchanged.
+
+## Historical1084 checkpoint
+### 1084 finalization evidence; intermittent readback clarification remains
 
 Full3m49 PASS: core945+app870=1815 JVM tests,0fail/error/skip; lint0errors144warnings1Hint;736 frozen inputs. Signed main3a3b9f59/test9e9e6984 installed with original identity/data and exact base hashes. Original pinned direct Tailscale health106ms PASS; external-network handoff untested. Same installed71 controlled checks PASS, including Calendar8 and recipient UI/scripted cases; Calendar uses controlled endpoints and does not validate live Google OAuth/provider behavior.
 

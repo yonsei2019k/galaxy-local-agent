@@ -756,6 +756,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     var reviewCount=0
                     var reviewSummary=""
                     var truncatedToolRetried=false
+                    var noteQuestionFeedbackUsed=false // At most once in this active execution; not a durable run-lifetime counter.
                     // A model-selected answer signal opens the existing bounded prose writer once.
                     // It grants no tool authority and is never itself a completion or visible answer.
                     var directAnswerWriting=false
@@ -855,6 +856,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             // The writer has already checkpointed it and published the pause reason.
                             complete=true
                             return@roundStep
+                        }
+                        if(useStructured&&!noteQuestionFeedbackUsed)noteQuestionFeedback(request,taskGoal,allowedTools,written,
+                            com.user.localagent.core.WorkSegments.TOTAL_ROUNDS-round-1)?.let{feedback->
+                            noteQuestionFeedbackUsed=true;query+="\n"+feedback;return@roundStep
                         }
                         if(useStructured&&pauseForOwnerInput(request,raw,written.summary?.mayBeTruncated==true)){
                             responsePaused=true;complete=true;return@roundStep
@@ -1862,6 +1867,26 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         answer(question);persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode=com.user.localagent.core.NextActionQuestion.PAUSE_CODE)
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
+    }
+    /** Protocol feedback only. No answer, tool call, approval or completion is published here. */
+    private suspend fun noteQuestionFeedback(request:QueuedChatRequest,goal:com.user.localagent.core.TaskGoal,
+        allowed:Set<String>,written:WrittenAnswer,remainingRounds:Int):String? {
+        val feedback=NoteReadbackQuestionFeedback.feedback(request,goal,requestSteps,observedOutcomes,requestReadbackObligations,
+            readbackContext(request),allowed,requestTools?.deliveredNoteReadKeys().orEmpty(),written,false,remainingRounds,requestGuidance.isNotEmpty())?:return null
+        currentCoroutineContext().ensureActive()
+        val active=activeRequest?:throw CancellationException("현재 요청이 없어 재조회 판단을 중단했습니다.")
+        if(active.runId!=request.runId||active.threadId!=request.threadId||active.branchId!=request.branchId||active.projectId!=request.projectId||
+            requestJob?.isActive!=true||pendingSteerRunId==request.runId)throw CancellationException("현재 요청이 중지·변경되었습니다.")
+        if(approval.value!=null)return null
+        val disabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+        if("read_note" in disabled)return null
+        val live=checkNotNull(app.repository.chat.run(request.runId))
+        check(live.status=="running"&&live.threadId==request.threadId&&live.branchId==request.branchId&&live.projectId==request.projectId)
+        app.repository.chat.updateRunContext(live.id,live.contextJson) // Existing transactional current branch/project binding check.
+        currentCoroutineContext().ensureActive()
+        if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용을 위해 재조회 판단을 중단했습니다.")
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"현재 재조회 관측값을 보존하고 모델에 다음 행동 판단을 한 번 더 요청합니다.")
+        return feedback
     }
     private suspend fun pauseForOwnerInput(request:QueuedChatRequest,raw:String,truncated:Boolean):Boolean {
         var invalid=false

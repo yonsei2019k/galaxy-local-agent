@@ -1,5 +1,11 @@
 # Galaxy Local Agent implementation contracts
 
+## Bounded note readback clarification feedback1085
+
+One active execution may append static protocol feedback after a normal unpublished structured clarification only for a fresh note-only ACT request with one current exact durable patch receipt, a single pending NOTE_PATCH, a model-ACKed same-target/new-version partial AFTER page and its actual nextOffset, current read permission and remaining budget. Original query/source references remain unchanged. The model selects its next action; a repeated question uses the original pause path. Existing live cancel/steer/run/branch/project/disabled-read/approval checks are repeated. No automatic read, mutation, approval, completion, question-word classification, durable retry framework or budget increase is introduced. Old goals/steps/inherited obligations/continuations/mixed work retain prior behavior. The active-execution latch is not a run-lifetime-once promise.
+
+The current host's ACK-bound page must equal its parsed compact serialization; alternate/duplicate-key encodings decline feedback. Feedback before the first AFTER page and search-query owner references are source-only candidates, not installed features. Actual1085 repeats include one complete note workflow and two separately retained early-question failures; controlled once/twice tests do not prove general semantic recovery. PC/phone orchestration remains an unconnected offline prototype; see the2026-11-15 plan audit.
+
 ## Verified note-only finalization1084
 
 After a normal unpublished EOG model review_complete or experimental direct answer decision, a fresh note-only ACT request may publish the SAME existing ActionCompletionReport without generating discarded final prose. This requires one actual verified literal patch, current run/thread/branch/scope-bound durable receipt, same-target/new-version whole AFTER pages actually acknowledged by the model, TaskHarness/readback completion, and unchanged live context/permission/cancel/steer/store-write guards. Mixed tasks, old goal/steps/continuations, inherited proof, selected PC/Kakao data, malformed/opaque/truncated output and incomplete proof retain the existing fallback. No tool executes automatically, no new completion evidence or authority is created, and no renderer/store/model API is replaced.

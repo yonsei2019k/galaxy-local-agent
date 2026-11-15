@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Authored only. Real coordinator, approval seam, scoped Room/writeRunAnswer; scripted model, no PC/API/model calls. */
 @RunWith(AndroidJUnit4::class)
 class NoteReceiptFinalizationDeviceValidation {
-    private class ScriptedEngine(private val direct:Boolean,private val current:suspend()->NoteRecord):ComputeExecutionEngine {
+    private class ScriptedEngine(private val direct:Boolean,private val questions:Int=0,private val current:suspend()->NoteRecord):ComputeExecutionEngine {
         override val state=MutableStateFlow("synthetic note finalization")
         override val residentModelPath:String?=null
         override val lastMetrics=MutableStateFlow<InferenceMetrics?>(null)
@@ -37,6 +37,8 @@ class NoteReceiptFinalizationDeviceValidation {
         override val waitingForResource=MutableStateFlow<ComputeResource?>(null)
         override val executionLocation="pc"
         val calls=AtomicInteger();val plains=AtomicInteger();val actions=AtomicInteger();val plans=AtomicInteger();val decisions=AtomicInteger()
+        val asked=AtomicInteger();val feedbackInputs=AtomicInteger()
+        private var questionTokens:Set<String>?=null
         override suspend fun load(path:String,options:InferenceOptions){}
         override suspend fun unload(){}
         override fun cancel(){}
@@ -47,7 +49,20 @@ class NoteReceiptFinalizationDeviceValidation {
             plains.incrementAndGet();"QA_DISCARDED_FINAL_PROSE_MUST_NOT_BE_GENERATED"
         }
         override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>)=events {
+            questionTokens?.let{tokens->
+                check(userText.contains(NoteReadbackQuestionFeedback.MARKER))
+                check(userText.indexOf(NoteReadbackQuestionFeedback.MARKER)==userText.lastIndexOf(NoteReadbackQuestionFeedback.MARKER))
+                check(tokens.all{userText.contains(it)}){"Current page references were not preserved"}
+                feedbackInputs.incrementAndGet();questionTokens=null
+            }
             when{
+                actions.get()==3&&asked.get()<questions->{
+                    val number=asked.incrementAndGet()
+                    // Exact serialized metadata extraction in a synthetic test, not natural-language question routing.
+                    questionTokens=userText.split("\"readToken\":\"").drop(1).map{it.substringBefore('"')}.toSet()
+                    check(questionTokens?.isNotEmpty()==true)
+                    "{\"type\":\"clarification\",\"question\":\"QA 질문 $number: 계속할까요?\"}"
+                }
                 schema.contains("targetType")&&schema.contains("requiredTools")->{
                     check(!direct);plans.incrementAndGet()
                     """{"action":"TOOL_TASK","goal":"합성 메모의 needle만 changed로 수정하고 같은 새 버전 전체를 조회","target":"","publicQuery":"","sourceKind":"none","targetType":"CONTENT","requiredTools":["patch_note","read_note"],"constraints":["다른 문구와 줄바꿈 보존"],"usesPrivateData":true,"question":""}"""
@@ -76,7 +91,10 @@ class NoteReceiptFinalizationDeviceValidation {
     @Test fun reviewedNotePublishesTheSameStoredReportWithoutTheDiscardedFinalGeneration()=runBlocking(Dispatchers.Default){runCase(false)}
     @Test fun directAnswerPublishesTheSameStoredReportWithoutTheDiscardedFinalGeneration()=runBlocking(Dispatchers.Default){runCase(true)}
 
-    private suspend fun runCase(direct:Boolean){
+    @Test fun onePartialReadbackQuestionGetsOneModelReconsiderationAndThenTheActualTailRead()=runBlocking(Dispatchers.Default){runCase(false,1);runCase(true,1)}
+    @Test fun repeatedPartialReadbackQuestionStillPausesWithoutAutomaticReadOrCompletion()=runBlocking(Dispatchers.Default){runCase(false,2);runCase(true,2)}
+
+    private suspend fun runCase(direct:Boolean,questions:Int=0){
         val args=InstrumentationRegistry.getArguments()
         assumeTrue("noteReceiptFinalizationApproved=true required",args.getString("noteReceiptFinalizationApproved")=="true")
         args.getString("noteReceiptFinalizationExpectedVersion")?.toLongOrNull()?.let{expected->
@@ -105,7 +123,7 @@ class NoteReceiptFinalizationDeviceValidation {
             val r=store.createThread(p.id,title).also{room=it};val scoped=app.repository.forThread(r.id).also{repository=it}
             val ws=app.workspaceFor(p.id).also{workspace=it};check(!ws.state.value.external&&ws.list().isEmpty())
             val initial=scoped.saveNote("$title-note",before,collection).also{seed=it}
-            val engine=ScriptedEngine(direct){checkNotNull(scoped.getNote(initial.id))}
+            val engine=ScriptedEngine(direct,questions){checkNotNull(scoped.getNote(initial.id))}
             val coordinator=withContext(Dispatchers.Main){ChatRunCoordinator(context,app,restorePersistedQueue=false,
                 inferenceChoiceOverride={choice},workerEngineFactory={request->
                     check(request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&!request.allowCloudText);engine
@@ -131,13 +149,23 @@ class NoteReceiptFinalizationDeviceValidation {
                 if(store.run(id)?.status !in setOf("queued","running","waiting_approval")&&coordinator.executionForRun(id)==null)break
                 delay(25)
             }}
-            val completed=checkNotNull(store.run(id));assertEquals(completed.errorCode,"completed",completed.status)
-            assertEquals(1,approvals);assertEquals(1,engine.decisions.get());assertEquals(if(direct)0 else 1,engine.plans.get())
-            assertEquals(4,engine.actions.get());assertEquals("One previously discarded final generation must be absent",0,engine.plains.get())
-            assertEquals(if(direct)5 else 6,engine.calls.get())
+            val completed=checkNotNull(store.run(id));val stopped=questions==2
+            assertEquals(completed.errorCode,if(stopped)"paused"else"completed",completed.status)
+            assertEquals(1,approvals);assertEquals(if(stopped)0 else 1,engine.decisions.get());assertEquals(if(direct)0 else 1,engine.plans.get())
+            assertEquals(questions,engine.asked.get());assertEquals(if(questions==0)0 else 1,engine.feedbackInputs.get())
+            assertEquals(if(stopped)3 else 4,engine.actions.get());assertEquals(0,engine.plains.get())
+            assertEquals((if(direct)5 else 6)+(if(questions==1)1 else 0),engine.calls.get())
             val captured=QueuedChatRequest.fromJson(completed.contextJson);val steps=captured.previousSteps
-            assertEquals(1,steps.count{it.tool=="patch_note"});assertEquals(3,steps.count{it.tool=="read_note"})
+            assertEquals(1,steps.count{it.tool=="patch_note"});assertEquals(if(stopped)2 else 3,steps.count{it.tool=="read_note"})
             val actual=checkNotNull(scoped.getNote(initial.id));assertEquals(after,actual.body);assertEquals(initial.title,actual.title)
+            if(stopped){
+                assertEquals(NextActionQuestion.PAUSE_CODE,completed.errorCode)
+                val answer=checkNotNull(store.assistantForRun(id));val saved=store.fullMessageText(answer.id)
+                assertTrue(saved.contains("QA 질문 2"));assertFalse(saved.contains("QA 질문 1"))
+                val proof=checkNotNull(captured.readbackObligations)
+                assertFalse(RequiredReadbackObligations.assess(proof,proof.context,steps,0,allowed,18-steps.size,1,true).readbackSatisfied)
+                return
+            }
             val binding=NoteReadBinding(id,r.id,r.activeBranchId,store.accessScope(r.id).scopeKey)
             val host=NoteReadPatchHost(binding,NotePatchStore(binding,scoped.notePatchTransactions(binding))){}
             val session=NoteReadPatchSession(binding)
