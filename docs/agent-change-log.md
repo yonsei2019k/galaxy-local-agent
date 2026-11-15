@@ -1,3 +1,29 @@
+## 2026-11-15 — 1071 phase3 통제4·정확 복구 PASS / 성능 개선 우선 전환
+
+Test-only 3수정(실제 자기 PHONE lease의 resource/owner 대조, normal canary 고정 진단, 분석 시험 terminal ledger 후조건·exact 복구)을 한 빌드로 묶었다. Assembly1m48, 서명·설치·독립 SHA·direct pinned overlay PASS이며 main c680 불변/test6fe7c5c9bc103c269b4d842fd33bab38c1026e4c54d1c684b89d89d0089bea3b다. 새 prerequisite4가 모두 PASS다. 이전 test0ca의76개와 이번4개를 구분하며 새 APK 전체80 재실행으로 주장하지 않는다. 분석 exact synthetic recovery도 PASS, 원 보고서 bytes 불변/owner DB 열기0/model0을 확인했다. Phone byte-exact pull과 PowerShell 텍스트 저장본의 SHA를 구분해 실제 phone bytes를 복구 입력에 사용했다.
+
+Normal canary 새 회차는57335ms FAILED, captured1/실제 typed load1·matched receipt1/cleanuptrue다. Private 고정 JSON과 기존 FailureLog의 같은 회차 시간창에서 plan_rejected_missing_connection_target·SemanticPlanningException을 독립 대조했다. SafeError allowlist 밖이라 JSON UNKNOWN이지만 기존 고정 로그에 원 code가 남는다. 앞선71341ms paused에 같은 원인을 소급 적용하지 않는다. 원래 자연어/모델/완료 판정은 바꾸지 않았다.
+
+분석 fresh repeat는173774ms QA_ANALYSIS_NOT_VERIFIED로 strict FAIL이며 model/fixture cleanup은 모두true다. 첫 회차의 내용 검증 성공이나 이번 정리 성공을 전체 성공으로 승격하지 않는다. 종료676source+10public+6build와 실제 main/test 바이트/direct overlay244ms/PC empty idle을 재확인했다.
+
+사용자가 모든 추론·도구·읽기/쓰기/저장 실행속도 개선을 새 우선순위로 명시했다. 3개 기존 고정 채팅을 모델/worker, 도구·Room·파일 I/O, end-to-end 계측·성능 회귀로 병렬 분담했고 canonical/deploy/실제 모델은root가 통합한다. 먼저 같은 시나리오 cold/warm·단계별 전후 실측을 준비하며 실제 권한·대상·CAS·readback·durable receipt/취소/모델 pin을 생략하지 않는다. notes v2/F1 및 실제 note canary는 frozen 미통합 상태로 보존한다.
+
+## 2026-11-15 — 1071 설치·76 기기 검사 PASS / 실제 PC 검증과 남은 실패
+
+Core828/app779=1607 JVM0fail/error/skip, 최종 release/test5m59 및 lint0errors/144warnings/1hint를 확인했다. Main c680de6776712f867bc7391797ecc90627b2a97e028ec32db5ff7d4237f05133 설치·서명·데이터 유지와 독립 base SHA 대조를 완료했다. Test-only phase0ca0278a15676a9f64ea79739fc8931ba50c86b2fa842bd69148b602eab3aa39는676source+10public+6build 입력을 대조했고 original certificate pin/direct overlay189ms·VPN 확인·LAN fallback false다. 외부망 전환 증거는 아니다.
+
+최초 Calendar8 FAIL은 빈 Compose 테스트 화면 초기화 경로였다. UI thread setContent 안에 대기 Text만 추가한 별도 test-only phase에서 원래 Calendar8·file binding6·old59·empty-model3=76개가 PASS다. Cold2는 중복 통제로 합산하지 않는다. 새 prerequisite4는 자기 PHONE lease를 ownerQuiet가 거부해 시나리오 전에 FAIL이며 실제 획득 handle/resource/owner 일치만 허용하는 테스트 수정은 통합했지만 아직 컴파일·설치하지 않았다. 권한/사용자 작업 차단은 유지한다.
+
+Actual logical paired-PC cancellation은94322ms PASS다. Typed load6회의 실제 receipt가 모두 일치하고 원래 generation과 연결된 HTTP200 ACK_CLEANED/수락/cleanup,226자 보존, calls2→2, owner unload/idle/fixture cleanup을 확인했다. native decoder active proof는 false다. 정상 send/selector actual canary는71341ms 뒤 completed 대신 paused로 FAIL이며 정리 후 PC idle을 확인했다. 원인은 아직 확정하지 않았고 원래 판정을 유지한 private 고정 메타데이터 진단을 준비 중이다.
+
+Actual direct analysis는 합성 import1/chunk1/finding1/citation1, 최종 정정 문장, fresh journal·evidence readback, 원문 불변, 보고서 hash, 실제 PC와 model cleanup을 검증했다. 그러나115634ms 뒤 fixture_roster cleanup 검사가 실패해 전체 FAIL을 유지한다. 소스에서 project 삭제 뒤 terminal run ledger를 남기는 계약과 isEmpty 기대값이 충돌하는 테스트 결함을 확인했으며 exact QA recovery/수정은 아직 실행 전이다. NLP 도구 선택·일반 의미 정확도·전체 상용화 성공으로 승격하지 않는다. Registry102/notes 미통합 상태이고 원래 미추적 사용자 파일은 보존했다.
+
+## 2026-11-15 — 1071 actual 분석 model pin 연결 통합 / 최종 검증 전
+
+Root가동결analysis후보654090df/manifestde392eca의3owning baseline·6payload SHA와patch를대조하고4production/2pure회귀소스(25선언)를통합했다. 동일request Automatic의원래owner/capturedpairrevision/local-only/PClease와기존strict typedload를사용해실제fullSHA/context/route를확인한다. LocalWeight가PC에서실행되면폰Gemma SHA를actualpin으로쓰지않는다. 매count전/매generation전기존load응답을재확인하며residencycache/새workerAPI/queue/generic엔진변경은없다. 준비실패만최초오류로보존해workflow·overview의출력repair/partial성공으로새보고서를만들지않고,기존유효checkpoint는보존한다. CancellationException은원래취소로전파한다.
+
+알수없는관측wrapper는actual identity지원없으면not-ready이며실제facade의marker를그대로forward할수있다. 직접known phone engine은기존global inference범위/verified파일record/실제loadpath로별도구분하고새로운전체파일재해시증거로쓰지않는다. 기존Decider내별도globalgate/finally가있다는이전Root가정은소스로정정했으며,원래requestcomputelease와Coordinatorunload소유를보존했다. 중간not-ready를해소하려는소스연결이지아직기능보존성공은아니다. 모델입력/권한·정확인용/coverage/checkpoint해시를소급바꾸지않으며전체보안·release/test·서명/설치/native/actual모델검증은이제진행한다.
+
 ## 2026-11-15 — 1071 target 소스1582JVM·release/lint PASS / 미설치
 
 Root의첫target검사는51s에planningStage<T:Any>와nullable loadTarget반환의타입오류로FAIL해loading lambda에Unit을명시했다. 두번째56s는누락소비자ReflectionWorker의파일전용가정으로FAIL해기존background local-only를LocalWeight unwrap으로보존했다. 이전app732XML캐시는새검사로세지않았다. 세번째4m20는core828/app754=1582 JVM0fail/error/skip 및androidTest assemble PASS,별도release/lint4m29 PASS/0errors144warnings1hint다. 종료671source+별도public10/build6을대조했다. 아직1071서명/설치/기기/실모델0이며폰1070의성공을승계하지않는다.
@@ -1086,3 +1112,7 @@ Tailscale: 기준 실행 완료·compute_busy=false/cleanup_pending=false·모�
 ### 2026-11-14 상용화 준비 분석 보고서 (문서만, 소스·빌드·설치 변경 없음)
 
 `docs/commercial-readiness-2026-11-14.ko.md`를 추가했다. 기준은 커밋 8c3ed07과 설치 1059의 기존 기록이며, 저장소 문서·빌드 설정·매니페스트·CI·lint 결과·평가 기록을 읽어 정리했다. 새 빌드, 기기 검사, 모델 평가는 실행하지 않았다. 에이전트 품질, PC 의존 구조, 보안·개인정보, 배포·스토어 정책, 코드 구조, 사용자 경험, 운영·지원, 법무, 검증 체계의 간격과 단계별 통과 기준을 담는다. 스토어 정책·법률 항목은 최신 문서와 대조하지 않은 검토 필요 지적이다. 계약·도구·프롬프트 변경은 없다. 배포 경로, 추론 위치, 지원 범위의 소유자 결정이 남아 있다.
+
+### 2026-11-15 상용화 방향 소유자 결정 기록 (문서만, 소스·빌드·설치 변경 없음)
+
+소유자가 `docs/commercial-readiness-2026-11-14.ko.md`의 권장안을 확정했다: 직접 배포(APK+서명 자체 업데이트), PC 필수 유지+PC 설치 프로그램 제작, 갤럭시 최신 2~3기종 한정 지원. 같은 문서 맨 위에 결정과 단계 0 상태(HEAD eaf69f4, 설치 1070, 소스 1071 통합 중)를 기록을 읽어 추가했다. 진행 중인 1071 통합 창과 겹치지 않도록 공용 소스·빌드·설치·기기 검사는 실행하지 않았다. GitHub CLI 2.104.0을 이 PC에 설치하고 소유자가 로그인했다(자격 증명은 저장소 밖 Windows 키링). 저장소는 공개 상태이고 main의 마지막 CI 실행은 2026-10-30이다.

@@ -1,7 +1,5 @@
 package com.user.localagent.analysis
 
-import com.user.localagent.inference.loadTarget
-
 import com.user.localagent.AppContainer
 import com.user.localagent.inference.*
 import com.user.localagent.models.ChosenInference
@@ -18,11 +16,10 @@ class LocalPrivateAnalysisDecider(
     private val source:PrivateSourceSnapshot,
     private val selectOverview:Boolean=false,
     private val requestEngine:InferenceEngine=app.engine,
+    private val analysisModel:PreparedAnalysisModel,
 ):PrivateAnalysisDecider {
     private val timeIndex=PrivateTimeReferenceIndex(source.timeRefs,source.coreSource.utf8ByteLength)
     override suspend fun decide(input:String,schema:String,repair:Boolean):String {
-        if(chosen.model !is com.user.localagent.models.LocalWeight)
-            throw com.user.localagent.models.InferencePrerequisiteMissing(com.user.localagent.models.InferencePrerequisiteReason.PC_ANALYSIS_PROVENANCE_UNAVAILABLE)
         chosen.model.requireSelectable()
         val original=Json.parseToJsonElement(input).jsonObject
         val start=(original["chunk"] as? JsonObject)?.get("startByte")?.jsonPrimitive?.intOrNull
@@ -51,14 +48,17 @@ class LocalPrivateAnalysisDecider(
             appendLine("Output schema: $schema")
         }
         val maximumOutput=if(selectOverview)256 else 1024
-        var options=chosen.options.copy(thinking=false,maxOutputTokens=maximumOutput,audioEnabled=false,visionEnabled=false,projectorPath=null)
+        var options=chosen.options.privateAnalysisOptions(maximumOutput)
         try {
             return withTimeout(600_000) {
-                requestEngine.loadTarget(chosen.model,options)
+                // Token counting also sends private source text; confirm the actual pin before it.
+                requestEngine.preparePrivateAnalysis(chosen.model,options,analysisModel)
                 val count=requestEngine.countChatTokens(user,system,emptyList())?:error("분석 문맥의 실제 토큰 수를 확인하지 못했습니다.")
                 val outputBudget=minOf(maximumOutput,options.contextSize-count-256)
                 require(count>=0&&outputBudget>=256){"현재 질문과 원문 조각이 모델 문맥 예산을 넘었습니다. 원문이나 질문을 잘라 분석하지 않았습니다."}
-                if(outputBudget!=options.maxOutputTokens){options=options.copy(maxOutputTokens=outputBudget);requestEngine.loadTarget(chosen.model,options)}
+                if(outputBudget!=options.maxOutputTokens)options=options.copy(maxOutputTokens=outputBudget)
+                // Always obtain fresh actual preparation immediately before generation, even at the same cap.
+                requestEngine.preparePrivateAnalysis(chosen.model,options,analysisModel)
                 val text=StringBuilder();var terminal:GenerationSummary?=null
                 val events=if(requestEngine.supportsStructuredOutput)requestEngine.generateStructuredEvents(user,system,schema,emptyList())else requestEngine.generateChatEvents(user,system,emptyList())
                 events.collect {event->

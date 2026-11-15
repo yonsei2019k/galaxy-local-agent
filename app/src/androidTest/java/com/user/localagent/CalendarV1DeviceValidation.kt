@@ -157,6 +157,7 @@ class CalendarV1DeviceValidation {
             runner=coordinator
             uiInstalled=true
             compose.activity.runOnUiThread {compose.activity.setContent {MaterialTheme {
+                Text("격리 Calendar 승인 대기")
                 val actions by coordinator.pendingActions.collectAsState()
                 val selected by shown.collectAsState()
                 actions.firstOrNull{it.runId==selected}?.let {action->ActionApprovalDialog(action,checkNotNull(action.reviewText))}

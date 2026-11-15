@@ -5,6 +5,8 @@ import com.user.localagent.AppContainer
 import com.user.localagent.core.*
 import com.user.localagent.data.LocalRepository
 import com.user.localagent.models.ChosenInference
+import com.user.localagent.inference.preparePrivateAnalysis
+import com.user.localagent.inference.privateAnalysisOptions
 import com.user.localagent.skills.BundledSkillStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -56,19 +58,22 @@ class PrivateAnalysisExecutor(
         require(snapshot.coreSource.ref.kind==expected&&snapshot.coreSource.ref.scopeId==scopeId){"이 분석 도구에 맞는 현재 범위의 원문이 필요합니다."}
         val question=previous?.question?:call.arguments.getValue("question").jsonPrimitive.content
         val chosen=choose(question)?:error("검증된 분석 모델을 선택해야 합니다.")
-        val analysisModel=(chosen.model as? com.user.localagent.models.LocalWeight)?.installed
-            ?:throw com.user.localagent.models.InferencePrerequisiteMissing(com.user.localagent.models.InferencePrerequisiteReason.PC_ANALYSIS_PROVENANCE_UNAVAILABLE)
+        // The same request facade owns this preparation and the existing compute lease/teardown.
+        val analysisModel=requestEngine.preparePrivateAnalysis(chosen.model,chosen.options.privateAnalysisOptions(1024))
         val skill=skills.read(if(expected==PrivateEvidenceKind.AUDIO_TRANSCRIPT)"recording-analysis"else"message-analysis")
-        val workflow=PrivateRecordAnalysisWorkflow(LocalPrivateAnalysisDecider(app,chosen,skill,snapshot,requestEngine=requestEngine),journal)
+        val workflow=PrivateRecordAnalysisWorkflow(LocalPrivateAnalysisDecider(app,chosen,skill,snapshot,requestEngine=requestEngine,analysisModel=analysisModel),journal)
         val locator=snapshot.metadata.getValue("sourceLocator").jsonObject
         progress("원문 범위를 확인했습니다 · ${snapshot.coreSource.utf8ByteLength}바이트")
-        val result=workflow.run(snapshot.coreSource,locator,question,analysisModel.sha256,skill.sha256,
+        val result=workflow.run(snapshot.coreSource,locator,question,analysisModel.modelSha256,skill.sha256,
             analysisId=previous?.id,maxChunks=call.integer("maxChunks",16),progress={done,total->progress("원문 분석 · $done/$total 조각 · 근거와 진행 상태 저장 중")})
+        // Output repair may return partial coverage; an actual preparation failure must still fail this run.
+        analysisModel.requireUsable()
         val saved=journal.load(result.checkpoint.id)?:error("분석 저장 결과를 다시 읽지 못했습니다.")
         check(saved==result.checkpoint)
         progress("질문에 맞는 저장 근거를 검토 중")
-        val overviewDecider=LocalPrivateAnalysisDecider(app,chosen,skills.read("evidence-synthesis"),snapshot,selectOverview=true,requestEngine=requestEngine)
+        val overviewDecider=LocalPrivateAnalysisDecider(app,chosen,skills.read("evidence-synthesis"),snapshot,selectOverview=true,requestEngine=requestEngine,analysisModel=analysisModel)
         val overview=PrivateAnalysisOverview(PrivateOverviewDecider {input,schema->overviewDecider.decide(input,schema,false)}).select(saved)
+        analysisModel.requireUsable()
         val artifact=writeReport(snapshot,result,overview)
         val findings=allFindings(saved)
         val timeIndex=PrivateTimeReferenceIndex(snapshot.timeRefs,snapshot.coreSource.utf8ByteLength)

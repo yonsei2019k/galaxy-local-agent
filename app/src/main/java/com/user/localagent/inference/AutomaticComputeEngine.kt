@@ -3,6 +3,7 @@ package com.user.localagent.inference
 import android.content.Context
 import com.user.localagent.benchmark.RuntimeGate
 import com.user.localagent.compute.*
+import com.user.localagent.models.*
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -26,12 +27,13 @@ class AutomaticComputeEngine internal constructor(
     private val beforePhoneLoad: suspend () -> Unit = {},
     private val externalPcAuthority: () -> Boolean = { true },
     private val pcOnly: Boolean = false,
-) : ComputeExecutionEngine, PairedPcTextLoader {
+    private val analysisPcTarget: (() -> PairedPcText?)? = null,
+) : ComputeExecutionEngine, PairedPcTextLoader, AnalysisModelPreparation {
     constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {},
         capturedPcRevision:Long?=null,allowCloudText:Boolean=false) :
         this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText), ownerRunId, beforePhoneLoad)
     private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit) :
-        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = true)
+        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = true, analysisPcTarget = parts.analysisPcTarget)
 
     private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -132,6 +134,29 @@ class AutomaticComputeEngine internal constructor(
         check(externalPcAuthority()&&receipt.matches(target,options.contextSize)){"원래 PC의 모델 준비 결과를 확인하지 못했습니다."}
         snapshot()
         receipt
+    }
+
+    /** Uses the existing typed loader's mutex/lease. Do not nest that load inside this mutex. */
+    override suspend fun prepareAnalysisModel(target: InferenceModelTarget, options: InferenceOptions): PreparedAnalysisModel {
+        requirePrivateAnalysisText(target, options)
+        require(!options.deviceOnly) { "휴대전화 전용 작업을 PC 분석으로 바꾸지 않습니다." }
+        val owner = ownerRunId?.takeIf { it.isNotBlank() }
+            ?: throw InferencePrerequisiteMissing(InferencePrerequisiteReason.ORIGINAL_PC_AUTHORITY_MISSING)
+        if (!pcOnly) throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_ANALYSIS_PROVENANCE_UNAVAILABLE)
+        val capturedTarget = analysisPcTarget?.invoke()
+            ?: throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_ANALYSIS_PROVENANCE_UNAVAILABLE)
+        val actualTarget = when (target) {
+            is PairedPcText -> target.also {
+                check(it.authorizationRevision == capturedTarget.authorizationRevision) {
+                    "분석 모델 선택과 원래 PC 사용 권한이 다릅니다."
+                }
+            }
+            is LocalWeight -> capturedTarget
+        }
+        // LocalWeight is the owner's selection label. It is never the PC model's actual hash.
+        val receipt = loadPairedPcText(actualTarget, options)
+        currentCoroutineContext().ensureActive()
+        return PreparedAnalysisModel.pairedPc(this, target, actualTarget, options, receipt, owner)
     }
 
     private fun snapshot() {
@@ -245,7 +270,7 @@ class AutomaticComputeEngine internal constructor(
 
     private data class Components(val local: InferenceEngine, val pc: InferenceEngine,
         val eligible: (String, InferenceOptions) -> Boolean, val preflight: suspend () -> Boolean, val report: (String) -> Unit,
-        val externalPcAuthority: () -> Boolean)
+        val externalPcAuthority: () -> Boolean, val analysisPcTarget: () -> PairedPcText?)
     companion object {
         private fun components(context: Context, owner: String?,capturedPcRevision:Long?,allowCloudText:Boolean): Components {
             val settings = PcComputeSettings.get(context)
@@ -261,7 +286,11 @@ class AutomaticComputeEngine internal constructor(
             return Components(LocalInferenceEngine(context), pc,
                 eligible = { _, _ -> settings.snapshot()?.let(::samePair) == true },
                 preflight = pc::preflight, report = settings::report,
-                externalPcAuthority = { settings.snapshot()?.let(::samePair) == true })
+                externalPcAuthority = { settings.snapshot()?.let(::samePair) == true },
+                analysisPcTarget = {
+                    PairedPcText.forRequest("auto", capturedPcRevision, allowCloudText,
+                        settings.authorizationRevision, settings.snapshot()?.let(::samePair) == true)
+                })
         }
     }
 }
