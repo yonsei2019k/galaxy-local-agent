@@ -1,3 +1,39 @@
+## 2026-11-15 — 1074 설치·1699JVM·44폰 PASS / 실제 실패와 정확 복구 분리
+
+Full build6m10 PASS, core873은 소스 불변의 Gradle cache/app826은 fresh이며 합1699/0fail-error-skip, lint0errors/144warnings/1hint다.710입력 대조 후 원래 서명/ID/데이터를 유지해 main3717a82c75abf284d91fe3800d323dcdae6da13f8b086fa320a01dee6ab4d860/testf18027238c788887f4958d6eef7cb19e972327171b066dc3bb3ac879d27aa49c를 설치했다. 동일 phase1 test의 I/O5/LongAnswerFinish17/ChatData12/notes10=44 PASS이며 예전94를 새 결과로 합산하지 않는다. SQLCipher 실제 행 trigger로 동일본문0/변경1/옛무조건 no-op 양성대조/전체본문·metadata·취소 reconciliation·재열기를 확인했다. 동일24구간 조회5쌍 중앙값48.177813→24.88918ms, 별도10회 SHA연산묶음5쌍8.729609→3.804687ms다. 실제 파일 fresh read/CAS/readback/정리는 유지하고 전체 저장·모델 시간 개선율로 승격하지 않는다.
+
+실제 typed cancel은128802ms PASS, typed load8/receipt8, 요청 일치HTTP200 ACK_CLEANED/수락/정리,455자 보존/calls3→3/owner unload·fixture cleanup이다. native decoder active는false/미증명이다. 정상 semantic note는98773ms FAIL/paused/awaiting_owner_input, 승인0/검증도구효과0/다른메모불변/fixture·private prefs 정리true다. 첫실패 QA_RUN_COMPLETED와 실제 terminal code를 캡처했고 독립 PC idle도 확인했다.
+
+Direct opt-in r1은 native NoSuchElementException으로 FAIL(64.61s)이며 마지막 보고서는60682ms/running/typed4match4/gen1/terminal미수집/cleanupfalse다. 실제 원인은 단정하지 않고 원 보고서를 byte 불변 보존했다. batch가 PC idle만 보고 다음 취소를 실행한 문제는 이후 fixture cleanup도 필수인 barrier로 고쳤다. 취소 자체의 원 strict PASS와 이 batch 조정 오류를 구분한다. 진단 test에는 terminal 관측 즉시 publish와 patch count==1의 고정 QA_ONE_VERIFIED_PATCH 실패 코드를 추가해 원 엄격 판정은 유지했다.
+
+Test-only phase2 build1m36 PASS/main unsigned byte동일, test57aef654 설치 후 복구 audit은 잘못된 DB run.contextSize==8192 가정으로 변경 전 거부했다. crash buffer는 QA_RECOVERY_RUN_BINDING 예외와 ART abort를 보이며 모델/제품의 일반 실패 원인으로 단정하지 않는다. enqueue 기록4096·project/actual PC8192를 구분하고 selectThread가 UUID-private prefs에 기록한 정확 thread 키를 반영했다. phase3 compile39s의 nullable JsonObject 진단 오류는 JsonNull로 고쳐 phase4 build54s PASS, 최종 test66fe424520ddb689ffe1cf11b2f6aa221aafe2b2f4a6f57c79c6b1c752f3c482다. production main은 계속3717이며 최종711입력/실제 APK/pinned direct overlay162ms/empty-idle을 재대조했다.44폰과 실제 취소는 phase1 결과이며 최신 test의 새 실행으로 주장하지 않는다.
+
+원 보고서 SHA에 묶은 별도 audit은 정확 합성 프로젝트·대화·run·전문·두 메모·scope·권한·빈workspace·고유prefs를 확인했다. 실제 run completed/verified tools0/대상UNCHANGED_BEFORE/다른메모불변이었다. 별도 허용 recovery는 같은 live 상태를 다시 확인하고 두 메모 CAS/그 프로젝트·private폴더·UUID prefs만 정리해 DB/파일/prefs absence와 원보고서 byte불변을 검증했다(model/PC transport0). 원 실패를 성공으로 재판정하지 않는다. 후속 idempotent absence 검사는 erased ledger가 cancelled여야 한다는 추가 가정 때문에 FAIL했지만 실제 보존 상태는 completed였다. 앞선 실제 정리 검증과 이 테스트 계약 오류를 분리하고1075에서 terminal 보존 계약을 정정한다.
+
+③ source audit은 direct allowed3과 별개로 첫 argument catalog가0개일 수 있음을 확인했다. bounded small-set catalog 후보는1075용 ignored 단계이며 아직 제품에 넣거나 비교경로를 기본 활성화하지 않았다. 전체 의미 이해/요청 완료/상용화 성공을 주장하지 않는다.
+
+## 2026-11-15 — 1074 동일 본문 DB 쓰기 제거 / 당시 검증 전 소스 통합
+
+Root가 frozen checkpoint patch ec569260/manifest8c19abb1의 두 baseline/payload를 대조해 checkpoint SQL 한 줄에 text!=:text를 추가했다. 원래 transaction/run-message binding/전체 chunk 실제 재조회·원문 조립·반환은 유지하며 DAO 반환Unit·metadata·updatedAt·receipt를 바꾸지 않았다. 새 isolated SQLCipher native1은 row trigger와 기존 무조건 no-op UPDATE 양성대조로 같은본문0/다른본문1, 취소된 실제 coroutine의 기존 CancelledAnswerFinalizer/reconciliation, chunk/metadata/재열기까지 확인하도록 작성됐지만 아직 컴파일/실행하지 않았다. 벽시계 성능 향상을 예상값으로 주장하지 않는다.
+
+메모 canary는 진단 frozen9f687ded와 별도 direct opt-in7f2eeebe를 원 baselinefd12 기준 정확3way로 결합했다(최종d4ccf56f). direct 후보에는 진단 helper가 실제 없었음을 확인해 그대로 덮어쓰지 않았다. 최초 실패code/실제 terminal error 고정 allowlist를 보존하고 새 instrumentarg로만 UUID-private prefs의 기존 direct-next-action 비교를 선택한다. 원 요청·승인·실제 효과·readback·완료·cleanup 조건은 유지한다. default semantic은 그대로이며 별도 보고서와 빈 private prefs 정확 복구/삭제를 확인한다. 제품 기본경로나 사용자 설정을 바꾸지 않는다.
+
+별도 actual core-only 직접응답 probe는 일반 literal1 PASS4.761초, 인용문 literal1 FAIL25.892초이며2계획/2기록/정리true다. 인용문은 원문 반환 대신 연결 방법을 답해 실제 의도 실패로 남겼다. 필수 선분류를 생략해도 해석 품질이 해결됐다고 하지 않는다.1074 source/JVM/APK/설치/통제기기/실제모델 결과는 이 시점부터 새로 분리한다. 빌드·서명·설치·모델/폰 창은root만 소유한다.
+
+## 2026-11-15 — GPU startup 후보 비교 종료 / 속도 퇴행으로 기본값 유지
+
+동일 모델/fullSHA·8K·답/terminal/정리 기준에서30 control6회 PASS, unloaded warm-hash load47.787초/native47.734초/GPU여유142MiB다.20의 cold6회와 warm-hash6회도 정답은 PASS지만 후자의 plain응답6.3~6.6초와 structured16.4~16.7초 퇴행으로 채택하지 않았다.12는 cold17.637초(hash10.906/native6.688), warm-hash6.319초(native6.266), 짧은/구조화12정답과 정리를 확인했고 GPU여유1160MiB였다. 별도 native prompt7259토큰/생성19.881초의 고정 구조화 답·정상 terminal·정리도 PASS다. 이는 긴 문맥의 일반 이해력이나 exact token renderer 검증은 아니다.
+
+그러나12의 원래 explicit deep control은 생성275.662초 동안 최종 content/정상 DONE-stop이 없었다. Root가 실제 source·동일 ownerMatches/모델·문맥과 유일한 실행 창을 확인하고 원래 owner-scoped unload로 중단했다. 실패한 원 report/602 reasoning문자/정리true와 별도 관찰 중단 기록을 보존했다. 이를 typed cancel 성공으로 승격하지 않는다. 실제 worker를 canonical 계측31 engines6d52cb12/owned64623369/default ladder로 복구하고 인증된 empty/idle을 확인했다. 새 opt-in profile도 제품에 넣지 않았다. Cold만의 개선을 전체 속도 개선으로 주장하지 않는다.
+
+## 2026-11-15 — PC startup 구간 계측31 / 당시 GPU offload 비교 진행
+
+Root가 frozen31 manifestcba67af2/patchd221151a 및 baseline4615d51f를 대조해 실제 tracked worker 소스에 loadTimings 계측만 반영했다. canonical/actual engines6d52cb12, owned64623369다. hash검사·retry ladder·native argv·90초 readiness·owner/cancel/idle/unload는 유지한다. 공개 경로 Python4 계측 검사와 기존 thinking12 회귀가 PASS다. 원 worker를 백업하고 실제 PID/원본SHA/empty-idle을 확인한 뒤 원자교체·기존 supervisor 재시작과 authenticated idle을 확인했다. Android1073 APK는 바꾸지 않았다.
+
+실제 원래 모델 fullSHA/8K load·기존 resident fast path·동일6합성답/terminal/unload-idle를 두 회차 모두 확인했다. worker재시작 뒤 cold34.729초는 file검사13.656초+native21.031초, 같은 worker의 다음 unloaded warm-hash47.717초는 file검사0+native47.703초다. 같은 resident 확인은25.07/18.83ms다. readiness 안의 CUDA/weight mapping/tokenizer를 각각 증명하지 않으며 이것은 계측이지 자체 성능 개선이 아니다.
+
+현재4GiB GPU에서 기존30-layer가 성공해도 실제 offload에 따른 속도는 별도 문제다. 실제 load 후 고정 GPU 메모리 수치와 같은 정답/terminal/cleanup 기준으로 기존30 대 기존 fallback20을 root만 비교 중이다. 20은 ignored runtime-only 후보이며 canonical에는 아직 채택하지 않았다. 측정이 끝날 때까지 다른 채팅의 source/build/worker/ADB/model 변경은 동결한다. 메모 진단과 no-op checkpoint 쓰기 후보는 다음 별도 Android batch 대기다.
+
 ## 2026-11-15 — 1073 설치·1699JVM·94폰 PASS / 실제 메모 요청 FAIL 보존
 
 최초 full build1m44는 기존 registry count102→104와 Coordinator catalog import 누락으로 실패했다. 기대값은 실제 등록104로 고치고 import를 추가했으며 기존 JsonPrimitive와 patch_note private-data assertTrue도 유지했다. phase2 full build6m42 PASS, core873/app826=1699 JVM0fail/error/skip, lint0errors/144warnings/1hint다.694source+10public+6build를 서명 전에 대조했다. 원래 서명/ID/데이터를 유지해 main532316cdf7a951edb3cf195930db54dde9f900961d7f7a1ed19daf3eca805e24/testd7726b801618617316b73231170efc8bb69a359dc62d955463c5191b75a439d3를 설치하고 실제 base SHA와 원래 pin/direct Tailscale92ms를 독립 확인했다. 동일 test APK의 메모 native10(7.119s), 기존80, I/O4가 모두 PASS다. 겹치는 cold2는 합산하지 않는다.

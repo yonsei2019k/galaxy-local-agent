@@ -12,6 +12,13 @@ import java.io.File
 import java.security.SecureRandom
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -48,6 +55,74 @@ class ToolIoPerformanceValidation {
         finally{current?.close();key.fill(0);check(name.startsWith("tool-io-qa-"));context.deleteDatabase(name)
             check(!context.getDatabasePath(name).exists()){"QA_DATABASE_CLEANUP"}}
     }
+
+    @Test fun identicalCheckpointSkipsOnlyTheRowUpdateAndKeepsCancelledDurableReadback()=runBlocking(Dispatchers.IO){fixture{repo,db,reopen->
+        val chat=repo.chat;val thread=chat.createThread();val run=chat.createRun(thread.id,thread.activeBranchId);chat.startRun(run.id)
+        val message=chat.beginAssistant(run.id);val segment=chat.beginSegment(run.id,message.id,1)
+        val head="동일 본문  보존 😀 e\u0301\r\n".repeat(900)
+        val tail="\r\n취소 직전 실제 저장된 추가 조각 😀 e\u0301  끝"
+        chat.appendChunk(run.id,message.id,segment.id,0,head)
+        val sql=db.openHelper.writableDatabase
+        // Private fixture only: count actual messages.text row-update trigger firings, not elapsed time.
+        // Unlike total_changes(), this ignores Room's own invalidation-table trigger writes.
+        sql.execSQL("CREATE TABLE qa_checkpoint_probe (singleton INTEGER PRIMARY KEY, updates INTEGER NOT NULL)")
+        sql.execSQL("INSERT INTO qa_checkpoint_probe VALUES (1,0)")
+        sql.execSQL("CREATE TRIGGER qa_checkpoint_probe_update AFTER UPDATE OF text ON messages BEGIN UPDATE qa_checkpoint_probe SET updates=updates+1 WHERE singleton=1; END")
+        fun updates():Long=sql.query("SELECT updates FROM qa_checkpoint_probe WHERE singleton=1").use{check(it.moveToFirst());it.getLong(0)}
+        suspend fun checkedCheckpoint(body:String,rows:Long):MessageRecord=db.withTransaction{
+            val before=updates();val stored=chat.checkpointMessage(run.id,message.id);val after=updates()
+            assertEquals("EXACT_TEXT_ROW_UPDATE_COUNT",rows,after-before)
+            assertEquals(body,stored.text);assertEquals(message.copy(text=body),stored)
+            assertEquals(stored,db.dao().messageById(message.id));assertEquals(body,chat.fullMessageText(message.id))
+            stored
+        }
+        checkedCheckpoint(head,1);checkedCheckpoint(head,0)
+        // Positive control proves that a legacy unconditional no-op UPDATE really is observable.
+        db.withTransaction{val before=updates()
+            sql.execSQL("UPDATE messages SET text=text WHERE id=?",arrayOf<Any?>(message.id))
+            assertEquals("LEGACY_NOOP_UPDATE_OBSERVED",1L,updates()-before)
+        }
+        chat.appendChunk(run.id,message.id,segment.id,1,tail)
+        val full=head+tail;checkedCheckpoint(full,1);checkedCheckpoint(full,0)
+        val chunksBefore=db.chatDao().chunks(message.id)
+        val foreign=chat.createThread();val foreignMessage=chat.addMessage(foreign.id,foreign.activeBranchId,"user","synthetic other thread")
+        val beforeWrong=updates()
+        assertTrue("ORIGINAL_MESSAGE_BINDING_REQUIRED",runCatching{chat.checkpointMessage(run.id,foreignMessage.id)}.isFailure)
+        assertEquals(beforeWrong,updates());assertEquals("synthetic other thread",chat.fullMessageText(foreignMessage.id))
+
+        val ready=kotlinx.coroutines.CompletableDeferred<Unit>()
+        var reconciled:com.user.localagent.CancelledAnswerReadback?=null
+        val views=mutableListOf<com.user.localagent.ui.UiAnswerState>()
+        val job=launch {
+            ready.complete(Unit)
+            try{awaitCancellation()}catch(cancel:CancellationException){
+                withContext(NonCancellable){
+                    chat.finishSegment(segment.id,"cancelled");chat.cancelRuns(thread.id)
+                    assertEquals("cancelled",chat.run(run.id)?.status)
+                    reconciled=com.user.localagent.CancelledAnswerFinalizer.finish(cancel,
+                        listOf(com.user.localagent.ui.UiAnswerPart(1,full)),
+                        reconcile={
+                            val durable=checkedCheckpoint(full,0)
+                            com.user.localagent.CancelledAnswerReadback(durable.text,
+                                chat.segmentsForMessage(message.id).map{com.user.localagent.ui.UiAnswerPart(it.partNumber,chat.segmentText(it.id))})
+                        },publish={views+=it})
+                    assertTrue("CANCEL_RECONCILE_NO_SUPPRESSED_FAILURE",cancel.suppressed.isEmpty())
+                }
+                throw cancel
+            }
+        }
+        withTimeout(5_000){ready.await()};withTimeout(15_000){job.cancelAndJoin()}
+        assertEquals(full,checkNotNull(reconciled).text)
+        assertEquals(listOf(com.user.localagent.ui.UiAnswerPart(1,full)),checkNotNull(reconciled).parts)
+        assertEquals(2,views.size);assertTrue(views.all{it.phase==com.user.localagent.ui.UiAnswerPhase.CANCELLED&&!it.canContinue})
+        assertEquals(chunksBefore,db.chatDao().chunks(message.id))
+        assertEquals(full,chat.segmentText(segment.id));assertEquals(full,chat.fullMessageText(message.id))
+        val restored=reopen()
+        assertEquals("REOPEN_FULL_DURABLE_BODY",full,restored.chat.fullMessageText(message.id))
+        assertEquals(full,restored.chat.segmentText(segment.id));assertEquals("cancelled",restored.chat.run(run.id)?.status)
+        assertEquals("cancelled",restored.chat.segmentsForMessage(message.id).single().status)
+        assertEquals(message.copy(text=full),restored.getMessage(message.id))
+    }}
 
     @Test fun segmentQueriesPreserveOrderEmptyMissingForeignAndLiveRowsAfterRestart()=runBlocking(Dispatchers.IO){fixture{repo,db,reopen->
         val thread=repo.chat.createThread();val run=repo.chat.createRun(thread.id,thread.activeBranchId);repo.chat.startRun(run.id)

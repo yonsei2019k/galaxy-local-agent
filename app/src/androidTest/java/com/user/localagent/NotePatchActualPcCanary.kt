@@ -55,6 +55,49 @@ class NotePatchActualPcCanary {
             put("allTypedReceiptsMatched",loads>0&&loads==receipts);put("allGenerationsPc",generations>0&&allPc)
         }}
     }
+    private fun reportableTerminalErrorCode(raw:String?):String?=when(raw){
+        null->null
+        "awaiting_owner_input",
+        "execution_not_verified",
+        "invalid_clarification",
+        "owner_requested_cancel",
+        "plan_rejected_canonical_validation_failed",
+        "plan_rejected_duplicate_key",
+        "plan_rejected_invalid_action",
+        "plan_rejected_invalid_array_type",
+        "plan_rejected_invalid_field_length",
+        "plan_rejected_invalid_field_type",
+        "plan_rejected_invalid_host_tools",
+        "plan_rejected_invalid_json",
+        "plan_rejected_invalid_json_length",
+        "plan_rejected_invalid_privacy_type",
+        "plan_rejected_invalid_public_tools",
+        "plan_rejected_invalid_record_tools",
+        "plan_rejected_invalid_source_kind",
+        "plan_rejected_invalid_target_type",
+        "plan_rejected_missing_action",
+        "plan_rejected_missing_connection_target",
+        "plan_rejected_missing_content_read",
+        "plan_rejected_missing_goal",
+        "plan_rejected_missing_public_query",
+        "plan_rejected_missing_question",
+        "plan_rejected_missing_record_source",
+        "plan_rejected_missing_required_tools",
+        "plan_rejected_missing_target_type",
+        "plan_rejected_mixed_private_public",
+        "plan_rejected_public_private_conflict",
+        "plan_rejected_shopping_target_mismatch",
+        "plan_rejected_too_many_tools",
+        "plan_rejected_unavailable_tool",
+        "plan_rejected_unexpected_tools",
+        "plan_rejected_unknown_field",
+        "plan_rejected_unknown_tool",
+        "readback_obligation_unmet",
+        "reasoning_budget_exhausted",
+        "request_failed_before_finalization",
+        "stuck_repeated_action"->raw
+        else->"UNMAPPED"
+    }
     private fun sha(text:String)=MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it.toInt()and 255)}
     private fun atomic(file:File,value:JsonObject){
         check(file.parentFile?.isDirectory==true||file.parentFile?.mkdirs()==true){"QA_REPORT_DIRECTORY"}
@@ -65,6 +108,7 @@ class NotePatchActualPcCanary {
     @Test fun normalRequestEditsOnlyTheObservedNoteAndReadsTheSavedVersion()=runBlocking(Dispatchers.Default){
         val args=InstrumentationRegistry.getArguments()
         assumeTrue("notePatchActualPcApproved=true required",args.getString("notePatchActualPcApproved")=="true")
+        val directNextAction=args.getString("notePatchDirectNextAction")?.let{check(it in setOf("true","false")){"QA_INVALID_DIRECT_VARIANT"};it=="true"}?:false
         val base=InstrumentationRegistry.getInstrumentation().targetContext
         val expected=checkNotNull(args.getString("notePatchActualPcExpectedVersion")?.toLongOrNull()){"QA_EXPECTED_VERSION"}
         check(base.packageManager.getPackageInfo(base.packageName,0).longVersionCode==expected){"QA_INSTALLED_VERSION"}
@@ -79,6 +123,9 @@ class NotePatchActualPcCanary {
         val prefix="qa-note-pc-"+UUID.randomUUID();val collection="qa-note-"+UUID.randomUUID();val prefs="$prefix-chat-preferences"
         val context=object:ContextWrapper(base){override fun getSharedPreferences(name:String,mode:Int):SharedPreferences=
             if(name=="chat-preferences")base.getSharedPreferences(prefs,mode)else super.getSharedPreferences(name,mode)}
+        val privatePreferences=context.getSharedPreferences("chat-preferences",Context.MODE_PRIVATE)
+        check(privatePreferences.all.isEmpty()){"QA_PRIVATE_PREFS_NOT_FRESH"}
+        var directPreferenceObserved=false;var privatePreferencesRestored=false
         val oldText="목요일 14시";val newText="금요일 16시"
         val before="인수 시각: $oldText\r\n담당: 운영팀\r\n두  공백 😀 e\u0301\r\n"+"보존 구간  원문 😀 e\u0301\r\n".repeat(75)+"마지막 줄은 유지"
         val after=before.replaceFirst(oldText,newText)
@@ -86,8 +133,9 @@ class NotePatchActualPcCanary {
         val targetTitle="$prefix-target";val keepTitle="$prefix-keep"
         val owner="제목 '$targetTitle' 메모를 찾아 현재 원문을 읽고, 인수 시각의 '$oldText'만 '$newText'로 고쳐줘. "+
             "제목과 다른 줄, 줄바꿈, 연속 공백과 이모지는 그대로 유지해. 다른 메모는 바꾸지 마. 저장된 같은 메모를 다시 읽어 수정 결과를 확인하고 알려줘."
-        val report=File(checkNotNull(base.getExternalFilesDir(null)),"diagnostics/note-patch-actual-pc-canary.json")
+        val report=File(checkNotNull(base.getExternalFilesDir(null)),if(directNextAction)"diagnostics/note-patch-actual-pc-canary-direct-next-action.json"else"diagnostics/note-patch-actual-pc-canary.json")
         val started=SystemClock.elapsedRealtime();var stage="before_fixture";var lastCheck="QA_NOT_STARTED"
+        var firstFailureCheckCode:String?=null;var terminalErrorCode:String?=null;var terminalErrorCodeCaptured=false
         var project:ProjectRecord?=null;var room:ChatThreadRecord?=null;var repository:LocalRepository?=null
         var workspace:ProjectWorkspace?=null;var workspaceBinding:String?=null;var privateRoot:File?=null
         var seed:NoteRecord?=null;var keep:NoteRecord?=null;var runner:ChatRunCoordinator?=null;var ownRun:String?=null
@@ -96,7 +144,7 @@ class NotePatchActualPcCanary {
         var freshRead=false;var stateObserved=false;var exactEffect=false;var keepUnchanged=false;var broadPairSelected=false;var wholeAfterProven=false
         var validated=false;var cleanup=false;var finalIdle=false;var ownerInterrupted=false
         var failure:Throwable?=null;var cleanupFailure:Throwable?=null
-        fun verify(code:String,condition:Boolean){lastCheck=code;check(condition){code}}
+        fun verify(code:String,condition:Boolean){lastCheck=code;if(!condition&&firstFailureCheckCode==null)firstFailureCheckCode=code;check(condition){code}}
         fun authority(){val current=settings.snapshot();verify("QA_PAIRING_UNCHANGED",current!=null&&settings.authorizationRevision==revision&&
             current.serverId==connection.serverId&&current.token==connection.token&&current.certificateSha256==connection.certificateSha256&&!settings.state.value.claudeText)}
         fun ownerQuiet(){if(app.runs.hasActiveRuns.value||app.runs.busy.value||app.imageStudio.state.value.running){ownerInterrupted=true;error("QA_OWNER_INTERRUPTED")}}
@@ -105,7 +153,10 @@ class NotePatchActualPcCanary {
         fun idle(value:JsonObject)=value["compute_busy"]?.jsonPrimitive?.booleanOrNull==false&&value["cleanup_pending"]?.jsonPrimitive?.booleanOrNull==false&&
             (value["llmResident"]==null||value["llmResident"] is JsonNull)
         fun publish(){atomic(report,buildJsonObject{
+            put("requestLoopVariant",if(directNextAction)"DIRECT_NEXT_ACTION_OPT_IN"else"ORIGINAL_SEMANTIC")
+            put("directPreferenceObserved",directPreferenceObserved);put("privatePreferencesRestored",privatePreferencesRestored)
             put("schema",1);put("kind","actual_pc_normal_send_note_patch_canary");put("versionCode",expected);put("stage",stage);put("lastCheckCode",lastCheck)
+            put("firstFailureCheckCode",firstFailureCheckCode);put("terminalErrorCodeCaptured",terminalErrorCodeCaptured);put("terminalErrorCode",terminalErrorCode)
             put("passed",validated&&cleanup&&failure==null&&cleanupFailure==null);put("runStatus",status);put("cleanupVerified",cleanup);put("postRunIdleVerified",finalIdle)
             put("normalSendSelectorUsed",true);put("choiceOverrideUsed",false);put("emptyPhoneModelListProven",false)
             put("approvalMethod","actual_PendingAction_guarded_fixture_consent");put("humanOrComposeApprovalProven",false)
@@ -140,8 +191,12 @@ class NotePatchActualPcCanary {
             keep=scoped.saveNote(keepTitle,"보존 메모\r\n인수 시각: $oldText\r\n두  공백 😀 e\u0301",collection);publish()
             verify("QA_EXACT_INITIAL_NOTES",scoped.notes.first().map{it.id}.toSet()==setOf(checkNotNull(seed).id,checkNotNull(keep).id))
             val initialAccess=store.accessScope(r.id)
+            if(directNextAction)verify("QA_DIRECT_PREF_COMMIT",privatePreferences.edit().putBoolean("direct-next-action",true).commit())
+            verify("QA_DIRECT_PREF_BEFORE_CAPTURE",privatePreferences.getBoolean("direct-next-action",false)==directNextAction)
             val coordinator=withContext(Dispatchers.Main){ChatRunCoordinator(context,app,restorePersistedQueue=false,
                 workerEngineFactory={request->
+                    check(context.getSharedPreferences("chat-preferences",Context.MODE_PRIVATE).getBoolean("direct-next-action",false)==directNextAction){"QA_DIRECT_PREF_CAPTURE_CHANGED"}
+                    directPreferenceObserved=true
                     check(request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&request.modelId==PairedPcTextProfile.SELECTION_ID&&
                         request.capturedPcRevision==revision&&!request.allowCloudText&&request.allowTools){"QA_REQUEST_BINDING"}
                     check(selectedRequest.compareAndSet(null,request)){"QA_ADDITIONAL_REQUEST"};ownRun=request.runId
@@ -196,14 +251,18 @@ class NotePatchActualPcCanary {
                 checkNotNull(terminal)
             }
             status=completed.status
+            terminalErrorCode=reportableTerminalErrorCode(completed.errorCode);terminalErrorCodeCaptured=true
             val captured=checkNotNull(selectedRequest.get());val request=QueuedChatRequest.fromJson(completed.contextJson);steps=request.previousSteps
+            stage="terminal_observed";publish()
             verify("QA_RUN_COMPLETED","completed"==completed.status)
             verify("QA_ORIGINAL_REQUEST_PRESERVED",request.runId==captured.runId&&request.threadId==r.id&&request.projectId==p.id&&request.branchId==r.activeBranchId&&
                 request.text==owner&&request.allowTools&&!request.allowCloudText&&request.capturedPcRevision==revision&&request.modelId==PairedPcTextProfile.SELECTION_ID)
             val facts=checkNotNull(probe.get()).facts();verify("QA_ACTUAL_PC_AND_RECEIPTS",facts["allGenerationsPc"]?.jsonPrimitive?.boolean==true&&facts["allTypedReceiptsMatched"]?.jsonPrimitive?.boolean==true)
             verify("QA_NO_UNKNOWN_EFFECTS",steps.all{it.tool in allowed}&&steps.none{it.evidence.state in setOf(VerificationState.PREPARED,VerificationState.UNVERIFIED)})
             val verified=steps.withIndex().filter{it.value.evidence.state==VerificationState.VERIFIED&&!it.value.evidence.effectNotApplied}
-            val patch=verified.single{it.value.tool=="patch_note"};val original=checkNotNull(seed)
+            val patches=verified.filter{it.value.tool=="patch_note"}
+            verify("QA_ONE_VERIFIED_PATCH",patches.size==1)
+            val patch=patches.single();val original=checkNotNull(seed)
             verify("QA_SEARCH_THEN_ORIGINAL_READ",sameTargetSearch&&verified.any{read->read.index<patch.index&&read.value.tool=="read_note"&&
                 read.value.arguments["id"]?.jsonPrimitive?.content==original.id&&read.value.arguments["scope"]?.jsonPrimitive?.content==collection&&read.value.arguments["expectedUpdatedAt"]?.jsonPrimitive?.content==original.updatedAt.toString()&&
                 verified.any{it.index<read.index&&it.value.tool=="search_notes"}})
@@ -223,7 +282,7 @@ class NotePatchActualPcCanary {
             val answer=checkNotNull(store.assistantForRun(completed.id));verify("QA_FINAL_ANSWER_SUPPORTED",store.fullMessageText(answer.id).contains(newText))
             verify("QA_NO_FILE_OR_REMINDER_EFFECTS",ws.list().isEmpty()&&scoped.listReminders().isEmpty())
             verify("QA_FINAL_PC_IDLE",idle(health(completed.id)));finalIdle=true;validated=true;stage="actual_note_patch_verified";publish()
-        }catch(error:Throwable){failure=error}
+        }catch(error:Throwable){failure=error;if(firstFailureCheckCode==null)firstFailureCheckCode="UNCLASSIFIED_FAILURE"}
         finally{withContext(NonCancellable){
             stage="cleanup";publish()
             try{
@@ -255,6 +314,8 @@ class NotePatchActualPcCanary {
             }catch(error:Throwable){cleanupFailure=error}
             try{
                 if(app.runs.selectedProjectId.value==originalProject)app.selectProjectWorkspace(originalProject.takeIf{it.isNotBlank()})
+                verify("QA_PRIVATE_PREF_RESTORE",privatePreferences.edit().clear().commit()&&privatePreferences.all.isEmpty())
+                privatePreferencesRestored=true
                 verify("QA_PREFS_CLEANUP",base.deleteSharedPreferences(prefs))
             }catch(error:Throwable){cleanup=false;if(cleanupFailure==null)cleanupFailure=error else cleanupFailure?.addSuppressed(error)}
             stage="finished";publish()

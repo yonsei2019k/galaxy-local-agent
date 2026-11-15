@@ -154,7 +154,7 @@ class ChatConverters {
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun draft(value:ChatDraftRecord)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun sourceScope(value:SourceScopeRecord)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun knowledgeScope(value:KnowledgeScopeRecord)
-    @Query("UPDATE messages SET text=:text WHERE id=:id") suspend fun checkpoint(id:String,text:String)
+    @Query("UPDATE messages SET text=:text WHERE id=:id AND text!=:text") suspend fun checkpoint(id:String,text:String)
     @Query("UPDATE messages SET text=:text WHERE id=:messageId AND role='user' AND EXISTS (SELECT 1 FROM chat_runs r WHERE r.id=:runId AND r.status='queued' AND r.startedAt IS NULL AND r.userMessageId=messages.id AND r.threadId=messages.threadId AND r.branchId=messages.branchId)") suspend fun editQueuedUserMessage(runId:String,messageId:String,text:String):Int
     @Query("UPDATE chat_runs SET contextJson='' WHERE threadId=:threadId") suspend fun eraseRunEnvelopes(threadId:String)
     @Query("UPDATE tool_runs SET summary='' WHERE threadId=:threadId") suspend fun eraseToolSummaries(threadId:String)

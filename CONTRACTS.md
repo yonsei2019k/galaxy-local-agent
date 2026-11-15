@@ -4,6 +4,12 @@ Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.
 
+## Checkpoint persistence1074
+
+Checkpoint SQL updates messages.text only when its persisted text differs. Every checkpoint still performs the original transaction, run/message binding, full current chunk reread, assembly and persisted return. No receipt, revision, terminal status, approval, scope or cancellation reconciliation is skipped. Actual SQLCipher row-trigger controls distinguish the removed same-text write from real changed-text writes and verify cancellation/reopen behavior. Benchmark query/hash computation figures remain separate from whole-save or whole-app latency.
+
+Completed run ledgers can retain their terminal status after project deletion while their request envelopes are erased. Recovery must not require every erased terminal ledger to become cancelled. A QA recovery result never regrades its failed model scenario or supplies execution evidence.
+
 ## Scoped note read/patch1073
 
 `read_note` returns a scoped UTF-16 page of2..900 units bound to the actual note id, collection and revision. A literal `patch_note` requires an actually delivered same-request/branch page, the current revision/full-body hash, one exact oldText occurrence and an owner-approved diff. oldText is1..900 units, newText0..2000 and resulting body at most12000. Approval is never inferred from a model plan. Scope and consent are checked again before a single Room transaction performs CAS, full persisted-body reread and durable receipt recording. Cancellation reconciles an actual receipt without replaying a mutation. Only normal EOG can acknowledge the pages actually present in that query; a later failed read invalidates older full-read proof. Original18-step and whole-content evidence limits remain.
@@ -15,6 +21,8 @@ Offered-only prerequisite closure supplies search/read only for an explicit patc
 The current production PC-only route forwards provisional content deltas while preserving original authority, cancellation, stream bounds and terminal verification. A delta is not completion or VERIFIED tool evidence. A failed stream cannot start a phone reply in that route. Legacy routes that allow phone fallback retain their existing whole-response buffer and no-mixed-replies behavior. The transport keeps one pending delta; reported observed first-content time is measured at SSE receipt, separately from total generation and app delivery. Installed1072 passes targeted unit, controlled phone and actual cancellation/analysis checks; normal request planning still has a recorded failure. Internal planning deltas are not user-visible answer timing.
 
 Message segment reads filter both actual messageId and segmentId in SQLite and preserve sequence order. File-save SHA reuse is confined to immutable strings within one invocation; original provider reads, current-body CAS, full-body delivery, approval, independent readback and recovery remain mandatory. No global data cache or database migration is introduced. Performance measurements and evidence of unchanged behavior remain separate.
+
+Optional PC loadTimings reports fixed numeric durations for lock wait, stop, full-file verification and native startup/readiness, plus existing resident reuse. These observations do not grant authority, establish CUDA subphase or actual GPU placement, or replace model SHA/context/owner receipts. Startup experiments retain default30→20→0 and all cancellation/cleanup policy; reduced-offload and no-warmup candidates have not been promoted.
 
 ## Evidence limits identified in1067
 

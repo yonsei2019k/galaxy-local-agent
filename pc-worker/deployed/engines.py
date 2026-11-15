@@ -251,37 +251,54 @@ class Engines:
    job['result']=None
    if job['phase']=='completed':job['phase']='acknowledged';job['updated']=time.monotonic()
  def load_llm(self,request):
+  load_started=time.monotonic()
   if set(request)-{'modelId','modelShaPrefix','contextSize'}:raise ValueError('UNKNOWN_FIELD')
   alias=request['modelId'];prefix=request['modelShaPrefix'];context=request['contextSize']
   if alias not in GEMMAS or not isinstance(prefix,str) or not re.fullmatch('[a-f0-9]{12,64}',prefix) or context not in (4096,8192):raise ValueError('LLM_PROFILE')
   path,sha=GEMMAS[alias]
   if not sha.startswith(prefix):raise ValueError('MODEL_SHA_MISMATCH')
+
+  timings={'version':1,'scope':'base_engine_load','residentReused':False,
+           'lockWaitMs':None,'stopPreviousMs':0.0,'verifyFileMs':0.0,
+           'nativeAttemptsMs':0.0,'successfulLaunchMs':None,'successfulReadyWaitMs':None,'attemptCount':0}
+  def reply():
+   timings['totalMs']=(time.monotonic()-load_started)*1000
+   return {'modelId':alias,'modelSha256':sha,'contextSize':context,'structuredOutput':True,'loadTimings':dict(timings)}
+  lock_started=time.monotonic()
   if not self.lock.acquire(timeout=30):raise Busy()
   try:
+   timings['lockWaitMs']=(time.monotonic()-lock_started)*1000
    self.last_used=time.monotonic()
-   if self.llm and self.llm.poll() is None and self.llm_alias==alias and self.llm_ctx==context:return {'modelId':alias,'modelSha256':sha,'contextSize':context,'structuredOutput':True}
-   self.stop_llm()
+   if self.llm and self.llm.poll() is None and self.llm_alias==alias and self.llm_ctx==context:
+    timings['residentReused']=True;return reply()
+   phase_started=time.monotonic();self.stop_llm();timings['stopPreviousMs']=(time.monotonic()-phase_started)*1000
    if available_memory()<3*1024**3:raise Busy()
-   verify_file(path,sha)
+   phase_started=time.monotonic();verify_file(path,sha);timings['verifyFileMs']=(time.monotonic()-phase_started)*1000
    ladder=(30,20,0) if alias=='pc-text' else (24,0)
    for attempt,layers in enumerate(ladder):
+    attempt_started=time.monotonic();timings['attemptCount']+=1
     try:
-     self.start_llm(path,layers);break
+     native=self.start_llm(path,layers)
+     if isinstance(native,dict):
+      timings['successfulLaunchMs']=native.get('processLaunchMs');timings['successfulReadyWaitMs']=native.get('readyWaitMs')
+     break
     except (RuntimeError,TimeoutError):
      self.stop_llm()
      if attempt==len(ladder)-1:raise
+    finally:timings['nativeAttemptsMs']+=(time.monotonic()-attempt_started)*1000
    self.llm_alias=alias;self.llm_ctx=context;self.llm_layers=layers
-   return {'modelId':alias,'modelSha256':sha,'contextSize':context,'structuredOutput':True}
+   return reply()
   except Exception:self.stop_llm();raise
   finally:self.lock.release()
  def start_llm(self,path,layers):
+   process_started=time.monotonic()
    with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
    self.llm_port=port;self.llm_key=uuid.uuid4().hex
    env=dict(__import__('os').environ,LLAMA_API_KEY=self.llm_key)
    command=[str(TOOLS/'llama-runtime/llama-server.exe'),'-m',str(path),'--host','127.0.0.1','--port',str(port),'--ctx-size','8192','--parallel','1','--n-gpu-layers',str(layers),'--threads','6','--threads-batch','6','--batch-size','512','--ubatch-size','256','--jinja','--flash-attn','on','--cache-type-k','q8_0','--cache-type-v','q8_0','--cache-ram','0','--no-context-shift','--no-webui','--slots','--slot-save-path',str(HOME/'scratch'),'--log-disable','--reasoning-format','deepseek']
    self.llm=subprocess.Popen(command,cwd=TOOLS/'llama-runtime',env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=FLAGS)
    constrain(self.llm)
-   deadline=time.monotonic()+90
+   launched_at=time.monotonic();deadline=launched_at+90
    while time.monotonic()<deadline:
     if self.llm.poll() is not None:raise RuntimeError('LLM_LOAD_FAILED')
     try:
@@ -289,6 +306,7 @@ class Engines:
       if reply.status==200:break
     except Exception:time.sleep(.3)
    else:raise TimeoutError('LLM_LOAD_TIMEOUT')
+   return {'processLaunchMs':(launched_at-process_started)*1000,'readyWaitMs':(time.monotonic()-launched_at)*1000}
  def upstream(self,path,payload,timeout=180):
   raw=json.dumps(payload,separators=(',',':')).encode() if payload is not None else None
   request=urllib.request.Request(f'http://127.0.0.1:{self.llm_port}'+path,data=raw,headers={'Authorization':'Bearer '+str(self.llm_key),'Content-Type':'application/json'})
