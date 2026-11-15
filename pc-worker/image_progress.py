@@ -1,7 +1,7 @@
 """Additive evidence for image phases; no model, owner, cancellation or scheduling changes."""
 STAGES={
     'admitting':'queued','waiting_compute':'queued','releasing_model':'queued',
-    'verifying_models':'queued','preparing_runtime':'queued','loading_model':'loading',
+    'verifying_models':'queued','preparing_runtime':'queued','loading_model':'loading','preparing_inputs':'loading',
     'waiting_memory':'waiting_resources','waiting_gpu':'waiting_resources',
 }
 

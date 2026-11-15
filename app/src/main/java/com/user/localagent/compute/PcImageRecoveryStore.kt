@@ -10,8 +10,9 @@ data class PcImageRecoveryTicket(val id:String,val owner:String,val pair:String,
     val seed:Long,val steps:Int,val createdAt:Long,val context:JsonObject) {
     init {
         require(listOf(id,owner).all {runCatching{UUID.fromString(it).toString()==it}.getOrDefault(false)})
-        require(pair.matches(Regex("[a-f0-9]{64}"))&&seed>=0&&steps in 12..50&&createdAt>0)
+        require(pair.matches(Regex("[a-f0-9]{64}"))&&seed>=0&&createdAt>0)
         com.user.localagent.core.PcImageModelCatalog.selection(model)
+        com.user.localagent.core.PcComputeContract.steps(true,steps,pcModelId=model)
         require(context.toString().length<=12000)
     }
     fun json()=buildJsonObject {
@@ -35,13 +36,18 @@ data class PcImageRecoveryTicket(val id:String,val owner:String,val pair:String,
 
 class PcImageRecoveryStore(context:Context,scope:String) {
     private val store=DraftStore(context,"pc-image-recovery-v1:$scope",16000)
+    private val archiveStore=DraftStore(context,"pc-image-recovery-archive-v1:$scope",PcImageRecoveryArchive.MAX_CHARS)
+    private val archive=PcImageRecoveryArchive(store::readStrict,{store.write(it)},archiveStore::readStrict,{archiveStore.write(it)},System::currentTimeMillis)
     fun read():PcImageRecoveryTicket?=synchronized(LOCK) {
         store.readStrict().takeIf{it.isNotBlank()}?.let(PcImageRecoveryTicket::parse)?.takeIf{it.validAt(System.currentTimeMillis())}
     }
     fun save(ticket:PcImageRecoveryTicket)=synchronized(LOCK) {
-        val current=read();check(current==null||current.id==ticket.id){"기존 PC 이미지 복구 작업을 이어받거나 먼저 삭제해주세요."}
+        val current=read();check(current==null||current.id==ticket.id){"기존 PC 이미지 복구 작업을 먼저 이어받거나 보관해주세요."}
         store.write(ticket.json())
     }
     fun clear(id:String)=synchronized(LOCK){if(read()?.id==id)store.write("")}
+    fun archived():List<PcImageRecoveryTicket> = synchronized(LOCK){archive.available()}
+    fun archiveActive():Boolean = synchronized(LOCK){archive.archiveActive()}
+    fun restoreMostRecent():PcImageRecoveryTicket? = synchronized(LOCK){archive.restoreMostRecent()}
     companion object {private val LOCK=Any()}
 }

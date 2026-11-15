@@ -1,8 +1,16 @@
 # ZipHap.Agent project state
 
-Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
+Updated 2026-11-16. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Installed1088; ordinary cloud phone tools and consent boundaries qualified
+## Installed1089; fast local image generation/editing and preserved recovery
+
+Owner-approved update preserves the original Qwen request/seed/50steps/runtime binding and real checkpoint1, archives its exact encrypted phone ticket, and selects the explicit FLUX.2-klein4B/4-step option for new requests. Explicit pause is persisted and never undone by automatic resume; server checks `automatic`/`explicit` atomically, and phone shows pause rather than compute failure. Copy/readback-before-removal archive/restore is bounded4/64KiB/unchanged24h expiry. No model is bundled, paid key added, permission expanded or private image copied into Git.
+
+Main1089 SHA bf0c2baa8a3f6c826f16aa9b87e2b6773b79e0e23a5443e9b139736b5ea9ce20; current test5eacf3e7dc3b617ff8878eef2e02b0121ee86e6a99aa808140d1c7831013f8de; original identity/data/base bytes verified. Full6m18/core947+app926=1873 JVM PASS,0fail/error/skip,lint0errors145warnings1hint. Test-only image routing preservation correction full39s retains identical production unsigned bytes. PC140=139PASS/one POSIX skip, including actual legacy baseline transform/temporary-install compile; original model pins retained and final deployed8 source pins/empty-idle verified.
+
+Actual phone synthetic new image PASS: PC60343ms/test78.961s; reference edit PASS90774ms/test91.021s; exact model pin,1024 PNG,source unchanged,app save/Gallery readback and independent artifact SHA verified. Actual encrypted archive/restore/stale cleanup2 PASS; original ticket preservation/fast selection1 PASS. Original authenticated pinned direct Tailscale199ms PASS, no LAN fallback; external-network handoff untested. Original20B reproduction984s first step/1206s second is not completed-output evidence. CPU-VAE stopped probe and 2.0GiB-budget reference failures remain failures; final VulkanVAE/2.5GiB candidate passes. Public object/background tests do not establish face identity, all-photo instruction quality, Korean translation quality or commercial readiness. [Details](docs/image-workflow-repair-2026-11-16.ko.md).
+
+## Historical installed1088; ordinary cloud phone tools and consent boundaries qualified
 
 After the selected-tool executor binding correction and PC provider's clarification of the existing phone-review protocol, the actual normal singleton conversation workflow PASSes: save_note→search_notes→same-note whole read_note, exact fixture approval1, requested title/body/whitespace retained, keep note unchanged, local ledger/readback gate, closed-session receipt, final answer bytes/SHA, fixture/preferences cleanup and independent cloud/local empty-idle. Native elapsed29685ms (29.7s), not a controlled comparison to earlier local-model note editing.
 

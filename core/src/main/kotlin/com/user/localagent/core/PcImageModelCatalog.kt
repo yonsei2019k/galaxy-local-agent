@@ -8,11 +8,13 @@ object PcImageModelCatalog {
     const val SDXL_SHA="51ab2be4ec58905b4cbfe5c0d2f3d0cdc5b0192e8e85dbe9a00481858c8389b0"
     const val EDIT_ID="Qwen-Image-Edit-2511-20B-Q4_K_M"
     const val EDIT_SHA="07951f61941a81e236cbd4a9b6f250d49626b3ba518f260135bf2e01a87cf1c8"
+    const val FAST_ID="FLUX.2-klein-4B-Q4_0"
+    const val FAST_SHA="d1023499ef3f2f82ff7c50e6778495195c1b6cc34835741778868428111f9ff4"
     private val pins=mapOf(QUALITY_ID to QUALITY_SHA,
-        SDXL_ID to SDXL_SHA,EDIT_ID to EDIT_SHA)
+        SDXL_ID to SDXL_SHA,EDIT_ID to EDIT_SHA,FAST_ID to FAST_SHA)
     data class Pin internal constructor(val id:String,val sha256:String)
     fun selection(id:String):Pin {
-        require(id==QUALITY_ID||id==SDXL_ID){"PC 기본 선택은 SDXL 또는 Qwen입니다."}
+        require(id==QUALITY_ID||id==SDXL_ID||id==FAST_ID){"PC 기본 선택은 SDXL, Qwen 또는 FLUX입니다."}
         return verified(id,pins[id])
     }
     /** A real editing model is explicit in preflight, request, result and saved metadata. */

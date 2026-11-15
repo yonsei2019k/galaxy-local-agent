@@ -111,3 +111,19 @@ def reference_models():return [name for name,item in PROFILES.items() if item.ge
 for _id in (DEFAULT_ID,EDIT_ID):
  PROFILES[_id]['runtime_dir']='runtime-vulkan-37bc88b'
  PROFILES[_id]['arguments']=[arg.replace('diffusion=cuda0','diffusion=Vulkan0') for arg in PROFILES[_id]['arguments']]
+
+# Explicit distilled option: never substitute for an existing Qwen recovery request.
+FAST_ID='FLUX.2-klein-4B-Q4_0'
+PROFILES[FAST_ID]={
+ 'sha256':'d1023499ef3f2f82ff7c50e6778495195c1b6cc34835741778868428111f9ff4',
+ 'files':[(ROOT/'flux-2-klein-4b-Q4_0.gguf','d1023499ef3f2f82ff7c50e6778495195c1b6cc34835741778868428111f9ff4'),
+          (ROOT/'qwen3-4b-q5.gguf','37edbd37f5b7a4d4e7a766400c57def1f790e809de03513b86bf11bb06979695'),
+          (ROOT/'flux2-vae.safetensors','ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04')],
+ 'arguments':['--diffusion-model',str(ROOT/'flux-2-klein-4b-Q4_0.gguf'),
+              '--llm',str(ROOT/'qwen3-4b-q5.gguf'),'--vae',str(ROOT/'flux2-vae.safetensors'),
+              '--backend','clip=cpu,vae=Vulkan0,diffusion=Vulkan0',
+              '--params-backend','clip=cpu,vae=cpu,diffusion=disk',
+              '--max-vram','2.5','--auto-fit','on','--disable-prefetch'],
+ 'cfg':1.0,'supports_reference':True,'min_steps':4,'default_steps':4,
+ 'negative_prompt':False,'cpu_threads':4,'runtime_dir':'runtime-checkpoint-37bc88b-v1',
+}

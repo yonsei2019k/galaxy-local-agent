@@ -16,6 +16,14 @@ class PcImageRecoveryTicketTest {
         assertThrows(IllegalArgumentException::class.java){saved.copy(owner="foreign")}
         assertThrows(IllegalArgumentException::class.java){saved.copy(model="untrusted-model")}
     }
+    @Test fun fourStepRecoveryRequiresTheExplicitFastModelAndRetainsOldTickets(){
+        val legacy=ticket()
+        val fast=legacy.copy(model=PcImageModelCatalog.FAST_ID,steps=4)
+        assertEquals(fast,PcImageRecoveryTicket.parse(fast.json()))
+        assertEquals(legacy,PcImageRecoveryTicket.parse(legacy.json()))
+        assertThrows(IllegalArgumentException::class.java){legacy.copy(steps=4)}
+        assertThrows(IllegalArgumentException::class.java){fast.copy(steps=3)}
+    }
     @Test fun rePairOrPermissionRevisionChangeCannotReuseAnOldTicket(){
         val config=PcConnection("synthetic-server","synthetic-endpoint","synthetic-token","b".repeat(64))
         assertNotEquals(PcImageRecoveryTicket.pair(config,1),PcImageRecoveryTicket.pair(config,2))

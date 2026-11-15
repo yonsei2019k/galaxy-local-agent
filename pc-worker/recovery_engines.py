@@ -1,16 +1,26 @@
 """Opt-in recovery layered over the installed ownership checks. Legacy RAM-only jobs are unchanged."""
 import base64, hashlib, json, threading, time, uuid
 from pathlib import Path
-from image_progress import mark,acquire_slot,resources_waiting
+from image_progress import mark,acquire_slot,resources_waiting,public_stage,STAGES
 from checkpoint_store import CheckpointStore,TTL
 from owned_engines import OwnedEngines,owner_value,request_key,terminate,OwnershipMismatch,_UNSET
 from engines import HOME,TOOLS,profile,verify_file,available_memory,gpu_busy,validate_png,Busy
 from native_memory_image import NativeMemoryImage
 
+# Public diagnostics are fixed codes only. Never return native output, paths or prompts.
+ERROR_CODES=frozenset(('IMAGE_EXECUTION_ERROR','MODEL_INTEGRITY','RECOVERY_RUNTIME_CHANGED','RECOVERY_EXPIRED','PROMPT_CONTROL_TAG_NOT_ALLOWED',
+    'NATIVE_MEMORY_SERVER_LOAD_FAILED','NATIVE_MEMORY_SERVER_LOAD_TIMEOUT','NATIVE_MEMORY_SERVER_EXITED',
+    'NATIVE_MEMORY_GENERATION_FAILED','NATIVE_MEMORY_GENERATION_TIMEOUT','NATIVE_JOB_ID','NATIVE_JOB_BINDING',
+    'NATIVE_JOB_STATE','IMAGE_RESPONSE_BOUND','IMAGE_COUNT'))
+FAILURE_STAGES=frozenset(STAGES)|{'sampling','decoding'}
+def failure_code(error):
+    value=str(error)
+    return value if value in ERROR_CODES else 'IMAGE_EXECUTION_ERROR'
+
 def job_control(method):
-    def guarded(self,key,owner=_UNSET):
+    def guarded(self,key,owner=_UNSET,**options):
         with self.jobs_lock:control=self._job_owner(key,owner).setdefault('recovery_control',threading.RLock())
-        with control:return method(self,key,owner)
+        with control:return method(self,key,owner,**options)
     return guarded
 
 class RecoveryEngines(OwnedEngines):
@@ -25,6 +35,8 @@ class RecoveryEngines(OwnedEngines):
                     if request_key(request)!=key or owner is None:raise ValueError('RECOVERY_BINDING')
                     if hashlib.sha256(json.dumps(request,sort_keys=True,separators=(',',':')).encode()).hexdigest()!=saved['requestHash']:raise ValueError('RECOVERY_REQUEST_CHANGED')
                     job=self._restored(saved)
+                    if saved.get('failureCode') in ERROR_CODES and saved.get('failureStage') in FAILURE_STAGES:
+                        job.update(failureCode=saved['failureCode'],failureStage=saved['failureStage'])
                     if saved['phase']=='completed':job.update(result=self.store.result(key),phase='completed')
                     job['cleanup_done'].set();self.jobs[key]=job
                 except Exception:pass # Never interpret damaged state as a new generation request.
@@ -34,11 +46,13 @@ class RecoveryEngines(OwnedEngines):
             steps=request['steps'],seed=request['seed'],created=now,updated=now,client_seen=now,cancel=threading.Event(),
             process=None,result=None,request_hash=saved['requestHash'],error=None,owner=saved['owner'],thread=None,
             cleanup_done=threading.Event(),recovery=True,request=request,createdWall=saved['createdWall'],
-            binding=saved.get('binding'),attempts=saved.get('attempts',1),elapsed_ms=saved.get('elapsedMillis',0),pause=False)
+            binding=saved.get('binding'),attempts=saved.get('attempts',1),elapsed_ms=saved.get('elapsedMillis',0),
+            pause=bool(saved.get('pause',saved['phase'] in ('suspended','resumable'))))
     def _persist(self,job):
         self.store.save(job['id'],dict(request=job['request'],owner=job['owner'],requestHash=job['request_hash'],
             createdWall=job['createdWall'],phase=job['phase'],step=job['step'],binding=job.get('binding'),
-            attempts=job.get('attempts',1),elapsedMillis=job.get('elapsed_ms',0)))
+            attempts=job.get('attempts',1),elapsedMillis=job.get('elapsed_ms',0),pause=bool(job.get('pause')),
+            **({k:job[k] for k in ('failureCode','failureStage')} if job.get('failureCode') else {})))
     def image(self,request,owner=None):
         if request.get('ioMode')!='encrypted_checkpoint':return super().image(request,owner)
         owner=owner_value(owner)
@@ -60,14 +74,16 @@ class RecoveryEngines(OwnedEngines):
             if job.get('recovery'):
                 if time.time()>=job['createdWall']+TTL:raise ValueError('RECOVERY_EXPIRED')
                 saved=self.store.native_step(key,job['binding'],job['steps']) if job.get('binding') else 0
-                result.update(recovery=True,checkpointStep=saved,resumedFrom=job.get('resumedFrom',0),
+                result.update(recovery=True,paused=bool(job.get('pause')),checkpointStep=saved,resumedFrom=job.get('resumedFrom',0),stage=public_stage(job),
                     expiresAt=int(job['createdWall']+TTL),attempts=job.get('attempts',1))
+                if job.get('failureCode'):result.update(failureCode=job['failureCode'],failureStage=job['failureStage'])
             return result
     def _binding(self,job,runtime,selected):
         binaries={name:hashlib.sha256((runtime/name).read_bytes()).hexdigest() for name in
             ('sd-server.exe','stable-diffusion.dll','ggml.dll','ggml-base.dll','ggml-cpu.dll','ggml-vulkan.dll','ggml-cuda.dll')}
         value={'requestHash':job['request_hash'],'model':selected['sha256'],'files':[(str(p),h) for p,h in selected['files']],
             'runtime':binaries,'schema':1,'sampler':'euler','cfg':selected['cfg'],'arguments':selected['arguments']}
+        if 'cpu_threads' in selected:value['cpuThreads']=NativeMemoryImage.thread_count(selected['cpu_threads'])
         return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     def run_image(self,key,prompt,negative,reference,strength):
         with self.jobs_lock:job=self.jobs[key];recovery=job.get('recovery',False)
@@ -93,16 +109,21 @@ class RecoveryEngines(OwnedEngines):
                 job.update(step=max(job['step'],min(job['steps'],step)),phase='decoding' if step==job['steps'] else 'sampling',updated=time.monotonic())
             native=NativeMemoryImage(runtime/'sd-server.exe',selected['arguments'],runtime)
             result=native.generate(prompt,negative,job['seed'],job['steps'],1024,selected['cfg'],'euler',reference=reference,
-                cancel=job['cancel'],on_process=launched,on_progress=progress,extra_args=('--disable-prefetch',) if reference else (),
+                cancel=job['cancel'],on_process=launched,on_progress=progress,on_stage=lambda stage:mark(job,stage),cpu_threads=selected.get('cpu_threads',2),extra_args=('--disable-prefetch',) if reference else (),
                 native_environment={'ZIPHAP_EULER_CHECKPOINT':str(self.store.native(key)), 'ZIPHAP_CHECKPOINT_BINDING':binding})
             if job['cancel'].is_set():raise InterruptedError()
             validate_png(result,1024);self.store.result(key,result)
             job.update(result=result,phase='completed',step=job['steps'],error=None)
-        except Exception:
-            job.update(phase='suspended' if job.get('pause') else 'failed',error='PC_IMAGE_COMPUTE_FAILED')
+        except Exception as error:
+            failed_stage=public_stage(job) or (job['phase'] if job['phase'] in FAILURE_STAGES else 'admitting')
+            paused=isinstance(error,InterruptedError) and job.get('pause') and job['cancel'].is_set()
+            job.update(phase='suspended' if paused else 'failed',error=None if paused else 'PC_IMAGE_COMPUTE_FAILED')
+            if not paused:
+                job.update(failureCode=failure_code(error),failureStage=failed_stage)
+                if job['failureCode']!='IMAGE_EXECUTION_ERROR':job['error']=job['failureCode']
             try:
                 saved=self.store.native_step(key,job['binding'],job['steps']) if job.get('binding') else 0
-                if saved:job.update(phase='resumable',step=saved,error='PC_IMAGE_CHECKPOINT_AVAILABLE')
+                if saved:job.update(phase='resumable',step=saved,error=None if paused else 'PC_IMAGE_CHECKPOINT_AVAILABLE')
             except Exception:job.update(phase='failed',error='PC_IMAGE_CHECKPOINT_INVALID')
         finally:
             terminate(job.get('process'),wait=True)
@@ -115,7 +136,8 @@ class RecoveryEngines(OwnedEngines):
                 job['cleanup_done'].set()
                 if acquired:self.lock.release()
     @job_control
-    def resume_image(self,key,owner):
+    def resume_image(self,key,owner,automatic=False,explicit=False):
+        if type(automatic) is not bool or type(explicit) is not bool or automatic and explicit:raise ValueError('INVALID_RESUME_MODE')
         with self.jobs_lock:
             if self.closing:raise ValueError('WORKER_CLOSING')
             job=self._job_owner(key,owner)
@@ -123,9 +145,11 @@ class RecoveryEngines(OwnedEngines):
             if job['phase'] in ('cancelled','acknowledged','failed'):raise ValueError('NO_RECOVERY_STATE')
             self.store.load(key) # expiry and pairing epoch are checked before any launch
             if job['phase']=='completed' or job.get('thread') and job['thread'].is_alive():return self.public_job(key,owner)
+            if job.get('pause') and not explicit:raise ValueError('IMAGE_EXPLICITLY_PAUSED')
             if job['phase'] not in ('resumable','suspended'):raise ValueError('NO_RECOVERY_STATE')
             job.update(cancel=threading.Event(),cleanup_done=threading.Event(),pause=False,phase='queued',error=None,
                 attempts=job.get('attempts',1)+1,client_seen=time.monotonic())
+            job.pop('failureCode',None);job.pop('failureStage',None)
             request=job['request'];reference=base64.b64decode(request.get('referencePng',''),validate=True)
             thread=threading.Thread(target=self.run_image,args=(key,request['prompt'],request.get('negativePrompt',''),reference,.65),daemon=True)
             job['thread']=thread;thread.start();return self.public_job(key,owner)
@@ -171,6 +195,8 @@ class RecoveryEngines(OwnedEngines):
                 finally:self.lock.release()
     def health(self):
         return super().health()|{'image_recovery':1,'image_recovery_storage':'user_dpapi_24h','image_checkpoint_interval':5,
+            'image_steps_by_model':{'FLUX.2-klein-4B-Q4_0':[4,8]},
+            'image_resume_guard':1,
             'durable_personal_store':True,'durable_personal_store_scope':'explicit_image_recovery_only',
             'image_io_modes':['ram_only','encrypted_checkpoint'],'image_recovery_instance':self.instance_id}
     def image_bytes(self,key,owner=None):

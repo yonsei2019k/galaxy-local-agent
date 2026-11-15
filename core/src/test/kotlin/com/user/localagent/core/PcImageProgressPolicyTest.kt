@@ -17,6 +17,8 @@ class PcImageProgressPolicyTest {
         assertEquals("PC 메모리 여유 대기",PcImageProgressPolicy.label("waiting_resources","waiting_memory"))
         assertEquals("PC GPU 여유 대기",PcImageProgressPolicy.label("waiting_resources","waiting_gpu"))
         assertEquals("PC 메모리 또는 GPU 여유 대기",PcImageProgressPolicy.label("waiting_resources",null))
+        assertEquals("PC 입력 처리 · 첫 생성 단계 준비 중",PcImageProgressPolicy.label("loading","preparing_inputs"))
+        assertEquals("PC에서 장면을 정교하게 만드는 중",PcImageProgressPolicy.label("sampling","preparing_inputs"))
     }
     @Test fun pollingSlowsWhileUnchangedAndResetsOnProgress(){
         assertEquals(1000L,PcImageProgressPolicy.pollDelayMillis(0))

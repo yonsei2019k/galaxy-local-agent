@@ -116,6 +116,9 @@ class PcComputeValidation {
         val originalImageModel=imageSettings.state.value.imageModelId
         val selectedImageModel=InstrumentationRegistry.getArguments().getString("pcImageModelId")?:com.user.localagent.core.PcImageModelCatalog.QUALITY_ID
         val imagePin=com.user.localagent.core.PcImageModelCatalog.selection(selectedImageModel)
+        val requestedSteps=InstrumentationRegistry.getArguments().getString("pcImageSteps")?.toInt()
+            ?:if(selectedImageModel==com.user.localagent.core.PcImageModelCatalog.FAST_ID)4 else 50
+        com.user.localagent.core.PcComputeContract.steps(true,requestedSteps,pcModelId=selectedImageModel)
         val owned=openOwnedText(app,enableImages=true);val engine=owned.engine
         try {
             imageSettings.imageModel(selectedImageModel)
@@ -128,7 +131,7 @@ class PcComputeValidation {
                     delay(5000)
                 }
             }
-            val result=try {withTimeout(4*60*60_000L){studio.generateInCurrentRequest("A photorealistic still life on a wooden desk. A red ceramic mug is on the left and a blue glass bottle is on the right. A small cream card between them reads ZIPHAP. Soft window light, realistic reflections, fine ceramic texture, natural perspective.",steps=50,seed=12345)}}finally{monitor.cancelAndJoin()}
+            val result=try {withTimeout(4*60*60_000L){studio.generateInCurrentRequest("A photorealistic still life on a wooden desk. A red ceramic mug is on the left and a blue glass bottle is on the right. A small cream card between them reads ZIPHAP. Soft window light, realistic reflections, fine ceramic texture, natural perspective.",steps=requestedSteps,seed=12345)}}finally{monitor.cancelAndJoin()}
             assertEquals(1024,result.width);assertEquals(1024,result.height);assertTrue(result.file.isFile)
             val note=checkNotNull(app.repository.latestNote("generated-images"));val metadata=Json.parseToJsonElement(note.body).jsonObject
             assertEquals("pc",metadata["computeLocation"]?.jsonPrimitive?.content)
@@ -141,7 +144,8 @@ class PcComputeValidation {
             fun sha(data:ByteArray)=MessageDigest.getInstance("SHA-256").digest(data).joinToString(""){"%02x".format(it.toInt()and 255)}
             assertEquals(sha(result.file.readBytes()),sha(bytes))
             assertNull(engine.residentModelPath);assertNull(studio.residentImageModelPath)
-            report("pc-image-"+(if(selectedImageModel==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"sdxl"else"qwen")+"-phone-save.json",buildJsonObject{put("passed",true);put("width",1024);put("height",1024);put("phone_file",result.file.name);put("gallery_readback",true);put("sha256",sha(bytes));put("model_sha256",imagePin.sha256);put("model_id",selectedImageModel)})
+            val modelLabel=when(selectedImageModel){com.user.localagent.core.PcImageModelCatalog.SDXL_ID->"sdxl";com.user.localagent.core.PcImageModelCatalog.FAST_ID->"flux-fast";else->"qwen"}
+            report("pc-image-$modelLabel-phone-save.json",buildJsonObject{put("passed",true);put("width",1024);put("height",1024);put("steps",requestedSteps);put("elapsed_ms",result.elapsedMillis);put("phone_file",result.file.name);put("gallery_readback",true);put("sha256",sha(bytes));put("model_sha256",imagePin.sha256);put("model_id",selectedImageModel)})
             // Keep this owner-requested sample on the phone for viewing; PC scratch must be released.
         }finally{owned.close();if(imageSettings.state.value.imageModelId==selectedImageModel)imageSettings.imageModel(originalImageModel)}
     }
@@ -162,9 +166,12 @@ class PcComputeValidation {
         val uri=androidx.core.content.FileProvider.getUriForFile(context,"${context.packageName}.files",reference)
         val settings=PcComputeSettings.get(context);val original=settings.state.value.imageModelId
         val owned=try{openOwnedText(app,enableImages=true)}catch(error:Throwable){reference.delete();throw error}
-        val pin=com.user.localagent.core.PcImageModelCatalog.effectiveSelection(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,true)
+        val selectedModel=args.getString("pcImageModelId")?:com.user.localagent.core.PcImageModelCatalog.QUALITY_ID
+        val requestedSteps=args.getString("pcImageSteps")?.toInt()?:if(selectedModel==com.user.localagent.core.PcImageModelCatalog.FAST_ID)4 else 50
+        com.user.localagent.core.PcComputeContract.steps(true,requestedSteps,pcModelId=selectedModel)
+        val pin=com.user.localagent.core.PcImageModelCatalog.effectiveSelection(selectedModel,true)
         try {
-            settings.imageModel(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)
+            settings.imageModel(selectedModel)
             val studio=com.user.localagent.images.ImageStudioController(context,app,requestEngine=owned.engine,ownerRunId=owned.owner)
             assertNotNull(PcTransport(context).available(owned.owner))
             val monitor=launch {
@@ -176,7 +183,7 @@ class PcComputeValidation {
             val started=SystemClock.elapsedRealtime()
             val result=try {withTimeout(4*60*60_000L){studio.generateInCurrentRequest(
                 "Keep the exact same red ceramic mug and blue glass object, their shapes, handles, colors and positions. Change only the background to a softly lit garden. Preserve the objects and the wooden board. Photorealistic product photography.",
-                steps=50,seed=12345,referenceUri=uri,strength=.45f)}}finally{monitor.cancelAndJoin()}
+                steps=requestedSteps,seed=12345,referenceUri=uri,strength=.45f)}}finally{monitor.cancelAndJoin()}
             assertEquals(expected,sha(source.readBytes()));assertEquals(expected,sha(reference.readBytes()))
             val metadata=Json.parseToJsonElement(checkNotNull(app.repository.latestNote("generated-images")).body).jsonObject
             assertEquals("pc",metadata["computeLocation"]?.jsonPrimitive?.content)
@@ -186,14 +193,14 @@ class PcComputeValidation {
             assertEquals(pin.sha256,metadata["modelSha256"]?.jsonPrimitive?.content)
             val gallery=studio.exportToGallery();val exported=context.contentResolver.openInputStream(gallery)!!.use{it.readBytes()}
             assertEquals(sha(result.file.readBytes()),sha(exported));assertEquals(1024,result.width);assertEquals(1024,result.height)
-            report("pc-image-qwen-edit-phone-save.json",buildJsonObject{
+            report("pc-image-"+(if(selectedModel==com.user.localagent.core.PcImageModelCatalog.FAST_ID)"flux-fast"else"qwen")+"-edit-phone-save.json",buildJsonObject{
                 put("passed",true);put("reference_sha256",expected);put("source_unchanged",true);put("model_id",pin.id);put("model_sha256",pin.sha256)
                 put("phone_file",result.file.name);put("sha256",sha(exported));put("gallery_readback",true)
-                put("elapsed_ms",SystemClock.elapsedRealtime()-started);put("identity_quality_verified",false)
+                put("elapsed_ms",SystemClock.elapsedRealtime()-started);put("steps",requestedSteps);put("identity_quality_verified",false)
             })
         }finally{
             owned.close();reference.delete()
-            if(settings.state.value.imageModelId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)settings.imageModel(original)
+            if(settings.state.value.imageModelId==selectedModel)settings.imageModel(original)
         }
     }
     @Test fun actualPcComputationsOverlapOnePhoneGeneration()=runBlocking {
@@ -303,7 +310,7 @@ class PcComputeValidation {
         try {
             check(!app.runs.hasActiveRuns.value&&app.runs.queued.value.isEmpty()&&!app.imageStudio.state.value.running&&!RuntimeGate.benchmark.get()&&!RuntimeGate.inference.get()&&!RuntimeGate.pc.get()){"Existing owner work has priority"}
             busy=app.updates.acquireBusy(owner);app.cancelIdleUnload()
-            val routingRevision=checkNotNull(settings.updateRoutingIfUnchanged(capturedRevision,true,if(enableImages)true else previous.preferPcImages)){"Owner routing changed during fixture admission"}
+            val routingRevision=checkNotNull(settings.updateRoutingIfUnchanged(capturedRevision,if(enableImages)previous.automaticText else true,if(enableImages)true else previous.preferPcImages)){"Owner routing changed during fixture admission"}
             appliedRevision=routingRevision
             val engine=AutomaticComputeEngine(app.applicationContext,owner,beforePhoneLoad={app.engine.unloadPhoneResidency()})
             return OwnedText(owner,engine,app,previous.automaticText,previous.preferPcImages,routingRevision,busy,admission)

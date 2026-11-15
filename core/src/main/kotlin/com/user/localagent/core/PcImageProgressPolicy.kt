@@ -22,7 +22,7 @@ object PcImageProgressPolicy {
                 "waiting_gpu"->"PC GPU 여유 대기"
                 else->"PC 메모리 또는 GPU 여유 대기"
             }
-            "loading"->"PC 이미지 모델 로딩 중"
+            "loading"->if(stage=="preparing_inputs")"PC 입력 처리 · 첫 생성 단계 준비 중"else"PC 이미지 모델 로딩 중"
             "sampling"->"PC에서 장면을 정교하게 만드는 중"
             "decoding"->"PC에서 이미지 디코딩 중"
             "completed"->"완성 이미지를 스마트폰으로 받는 중"

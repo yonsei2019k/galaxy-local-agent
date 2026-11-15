@@ -10,4 +10,14 @@ class PcComputeContractTest {
     }
     @Test fun selectedBackendsHaveDifferentQualityDefaults(){assertEquals(50,PcComputeContract.steps(true,null));assertEquals(8,PcComputeContract.steps(false,null))}
     @Test fun samplerBudgetsStayBoundedAndExplicit(){assertEquals(32,PcComputeContract.steps(true,32));assertEquals(4,PcComputeContract.steps(false,4));for(pair in listOf(true to 4,true to 51,false to 50,false to 0))assertTrue(runCatching{PcComputeContract.steps(pair.first,pair.second)}.isFailure)}
+    @Test fun fastDefaultsAreExplicitAndDoNotLowerLegacyQualityBudgets(){
+        val fast=PcImageModelCatalog.FAST_ID
+        assertEquals(4,PcComputeContract.steps(true,null,pcModelId=fast))
+        for(steps in listOf(4,8,50))assertEquals(steps,PcComputeContract.steps(true,steps,pcModelId=fast))
+        for(steps in listOf(3,51))assertThrows(IllegalArgumentException::class.java){PcComputeContract.steps(true,steps,pcModelId=fast)}
+        assertEquals(50,PcComputeContract.steps(true,null,pcModelId=PcImageModelCatalog.QUALITY_ID))
+        for(id in listOf(PcImageModelCatalog.QUALITY_ID,PcImageModelCatalog.SDXL_ID))
+            assertThrows(IllegalArgumentException::class.java){PcComputeContract.steps(true,4,pcModelId=id)}
+        assertThrows(IllegalArgumentException::class.java){PcComputeContract.steps(true,4,pcModelId="unknown")}
+    }
 }

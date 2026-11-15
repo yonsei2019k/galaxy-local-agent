@@ -103,6 +103,8 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
         val health=transport.json(config,"/v1/health",timeout=3000,computeOwner=computeOwner)
         val selectedId=resume?.model?:selectedModel.id
         val modelPin=PcImageModelCatalog.effectiveSelection(selectedId,reference!=null)
+        com.user.localagent.core.PcComputeContract.steps(true,steps,pcModelId=selectedId)
+        require(modelPin.id!=PcImageModelCatalog.FAST_ID||negative.isBlank()){"빠른 모델은 제외 문장을 지원하지 않습니다. 비우거나 Qwen을 선택해주세요."}
         require((health["image_models"] as? JsonObject)?.get(modelPin.id)?.jsonPrimitive?.content==modelPin.sha256){"선택한 PC 이미지 모델이 준비되지 않았습니다."}
         requireOwnerAccess(config)
         val revision=cancelRevision.get()
@@ -134,7 +136,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
             repeat(2){
                 if(!accepted){
                     requireOwnerAccess(config)
-                    try {transport.json(config,if(resume==null)"/v1/images"else"/v1/images/$id/resume","POST",if(resume==null)body else buildJsonObject{},15_000,computeOwner=computeOwner);accepted=true}
+                    try {transport.json(config,if(resume==null)"/v1/images"else"/v1/images/$id/resume","POST",if(resume==null)body else buildJsonObject{if(health["image_resume_guard"]?.jsonPrimitive?.intOrNull==1)put("explicit",requestedResume!=null)},15_000,computeOwner=computeOwner);accepted=true}
                     catch(cancel:CancellationException){throw cancel}catch(error:Exception){if(it==1)throw error;delay(1000)}
                 }
             }
@@ -156,12 +158,34 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                     val total=report.getValue("steps").jsonPrimitive.int
                     require(step in 0..total&&total==steps)
                     if(phase in setOf("resumable","suspended")){
-                        check(recoverable&&resumeAttempts++<2){"PC 복구 정보를 보관했습니다. 자원 상태를 확인한 뒤 ‘PC 작업 이어받기’를 눌러주세요."}
                         val saved=report["checkpointStep"]?.jsonPrimitive?.intOrNull?:0
+                        PcImageSuspended.fromReport(phase,report["paused"]?.jsonPrimitive?.boolean,saved,steps)?.let{throw it}
+                        check(recoverable&&resumeAttempts++<2){"PC 복구 정보를 보관했습니다. 자원 상태를 확인한 뒤 ‘PC 작업 이어받기’를 눌러주세요."}
                         check(saved in 1..steps){"저장된 계산 지점이 없습니다. PC 상태를 확인한 뒤 새로 시작해야 합니다."}
                         onProgress(ImageGenerationProgress("PC ${saved}단계 저장 확인 · 원래 설정으로 이어서 계산 준비",saved,total,saved.toFloat()/total))
                         delay(5000L*resumeAttempts)
-                        transport.json(config,"/v1/images/$id/resume","POST",buildJsonObject{},15_000,computeOwner=computeOwner)
+                        requireOwnerAccess(config)
+                        val latest=transport.json(config,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
+                        requireOwnerAccess(config)
+                        val latestPhase=latest.getValue("phase").jsonPrimitive.content
+                        if(latestPhase !in setOf("resumable","suspended"))continue
+                        val latestSaved=latest["checkpointStep"]?.jsonPrimitive?.intOrNull?:0
+                        require(latest.getValue("steps").jsonPrimitive.int==steps)
+                        PcImageSuspended.fromReport(latestPhase,latest["paused"]?.jsonPrimitive?.boolean,latestSaved,steps)?.let{throw it}
+                        require(latestSaved in 1..steps)
+                        try {
+                            transport.json(config,"/v1/images/$id/resume","POST",buildJsonObject{if(health["image_resume_guard"]?.jsonPrimitive?.intOrNull==1)put("automatic",true)},15_000,computeOwner=computeOwner)
+                        }catch(cancel:CancellationException){throw cancel}catch(error:Exception){
+                            val stopped=try{
+                                val current=transport.json(config,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
+                                requireOwnerAccess(config)
+                                require(current.getValue("steps").jsonPrimitive.int==steps)
+                                PcImageSuspended.fromReport(current.getValue("phase").jsonPrimitive.content,current["paused"]?.jsonPrimitive?.boolean,
+                                    current["checkpointStep"]?.jsonPrimitive?.intOrNull?:0,steps)
+                            }catch(cancel:CancellationException){throw cancel}catch(_:Exception){null}
+                            if(stopped!=null)throw stopped
+                            throw error
+                        }
                         continue
                     }
                     if(phase in setOf("failed","cancelled","acknowledged"))throw PcImageComputationFailure.fromReport(phase,report["error"]?.jsonPrimitive?.contentOrNull)

@@ -69,11 +69,11 @@ import kotlinx.coroutines.*
             }
             if(state.claudeText)Text("Claude를 고르면 대화 내용과 도구 결과가 인터넷을 거쳐 Anthropic으로 전송되고 API 요금이 듭니다. 음성과 사진 분석은 계속 PC에서 처리합니다.",style=MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("이미지 · PC 정밀")})
+                FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("이미지 · PC")})
                 FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("이미지 · 휴대폰")})
             }
             PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
-            Text("휴대폰 단독은 설치된 SDXL을 사용합니다. Qwen은 새 이미지에2512, 참고 사진 편집에Edit2511을 사용합니다. PC 모델 선택은 다음 작업부터 적용됩니다.",style=MaterialTheme.typography.bodySmall)
+            Text("휴대폰 단독은 설치된 SDXL을 사용합니다. Qwen은 새 이미지에2512, 참고 사진 편집에Edit2511을 사용합니다. FLUX는 생성·편집에 같은 모델을 사용합니다. PC 모델 선택은 새 작업부터 적용되며 보관된 복구 작업의 모델은 유지합니다.",style=MaterialTheme.typography.bodySmall)
             TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
         }
     }
@@ -128,6 +128,10 @@ fun PcImageModelSelector(selectedId:String,onSelect:(String)->Unit,enabled:Boole
             FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,
                 onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)},enabled=enabled,
                 label={Text("Qwen · 20B")},modifier=Modifier.testTag("pc_image_model_qwen"))
+            FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.FAST_ID,
+                onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.FAST_ID)},enabled=enabled,
+                label={Text("FLUX · 4B")},modifier=Modifier.testTag("pc_image_model_flux"))
         }
+        Text("FLUX는 기본 4단계, Qwen은 기본 50단계입니다. 실제 처리 시간은 PC 자원에 따라 달라집니다.",style=MaterialTheme.typography.bodySmall)
     }
 }

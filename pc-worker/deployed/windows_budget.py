@@ -1,5 +1,7 @@
 """Restrict only this worker's native children; never changes another app's priority."""
 import ctypes
+import time
+from resident_budget import expanded_limit
 
 class Basic(ctypes.Structure):
  _fields_=[('process_time',ctypes.c_int64),('job_time',ctypes.c_int64),('flags',ctypes.c_uint32),('minimum',ctypes.c_size_t),('maximum',ctypes.c_size_t),('active',ctypes.c_uint32),('affinity',ctypes.c_size_t),('priority',ctypes.c_uint32),('scheduling',ctypes.c_uint32)]
@@ -39,3 +41,28 @@ def constrain(process):
   function.argtypes=[ctypes.c_void_p,ctypes.c_int];function.restype=ctypes.c_long
   return function(ctypes.c_void_p(int(process._handle)),1)==0 # BELOW_NORMAL
  except (AttributeError,OSError):return False
+
+class ProcessMemory(ctypes.Structure):
+ _fields_=[('size',ctypes.c_uint32),('faults',ctypes.c_uint32)]+[(name,ctypes.c_size_t) for name in
+  ('peak_resident','resident','peak_paged','paged','peak_nonpaged','nonpaged','pagefile','peak_pagefile')]
+
+def refresh_resident_budget(process):
+ """Optional monotonic expansion; never terminate/restart, shrink, or reserve more RAM."""
+ now=time.monotonic()
+ if now-getattr(process,'ziphap_budget_checked',0)<30:return False
+ process.ziphap_budget_checked=now
+ if process.poll() is not None:return False
+ status=MemoryStatus();status.length=ctypes.sizeof(status)
+ memory=ProcessMemory();memory.size=ctypes.sizeof(memory)
+ query=kernel.K32GetProcessMemoryInfo
+ query.argtypes=[ctypes.c_void_p,ctypes.c_void_p,ctypes.c_uint32]
+ handle=ctypes.c_void_p(int(process._handle))
+ if not kernel.GlobalMemoryStatusEx(ctypes.byref(status)) or not query(handle,ctypes.byref(memory),ctypes.sizeof(memory)):return False
+ old=process.ziphap_working_set_limit_bytes
+ target=expanded_limit(old,status.available_physical,memory.resident)
+ if target==old:return False
+ if not kernel.SetProcessWorkingSetSizeEx(handle,128*1024,target,0x6):return False
+ minimum=ctypes.c_size_t();actual=ctypes.c_size_t();flags=ctypes.c_uint32()
+ if not kernel.GetProcessWorkingSetSizeEx(handle,ctypes.byref(minimum),ctypes.byref(actual),ctypes.byref(flags)):return False
+ process.ziphap_working_set_limit_bytes=actual.value
+ return actual.value==target and bool(flags.value&0x4)

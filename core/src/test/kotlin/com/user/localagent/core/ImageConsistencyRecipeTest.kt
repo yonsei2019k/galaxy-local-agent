@@ -28,5 +28,7 @@ class ImageConsistencyRecipeTest {
         assertThrows(IllegalArgumentException::class.java){ImageConsistencyRecipe(seed=-1).validate()}
         assertThrows(IllegalArgumentException::class.java){ImageConsistencyRecipe(scene="x".repeat(1201)).validate()}
         assertEquals("landscape",ImageConsistencyRecipe(scene=" landscape ").validate().prompt())
+        val fast=ImageConsistencyRecipe(pcModelId=PcImageModelCatalog.FAST_ID,pcSteps=4).validate()
+        assertEquals(fast,Json.decodeFromString<ImageConsistencyRecipe>(Json.encodeToString(fast)).validate())
     }
 }

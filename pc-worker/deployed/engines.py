@@ -184,8 +184,10 @@ class Engines:
   key=str(uuid.UUID(request['requestId']))
   prompt=request['prompt'];negative=request.get('negativePrompt','')
   if not isinstance(prompt,str) or not 1<=len(prompt)<=4000 or '\x00' in prompt or not isinstance(negative,str) or len(negative)>2000 or '\x00' in negative:raise ValueError('PROMPT_BOUND')
-  steps=request.get('steps',50);seed=request.get('seed',-1)
-  if type(steps)!=int or not 12<=steps<=50 or type(seed)!=int or not -1<=seed<=9223372036854775807:raise ValueError('IMAGE_OPTIONS')
+  selected=profile(model_id)
+  if selected.get('negative_prompt') is False and negative.strip():raise ValueError('NEGATIVE_PROMPT_NOT_SUPPORTED')
+  steps=request.get('steps',selected.get('default_steps',50));seed=request.get('seed',-1)
+  if type(steps)!=int or not selected.get('min_steps',12)<=steps<=50 or type(seed)!=int or not -1<=seed<=9223372036854775807:raise ValueError('IMAGE_OPTIONS')
   if seed<0:seed=uuid.uuid4().int&0x7fffffff
   strength=request.get('strength',.65)
   if not isinstance(strength,(int,float)) or not .4<=strength<=.85:raise ValueError('REFERENCE_STRENGTH')
@@ -235,7 +237,7 @@ class Engines:
     def progress(step):
      job['step']=max(job['step'],min(job['steps'],step));job['phase']='decoding' if job['step']==job['steps'] else 'sampling';job['updated']=time.monotonic()
     started=time.monotonic();job['phase']='loading'
-    result=native.generate(prompt,negative,job['seed'],job['steps'],1024,selected['cfg'],'euler',reference=reference,cancel=job['cancel'],on_process=launched,on_progress=progress,extra_args=('--disable-prefetch',) if reference else ())
+    result=native.generate(prompt,negative,job['seed'],job['steps'],1024,selected['cfg'],'euler',reference=reference,cancel=job['cancel'],on_process=launched,on_progress=progress,cpu_threads=selected.get('cpu_threads',2),extra_args=('--disable-prefetch',) if reference else ())
     if job['cancel'].is_set():raise InterruptedError()
     validate_png(result,1024)
     job.update(result=result,phase='completed',step=job['steps'],elapsed_ms=round((time.monotonic()-started)*1000),updated=time.monotonic())

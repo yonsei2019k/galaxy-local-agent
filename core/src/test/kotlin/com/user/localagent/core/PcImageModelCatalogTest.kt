@@ -4,11 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PcImageModelCatalogTest {
-    @Test fun referenceUsesExplicitEditorWhileBaseChooserStaysTwoModels(){
+    @Test fun referenceUsesExplicitEditorWithoutChangingOtherModels(){
         assertEquals(PcImageModelCatalog.QUALITY_ID,PcImageModelCatalog.effectiveSelection(PcImageModelCatalog.QUALITY_ID,false).id)
         assertEquals(PcImageModelCatalog.EDIT_ID,PcImageModelCatalog.effectiveSelection(PcImageModelCatalog.QUALITY_ID,true).id)
         assertEquals(PcImageModelCatalog.SDXL_ID,PcImageModelCatalog.effectiveSelection(PcImageModelCatalog.SDXL_ID,true).id)
         assertThrows(IllegalArgumentException::class.java){PcImageModelCatalog.selection(PcImageModelCatalog.EDIT_ID)}
+    }
+    @Test fun fastReferenceRetainsItsOwnExactModelPin(){
+        val fast=PcImageModelCatalog.selection(PcImageModelCatalog.FAST_ID)
+        assertEquals(PcImageModelCatalog.FAST_SHA,fast.sha256)
+        assertEquals(fast,PcImageModelCatalog.effectiveSelection(fast.id,false))
+        assertEquals(fast,PcImageModelCatalog.effectiveSelection(fast.id,true))
+        assertThrows(IllegalArgumentException::class.java){PcImageModelCatalog.verifyResult(fast,PcImageModelCatalog.EDIT_ID,PcImageModelCatalog.EDIT_SHA)}
+        assertThrows(IllegalArgumentException::class.java){PcImageModelCatalog.verified(fast.id,PcImageModelCatalog.QUALITY_SHA)}
     }
     @Test fun editorCannotBeReportedAsTextImageModel(){
         val edit=PcImageModelCatalog.effectiveSelection(PcImageModelCatalog.QUALITY_ID,true)

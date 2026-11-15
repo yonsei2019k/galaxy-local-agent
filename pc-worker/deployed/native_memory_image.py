@@ -1,6 +1,7 @@
 """Native diffusion HTTP in RAM only: no prompt/reference/output files or user log files."""
 import base64
 import json
+import os
 import re
 import socket
 import subprocess
@@ -8,18 +9,22 @@ import threading
 import time
 import urllib.request
 import uuid
-from windows_budget import constrain
+from windows_budget import constrain,refresh_resident_budget
 
 class NativeMemoryImage:
     def __init__(self,executable,model_args,cwd):
         self.executable=executable;self.model_args=model_args;self.cwd=cwd;self.last_native_output=''
-    def generate(self,prompt,negative,seed,steps,size,cfg,sampler,reference=b'',cancel=None,on_process=None,on_progress=None,extra_args=(),native_environment=None):
+    @staticmethod
+    def thread_count(requested):
+        if type(requested) is not int or not 1<=requested<=4:raise ValueError('NATIVE_THREAD_BUDGET')
+        return min(requested,os.cpu_count() or 2)
+    def generate(self,prompt,negative,seed,steps,size,cfg,sampler,reference=b'',cancel=None,on_process=None,on_progress=None,extra_args=(),native_environment=None,on_stage=None,cpu_threads=2):
         if any('<sd_cpp_extra_args' in text.lower() or '</sd_cpp_extra_args' in text.lower() for text in (prompt,negative)):
             raise ValueError('PROMPT_CONTROL_TAG_NOT_ALLOWED')
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         command=[str(self.executable),'--listen-ip','127.0.0.1','--listen-port',str(port),*map(str,self.model_args),
                  '--width',str(size),'--height',str(size),'--steps',str(steps),'--cfg-scale',str(cfg),'--sampling-method',sampler,
-                 '--seed',str(seed),'--threads','2','--mmap','--vae-tiling','--flash-attn','on','--conditioning-cache-size','0',
+                 '--seed',str(seed),'--threads',str(self.thread_count(cpu_threads)),'--mmap','--vae-tiling','--flash-attn','on','--conditioning-cache-size','0',
                  '--disable-image-metadata','--log-level','error',*extra_args]
         reader=None;progress_reader=None;finished=threading.Event()
         process=subprocess.Popen(command,cwd=self.cwd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
@@ -58,10 +63,12 @@ class NativeMemoryImage:
             request=urllib.request.Request(base+'/sdcpp/v1/img_gen',data=json.dumps(payload,separators=(',',':')).encode(),headers={'Content-Type':'application/json'})
             accepted=read_json(request,30);native_id=accepted.get('id')
             if not isinstance(native_id,str) or not re.fullmatch(r'job_[a-zA-Z0-9_-]{1,80}',native_id):raise ValueError('NATIVE_JOB_ID')
+            if on_stage:on_stage('preparing_inputs')
             deadline=time.monotonic()+4*3600
             while True:
                 if cancel is not None and cancel.is_set():raise InterruptedError()
                 if process.poll() is not None:raise RuntimeError('NATIVE_MEMORY_SERVER_EXITED')
+                refresh_resident_budget(process)
                 job=read_json(base+'/sdcpp/v1/jobs/'+native_id)
                 if job.get('id')!=native_id or job.get('kind')!='img_gen':raise ValueError('NATIVE_JOB_BINDING')
                 state=job.get('status')

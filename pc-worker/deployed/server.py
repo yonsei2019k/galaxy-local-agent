@@ -152,8 +152,10 @@ class Handler(BaseHTTPRequestHandler):
     if data is None:self.reply({'error':'NOT_READY'},409);return
     self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-SHA256',hashlib.sha256(data).hexdigest());self.end_headers();self.wfile.write(data);return
    if self.command=='POST' and suffix in ('/resume','/suspend'):
-    if self.body():raise ValueError('RECOVERY_BODY_MUST_BE_EMPTY')
-    result=ENGINE.resume_image(key,owner) if suffix=='/resume' else ENGINE.suspend_image(key,owner)
+    body=self.body()
+    if suffix=='/suspend' and body:raise ValueError('RECOVERY_BODY_MUST_BE_EMPTY')
+    if suffix=='/resume' and (set(body)-{'automatic','explicit'} or any(type(v) is not bool for v in body.values())):raise ValueError('INVALID_RESUME_MODE')
+    result=ENGINE.resume_image(key,owner,automatic=body.get('automatic',False),explicit=body.get('explicit',False)) if suffix=='/resume' else ENGINE.suspend_image(key,owner)
     self.reply(result,202 if suffix=='/resume' else 200);return
    if self.command=='DELETE' or self.command=='POST' and suffix=='/ack':
     if self.command=='POST':self.body()

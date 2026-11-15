@@ -80,6 +80,64 @@ class RecoveryTest(unittest.TestCase):
         self.engine.suspend_image(self.key,self.owner)
         report=self.engine.public_job(self.key,self.owner)
         self.assertEqual(('suspended',0),(report['phase'],report['checkpointStep']))
+        self.assertTrue(report['paused'])
+        self.engine=RecoveryEngines('epoch-a')
+        self.assertTrue(self.engine.public_job(self.key,self.owner)['paused'])
+        self.engine.resume_image(self.key,self.owner,explicit=True)
+        self.assertFalse(self.engine.public_job(self.key,self.owner)['paused'])
+    def test_atomic_resume_guard_keeps_explicit_pause_even_after_a_stale_poll(self):
+        self.engine.image(self.request,self.owner)
+        self.engine.jobs[self.key]['cleanup_done'].set()
+        self.engine.suspend_image(self.key,self.owner)
+        attempts=self.engine.public_job(self.key,self.owner)['attempts']
+        for options in ({},{'automatic':True},{'automatic':True,'explicit':True},{'explicit':'yes'}):
+            with self.assertRaises(ValueError):self.engine.resume_image(self.key,self.owner,**options)
+        self.assertEqual(attempts,self.engine.public_job(self.key,self.owner)['attempts'])
+        self.engine.resume_image(self.key,self.owner,explicit=True)
+        self.assertFalse(self.engine.public_job(self.key,self.owner)['paused'])
+    def test_failure_diagnostic_is_fixed_code_and_stage_without_private_exception(self):
+        self.engine.image(self.request,self.owner)
+        with patch.object(module,'verify_file',side_effect=RuntimeError('private path and prompt')):
+            self.run_job()
+        report=self.engine.public_job(self.key,self.owner)
+        self.assertEqual('IMAGE_EXECUTION_ERROR',report['failureCode'])
+        self.assertEqual('verifying_models',report['failureStage'])
+        self.assertNotIn('private path',json.dumps(report))
+        self.assertEqual('NATIVE_MEMORY_SERVER_LOAD_FAILED',module.failure_code(RuntimeError('NATIVE_MEMORY_SERVER_LOAD_FAILED')))
+        self.engine=RecoveryEngines('epoch-a')
+        restored=self.engine.public_job(self.key,self.owner)
+        self.assertEqual('IMAGE_EXECUTION_ERROR',restored['failureCode'])
+        self.assertEqual('verifying_models',restored['failureStage'])
+        self.engine.resume_image(self.key,self.owner)
+        self.assertNotIn('failureCode',self.engine.public_job(self.key,self.owner))
+    def test_paused_worker_is_not_a_compute_failure(self):
+        self.engine.image(self.request,self.owner)
+        job=self.engine.jobs[self.key];job['pause']=True;job['cancel'].set()
+        self.run_job()
+        report=self.engine.public_job(self.key,self.owner)
+        self.assertEqual('suspended',report['phase'])
+        self.assertIsNone(report.get('error'))
+        self.assertNotIn('failureCode',report)
+    def test_pause_race_does_not_hide_a_real_model_failure(self):
+        self.engine.image(self.request,self.owner)
+        def fail(*args):
+            job=self.engine.jobs[self.key];job['pause']=True;job['cancel'].set()
+            raise ValueError('MODEL_INTEGRITY')
+        with patch.object(module,'verify_file',side_effect=fail):self.run_job()
+        report=self.engine.public_job(self.key,self.owner)
+        self.assertEqual('MODEL_INTEGRITY',report['error'])
+        self.assertEqual('MODEL_INTEGRITY',report['failureCode'])
+    def test_sampling_failure_is_not_reported_as_model_loading(self):
+        self.engine.image(self.request,self.owner)
+        class Failing:
+            def __init__(self,*args):pass
+            def generate(self,*args,**kwargs):
+                kwargs['on_progress'](1)
+                raise RuntimeError('NATIVE_MEMORY_GENERATION_FAILED')
+        with patch.object(module,'NativeMemoryImage',Failing):self.run_job()
+        report=self.engine.public_job(self.key,self.owner)
+        self.assertEqual('sampling',report['failureStage'])
+        self.assertEqual('NATIVE_MEMORY_GENERATION_FAILED',report['error'])
     def test_encrypted_binding_tamper_expiry_and_epoch_fail_closed(self):
         store=self.engine.store;store.folder(self.key);path=store.native(self.key);path.write_bytes(dpapi(checkpoint()))
         self.assertEqual(5,store.native_step(self.key,'a'*64,20))

@@ -52,6 +52,8 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     var steps by rememberSaveable{mutableIntStateOf(8)}
     var qualitySteps by rememberSaveable{mutableIntStateOf(40)}
     var pcSteps by rememberSaveable{mutableIntStateOf(50)}
+    var fastPcSteps by rememberSaveable{mutableIntStateOf(4)}
+    val fastPc=pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.FAST_ID
     var seedText by rememberSaveable{mutableStateOf("")}
     var advanced by rememberSaveable{mutableStateOf(false)}
     var computeSettings by rememberSaveable{mutableStateOf(false)}
@@ -75,7 +77,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     var compareReference by rememberSaveable{mutableStateOf(false)}
     var savedSeries by remember{mutableStateOf<List<com.user.localagent.core.ImageConsistencyRecipe>?>(null)}
     fun recipe()=com.user.localagent.core.ImageConsistencyRecipe(title=seriesTitle,preserve=preserve,scene=prompt,
-        negative=negative,seed=seedText.toLongOrNull()?:-1,strength=strength,phoneSteps=qualitySteps,pcSteps=pcSteps,
+        negative=negative,seed=seedText.toLongOrNull()?:-1,strength=strength,phoneSteps=qualitySteps,pcSteps=if(fastPc)fastPcSteps else pcSteps,
         referenceName=referenceName.takeIf{transform},referenceSha256=referenceSha.takeIf{transform},pcModelId=pc.imageModelId)
     fun restoreRecipe(saved:com.user.localagent.core.ImageConsistencyRecipe){scope.launch {
         importing=true
@@ -84,7 +86,8 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
             if(app.imageStudio.state.value.running){onStatus("현재 이미지 생성이 끝난 뒤 조건을 불러와주세요.");return@launch}
             com.user.localagent.compute.PcComputeSettings.get(context).imageModel(saved.pcModelId)
             seriesTitle=saved.title;preserve=saved.preserve;prompt=saved.scene;negative=saved.negative
-            seedText=saved.seed.toString();strength=saved.strength;qualitySteps=saved.phoneSteps;pcSteps=saved.pcSteps
+            seedText=saved.seed.toString();strength=saved.strength;qualitySteps=saved.phoneSteps
+            if(saved.pcModelId==com.user.localagent.core.PcImageModelCatalog.FAST_ID)fastPcSteps=saved.pcSteps else pcSteps=saved.pcSteps
             referenceName=saved.referenceName;referenceSha=saved.referenceSha256;referenceUri=uri?.toString();transform=uri!=null;series=true
             savedSeries=null;onStatus("${saved.title}의 기준 사진과 생성 조건을 불러왔습니다.")
         }catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("시리즈를 읽지 못했습니다. 기존 입력은 유지됩니다.")}
@@ -98,9 +101,11 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     }}
     var referencePreview by remember{mutableStateOf<ImageBitmap?>(null)}
     val usePc=pc.paired&&pc.preferPcImages
-    val pcModelTitle=if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"SDXL 1.0 · Q4_K"
+    val pcModelTitle=if(fastPc)"FLUX.2 klein · 4B Q4_0"
+        else if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"SDXL 1.0 · Q4_K"
         else if(transform)"Qwen-Image-Edit-2511 · 20B Q4_K_M"else"Qwen-Image-2512 · 20B Q4_K_M"
-    val pcModelSource=if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0"
+    val pcModelSource=if(fastPc)"https://huggingface.co/black-forest-labs/FLUX.2-klein-4B"
+        else if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0"
         else if(transform)"https://huggingface.co/Qwen/Qwen-Image-Edit-2511"else"https://huggingface.co/Qwen/Qwen-Image-2512"
     val modelSourceUrl=when {
         usePc->pcModelSource
@@ -159,12 +164,13 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
         val seed=seedText.trim().takeIf{it.isNotEmpty()}?.toLongOrNull()
         if(seedText.isNotBlank()&&(seed==null||seed<0)){onStatus("시드는 0 이상의 정수로 입력하거나 비워주세요.");return}
         if(transform&&referenceUri==null){onStatus("변환할 참고 사진을 먼저 선택해주세요.");return}
-        if(usePc&&transform&&pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID){onStatus("PC 참고 사진 편집에는 Qwen을 선택해주세요. 휴대폰 SDXL로 변환할 수도 있습니다.");return}
+        if(usePc&&transform&&pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID){onStatus("PC 참고 사진 편집에는 Qwen 또는 FLUX를 선택해주세요. 휴대폰 SDXL로 변환할 수도 있습니다.");return}
+        if(usePc&&fastPc&&negative.isNotBlank()){onStatus("빠른 모델은 제외 문장을 지원하지 않습니다. 비우거나 Qwen을 선택해주세요.");return}
         if(series&&seed==null){onStatus("시리즈에서는 고정 시드를 입력해주세요.");return}
         val generationPrompt=try{if(series)recipe().validate().prompt()else prompt.trim()}
             catch(_:IllegalArgumentException){onStatus("시리즈 이름·특징·장면 길이와 생성 조건을 확인해주세요.");return}
         if(generationPrompt.length>2000){onStatus("유지할 특징과 장면 설명을 합쳐 2000자 이내로 줄여주세요.");return}
-        if(!app.imageStudio.generate(generationPrompt,steps=if(pc.paired&&pc.preferPcImages)pcSteps else if(model.qualityModel)qualitySteps else steps,seed=seed,negativePrompt=negative.trim(),referenceUri=if(transform)referenceUri?.let(Uri::parse)else null,strength=strength))onStatus("이미지 생성을 시작하지 못했습니다. 현재 작업과 모델 상태를 확인해주세요.")
+        if(!app.imageStudio.generate(generationPrompt,steps=if(usePc)if(fastPc)fastPcSteps else pcSteps else if(model.qualityModel)qualitySteps else steps,seed=seed,negativePrompt=negative.trim(),referenceUri=if(transform)referenceUri?.let(Uri::parse)else null,strength=strength))onStatus("이미지 생성을 시작하지 못했습니다. 현재 작업과 모델 상태를 확인해주세요.")
     }
     Column(Modifier.fillMaxSize().imePadding()){
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(14.dp),contentPadding=PaddingValues(bottom=16.dp)){
@@ -214,7 +220,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                     referencePreview?.let {preview->Image(preview,"사용자가 선택한 참고 사진",Modifier.fillMaxWidth().height(150.dp),contentScale=ContentScale.Fit)}
                     if(referenceUri!=null&&referencePreview==null)Text("선택한 참고 사진 1장",style=MaterialTheme.typography.labelSmall)
                     if(pc.paired&&pc.preferPcImages){
-                        Text(if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"PC SDXL의 참고 사진 편집은 아직 지원하지 않습니다. Qwen을 선택하거나 휴대폰 SDXL을 사용해주세요."else"참고 사진 편집에는 Qwen-Image-Edit-2511을 사용합니다. 새 이미지용2512와 구분해 실제 결과 모델을 기록합니다. 특징 유지 여부는 결과를 비교해 확인해주세요.",style=MaterialTheme.typography.bodySmall)
+                        Text(if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"PC SDXL의 참고 사진 편집은 아직 지원하지 않습니다. Qwen 또는 FLUX를 선택하거나 휴대폰 SDXL을 사용해주세요."else if(fastPc)"참고 사진 편집에도 FLUX.2 klein 4B를 사용합니다. 특징 유지 여부는 결과를 비교해 확인해주세요."else"참고 사진 편집에는 Qwen-Image-Edit-2511을 사용합니다. 새 이미지용2512와 구분해 실제 결과 모델을 기록합니다. 특징 유지 여부는 결과를 비교해 확인해주세요.",style=MaterialTheme.typography.bodySmall)
                     }else{
                         Text("변환 강도 ${(strength*100).roundToInt()}%",style=MaterialTheme.typography.labelLarge)
                         Slider(value=strength,onValueChange={strength=it.coerceIn(.4f,.85f)},valueRange=.4f..0.85f,steps=8,enabled=!state.running)
@@ -250,13 +256,14 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 OutlinedTextField(value=prompt,onValueChange={if(it.length<=2000)prompt=it},label={Text("이미지 설명")},placeholder={Text("예: a cinematic photo of a quiet forest at sunrise, soft golden light")},modifier=Modifier.fillMaxWidth(),minLines=3,maxLines=7,enabled=!state.running)
                 Text("짧은 설명으로 시작해도 됩니다. 세부 표현은 결과를 보며 바꿀 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    (if(pc.paired&&pc.preferPcImages)listOf(20,32,50)else if(model.qualityModel||!model.available)listOf(30,40,50)else listOf(2,4,8)).forEach {value->FilterChip(selected=(if(pc.paired&&pc.preferPcImages)pcSteps else if(model.qualityModel||!model.available)qualitySteps else steps)==value,onClick={if(pc.paired&&pc.preferPcImages)pcSteps=value else if(model.qualityModel||!model.available)qualitySteps=value else steps=value},enabled=!state.running,label={Text("${value}단계")})}
+                    (if(usePc)if(fastPc)listOf(4,8)else listOf(20,32,50)else if(model.qualityModel||!model.available)listOf(30,40,50)else listOf(2,4,8)).forEach {value->FilterChip(selected=(if(usePc)if(fastPc)fastPcSteps else pcSteps else if(model.qualityModel||!model.available)qualitySteps else steps)==value,onClick={if(usePc){if(fastPc)fastPcSteps=value else pcSteps=value}else if(model.qualityModel||!model.available)qualitySteps=value else steps=value},enabled=!state.running,label={Text("${value}단계")})}
                 }
                 Text((if(pc.paired&&pc.preferPcImages)"PC 1024×1024 · 연결이 끊기면 중단하고 복구를 기다립니다. 휴대폰 계산은 직접 선택해야 합니다."else if(model.qualityModel||!model.available)"휴대폰 SDXL 1024×1024 · 기본40단계 · 계산이 오래 걸릴 수 있습니다. 전화·다른 앱 사용 중에는 품질을 유지하며 속도를 낮춰 계속합니다."else"기존 휴대폰 LCM 512×512 · 고품질 모델로 교체할 수 있습니다.")+if(transform&&!(pc.paired&&pc.preferPcImages))" 사진 변환의 실제 샘플링 횟수는 기준 단계와 변환 강도에 따라 달라집니다."else"",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick={advanced=!advanced}){Text(if(advanced)"상세 설정 접기" else "시드·제외할 표현·모델 파일")}
                 if(advanced){
                     OutlinedTextField(value=seedText,onValueChange={if(it.length<=19)seedText=it},label={Text("시드 · 비우면 매번 새롭게")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!state.running)
                     OutlinedTextField(value=negative,onValueChange={if(it.length<=1000)negative=it},label={Text("제외할 표현 · 선택 사항")},modifier=Modifier.fillMaxWidth(),maxLines=3,enabled=!state.running)
+                    if(usePc&&fastPc)Text("빠른 모델은 제외 문장을 지원하지 않습니다. 비우거나 Qwen을 선택해주세요.",style=MaterialTheme.typography.bodySmall)
                     HorizontalDivider()
                     Text("다른 호환 모델 가져오기",style=MaterialTheme.typography.titleSmall)
                     Text("배포자의 SHA-256을 확인한 호환 safetensors·GGUF 파일을 가져올 수 있습니다. 모델 구성과 생성 엔진이 맞아야 실행할 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -303,11 +310,16 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 Text(if(state.running)"생성 중지" else if(transform)"참고 사진 변환하기"else"이미지 만들기",style=MaterialTheme.typography.titleMedium)
             }
             if(state.canResumePc&&!state.running){
-                Text("PC에 보관한 원래 작업을 이어받습니다. 저장된 단계부터 재개하거나 완성 파일만 다시 받으며 모델·참고 사진·시드는 유지합니다.",style=MaterialTheme.typography.bodySmall)
+                Text("원래 작업의 모델·참고 사진·시드는 유지됩니다. ‘보관하고 새 작업’을 선택하면 원래 작업을 보관한 채 다른 모델로 새 작업을 준비할 수 있습니다.",style=MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                     Button(onClick={runCatching{app.imageStudio.resumePc()}.onFailure{onStatus(it.message?:"복구 작업을 확인하지 못했습니다.")}}){Text("PC 작업 이어받기")}
                     TextButton(onClick={deletePcRecovery=true}){Text("복구 정보 삭제")}
                 }
+                OutlinedButton(onClick={app.imageStudio.archivePcRecovery()}){Text("보관하고 새 작업")}
+            }
+            if(!state.canResumePc&&state.archivedPcCount>0&&!state.running){
+                Text("보관한 PC 작업 ${state.archivedPcCount}개 · 최근 작업의 원래 모델과 입력 조건을 불러옵니다. 복구 정보는 최대 24시간 유효합니다.",style=MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick={app.imageStudio.restoreArchivedPcRecovery()}){Text("보관한 작업 불러오기")}
             }
             if(pc.paired&&pc.preferPcImages)Text("복구 지원 PC에서는 중간 계산과 미수신 결과를 사용자 계정으로 암호화해 최대 24시간 보관합니다. 휴대폰 저장 확인·명시 취소 시 정리합니다.",style=MaterialTheme.typography.bodySmall)
         }}

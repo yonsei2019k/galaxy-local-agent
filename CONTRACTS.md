@@ -1,5 +1,11 @@
 # Galaxy Local Agent implementation contracts
 
+## Explicit local image model and pause/recovery1089
+
+FLUX.2-klein4B is an explicit pinned local option,4 default/4–50 bounded steps; legacy Qwen/SDXL defaults and12–50 bounds remain. FLUX reference results keep the same effective identity; CFG1 negative conditions are rejected rather than ignored. Exact model/SHA/PNG dimensions/bytes precede phone persistence/readback and PC ACK. No silent model substitution, paid key, bundled model or permission expansion is introduced.
+
+Recovery reports persist `paused`, fixed failure code and actual failure stage. On `image_resume_guard=1` workers, `/resume` accepts only boolean `automatic`/`explicit`; paused jobs require `explicit=true`. The owner-scoped control lock checks this atomically. New phone clients mark only requested manual resume explicit, keep crash retries bounded2, and preserve typed suspension without reporting a compute failure. Legacy paused clients need an app update; their rejected resume retains data. Archive/restore copies and verifies before removing the source, is encrypted/scope-bound/max4/max64KiB, preserves conditions/owner/authorization, and does not extend24h expiry or execute a task. Original Qwen native binding remains unchanged. See [actual image evidence](docs/image-workflow-repair-2026-11-16.ko.md).
+
 ## Phone-owned external cloud tool execution1088
 
 A fresh ordinary request may explicitly select the cloud-phone model and capture separate external-agent permission/revision plus the existing PC revision. Legacy/queued/read-only/resume/goal/attachment restrictions do not acquire current authority. Daily default inference stays local. Current normal catalog is a project-permitted subset of get_current_datetime/inspect_project_storage/save_note/search_notes/read_note; patch_note and PC folders are excluded from phone-only sessions.
