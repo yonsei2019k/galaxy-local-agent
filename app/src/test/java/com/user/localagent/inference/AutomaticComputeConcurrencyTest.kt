@@ -90,6 +90,52 @@ class AutomaticComputeConcurrencyTest {
         finally {engine.unload()}
         assertNull(engine.nativeProgressSnapshot)
     }
+    @Test fun pcOnlyDeliversDraftBeforeTheGenerationCanFinish()=runBlocking {
+        val f=Fixture();val local=f.local("phone");val remote=Fake("pc")
+        val received=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
+        remote.produce={emit(GenerationEvent.Delta("draft"));release.await();finish()}
+        val engine=pcOnly(f,local,remote)
+        var work:Deferred<List<GenerationEvent>>?=null
+        try {
+            engine.load(path,options)
+            val running=async {engine.generateChatEvents("q","",emptyList()).onEach {
+                if(it is GenerationEvent.Delta)received.complete(Unit)
+            }.toList()}
+            work=running
+            withTimeout(2000){received.await()}
+            assertFalse(running.isCompleted)
+            release.complete(Unit)
+            val events=withTimeout(2000){running.await()}
+            assertEquals(listOf("draft"),events.filterIsInstance<GenerationEvent.Delta>().map{it.text})
+            assertEquals(1,events.filterIsInstance<GenerationEvent.Finished>().size)
+            assertEquals(0,local.loads)
+        }finally{release.complete(Unit);work?.cancelAndJoin();engine.unload()}
+    }
+    @Test fun pcOnlyFailureAfterADraftNeverPublishesCompletionOrLoadsPhone()=runBlocking {
+        val f=Fixture();val local=f.local("phone");val remote=Fake("pc")
+        remote.produce={emit(GenerationEvent.Delta("received draft"));throw IOException("synthetic disconnect")}
+        val engine=pcOnly(f,local,remote);val events=mutableListOf<GenerationEvent>()
+        try {
+            engine.load(path,options)
+            try{engine.generateChatEvents("q","",emptyList()).collect{events+=it};fail("Unverified stream must fail")}
+            catch(expected:PcRequired){assertTrue(expected.cause is IOException)}
+            assertEquals(listOf("received draft"),events.filterIsInstance<GenerationEvent.Delta>().map{it.text})
+            assertTrue(events.none{it is GenerationEvent.Finished})
+            assertEquals(0,local.loads)
+        }finally{engine.unload()}
+    }
+    @Test fun pcOnlyConsumerStoppingAtFirstDraftDoesNotTriggerFallback()=runBlocking {
+        val f=Fixture();val local=f.local("phone");val remote=Fake("pc")
+        val engine=pcOnly(f,local,remote)
+        try {
+            engine.load(path,options)
+            val events=engine.generateChatEvents("q","",emptyList()).take(1).toList()
+            assertEquals(1,events.size)
+            assertTrue(events.single() is GenerationEvent.Delta)
+            assertEquals(0,local.loads)
+            assertEquals(1,remote.queries.size)
+        }finally{engine.unload()}
+    }
     private val options = InferenceOptions(contextSize = 4096, maxOutputTokens = 768)
     private suspend fun waitForPhone(engine: AutomaticComputeEngine) = withTimeout(2000) {
         engine.waitingForResource.first { it == ComputeResource.PHONE }

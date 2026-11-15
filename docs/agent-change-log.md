@@ -1,3 +1,25 @@
+## 2026-11-15 — 1072 설치·1616JVM·84폰 PASS / 직접 추론·I/O 개선 실측
+
+최종 phase4 full build8m12 PASS, core828/app788=1616 JVM0fail/error/skip, canonical worker Python12 PASS 및 lint0errors/144warnings/1hint다. 앞선 두 길이 예산 FAIL(44s/38s)은3000제한을 유지하고 새 일반 ANSWER 지침을 압축해 고쳤다. 세 번째 app compile1m14 FAIL의 nullable evidence는 evidence!=null을 명시해 전체 전달/hash/binding 요건을 보존했다. 최초 실패 로그를 보존하고 최종678source+10public+6build를 대조했다. 원래 서명/ID/데이터를 유지해 main cb78279de6db2f00eb6d9bd54157a56f0ba27a1ed24bbe86d2d991a99a1c43a0/test674d2f35c9cf87c6c559a6b5843ab781359e078b413629da32c37900ca0462c0 설치·독립 base SHA·원래 pin/direct overlay387ms를 확인했다. 같은 APK 통제80과 I/O4가 모두 PASS다.
+
+A30 worker2의 실제 원본 SHA/유휴 상태를 재대조·백업하고 원자 교체 후 기존 supervisor로 재시작했다. 실제 tracked deployed 소스는 engines4615d51f/owned64623369이며 공개 Python12 경로도 저장했다. 직접 API before/after 동일6회는 모두 원래 정확 문구·정상 terminal·실제 모델 fullSHA/8K load receipt·unload/idle을 확인했다. false/plain1024는39.404/51.045초→1.305/1.301초(2회 중앙값 관측34.72배/97.12% 감소)이며 short/structured 정답도 유지한다. 첫 worker 재시작 뒤 cold load63.09초는 이전30.05초와 hash-cache 조건이 달라 개선율로 쓰지 않는다. explicit true768 실제 control도 요청 binding/적용true·추가900·reason1123·guard재열기1·정답·terminal·cleanup PASS다. backend OFF/renderer qualification은unknown이며 앱 전체 성능 개선율로 승격하지 않는다.
+
+암호화 DB의 동일24구간 조회 pass5표본 중앙값55.465703→23.680312ms, 2304→96행 물질화·구간당2조회/동등성/정리를 확인했다. 별도10회 연산 묶음 SHA5표본은6.496758→3.308476ms다. 실제 파일 CAS/전체전달필수/잘못된SHA 거부/독립 readback/cleanup도 PASS지만 provider I/O·전체 저장/모델 시간은 이 숫자로 주장하지 않는다.
+
+실제 logical-PC cancel은87164ms PASS: typed load6 match, 원 generation과 연결된 HTTP200 ACK_CLEANED/수락/cleanup,239자 보존/calls2→2/owner unload·idle·fixture cleanup이다. 실제 direct analysis fresh run도148365ms PASS: 합성chunk1/finding2/citation2·마지막 정정문장·fresh journal/evidence·원문불변·보고서/hash 및 model/fixture cleanup 모두true다. native decoder active proof와 일반 의미 정확도/NLP 도구선택으로 승격하지 않는다.
+
+Normal-send1072r1은60410ms FAILED/plan_rejected_missing_connection_target, captured1/실제 typed receipt1match1/cleanuptrue다. host LOAD40.435초와 내부 계획 생성8.203+8.871초를 분리해 관찰했고 내부 첫delta는각4.621/4.392초지만 UI 답변 첫표시가 아니다. 지침 보완만으로 이 실패가 해결됐다고 하지 않는다. 원래 실패와 종료 상태를 보존한 direct schema/language 비교 및 별도 cold-start 실험을 준비 중이다. notes v2/F1/실제note canary/기존private 기대값1줄은1073 미통합으로 추적한다.
+
+## 2026-11-15 — 1072 성능 source 통합 시작 / 실측 기준과 동결 소유권
+
+1071 소스와 실제 실패·정리 결과를 a7bd5c1에 보존한 뒤, root가 current PC-only route의 이중 전체응답 buffer를 제거하는 소스를 작성했다. PcInferenceEngine은 bounded channel로 실제 content delta만 전달하고 원래 DONE/finish/권한·취소/크기 검사를 유지한다. Automatic은 pcOnly route만 즉시 전달하며 legacy phone-fallback buffer는 유지한다. 완료 전 draft 전달·draft 뒤 실패의 phone/완료 금지·consumer 중단의 fallback 금지 순수3회귀를 추가했으나 아직 실행 전이다. 첫 content 관측 시간과 총 생성 시간을 구분하고 full-response 시간을 TTFT로 보고하지 않는다.
+
+②의 frozen e5ad4197/manifest058facf9와 모든3payload/baseline을 대조해 실제 messageId+segmentId SQL 조회와 동일 호출 immutable SHA 지역 재사용을 통합했다. 새 native4는 동등성/암호화 DB 교차 벤치/SHA 연산 벤치/실제 private 파일 CAS·readback 경계를 다루지만 아직 컴파일·실행하지 않았다. 기존 fresh provider read·독립 readback·rollback·approval·scope·CAS를 유지하며 global cache/migration은 없다.
+
+Root의 직접 PC API 합성 before 벤치6회는 모두 정확한 한 줄/정상 terminal/실제 model SHA·8K load receipt와 owner unload·idle을 확인했다. Cold load30046ms, plain cap96의2회1739.95/1332.87ms, plain cap1024 thinking=false의2회39404.35/51044.88ms, structured cap384의2회2987.44/3003.10ms다. 큰 cap에서 요청false를 무시한 기존 자동 thinking 경로가 실제 reasoning836/1105문자와 두 번째 guard 재열기1회를 보였다. 이는 phone/NLP/task 성공이나 개선 후 수치가 아니다. 원문·주소·runtime ID는 Git에 넣지 않는다.
+
+①은 explicit thinking/count 최소 wire 후보,③은 동일 normal canary 계측과 일반 의미 지침2줄 후보를 ignored에서만 작성 중이다. Canonical inference/DB/workspace와 실제 build·worker deploy·APK/model 창은root 소유다. 소스/보안/JVM/release/설치/전후 실제 성능 및 정확도·취소 검증은 아직 수행 전이며 registry102/notes미통합을 유지한다.
+
 ## 2026-11-15 — 1071 phase3 통제4·정확 복구 PASS / 성능 개선 우선 전환
 
 Test-only 3수정(실제 자기 PHONE lease의 resource/owner 대조, normal canary 고정 진단, 분석 시험 terminal ledger 후조건·exact 복구)을 한 빌드로 묶었다. Assembly1m48, 서명·설치·독립 SHA·direct pinned overlay PASS이며 main c680 불변/test6fe7c5c9bc103c269b4d842fd33bab38c1026e4c54d1c684b89d89d0089bea3b다. 새 prerequisite4가 모두 PASS다. 이전 test0ca의76개와 이번4개를 구분하며 새 APK 전체80 재실행으로 주장하지 않는다. 분석 exact synthetic recovery도 PASS, 원 보고서 bytes 불변/owner DB 열기0/model0을 확인했다. Phone byte-exact pull과 PowerShell 텍스트 저장본의 SHA를 구분해 실제 phone bytes를 복구 입력에 사용했다.

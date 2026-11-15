@@ -184,7 +184,21 @@ class AutomaticComputeEngine internal constructor(
         mutex.withLock {
             metrics.value = null; generation.value = null
             try {
-                if (active === pc) {
+                if (active === pc && pcOnly) {
+                    // This route already refuses phone fallback. Deliver provisional text now;
+                    // only the original verified terminal event can establish completion.
+                    var characters = 0
+                    emitAll(block(pc).onEach { event ->
+                        if (event is GenerationEvent.Delta) {
+                            characters += event.text.length
+                            check(characters <= 4 * 1024 * 1024) { "PC 응답의 저장 예산을 초과했습니다." }
+                        }
+                    }.catch { error ->
+                        if (error is CancellationException || error !is Exception) throw error
+                        lastPcFailure = error
+                        fallback() // pcOnly always stops; never starts a second reply.
+                    })
+                } else if (active === pc) {
                     val buffered = mutableListOf<GenerationEvent>()
                     var bufferedCharacters = 0
                     try {

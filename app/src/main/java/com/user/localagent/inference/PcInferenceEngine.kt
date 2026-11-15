@@ -7,6 +7,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,6 +18,29 @@ private const val PC_TEXT_SHA_PREFIX="03b74727a860a563"
 private const val PC_CLAUDE_MODEL="claude"
 
 data class PcCleanupEvidence(val operation:String,val requestId:String?,val cleanupComplete:Boolean?,val acknowledged:Boolean)
+
+/** Host wire binding only, never installed-template qualification or exact token-count proof. */
+internal fun pcThinkingWireSupported(health:JsonObject?):Boolean {
+    val value=health?.get("textGenerationContract") as? JsonObject?:return false
+    val version=value["wireVersion"] as? JsonPrimitive?:return false
+    val strict=value["strictThinkingBool"] as? JsonPrimitive?:return false
+    return !version.isString&&version.intOrNull==1&&!strict.isString&&strict.booleanOrNull==true
+}
+internal fun pcThinkingReceiptMatches(receipt:JsonObject,id:String,model:String,cap:Int,context:Int,
+    thinking:Boolean,hasSchema:Boolean):Boolean {
+    fun integer(key:String)=(receipt[key] as? JsonPrimitive)?.takeUnless{it.isString}?.intOrNull
+    fun flag(key:String)=(receipt[key] as? JsonPrimitive)?.takeUnless{it.isString}?.booleanOrNull
+    fun text(key:String)=(receipt[key] as? JsonPrimitive)?.takeIf{it.isString}?.content
+    val effective=thinking&&model=="pc-text"&&!hasSchema&&cap>512
+    val extra=if(effective)900 else 0
+    val hash=text("preparedInputSha256");val modelSha=text("modelSha256")
+    return integer("wireVersion")==1&&text("requestId")==id&&text("modelId")==model&&
+        integer("contextSize")==context&&integer("maxOutputTokensTotal")==cap+extra&&
+        flag("requestedThinking")==thinking&&flag("appliedThinking")==effective&&
+        integer("extraReasoningTokens")==extra&&flag("legacyMayReopen")==effective&&
+        hash!=null&&Regex("[a-f0-9]{64}").matches(hash)&&modelSha!=null&&Regex("[a-f0-9]{64}").matches(modelSha)&&
+        (model!="pc-text"||modelSha==com.user.localagent.models.PairedPcTextProfile.MODEL_SHA256)
+}
 
 /** The paired PC computes text only. Request state, authority and persistence stay on the phone. */
 class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null,
@@ -138,21 +162,30 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
         history.forEach{require(it.role in setOf("user","assistant"));add(buildJsonObject{put("role",it.role);put("content",it.text)})}
         add(buildJsonObject{put("role","user");put("content",user)})
     }
-    override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int=withContext(Dispatchers.IO){mutex.withLock {
+    override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int =
+        countTextTokens(userText,systemInstruction,history,null)
+    private suspend fun countTextTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>,schema:String?):Int=withContext(Dispatchers.IO){mutex.withLock {
         val revision=cancellation.get()
         val connection=checkNotNull(config)
         requireAuthority(connection)
         // Claude's window far exceeds the app's budget; a Korean-safe character estimate keeps the check conservative.
         if(alias==PC_CLAUDE_MODEL)return@withLock (userText.length+systemInstruction.length+history.sumOf{it.text.length})/2
-        val reply=try{transport.json(connection,"/v1/llm/tokens","POST",buildJsonObject {put("modelId",checkNotNull(alias));put("messages",messages(userText,systemInstruction,history))},60_000,computeOwner)}catch(error:Throwable){if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단");throw error}
+        val selected=checkNotNull(options);val wire=pcThinkingWireSupported(transport.lastHealth);val countId=UUID.randomUUID().toString()
+        val reply=try{transport.json(connection,"/v1/llm/tokens","POST",buildJsonObject {
+            put("modelId",checkNotNull(alias));put("messages",messages(userText,systemInstruction,history))
+            if(wire){put("requestId",countId);put("thinking",selected.thinking);put("maxTokens",selected.maxOutputTokens)
+                schema?.let{require(it.toByteArray(Charsets.UTF_8).size<=65536);put("schema",Json.parseToJsonElement(it).jsonObject)}}
+        },60_000,computeOwner)}catch(error:Throwable){if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단");throw error}
+        if(wire)require(pcThinkingReceiptMatches(reply["textContract"] as? JsonObject?:error("PC 준비 metadata 누락"),
+            countId,checkNotNull(alias),selected.maxOutputTokens,selected.contextSize,selected.thinking,schema!=null)){"PC 계수 설정의 원래 요청 연결을 확인하지 못했습니다."}
         if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단")
         requireAuthority(connection)
         reply.getValue("count").jsonPrimitive.int.also {require(it in 0..100_000)}
     }}
-    // Without this the planner drops schema-constrained decoding. The PC counts the template without the
-    // grammar, which adds no prompt tokens on this server.
+    // Keep the existing structured planning path. Host preparation is shared; exact installed renderer
+    // equality is unqualified, and this metadata must not be promoted into that proof.
     override suspend fun countStructuredChatTokens(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Int? =
-        countChatTokens(userText,systemInstruction,history)
+        countTextTokens(userText,systemInstruction,history,schema)
     private fun media(path:String,file:File,extra:JsonObjectBuilder.()->Unit):Flow<String> = flow {
         val connection=checkNotNull(config);requireAuthority(connection)
         status.value="PC에서 계산 중 · 결과는 스마트폰에 저장"
@@ -175,7 +208,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
     override fun generateStructured(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<String> = generateStructuredEvents(userText,systemInstruction,schema,history).textDeltas()
     override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<GenerationEvent> = generateEvents(userText,systemInstruction,history,null)
     override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<GenerationEvent> = generateEvents(userText,systemInstruction,history,schema)
-    private fun generateEvents(user:String,system:String,history:List<InferenceTurn>,schema:String?):Flow<GenerationEvent> = flow {
+    private fun generateEvents(user:String,system:String,history:List<InferenceTurn>,schema:String?):Flow<GenerationEvent> = channelFlow {
         mutex.withLock {
             val id=UUID.randomUUID().toString();activeRequest=id
             val revision=cancellation.get()
@@ -184,11 +217,14 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             require(selected.maxOutputTokens in 1..4096)
             val body=buildJsonObject {
                 put("requestId",id);put("modelId",checkNotNull(alias));put("messages",messages(user,system,history))
-                put("maxTokens",selected.maxOutputTokens);put("thinking",false)
+                put("maxTokens",selected.maxOutputTokens);put("thinking",if(alias==PC_CLAUDE_MODEL)false else selected.thinking)
                 schema?.let{require(it.toByteArray(Charsets.UTF_8).size<=65536);put("schema",Json.parseToJsonElement(it).jsonObject)}
             }
             status.value="PC에서 계산 중 · 결과는 스마트폰에 저장";metrics.value=null;generation.value=null
+            val receiptExpected=alias!=PC_CLAUDE_MODEL&&pcThinkingWireSupported(transport.lastHealth)
+            var receiptSeen=false
             var visible=0
+            var firstVisibleNanos:Long?=null
             var cancelSession:PcCancelHandshake.Session<PcConnection>?=null
             try {
                 if(alias!=PC_CLAUDE_MODEL)cancelSession=cancelHandshake.activate(
@@ -211,13 +247,30 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                             val data=line.substring(6)
                             if(data=="[DONE]"){done=true;break}
                             val event=Json.parseToJsonElement(data).jsonObject
+                            event["ziphap_text_contract"]?.takeIf{alias!=PC_CLAUDE_MODEL}?.let { raw ->
+                                val receipt=raw as? JsonObject
+                                require(!receiptSeen&&receipt!=null&&pcThinkingReceiptMatches(receipt,id,checkNotNull(alias),
+                                    selected.maxOutputTokens,selected.contextSize,selected.thinking,schema!=null)){"PC 생성 설정의 원래 요청 연결을 확인하지 못했습니다."}
+                                receiptSeen=true
+                            }
                             event["timings"]?.takeUnless{it is JsonNull}?.jsonObject?.let {timing=it}
                             event["error"]?.let{error("PC 계산 오류")}
                             event["usage"]?.takeUnless{it is JsonNull}?.jsonObject?.let {usage->promptTokens=usage["prompt_tokens"]?.jsonPrimitive?.intOrNull;outputTokens=usage["completion_tokens"]?.jsonPrimitive?.intOrNull}
                             event["choices"]?.jsonArray?.forEach {choice->
                                 val item=choice.jsonObject
                                 item["delta"]?.jsonObject?.get("reasoning_content")?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {part->if(thought.length<16000)thought.append(part)}
-                                item["delta"]?.jsonObject?.get("content")?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {delta->require(text.length+delta.length<=128000);text.append(delta)}
+                                item["delta"]?.jsonObject?.get("content")?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {delta->
+                                    require(text.length+delta.length<=128000)
+                                    if(delta.isNotEmpty()){
+                                        require(!receiptExpected||receiptSeen){"PC 생성 설정 metadata를 확인하지 못했습니다."}
+                                        require(finish==null){"PC 종료 신호 뒤 추가 응답을 받았습니다."}
+                                        requireAuthority(config)
+                                        if(cancellation.get()!=revision)throw CancellationException("PC 계산 중단")
+                                        if(firstVisibleNanos==null)firstVisibleNanos=System.nanoTime()
+                                        text.append(delta);visible=text.length
+                                        trySendBlocking(GenerationEvent.Delta(delta)).getOrThrow()
+                                    }
+                                }
                                 item["finish_reason"]?.takeUnless{it is JsonNull}?.jsonPrimitive?.content?.let {finish=it}
                             }
                             val progressAt=System.nanoTime()
@@ -232,20 +285,20 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                 }
                 currentCoroutineContext().ensureActive()
                 requireAuthority(config)
+                require(!receiptExpected||receiptSeen){"PC 생성 설정 metadata를 확인하지 못했습니다."}
                 require(done&&finish in setOf("stop","length")){"PC 계산의 완료 신호를 확인하지 못했습니다."}
                 val seconds=(System.nanoTime()-started)/1e9
                 val input=promptTokens?.takeIf{it>=0};val output=outputTokens?.takeIf{it>=0}
-                // Completion is buffered before publication so a dropped PC cannot mix two replies.
                 visible=text.length
+                val firstVisibleSeconds=firstVisibleNanos?.let{(it-started)/1e9}
                 reasoning=thought.toString().takeIf {it.isNotBlank()}
                 val prefillRate=timing?.get("prompt_per_second")?.jsonPrimitive?.doubleOrNull?.takeIf{it.isFinite()&&it>=0}
                 val decodeRate=timing?.get("predicted_per_second")?.jsonPrimitive?.doubleOrNull?.takeIf{it.isFinite()&&it>=0}
-                val measured=if(input!=null&&output!=null&&prefillRate!=null&&decodeRate!=null)InferenceMetrics(if(visible>0)seconds else -1.0,input,output,prefillRate,decodeRate)else null
+                val measured=if(input!=null&&output!=null&&prefillRate!=null&&decodeRate!=null)InferenceMetrics(firstVisibleSeconds?:-1.0,input,output,prefillRate,decodeRate)else null
                 metrics.value=measured
-                val summary=GenerationSummary(id,if(finish=="length")GenerationStopReason.MAX_OUTPUT else GenerationStopReason.EOG,GenerationEvidence.SDK,finish=="length",selected.maxOutputTokens,input,output,visible,measured,elapsedMillis=(seconds*1000).toLong(),thinkingTokenBudget=0,observedTimeToFirstVisibleTokenSeconds=if(visible>0)seconds else null)
+                val summary=GenerationSummary(id,if(finish=="length")GenerationStopReason.MAX_OUTPUT else GenerationStopReason.EOG,GenerationEvidence.SDK,finish=="length",selected.maxOutputTokens,input,output,visible,measured,elapsedMillis=(seconds*1000).toLong(),thinkingTokenBudget=null,observedTimeToFirstVisibleTokenSeconds=firstVisibleSeconds)
                 generation.value=summary
-                if(text.isNotEmpty())emit(GenerationEvent.Delta(text.toString()))
-                emit(GenerationEvent.Finished(summary));status.value="PC 계산 완료"
+                send(GenerationEvent.Finished(summary));status.value="PC 계산 완료"
             }catch(error:Throwable){
                 val failure=if(cancellation.get()!=revision&&error !is CancellationException)CancellationException("PC 계산 중단").apply{initCause(error)}else error
                 generation.value=GenerationSummary(id,if(failure is CancellationException)GenerationStopReason.CANCELLED else GenerationStopReason.ENGINE_ERROR,GenerationEvidence.HOST,null,selected.maxOutputTokens,visibleChars=visible,errorCode=if(failure is CancellationException)"CANCELLED"else"PC_CONNECTION_OR_COMPLETION_FAILED",elapsedMillis=(System.nanoTime()-started)/1_000_000)
@@ -256,7 +309,7 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                 activeRequest=null
             }
         }
-    }.flowOn(Dispatchers.IO)
+    }.buffer(1).flowOn(Dispatchers.IO)
     private suspend fun sendCancel(session:PcCancelHandshake.Session<PcConnection>,remainingMillis:Long):PcCancelReply {
         val wire=PcTransport(context);var opened:HttpsURLConnection?=null
         try {

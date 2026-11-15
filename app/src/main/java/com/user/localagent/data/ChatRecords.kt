@@ -110,6 +110,8 @@ class ChatConverters {
     @Query("SELECT MAX(position) FROM chat_branch_messages WHERE branchId=:branchId") suspend fun lastPosition(branchId:String):Long?
     @Query("SELECT * FROM messages WHERE threadId=:threadId ORDER BY createdAt,id") suspend fun allMessages(threadId:String):List<MessageRecord>
     @Query("SELECT * FROM message_chunks WHERE messageId=:messageId ORDER BY segmentId,sequence") suspend fun chunks(messageId:String):List<MessageChunkRecord>
+    // Keep both identities: even an inconsistent foreign-message row must stay excluded.
+    @Query("SELECT * FROM message_chunks WHERE messageId=:messageId AND segmentId=:segmentId ORDER BY sequence") suspend fun segmentChunks(messageId:String,segmentId:String):List<MessageChunkRecord>
     @Query("SELECT * FROM message_chunks WHERE segmentId=:segmentId AND sequence=:sequence") suspend fun chunk(segmentId:String,sequence:Int):MessageChunkRecord?
     @Query("SELECT MAX(sequence) FROM message_chunks WHERE segmentId=:segmentId") suspend fun lastSequence(segmentId:String):Int?
     @Query("SELECT * FROM chat_drafts WHERE threadId=:threadId") suspend fun draft(threadId:String):ChatDraftRecord?
@@ -492,7 +494,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     suspend fun segmentText(segmentId:String):String {
         val segment=dao.segment(segmentId)?:error("출력 구간을 찾을 수 없습니다.")
-        return dao.chunks(segment.messageId).filter {it.segmentId==segmentId}.sortedBy {it.sequence}.joinToString(""){it.text}
+        return dao.segmentChunks(segment.messageId,segmentId).joinToString(""){it.text}
     }
     suspend fun finishSegment(segmentId:String,status:String="completed"):GenerationSegmentRecord=database.withTransaction {
         require(status in setOf("completed","cancelled","failed","interrupted"));val s=dao.segment(segmentId)?:error("출력 구간을 찾을 수 없습니다.")

@@ -4,7 +4,7 @@ import subprocess
 import threading
 import time
 import uuid
-from engines import Engines, Busy, GEMMAS, clean_scratch
+from engines import Engines, Busy, GEMMAS, clean_scratch, validate_text_request
 from security import HOME
 
 class OwnershipMismatch(Exception): pass
@@ -108,12 +108,12 @@ class OwnedEngines(Engines):
    else:self.lock.release()
  def tokens(self,request,owner=None):
   owner=owner_value(owner);key=request_key(request)
-  if set(request)-{'requestId','modelId','messages'}:raise ValueError('UNKNOWN_FIELD')
+  validate_text_request(request,'tokens')
   if not self.lock.acquire(timeout=30):raise Busy()
   record=None;success=False
   try:
    record,_=self._begin(owner,'tokens',key)
-   result=super().tokens({k:v for k,v in request.items() if k!='requestId'})
+   result=super().tokens(request|{'requestId':key})
    if record['cancel'].is_set():raise ComputeCancelled()
    success=True
    return result|{'requestId':key}
@@ -122,6 +122,7 @@ class OwnedEngines(Engines):
    else:self.lock.release()
  def chat(self,request,send,owner=None):
   owner=owner_value(owner);key=request_key(request)
+  validate_text_request(request,'chat')
   if not self.lock.acquire(timeout=30):raise Busy()
   record=None;success=False
   try:

@@ -170,12 +170,15 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
         val previous=runCatching {readUnlocked(parts)}.getOrElse {error->
             if(exists(parts))throw error else null
         }
-        if(previous!=null&&!(expectedSha256!=null&&expectedSha256==sha256(previous)))throw com.user.localagent.core.ToolPreconditionRejected("기존 파일은 먼저 읽고 확인한 SHA-256으로 수정해야 합니다.")
-        if(previous!=null){val evidence=reads[readKey(reader,path)];if(!(evidence?.hash==sha256(previous)&&evidence.complete&&evidence.binding==bindingUnlocked()))throw com.user.localagent.core.ToolPreconditionRejected("현재 실행에 파일 전체가 전달되지 않아 덮어쓰지 않았습니다. 발췌문으로 원본을 교체하지 않았습니다.")}
+        // Invocation-local values only; actual provider reads and readback remain independent.
+        val previousHash=previous?.let(::sha256)
+        if(previous!=null&&!(expectedSha256!=null&&expectedSha256==previousHash))throw com.user.localagent.core.ToolPreconditionRejected("기존 파일은 먼저 읽고 확인한 SHA-256으로 수정해야 합니다.")
+        if(previous!=null){val evidence=reads[readKey(reader,path)];if(!(evidence!=null&&evidence.hash==previousHash&&evidence.complete&&evidence.binding==bindingUnlocked()))throw com.user.localagent.core.ToolPreconditionRejected("현재 실행에 파일 전체가 전달되지 않아 덮어쓰지 않았습니다. 발췌문으로 원본을 교체하지 않았습니다.")}
         else if(expectedSha256!=null)throw com.user.localagent.core.ToolPreconditionRejected("수정할 기존 파일이 없습니다.")
         currentCoroutineContext().ensureActive()
         // A bounded write+readback finishes before cancellation is reported; it cannot claim an unverified save.
         withContext(NonCancellable) {
+            val contentHash=sha256(content)
             if(selected==null) {
                 val target=local(parts);check(target.parentFile!!.isDirectory||target.parentFile!!.mkdirs())
                 val atomic=AtomicFile(target);val stream=atomic.startWrite()
@@ -183,16 +186,17 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
             } else {
                 check(selection().writable){"선택한 폴더의 쓰기 권한이 필요합니다."}
                 val target=resolve(selected,parts,true)
-                try {writeUri(target,content);check(sha256(readUnlocked(parts))==sha256(content)){"저장된 파일 검증에 실패했습니다."}}
+                try {writeUri(target,content);check(sha256(readUnlocked(parts))==contentHash){"저장된 파일 검증에 실패했습니다."}}
                 catch(error:Throwable){
-                    val restored=runCatching {if(previous!=null){writeUri(target,previous);check(sha256(readUnlocked(parts))==sha256(previous))}else check(DocumentsContract.deleteDocument(resolver,target))}.isSuccess
+                    val restored=runCatching {if(previous!=null){writeUri(target,previous);check(sha256(readUnlocked(parts))==previousHash)}else check(DocumentsContract.deleteDocument(resolver,target))}.isSuccess
                     throw IllegalStateException(if(restored)"저장 검증 실패 · 변경을 복구했습니다."else"저장 검증과 복구에 실패했습니다. 원본 상태를 확인해야 합니다.",error)
                 }
             }
             val verified=readUnlocked(parts)
-            check(sha256(verified)==sha256(content)){"저장된 파일 검증에 실패했습니다."}
-            reads[readKey(reader,path)]=ReadEvidence(sha256(verified),reader==ownerReader,bindingUnlocked())
-            buildJsonObject {put("path",path);put("bytes",verified.toByteArray(Charsets.UTF_8).size);put("sha256",sha256(verified));put("verified",true);put("executed",false)}.toString()
+            val verifiedHash=sha256(verified)
+            check(verifiedHash==contentHash){"저장된 파일 검증에 실패했습니다."}
+            reads[readKey(reader,path)]=ReadEvidence(verifiedHash,reader==ownerReader,bindingUnlocked())
+            buildJsonObject {put("path",path);put("bytes",verified.toByteArray(Charsets.UTF_8).size);put("sha256",verifiedHash);put("verified",true);put("executed",false)}.toString()
         }
     }}}
     // Provider-level exclusion also covers a parent tree and an alias/descendant tree in another project.

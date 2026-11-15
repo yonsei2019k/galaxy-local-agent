@@ -2,7 +2,19 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Installed1071 under verification; normal-send pause unresolved
+## Installed1072 performance checkpoint; request planning remains unresolved
+
+Main `cb78279de6db2f00eb6d9bd54157a56f0ba27a1ed24bbe86d2d991a99a1c43a0` and test `674d2f35c9cf87c6c559a6b5843ab781359e078b413629da32c37900ca0462c0` are installed without resetting data and independently matched. Core828/app788=1616 JVM tests pass with0 failures/errors/skips; worker Python12 passes. Final release/test build8m12 and lint0 errors/144 warnings/1 hint pass. All678 source+10 public+6 build inputs match before signing. Original pinned direct Tailscale identity passes387ms without LAN fallback. Controlled phone80 and isolated I/O4 pass on this APK.
+
+For the same synthetic direct-PC answer, explicit thinking=false at cap1024 changes39.404/51.045s to1.305/1.301s, with correct text, normal terminal and verified cleanup in every recorded case. This is a two-sample direct API observation, not whole-app latency. Short and structured controls also retain the exact answer. Explicit deep thinking remains functional in a separate actual control: bound true/+900 policy, observed reasoning and bounded reopen, correct answer and cleanup. Backend renderer/thinking qualification remains unknown. Cold startup remains substantial and differs across worker/hash-cache conditions.
+
+The same encrypted-phone-DB benchmark reduces the median full24-segment query pass55.466→23.680ms across five paired samples; result equivalence and cleanup pass. A separate ten-repetition hash-computation batch reduces6.497→3.308ms across five samples. Fresh provider reads, CAS, independent readback and rollback remain; these figures do not measure whole-file save or whole-model speed. PC-only content is now streamed provisionally with a bounded channel and original terminal/authority/cancel checks; legacy phone-fallback buffering remains.
+
+Actual typed-PC cancellation passes87.164s with six matching load receipts, request-matched ACK_CLEANED HTTP200 acceptance/cleanup,239 preserved characters, calls2→2 and verified unload/idle/fixture cleanup. A fresh direct analysis passes148.365s: one synthetic chunk, two exact findings/citations, final correction, fresh journal/evidence/report/hash/source checks and both cleanup checks. Neither is general accuracy or normal NLP tool-selection proof. The normal-send canary still fails60.410s with plan_rejected_missing_connection_target; typed load succeeds and cleanup passes. Its internal load span is40.435s and two rejected planning generations total17.074s. No successful whole-app latency comparison is claimed. Controlled schema/language probes and startup experiments are being prepared separately.
+
+Registry102 remains unchanged. Frozen note v2/F1/canary work is pending1073, including the missing JsonPrimitive import and the existing patch_note private-data expectation change to assertTrue. Source, JVM, APK, installation and actual-device/model evidence must remain separate for that work.
+
+## Historical1071 verification; normal-send pause unresolved
 
 The paired-PC target and actual analysis-model provenance are installed without resetting data. Core828/app779=1607 JVM tests pass with0 failures/errors/skips; release/test assembly5m59 and lint0 errors/144 warnings/1 hint pass. Main SHA256 is `c680de6776712f867bc7391797ecc90627b2a97e028ec32db5ff7d4237f05133`. The current test-only phase SHA256 is `6fe7c5c9bc103c269b4d842fd33bab38c1026e4c54d1c684b89d89d0089bea3b`; test-only assembly1m48, installed bytes and original pinned direct Tailscale overlay match (final244ms, no LAN fallback). All676 source+10 public+6 build inputs match. External-network handoff is untested.
 

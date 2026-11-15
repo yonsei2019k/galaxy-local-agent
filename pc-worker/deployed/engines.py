@@ -30,6 +30,64 @@ GEMMAS={
 }
 THINKING_ALLOWANCE=900
 THINK_LIMIT=300
+
+_TEXT_LANGUAGE_RULE='모든 생각과 답변은 반드시 한국어로 작성한다. 중국어 문장을 쓰지 않는다.'
+
+def text_contract_capabilities():
+ # Wire/host policy only. Installed binary/template behavior remains unqualified.
+ return {'wireVersion':1,'strictThinkingBool':True,'explicitFalseHonored':False,
+         'exactRendererVerified':False,'qualification':'unknown','explicitTrue':'legacy_auto_policy'}
+
+def validate_text_request(request,kind):
+ if not isinstance(request,dict):raise ValueError('TEXT_REQUEST_FORMAT')
+ if set(request)-{'requestId','modelId','messages','maxTokens','thinking','schema'}:raise ValueError('UNKNOWN_FIELD')
+ if 'thinking' in request and type(request['thinking']) is not bool:raise ValueError('THINKING_BOOL_REQUIRED')
+ if kind=='chat' or 'maxTokens' in request:
+  if type(request.get('maxTokens')) is not int or not 1<=request['maxTokens']<=4096:raise ValueError('OUTPUT_BOUND')
+ schema=request.get('schema')
+ if schema is not None and (not isinstance(schema,dict) or len(json.dumps(schema))>65536):raise ValueError('SCHEMA_BOUND')
+
+def prepare_text_payload(request,alias,for_count=False):
+ validate_text_request(request,'tokens' if for_count else 'chat')
+ messages=[dict(message) for message in request['messages']]
+ if alias=='pc-text':
+  messages=[dict(m,content=_TEXT_LANGUAGE_RULE+'\n'+m['content']) if m['role']=='system' else m for m in messages]
+  if not any(m['role']=='system' for m in messages):messages=[{'role':'system','content':_TEXT_LANGUAGE_RULE}]+messages
+ maximum=request.get('maxTokens')
+ requested=request.get('thinking')
+ # False is an explicit override. True/absent retain the existing bounded auto policy.
+ automatic=alias=='pc-text' and request.get('schema') is None and maximum is not None and maximum>512
+ effective=None if for_count and maximum is None and 'thinking' not in request else (False if requested is False else automatic)
+ extra=None if effective is None else (THINKING_ALLOWANCE if effective else 0)
+ payload={'messages':messages,'stream':True,'stream_options':{'include_usage':True},'cache_prompt':False,
+          'temperature':.7,'top_p':.8,'reasoning_format':'deepseek'}
+ if maximum is not None:payload['max_tokens']=maximum+(extra or 0)
+ if effective is not None:payload['chat_template_kwargs']={'enable_thinking':effective}
+ if request.get('schema') is not None:
+  payload['response_format']={'type':'json_schema','json_schema':{'name':'ziphap_output','strict':True,'schema':request['schema']}}
+ return payload,{'requestedThinking':requested,'appliedThinking':effective,'extraReasoningTokens':extra,
+                 'legacyMayReopen':effective is True}
+
+def text_contract_receipt(request,alias,context,payload,policy):
+ # A digest of host preparation is not proof of the binary's rendered prompt/tokens.
+ prepared={key:payload[key] for key in ('messages','chat_template_kwargs') if key in payload}
+ digest=hashlib.sha256(json.dumps(prepared,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+ return {'wireVersion':1,'requestId':request.get('requestId'),'modelId':alias,'modelSha256':GEMMAS[alias][1],
+         'contextSize':context,'maxOutputTokensTotal':payload.get('max_tokens'),'preparedInputSha256':digest,
+         'thinkingHonored':None,'exactRendererVerified':False,'qualification':'unknown',**policy}
+
+class TextContractStream:
+ def __init__(self,response,receipt):
+  self.response=response;self.closed=False
+  self.prefix=b'data: '+json.dumps({'ziphap_text_contract':receipt},separators=(',',':')).encode()+b'\n\n'
+ def readline(self,size=-1):
+  if self.prefix:
+   count=len(self.prefix) if size<0 else size
+   prefix=self.prefix[:count];self.prefix=self.prefix[count:];return prefix
+  return self.response.readline(size)
+ def close(self):
+  if not self.closed:self.closed=True;self.response.close()
+
 class ThinkGuard:
  """Passes the SSE stream through. If the model is still thinking after THINK_LIMIT reasoning tokens, or runs
  out of tokens before any answer text, the request is reopened without thinking and its stream continues here.
@@ -114,7 +172,7 @@ class Engines:
    except subprocess.TimeoutExpired:self.llm.kill();self.llm.wait(timeout=10)
   self.llm=None;self.llm_alias=None;self.llm_ctx=0
  def health(self):
-  return {'service':'ZipHapCompute','version':1,'image_io':'ram_only','image_reference':True,'image_reference_models':reference_models(),'pairing_protocol':1,'image_model':MODEL_ID,'image_model_sha256':MODEL_SHA,'image_models':public_models(),'image_steps':[20,32,50],'image_size':1024,'llm_models':{key:value[1] for key,value in GEMMAS.items() if value[0].is_file()},'structured_output':True,'text_contexts':[4096,8192],'durable_personal_store':False}
+  return {'service':'ZipHapCompute','version':1,'image_io':'ram_only','image_reference':True,'image_reference_models':reference_models(),'pairing_protocol':1,'image_model':MODEL_ID,'image_model_sha256':MODEL_SHA,'image_models':public_models(),'image_steps':[20,32,50],'image_size':1024,'llm_models':{key:value[1] for key,value in GEMMAS.items() if value[0].is_file()},'structured_output':True,'text_contexts':[4096,8192],'durable_personal_store':False,'textGenerationContract':text_contract_capabilities()}
  def image(self,request):
   allowed={'modelId','requestId','prompt','negativePrompt','seed','steps','referencePng','strength','ioMode'}
   if set(request)-allowed:raise ValueError('UNKNOWN_FIELD')
@@ -244,34 +302,29 @@ class Engines:
   if len(json.dumps(messages,ensure_ascii=False).encode())>256*1024:raise ValueError('INPUT_BOUND')
   self.last_used=time.monotonic()
  def tokens(self,request):
+  validate_text_request(request,'tokens')
   if not self.lock.acquire(timeout=30):raise Busy()
   try:
    self.require_llm(request)
-   with self.upstream('/apply-template',{'messages':request['messages'],'add_generation_prompt':True}) as response:prompt=json.loads(response.read(2*1024*1024))['prompt']
+   payload,policy=prepare_text_payload(request,self.llm_alias,for_count=True)
+   template={'messages':payload['messages'],'add_generation_prompt':True}
+   if 'chat_template_kwargs' in payload:template['chat_template_kwargs']=payload['chat_template_kwargs']
+   with self.upstream('/apply-template',template) as response:prompt=json.loads(response.read(2*1024*1024))['prompt']
    with self.upstream('/tokenize',{'content':prompt,'add_special':False,'parse_special':True}) as response:tokens=json.loads(response.read(2*1024*1024))['tokens']
-   return {'count':len(tokens),'modelId':self.llm_alias}
+   return {'count':len(tokens),'modelId':self.llm_alias,'textContract':text_contract_receipt(request,self.llm_alias,self.llm_ctx,payload,policy)}
   finally:self.lock.release()
  def chat(self,request,send):
-  if set(request)-{'requestId','modelId','messages','maxTokens','thinking','schema'}:raise ValueError('UNKNOWN_FIELD')
+  validate_text_request(request,'chat')
   key=str(uuid.UUID(request['requestId']));maximum=request['maxTokens']
-  if type(maximum)!=int or not 1<=maximum<=4096:raise ValueError('OUTPUT_BOUND')
   if not self.lock.acquire(timeout=30):raise Busy()
   try:
    self.require_llm(request)
-   think=self.llm_alias=='pc-text' and request.get('schema') is None and maximum>512
-   messages=request['messages']
-   if self.llm_alias=='pc-text':
-    rule='모든 생각과 답변은 반드시 한국어로 작성한다. 중국어 문장을 쓰지 않는다.'
-    messages=[dict(m,content=rule+'\n'+m['content']) if m['role']=='system' else m for m in messages]
-    if not any(m['role']=='system' for m in messages):messages=[{'role':'system','content':rule}]+messages
-   payload={'messages':messages,'max_tokens':maximum+(THINKING_ALLOWANCE if think else 0),'stream':True,'stream_options':{'include_usage':True},'cache_prompt':False,'temperature':.7,'top_p':.8,'chat_template_kwargs':{'enable_thinking':think},'reasoning_format':'deepseek'}
-   if request.get('schema') is not None:
-    schema=request['schema']
-    if not isinstance(schema,dict) or len(json.dumps(schema))>65536:raise ValueError('SCHEMA_BOUND')
-    payload['response_format']={'type':'json_schema','json_schema':{'name':'ziphap_output','strict':True,'schema':schema}}
+   payload,policy=prepare_text_payload(request,self.llm_alias)
+   think=policy['legacyMayReopen']
    direct=dict(payload,max_tokens=maximum,chat_template_kwargs={'enable_thinking':False})
    guard=ThinkGuard(self.upstream('/v1/chat/completions',payload,timeout=300),lambda:self.upstream('/v1/chat/completions',direct,timeout=300)) if think else None
-   response=guard or self.upstream('/v1/chat/completions',payload,timeout=300)
+   upstream=guard or self.upstream('/v1/chat/completions',payload,timeout=300)
+   response=TextContractStream(upstream,text_contract_receipt(request,self.llm_alias,self.llm_ctx,payload,policy))
    try:
     with self.upstream_lock:self.upstreams[key]=response
     send(response)

@@ -21,7 +21,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -51,6 +51,7 @@ class PairedPcActualTargetCanary {
         INFERENCE_ORIGINAL_PC_AUTHORITY_MISSING("inference_original_pc_authority_missing"),
         INFERENCE_PC_AUTHORITY_CHANGED("inference_pc_authority_changed"),INFERENCE_PC_LOADER_UNAVAILABLE("inference_pc_loader_unavailable"),
         INFERENCE_PC_ANALYSIS_PROVENANCE_UNAVAILABLE("inference_pc_analysis_provenance_unavailable"),
+        PLAN_REJECTED_MISSING_CONNECTION_TARGET("plan_rejected_missing_connection_target"),
         LEGACY_ENGINE_ERROR("LEGACY_ENGINE_ERROR");
         companion object {
             fun of(raw:String?):SafeError=if(raw==null)NONE else entries.firstOrNull{it.wire==raw}?:UNKNOWN
@@ -61,20 +62,100 @@ class PairedPcActualTargetCanary {
         PAUSED("paused"),FAILED("failed"),CANCELLED("cancelled"),INTERRUPTED("interrupted"),UNKNOWN("");
         companion object {fun of(raw:String?)=entries.firstOrNull{it!=UNKNOWN&&it.wire==raw}?:UNKNOWN}
     }
+    private enum class BenchPhase { LOAD,COUNT_CHAT,COUNT_STRUCTURED,GENERATE_CHAT,GENERATE_STRUCTURED }
+    /** Bounded host clocks only. Missing server/DB/UI boundaries remain null, never zero-duration work. */
+    private class Benchmark(private val declaredResidency:String) {
+        private val origin=SystemClock.elapsedRealtimeNanos()
+        private data class Span(val phase:BenchPhase,val start:Long,var end:Long?=null,
+            var returned:String="UNFINISHED",var firstDelta:Long?=null,var terminal:JsonObject?=null)
+        private val spans=mutableListOf<Span>()
+        private var attempted=0
+        private var submitted:Long?=null
+        private var terminalObserved:Long?=null
+        @Synchronized fun submitted(){submitted=SystemClock.elapsedRealtimeNanos()}
+        @Synchronized fun terminalObserved(){terminalObserved=SystemClock.elapsedRealtimeNanos()}
+        @Synchronized fun begin(phase:BenchPhase):Int {
+            attempted++
+            if(spans.size>=64)return -1
+            spans+=Span(phase,SystemClock.elapsedRealtimeNanos());return spans.lastIndex
+        }
+        @Synchronized fun end(index:Int,result:String){if(index>=0){spans[index].end=SystemClock.elapsedRealtimeNanos();spans[index].returned=result}}
+        @Synchronized fun firstDelta(index:Int){if(index>=0&&spans[index].firstDelta==null)spans[index].firstDelta=SystemClock.elapsedRealtimeNanos()}
+        @Synchronized fun summary(index:Int,value:GenerationSummary){
+            if(index<0)return
+            fun measured(rate:Double?)=rate?.takeIf{it.isFinite()&&it>=0}?.let(::JsonPrimitive)?:JsonNull
+            spans[index].terminal=buildJsonObject {
+                put("reason",value.reason.name);put("evidence",value.evidence.name)
+                put("prefillTokens",value.prefillTokens?.let(::JsonPrimitive)?:JsonNull)
+                put("decodeTokens",value.decodeTokens?.let(::JsonPrimitive)?:JsonNull)
+                put("reportedElapsedMs",value.elapsedMillis?.let(::JsonPrimitive)?:JsonNull)
+                put("promptTokensPerSecond",measured(value.metrics?.prefillTokensPerSecond))
+                put("decodeTokensPerSecond",measured(value.metrics?.decodeTokensPerSecond))
+                // The current PC adapter's reported TTFT is completion-buffered. Do not relabel it as server TTFT.
+                put("serverTtftMs",JsonNull);put("serverPrefillMs",JsonNull);put("serverDecodeMs",JsonNull)
+            }
+        }
+        @Synchronized fun json(receipts:List<PairedPcLoadReceipt>):JsonObject=buildJsonObject {
+            fun ms(value:Long)=value/1_000_000.0
+            put("schemaVersion",1);put("scenarioId","NORMAL_PAIRED_PC_TEXT_RESPONSE_V1")
+            put("declaredModelResidency",declaredResidency);put("verifiedModelResidency","UNKNOWN")
+            put("osFileCacheCondition","UNKNOWN");put("uiProcessCondition","UNKNOWN")
+            put("actualModelSha256s",JsonArray(receipts.map{it.modelSha256}.distinct().sorted().map(::JsonPrimitive)))
+            put("actualContexts",JsonArray(receipts.map{it.contextSize}.distinct().sorted().map(::JsonPrimitive)))
+            put("requestToTerminalObservedMs",submitted?.let{start->terminalObserved?.let{JsonPrimitive(ms(it-start))}}?:JsonNull)
+            put("terminalPollIntervalMs",100);put("attemptedSpans",attempted);put("droppedSpans",attempted-spans.size)
+            put("spans",buildJsonArray {spans.forEach{span->add(buildJsonObject {
+                put("phase",span.phase.name);put("startOffsetMs",ms(span.start-origin))
+                put("durationMs",span.end?.let{JsonPrimitive(ms(it-span.start))}?:JsonNull);put("operationResult",span.returned)
+                put("firstHostModelDeltaMs",span.firstDelta?.let{JsonPrimitive(ms(it-span.start))}?:JsonNull)
+                put("terminal",span.terminal?:JsonNull)
+            })}})
+            put("unmeasured",buildJsonArray {listOf("PLAN","PREFILL","DECODE","TOOL","DB","FILE","PERSIST","FIRST_USER_VISIBLE_UI").forEach{phase->add(buildJsonObject {
+                put("phase",phase);put("durationMs",JsonNull);put("availability","NOT_INSTRUMENTED")
+            })}})
+        }
+    }
     private class ObservedEngine(private val real:AutomaticComputeEngine,private val expected:QueuedChatRequest,
         private val receipts:MutableList<PairedPcLoadReceipt>,private val typedLoads:AtomicInteger,
-        private val receiptMatches:AtomicInteger):ComputeExecutionEngine by real,PairedPcTextLoader {
+        private val receiptMatches:AtomicInteger,private val benchmark:Benchmark):ComputeExecutionEngine by real,PairedPcTextLoader {
+        private suspend fun <T> timed(phase:BenchPhase,block:suspend()->T):T {
+            val index=benchmark.begin(phase);var result="THREW"
+            try{val value=block();result=if(value==null)"NO_RESULT"else"RETURNED";return value}
+            catch(cancel:CancellationException){result="CANCELLED";throw cancel}
+            finally{benchmark.end(index,result)}
+        }
         override suspend fun load(path:String,options:InferenceOptions){error("Logical PC canary reached a file loader")}
         override suspend fun loadPairedPcText(target:PairedPcText,options:InferenceOptions):PairedPcLoadReceipt {
             check(expected.modelId==PairedPcTextProfile.SELECTION_ID&&!expected.allowCloudText)
             check(expected.capturedPcRevision!=null&&expected.capturedPcRevision==target.authorizationRevision)
             typedLoads.incrementAndGet()
-            val receipt=real.loadPairedPcText(target,options)
-            check(receipt.matches(target,options.contextSize));receipts+=receipt
-            receiptMatches.incrementAndGet()
-            return receipt
+            return timed(BenchPhase.LOAD){
+                val receipt=real.loadPairedPcText(target,options)
+                check(receipt.matches(target,options.contextSize));receipts+=receipt
+                receiptMatches.incrementAndGet()
+                receipt
+            }
         }
-
+        override suspend fun countChatTokens(userText:String,systemInstruction:String,history:List<InferenceTurn>):Int? =
+            timed(BenchPhase.COUNT_CHAT){real.countChatTokens(userText,systemInstruction,history)}
+        override suspend fun countStructuredChatTokens(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Int? =
+            timed(BenchPhase.COUNT_STRUCTURED){real.countStructuredChatTokens(userText,systemInstruction,schema,history)}
+        private fun observed(events:Flow<GenerationEvent>,phase:BenchPhase):Flow<GenerationEvent> = flow {
+            val index=benchmark.begin(phase);var result="THREW";var first=false
+            try{
+                events.collect{event->
+                    if(event is GenerationEvent.Delta&&!first&&event.text.isNotEmpty()){first=true;benchmark.firstDelta(index)}
+                    if(event is GenerationEvent.Finished)benchmark.summary(index,event.summary)
+                    emit(event)
+                }
+                result="RETURNED"
+            }catch(cancel:CancellationException){result="CANCELLED";throw cancel}
+            finally{benchmark.end(index,result)}
+        }
+        override fun generateChatEvents(userText:String,systemInstruction:String,history:List<InferenceTurn>):Flow<GenerationEvent> =
+            observed(real.generateChatEvents(userText,systemInstruction,history),BenchPhase.GENERATE_CHAT)
+        override fun generateStructuredEvents(userText:String,systemInstruction:String,schema:String,history:List<InferenceTurn>):Flow<GenerationEvent> =
+            observed(real.generateStructuredEvents(userText,systemInstruction,schema,history),BenchPhase.GENERATE_STRUCTURED)
     }
 
     @Test fun explicitPairedTargetPassesNormalCaptureSelectionAndActualLoad()=runBlocking {
@@ -100,6 +181,8 @@ class PairedPcActualTargetCanary {
         val captured=CopyOnWriteArrayList<QueuedChatRequest>()
         val typedLoads=AtomicInteger()
         val receiptMatches=AtomicInteger()
+        val declaredResidency=args.getString("pairedPcBenchmarkResidency")?.takeIf{it in setOf("COLD","WARM")}?:"UNKNOWN"
+        val benchmark=Benchmark(declaredResidency)
         var project:ProjectRecord?=null
         var room:ChatThreadRecord?=null
         var workspace:ProjectWorkspace?=null
@@ -137,6 +220,7 @@ class PairedPcActualTargetCanary {
                 put("failureKind",when(primary){null->"NONE";is AssertionError->"ASSERTION";is TimeoutCancellationException->"TIMEOUT";is CancellationException->"CANCELLED";else->"OTHER"})
                 put("terminalElapsedMillis",terminalElapsedMillis?.let(::JsonPrimitive)?:JsonNull)
                 put("elapsedMillis",(SystemClock.elapsedRealtime()-started).coerceAtLeast(0))
+                put("benchmark",benchmark.json(receipts))
                 // Only this test's existing owned fixture recovery locators.
                 put("recovery",buildJsonObject {
                     put("projectId",project?.id?.let(::JsonPrimitive)?:JsonNull)
@@ -172,12 +256,13 @@ class PairedPcActualTargetCanary {
                     captured+=request
                     ObservedEngine(AutomaticComputeEngine(context,ownerRunId=request.runId,
                         beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,
-                        allowCloudText=request.allowCloudText),request,receipts,typedLoads,receiptMatches)
+                        allowCloudText=request.allowCloudText),request,receipts,typedLoads,receiptMatches,benchmark)
                 })}
             val own=checkNotNull(coordinator)
             withContext(Dispatchers.Main.immediate){own.selectThread(ownedRoom.id)}
             withTimeout(15_000){while(!own.selectionReady.value)delay(50)}
             assertEquals(PairedPcTextProfile.SELECTION_ID,own.preferredModelId.value)
+            benchmark.submitted()
             check(withContext(Dispatchers.Main.immediate){own.send("짧게 연결 확인이라고만 답해주세요.",ownedRoom.id)})
             val run=withTimeout(600_000){
                 var result:ChatRunRecord?=null
@@ -192,6 +277,7 @@ class PairedPcActualTargetCanary {
                 checkNotNull(result)
             }
             terminalElapsedMillis=(SystemClock.elapsedRealtime()-started).coerceAtLeast(0)
+            benchmark.terminalObserved()
             assertEquals("completed",run.status)
             assertEquals(1,captured.size)
             val request=captured.single()

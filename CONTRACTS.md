@@ -4,13 +4,19 @@ Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.
 
+## Performance1072 boundaries
+
+The current production PC-only route forwards provisional content deltas while preserving original authority, cancellation, stream bounds and terminal verification. A delta is not completion or VERIFIED tool evidence. A failed stream cannot start a phone reply in that route. Legacy routes that allow phone fallback retain their existing whole-response buffer and no-mixed-replies behavior. The transport keeps one pending delta; reported observed first-content time is measured at SSE receipt, separately from total generation and app delivery. Installed1072 passes targeted unit, controlled phone and actual cancellation/analysis checks; normal request planning still has a recorded failure. Internal planning deltas are not user-visible answer timing.
+
+Message segment reads filter both actual messageId and segmentId in SQLite and preserve sequence order. File-save SHA reuse is confined to immutable strings within one invocation; original provider reads, current-body CAS, full-body delivery, approval, independent readback and recovery remain mandatory. No global data cache or database migration is introduced. Performance measurements and evidence of unchanged behavior remain separate.
+
 ## Evidence limits identified in1067
 
 1069 pauses a nonrepeat harness refusal and preserves host failed/cancelled disposition if error presentation or checkpointing is rejected after a scope change. It closes only the original running record, without granting answer/tool write authority in the changed scope. A captured allowTools=false request that produces a tool envelope/truncated tool proposal pauses without retrying its format; ordinary text follows the existing path. Current-generation path/hash decoder hints are not write authority: actual reader/body delivery, workspace binding, approval and current-body SHA CAS still apply. Ordinary structured-action writer counts remain advisory rather than proven server-exact schema counts.
 
 1068 keeps the raw `HarnessStep.fingerprint` stable for persistent readback references. Its separate repeat comparison fills only actual host defaults for note title/collection and reminder group. It does not rewrite tool payloads, normalize natural language, grant authority or complete a goal. Calendar native validation receives a request-local Hub through trusted constructors; default production execution keeps the real Hub and isolated transport cannot be selected by model or queued JSON.
 
-`ExactStructuredReviewInput` currently verifies an immutable client-side count/generate input boundary. This alone does not establish actual paired-worker template/token-count equivalence: current worker token counting and generation apply different message/thinking preparation. Installed backend renderer qualification is still absent. Do not report this client flag or fake-counter tests as server-exact token evidence. A separate versioned explicit-thinking/renderer contract is staged only; normal captured legacy requests retain their existing authority and checks.
+`ExactStructuredReviewInput` verifies an immutable client-side count/generate input boundary. The1072 worker shares host message/thinking preparation for supported versioned requests, but installed renderer/schema/token-count equivalence is still unqualified; legacy counts may omit those settings. Neither a prepared-input hash, this client flag nor fake-counter tests establish server-exact token evidence. Explicit false prevents host-added thinking allowance/reopen; actual false/deep controls are limited observations and do not turn backend qualification into true. Captured legacy authority and checks remain.
 
 Internal deployment targets the user's confirmed personal phone/personal PC configuration, with per-user pairing and data isolation. Shared-PC multi-user service, real Calendar OAuth effects and whole-phone cleanup are not validated capabilities.
 
