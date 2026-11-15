@@ -1,5 +1,11 @@
 # Galaxy Local Agent implementation contracts
 
+## Verified note-only finalization1084
+
+After a normal unpublished EOG model review_complete or experimental direct answer decision, a fresh note-only ACT request may publish the SAME existing ActionCompletionReport without generating discarded final prose. This requires one actual verified literal patch, current run/thread/branch/scope-bound durable receipt, same-target/new-version whole AFTER pages actually acknowledged by the model, TaskHarness/readback completion, and unchanged live context/permission/cancel/steer/store-write guards. Mixed tasks, old goal/steps/continuations, inherited proof, selected PC/Kakao data, malformed/opaque/truncated output and incomplete proof retain the existing fallback. No tool executes automatically, no new completion evidence or authority is created, and no renderer/store/model API is replaced.
+
+pcImageRecoveryAllowed is an unchanged captured permission for optional image recovery, not evidence that a note request performed image work. It alone does not exclude this note-only optimization; mixed image tools still exclude it. Actual1084 semantic9B/default4B and direct4B each demonstrate0 discarded plain generations with strict whole-note completion. A separate4B first attempt paused at an unnecessary partial-read clarification and remains failed; optional finalization does not repair semantic choices.
+
 Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.

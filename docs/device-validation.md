@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-15 installed1084
+
+Full3m49/core945+app870=1815 JVM PASS,0fail/error/skip,lint0errors144warnings1Hint;736 frozen inputs. Main3a3b9f59bdf65163fb9d41a5c37a1759ab7ab0346408bb37e9b137ff7c8cd7b4/test9e9e69845012192b6ed88eacd1f811916606227de6724b11c5fce7be8651330e signed/installed/baseSHA verified, data retained. Original pinned authenticated direct Tailscale health106ms PASS/VPN/no LAN fallback; external-network handoff untested.
+
+Same installed71 unique controlled checks PASS: IO5/long-answer finish17/chat data12/note read-patch12/calendar8/recipient UI1+scripted1(5scenarios×2 subcases)/reminder scope5/project write binding6/file artifacts2/note finalization2. Calendar readiness hardening preserves its assertions; controlled calendar endpoints and scripted engines are not live Google authorization/provider/model proof. IO paired segment median97.386171→44.185391ms; isolated ten-hash batch8.278867→3.790508ms,5rounds/equality+cleanup verified, not full application latency.
+
+Actual note matrix:9B default323731ms/8gen/23typedloads PASS;4B direct80972ms/8gen/25loads PASS;4B default first69446ms/7gen/17loads FAIL(awaiting_owner_input after verified patch/partial AFTER read);4B default repeat102301ms/9gen/23loads PASS.3/4 attempts passed, with strict target/diff/one guarded fixture approval/exact effect/full AFTER acknowledgement/final response/cleanup/preferences/idle for each pass. All pass paths have plain0 and exact final report/native receipt/visible and stored-answer bytes. Failure has receipt/7 companions/fixture+preferences cleanup verified; original idle=false is retained and independent empty/idle verified separately. No false completion; no original failure regraded. QA fixture consent is not manual user approval or general commercial readiness.1082 logical cancellation remains separate historical evidence.
+
 ## 2026-11-15 installed1082 / actual note completion and59 controlled checks
 
 Mainba17f5fd/test3d4119ec signed/installed/baseSHA matched with original data/signing identity retained. Full3m57/core945+app861=1806 JVM PASS,0fail-error-skip/lint0errors144warnings1Hint;733 frozen inputs. Original pinned direct Tailscale health68ms PASS; external-network handoff untested. Controlled IO5+finish17+chat12+notes12+reminder5+filebinding6+artifacts2=59 unique checks PASS. Separate Calendar8 attempt had3 pass/5 approval-UI hierarchy errors; Calendar provider/OAuth success is not established and recipient checks remain pending.

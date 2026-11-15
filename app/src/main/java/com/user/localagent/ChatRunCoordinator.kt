@@ -860,8 +860,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             responsePaused=true;complete=true;return@roundStep
                         }
                         if(directProtocol&&written.summary?.mayBeTruncated==false&&com.user.localagent.core.DirectNextActionProtocol.parse(raw,structuredTools) is com.user.localagent.core.DirectNextActionProtocol.Decision.Answer){
-                            directAnswerWriting=true
-                            query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)
+                            if(publishNoteReceiptFinal(request,semantic,taskGoal,written,direct=com.user.localagent.core.DirectNextActionProtocol.Decision.Answer))complete=true
+                            else{directAnswerWriting=true;query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)}
                             return@roundStep
                         }
                         if(directAnswerWriting&&written.toolEnvelope){
@@ -873,6 +873,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             if(review.toolJson==null){
                                 reviewedStepCount=requestSteps.size;reviewSummary=review.summary
                                 if(managedReview!=null&&written.exactReviewInputVerified&&publishManagedReceiptReview(request,text,semantic,taskGoal,managedReview,review.decision,written.summary?.mayBeTruncated==false&&!written.paused))complete=true
+                                else if(publishNoteReceiptFinal(request,semantic,taskGoal,written,review=review.decision))complete=true
                                 return@roundStep
                             }
                             raw=checkNotNull(review.toolJson)
@@ -1215,6 +1216,33 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용을 위해 게시를 멈췄습니다.")
         answer(report)
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"완결된 현재 조회 근거와 후속 검토를 확인해 실행 결과를 표시했습니다.")
+        return true
+    }
+
+    /** Skip only discarded final prose after the model decision and existing whole-readback gates. */
+    private suspend fun publishNoteReceiptFinal(
+        request:QueuedChatRequest,plan:com.user.localagent.core.SemanticRequestPlan?,goal:com.user.localagent.core.TaskGoal,written:WrittenAnswer,
+        review:AutonomousReviewPolicy.Decision?=null,direct:com.user.localagent.core.DirectNextActionProtocol.Decision?=null,
+    ):Boolean {
+        val report=NoteReceiptFinalization.report(request,plan,goal,requestSteps,observedOutcomes,requestReadbackObligations,
+            readbackContext(request),requestAuthorizedTools,requestGuidance.isNotEmpty(),written,review,direct)?:return false
+        if(checkedTaskFinish(request,goal,requestAuthorizedTools) !is HarnessDecision.Finish)return false
+        currentCoroutineContext().ensureActive()
+        val active=activeRequest
+        if(active?.runId!=request.runId||active.threadId!=request.threadId||active.branchId!=request.branchId||
+            active.projectId!=request.projectId||requestJob?.isActive!=true||pendingSteerRunId==request.runId)
+            throw CancellationException("현재 작업이 중지·변경되어 최종 결과를 게시하지 않았습니다.")
+        check(request.allowTools&&request.goal==null&&approval.value==null)
+        val disabled=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+        check(observedOutcomes.none {it.call.name in disabled}){"조회 뒤 도구 허용 범위가 변경되었습니다."}
+        val live=checkNotNull(app.repository.chat.run(request.runId))
+        check(live.status=="running"&&live.threadId==request.threadId&&live.branchId==request.branchId&&live.projectId==request.projectId)
+        // Same current branch/project revision and writeRunAnswer checks as managed receipt publication.
+        app.repository.chat.updateRunContext(live.id,live.contextJson)
+        currentCoroutineContext().ensureActive()
+        if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용을 위해 게시를 멈췄습니다.")
+        answer(report)
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"검증된 메모 수정·전체 후속 조회와 모델 완료 판단을 확인해 실행 결과를 표시했습니다.")
         return true
     }
 

@@ -129,6 +129,7 @@ class CalendarV1DeviceValidation {
         val app=(base.applicationContext as LocalAgentApplication).container
         val store=app.repository.chat
         val token=UUID.randomUUID().toString();val title="qa-calendar-v1-"+token
+        private val readyText="격리 Calendar 승인 대기 "+token
         var project:ProjectRecord?=null
         var runner:ChatRunCoordinator?=null
         val slots=linkedMapOf<String,Slot>();val extraThreads=mutableSetOf<String>()
@@ -156,12 +157,18 @@ class CalendarV1DeviceValidation {
                 },contactLookup={_,_->error("Contacts forbidden")},externalIntentLauncher={error("External Intent forbidden")})}
             runner=coordinator
             uiInstalled=true
-            compose.activity.runOnUiThread {compose.activity.setContent {MaterialTheme {
-                Text("격리 Calendar 승인 대기")
+            compose.runOnUiThread {compose.activity.setContent {MaterialTheme {
+                Text(readyText)
                 val actions by coordinator.pendingActions.collectAsState()
                 val selected by shown.collectAsState()
                 actions.firstOrNull{it.runId==selected}?.let {action->ActionApprovalDialog(action,checkNotNull(action.reviewText))}
             }}}
+            // A queued setContent or an idle test clock is not proof a Compose owner exists yet.
+            compose.waitUntil(timeoutMillis=5_000) {
+                compose.onAllNodesWithText(readyText,useUnmergedTree=true)
+                    .fetchSemanticsNodes(atLeastOneRootRequired=false).isNotEmpty()
+            }
+            compose.waitForIdle()
         }
 
         inner class Slot(val room:ChatThreadRecord,val runId:String,val messageId:String,val owner:String,
@@ -259,7 +266,13 @@ class CalendarV1DeviceValidation {
             slot.actualCall=action.call;slot.expectedId=checkNotNull(ConnectionRequests.build(ConnectionExecutionScope.bind(action.call,slot.runId)).knownId)
             slot.approvedAccess=slot.current().access();slot.approvals+=System.identityHashCode(action.decision)
             assertEquals(1,slot.hubFactories.get());assertEquals(0,slot.posts.get())
-            shown.value=slot.runId;compose.waitForIdle()
+            compose.runOnUiThread {shown.value=slot.runId}
+            // Wait for this actual bound preview; absence/duplicate/mismatched labels still fail below.
+            compose.waitUntil(timeoutMillis=5_000) {
+                compose.onAllNodesWithText("계정: "+slot.label,substring=true)
+                    .fetchSemanticsNodes(atLeastOneRootRequired=false).isNotEmpty()
+            }
+            compose.waitForIdle()
             compose.onNodeWithText("계정: "+slot.label,substring=true).assertExists()
             compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role,Role.Checkbox)).assertCountEquals(0)
             return action
@@ -329,7 +342,10 @@ class CalendarV1DeviceValidation {
             } finally {
             ownedPreferences.forEach {name->check(name.startsWith("qa-calendar-v1-"));check(base.deleteSharedPreferences(name))}
             // The shared Android Keystore alias and real owner preferences are never removed.
-            if(uiInstalled)compose.activity.runOnUiThread{compose.activity.setContent{MaterialTheme{Text("격리 Calendar 검증 종료")}}}
+            if(uiInstalled){
+                compose.runOnUiThread{compose.activity.setContent{MaterialTheme{Text("격리 Calendar 검증 종료")}}}
+                compose.waitForIdle()
+            }
             }
         }
     }
