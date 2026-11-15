@@ -6,16 +6,18 @@ import kotlinx.serialization.json.*
 data class ObservedToolOutcome(val call:ToolCall,val result:ToolResult)
 
 object ActionCompletionReport {
-    val managedTools=setOf("create_google_calendar_event","save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
+    val managedTools=setOf("patch_note","read_note","create_google_calendar_event","save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
         "prepare_sms","prepare_email","prepare_calendar_event","create_alarm","get_current_datetime","search_contacts",
         "inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")+
         com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")
-    private val auxiliaryReads=setOf("get_current_datetime","search_contacts","list_reminders","get_agent_capabilities")
-    private val observationTools=setOf("inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")
+    private val auxiliaryReads=setOf("read_note","get_current_datetime","search_contacts","list_reminders","get_agent_capabilities")
+    private val observationTools=setOf("read_note","inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")
     fun manages(required:Set<String>,outcomes:List<ObservedToolOutcome>)=required.any{it in managedTools}||outcomes.any{it.call.name in managedTools-auxiliaryReads}
     fun render(required:Set<String>,outcomes:List<ObservedToolOutcome>,reason:String?=null):String=buildString {
         val managed=outcomes.filter{it.call.name in managedTools}
         var observationIncomplete=false
+        val noteReadPages=NoteReadbackPages()
+        val noteReadIncomplete=linkedMapOf<RequiredReadbackPolicy.Resource,Boolean>()
         if(managed.isEmpty())append("이번 실행에서 완료를 확인한 작업이 없습니다.")
         managed.forEachIndexed {index,observed->
             if(isNotEmpty())append("\n\n")
@@ -30,7 +32,11 @@ object ActionCompletionReport {
                     observationIncomplete=true
                 }else{
                     val report=observation(call.name,result.content)
-                    append(report.text);observationIncomplete=observationIncomplete||report.incomplete
+                    append(report.text)
+                    if(call.name=="read_note"){
+                        val raw=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
+                        val proof=noteReadPages.observe(call,raw);noteReadIncomplete[proof.target]=proof.snapshot==null
+                    }else observationIncomplete=observationIncomplete||report.incomplete
                 }
             }else if(result.verification==VerificationState.PREPARED){
                 append("관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송·길 안내 시작은 확인되지 않았습니다.")
@@ -41,6 +47,17 @@ object ActionCompletionReport {
                     else->listOf("query","name","label","url").forEach{key->if(value(key).isNotBlank())append("\n요청 값: ").append(value(key))}
                 }
             }else when(call.name){
+                "patch_note"->{
+                    val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
+                    if(receipt?.flag("storedAndReadBack")==true&&receipt.flag("readbackComplete")==true&&receipt.flag("unreadTextPreserved")==true&&
+                        receipt.text("id")==value("id")&&receipt.text("scope")==value("scope")&&receipt.text("beforeUpdatedAt")==value("expectedUpdatedAt")){
+                        append(if(receipt.flag("changed")==true)"메모 부분 수정 후 전체 저장 재조회를 확인했습니다."else"같은 내용으로 본문·버전 변경 없이 재조회를 확인했습니다.")
+                        append("\n제목: ").append(receipt.text("title"));append("\n메모 버전: ").append(receipt.text("updatedAt"))
+                        append("\n그 밖의 문구는 보존했습니다.")
+                        noteReadPages.invalidate(value("id"))
+                        if("read_note" in required)noteReadIncomplete[RequiredReadbackPolicy.Resource("note_body_v1",value("id"))]=true
+                    }else{append("메모 부분 수정의 저장 근거를 확인하지 못했습니다.");observationIncomplete=true}
+                }
                 "create_google_calendar_event"->{
                     val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
                     val event=receipt?.get("event") as? JsonObject
@@ -77,7 +94,7 @@ object ActionCompletionReport {
             }
         }
         val verified=outcomes.filter{it.result.success&&it.result.verification==VerificationState.VERIFIED}.map{it.call.name}.toSet()
-        if((required-verified).isNotEmpty()||observationIncomplete)append("\n\n전체 요청의 완료는 확인되지 않았습니다.")
+        if((required-verified).isNotEmpty()||observationIncomplete||noteReadIncomplete.values.any{it})append("\n\n전체 요청의 완료는 확인되지 않았습니다.")
         reason?.takeIf{it.isNotBlank()}?.let{append("\n").append(it)}
     }
 
@@ -86,6 +103,10 @@ object ActionCompletionReport {
         val data=if(body.length<=65536)runCatching{rejectDuplicateKeys(body);Json.parseToJsonElement(body) as? JsonObject}.getOrNull()else null
         if(data==null)return Observation("조회 결과를 해석하지 못했습니다. 관찰 내용과 변경 여부는 미확인입니다.",true)
         return when(tool){
+            "read_note"->{
+                val complete=data.flag("completeBody")==true&&data.flag("partial")==false&&data.flag("hasMore")==false
+                Observation((if(complete)"메모 전체 조회"else"메모 일부 조회 · 읽지 않은 부분이 있습니다.")+"\n"+data.text("text").orEmpty(),!complete)
+            }
             "inspect_project_storage","find_project_duplicates"->storage(tool,data)
             "get_agent_capabilities"->capabilities(data)
             else->reminders(data)

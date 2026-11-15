@@ -89,7 +89,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
     }
     suspend fun toolsForThread(threadId:String,workspace:com.user.localagent.workspace.ProjectWorkspace,
         analysisChoose:suspend(String)->com.user.localagent.models.ChosenInference?={null},
-        requestRunId:String?=null,requestJob:Job?=null,analysisProgress:(String)->Unit={},
+        requestRunId:String?=null,requestBranchId:String?=null,requestJob:Job?=null,analysisProgress:(String)->Unit={},
         authorizedGoalTools:()->Set<String> = {emptySet()},
         goalLifecycle:com.user.localagent.automation.GoalToolLifecycle?=null,
         requestEngine:com.user.localagent.inference.InferenceEngine=engine,
@@ -124,6 +124,10 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
         val transcription=com.user.localagent.audio.ScopedRecordingTool(appContext,this,scoped,recordings,scoped::discardIncompleteAudioNotes,requestEngine=requestEngine)
         val requestImages by lazy {ImageStudioController(appContext,this,requestEngine=requestEngine,ownerRunId=requestRunId,recoveryAllowed=pcImageRecoveryAllowed,
             scopedRepository=scoped,ownerThreadId=threadId,verifyAccess=::verifyAnalysisAccess)}
+        val noteHost=if(requestRunId!=null&&requestBranchId!=null){
+            val binding=com.user.localagent.core.NoteReadBinding(requestRunId,threadId,requestBranchId,capturedAccess.scopeKey)
+            com.user.localagent.notes.NoteReadPatchHost(binding,com.user.localagent.notes.NotePatchStore(binding,scoped.notePatchTransactions(binding)),::verifyAnalysisAccess)
+        }else null
         val goalReadAuthority=com.user.localagent.automation.GoalReadAuthority()
         val goalTools=goalLifecycle?.let {lifecycle->com.user.localagent.automation.ScopedGoalTools(capturedAccess,
             com.user.localagent.automation.GuardedChatGoalStore(goalStore),authorizedGoalTools,requestRunId,lifecycle,
@@ -150,7 +154,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
             connectionHubOverride=connectionHub,
             kakaoReadBinding=kakaoReadBinding,
             connectionComputeEngine=requestEngine as? com.user.localagent.inference.ComputeExecutionEngine,
-            ownerRequest=ownerRequest,contactLookup=contactLookup,projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
+            noteReadPatch=noteHost,ownerRequest=ownerRequest,contactLookup=contactLookup,projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
                 call.arguments["negativePrompt"]?.jsonPrimitive?.content.orEmpty(),call.arguments["steps"]?.jsonPrimitive?.intOrNull,
                 call.arguments["seed"]?.jsonPrimitive?.longOrNull?:-1,referenceUri=chatAttachments.currentRequestReferenceUri(requestRunId)).toolResult()})}
     }

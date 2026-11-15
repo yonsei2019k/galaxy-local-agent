@@ -4,6 +4,12 @@ Package: `com.user.localagent`. Language: Kotlin. Time zone default: Asia/Seoul.
 
 The `core` JVM module has no Android dependencies. App code uses `kotlinx.serialization.json`.
 
+## Scoped note read/patch1073
+
+`read_note` returns a scoped UTF-16 page of2..900 units bound to the actual note id, collection and revision. A literal `patch_note` requires an actually delivered same-request/branch page, the current revision/full-body hash, one exact oldText occurrence and an owner-approved diff. oldText is1..900 units, newText0..2000 and resulting body at most12000. Approval is never inferred from a model plan. Scope and consent are checked again before a single Room transaction performs CAS, full persisted-body reread and durable receipt recording. Cancellation reconciles an actual receipt without replaying a mutation. Only normal EOG can acknowledge the pages actually present in that query; a later failed read invalidates older full-read proof. Original18-step and whole-content evidence limits remain.
+
+Offered-only prerequisite closure supplies search/read only for an explicit patch_note plan; it does not execute them or restore old captured permissions. patch_note is private-data=true and read-only=false. Installed1073 has104 registered tools,1699 passing JVM tests and94 controlled phone checks. Its actual normal-send note scenario still fails before approval, so these controls do not establish successful natural-language note editing.
+
 ## Performance1072 boundaries
 
 The current production PC-only route forwards provisional content deltas while preserving original authority, cancellation, stream bounds and terminal verification. A delta is not completion or VERIFIED tool evidence. A failed stream cannot start a phone reply in that route. Legacy routes that allow phone fallback retain their existing whole-response buffer and no-mixed-replies behavior. The transport keeps one pending delta; reported observed first-content time is measured at SSE receipt, separately from total generation and app delivery. Installed1072 passes targeted unit, controlled phone and actual cancellation/analysis checks; normal request planning still has a recorded failure. Internal planning deltas are not user-visible answer timing.

@@ -27,6 +27,7 @@ object RequiredReadbackPolicy {
     private val relations=listOf(
         Relation("save_note","search_notes","note"),
         Relation("update_note","search_notes","note"),
+        Relation("patch_note","read_note","note_body_v1"),
         Relation("create_reminder","list_reminders","reminder"),
         Relation("update_reminder","list_reminders","reminder"),
         Relation("write_project_file","read_project_file","project_file"))

@@ -32,12 +32,15 @@ object SemanticRequestPlanning {
     private val privateReads = setOf(
         "get_sms_summary", "get_call_log_summary", "search_contacts", "list_messenger_notifications",
         "list_imported_conversations", "search_conversation_imports", "search_conversation_history",
-        "list_audio_recordings", "search_audio_transcripts", "list_calendar_events", "search_notes",
+        "list_audio_recordings", "search_audio_transcripts", "list_calendar_events", "search_notes", "read_note",
         "search_memories", "list_project_files", "read_project_file", "inspect_project_storage", "find_project_duplicates", "list_reminders", "get_agent_capabilities",
     ) + com.user.localagent.core.connections.ConnectionCatalog.privateReadNames + com.user.localagent.core.connections.PcToolCatalog.names + PrivateAnalysisToolCatalog.privateReadNames + RecordingToolCatalog.names + GoalToolCatalog.names + KakaoScreenToolCatalog.names
 
-    /** Typed capability metadata shared with sparse decision normalization, not an intent router. */
-    internal fun isPrivateRead(tool:String):Boolean = tool in privateReads ||
+    // Mutations can intrinsically read existing private content; this is not read-only permission.
+    private val intrinsicPrivateDataTools=setOf("patch_note")
+    private val capabilityPrerequisites=mapOf("patch_note" to setOf("search_notes","read_note"))
+    /** Privacy metadata shared with sparse normalization, including intrinsic reads of mutations. */
+    internal fun isPrivateRead(tool:String):Boolean = tool in intrinsicPrivateDataTools || tool in privateReads ||
         (ToolRegistry.definitions[tool]?.risk==Risk.LOW &&
             (tool.startsWith("get_")||tool.startsWith("list_")||tool.startsWith("search_")||tool.startsWith("read_")) &&
             tool !in publicTools && tool!="get_current_datetime" && tool !in SkillToolCatalog.names)
@@ -146,7 +149,7 @@ object SemanticRequestPlanning {
                 SemanticSourceKind.NONE -> Unit
             }
             plan.requiredTools.forEach { tool -> when (tool) {
-                "search_notes" -> sources += IntentSource.NOTES
+                "search_notes", "read_note", "patch_note" -> sources += IntentSource.NOTES
                 "search_memories" -> sources += IntentSource.MEMORIES
                 "list_calendar_events" -> sources += IntentSource.CALENDAR
                 "list_audio_recordings", "search_audio_transcripts" -> sources += IntentSource.AUDIO_TRANSCRIPTS
@@ -176,7 +179,8 @@ object SemanticRequestPlanning {
         require(availableTools.all { it in ToolRegistry.definitions }) { "알 수 없는 사용 가능 도구입니다." }
         require(plan.goal.isNotBlank() && plan.goal.length <= 1000 && plan.target.length <= 200 && plan.publicQuery.length <= 500 && plan.question.length <= 240) { "의미 계획 문자열 길이가 허용 범위를 벗어났습니다." }
         require(plan.requiredTools.size <= 12 && plan.requiredTools.all { it in ToolRegistry.definitions && it in availableTools }) { "등록되지 않았거나 사용할 수 없는 필수 도구입니다." }
-        require(toolClosure(plan.requiredTools, availableTools).all { it in availableTools }) { "필요한 선행 도구가 비활성화되어 의미 계획을 실행할 수 없습니다." }
+        val effectiveTools=toolClosure(plan.requiredTools, availableTools)
+        require(effectiveTools.all { it in availableTools }) { "필요한 선행 도구가 비활성화되어 의미 계획을 실행할 수 없습니다." }
         if ("search_shopping" in plan.requiredTools) require(plan.targetType == SemanticTargetType.PHYSICAL_PRODUCT) { "상품 가격 비교 도구는 PHYSICAL_PRODUCT 대상만 지원합니다. 서비스·예약·운임 조사는 지원하는 공개 검색 도구를 선택해야 합니다." }
         require(plan.constraints.size <= 6 && plan.constraints.all { it.isNotBlank() && it.length <= 240 } && plan.constraints.size == plan.constraints.toSet().size) { "의미 계획 제약 목록이 잘못되었습니다." }
         if (plan.action != SemanticAction.CLARIFY) require(plan.question.isEmpty()) { "확인 질문은 CLARIFY 행동에서만 허용합니다." }
@@ -191,7 +195,7 @@ object SemanticRequestPlanning {
             }
             SemanticAction.TOOL_TASK -> {
                 require(plan.requiredTools.isNotEmpty()) { "도구 작업에는 필수 도구가 필요합니다." }
-                if (plan.sourceKind != SemanticSourceKind.NONE || plan.requiredTools.any { it in privateReads }) require(plan.usesPrivateData) { "로컬 자료를 읽는 작업은 개인 자료 사용을 명시해야 합니다." }
+                if (plan.sourceKind != SemanticSourceKind.NONE || effectiveTools.any { it in privateReads || it in intrinsicPrivateDataTools }) require(plan.usesPrivateData) { "로컬 자료를 읽는 작업은 개인 자료 사용을 명시해야 합니다." }
                 if (plan.requiredTools.any { it in searchTools }) {
                     require(plan.publicQuery.isNotBlank() && !plan.usesPrivateData && plan.sourceKind == SemanticSourceKind.NONE) { "개인 자료와 외부 검색은 자동 결합하지 않습니다." }
                 } else require(plan.publicQuery.isEmpty()) { "검색 도구 없이 외부 검색어를 사용할 수 없습니다." }
@@ -222,6 +226,7 @@ object SemanticRequestPlanning {
             addAll(setOf("list_analysis_sources","read_analysis_evidence").intersect(availableTools))
             if("analyze_conversation_import" in required&&"list_imported_conversations" in availableTools)add("list_imported_conversations")
         }
+        required.forEach{tool->addAll(capabilityPrerequisites[tool].orEmpty().intersect(availableTools))}
         addAll(required)
     }
 

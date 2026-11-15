@@ -4,7 +4,8 @@ package com.user.localagent.core
 object PostReadActions {
     private val related=mapOf(
         "search_contacts" to setOf("prepare_sms"),
-        "search_notes" to setOf("save_note","update_note","delete_note"),
+        "search_notes" to setOf("save_note","update_note","delete_note","read_note"),
+        "read_note" to setOf("patch_note"),
         "list_reminders" to setOf("create_reminder","update_reminder","delete_reminder"),
         "get_current_datetime" to setOf("create_reminder","create_alarm","prepare_calendar_event"),
         "calculate" to setOf("save_note"),

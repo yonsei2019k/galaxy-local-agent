@@ -2,7 +2,17 @@
 
 Updated 2026-11-15. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Installed1072 performance checkpoint; request planning remains unresolved
+## Installed1073: note tools integrated; normal-model completion still fails
+
+Main `532316cdf7a951edb3cf195930db54dde9f900961d7f7a1ed19daf3eca805e24` and test `d7726b801618617316b73231170efc8bb69a359dc62d955463c5191b75a439d3` are installed without resetting data and independently matched. Core873/app826=1699 JVM tests pass with0 failures/errors/skips; final release/test build6m42 and lint0 errors/144 warnings/1 hint pass. Before signing,694 source+10 public+6 build inputs matched. Original pinned direct Tailscale identity passes92ms without LAN fallback. On the same test APK,94 controlled phone cases pass: the previous80, note10 and I/O4. These controlled cases are not general natural-language/model success.
+
+Registry104 includes scoped paged `read_note` and consent-gated literal `patch_note`. Actual query delivery, current revision/full-body hash, exact target, approval, transactional CAS and independently reread durable receipt remain mandatory. The existing private-data expectation is corrected to true while patch remains a mutation requiring approval. Normal EOG acknowledges only pages actually delivered to the model; failed later reads invalidate older proof. See CONTRACTS.md for the bounds.
+
+The actual normal-send note canary FAILS81.849s: it pauses before any approval, records0 approvals and0 verified tools, applies no patch, preserves the other synthetic note and verifies fixture cleanup. Its original terminal error was not captured; no cause is assigned from the later cleanup code. Independent authenticated PC health afterward confirms no resident model or pending/busy computation. A diagnostic-only test candidate is staged but not built or installed. No human approval/Compose end-to-end success is claimed.
+
+I/O repeat medians are58.580→27.240ms for the same24-segment encrypted-DB query pass and7.093→3.566ms for a separate ten-repetition hash-computation batch; equivalence and cleanup pass. These are not whole-file save or whole-app latency. Direct semantic comparison records all24/24 attempts with cleanup: current2/6, goal-first3/6, plain2/6, Korean-answer2/6; legitimate connection targets and quoted requests still fail. No variant is promoted on these results. A native no-warmup experiment passes12 short/structured answer controls but load36.327/48.321s is inconclusive; the actual worker is restored to the committed A30 source. No startup-speed improvement is claimed. Public documentation written after the build is a later evidence update, not an original build input.
+
+## Historical1072 performance checkpoint; request planning remains unresolved
 
 Main `cb78279de6db2f00eb6d9bd54157a56f0ba27a1ed24bbe86d2d991a99a1c43a0` and test `674d2f35c9cf87c6c559a6b5843ab781359e078b413629da32c37900ca0462c0` are installed without resetting data and independently matched. Core828/app788=1616 JVM tests pass with0 failures/errors/skips; worker Python12 passes. Final release/test build8m12 and lint0 errors/144 warnings/1 hint pass. All678 source+10 public+6 build inputs match before signing. Original pinned direct Tailscale identity passes387ms without LAN fallback. Controlled phone80 and isolated I/O4 pass on this APK.
 

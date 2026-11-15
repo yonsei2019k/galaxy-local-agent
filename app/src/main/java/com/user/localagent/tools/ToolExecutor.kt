@@ -45,6 +45,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val ownerRequest:String?=null,
     private val contactLookup:((String,Int)->List<ContactCandidate>)?=null,
     private val connectionHubOverride:com.user.localagent.connections.ConnectionHub?=null,
+    private val noteReadPatch:com.user.localagent.notes.NoteReadPatchHost?=null,
     private val createImage:(suspend(ToolCall)->String)?=null) {
     fun resolveOwnerText(call:ToolCall):ToolCall=OwnerTextSources.resolve(call,ownerRequest)
     private val recipients=RecipientEvidence(ownerRequest.orEmpty())
@@ -74,6 +75,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     /** The approval names a real scoped record, and its revision must still match at the mutation. */
     suspend fun reviewForAction(call:ToolCall):String? {
         ToolRegistry.validate(call)
+        if(call.name=="patch_note")return checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.review(call)
         if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)return requestConnections.reviewForAction(call)
         val target=when(call.name){
             "update_note","delete_note"->{val note=repository.getNote(call.s("id"))?:error("대상 메모가 없어 변경·삭제하지 않았습니다.");Triple(note.toString(),note.updatedAt,"메모: ${note.title}\n범위: ${note.collection}\n현재 본문:\n${note.body.take(1200)}")}
@@ -108,6 +110,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     suspend fun validateGoalEditRead(call:ToolCall){
         if(call.name==GoalToolCatalog.UPDATE)checkNotNull(goalEditPreflight){"현재 요청의 목표 읽기 근거가 연결되지 않았습니다."}.invoke(call)
     }
+    fun acceptNoteReadContext(evidence:List<JsonObject>,query:String):com.user.localagent.notes.NoteReadDeliveryBatch?=noteReadPatch?.accept(evidence,query)
+    fun acknowledgeNoteReadContext(batch:com.user.localagent.notes.NoteReadDeliveryBatch){checkNotNull(noteReadPatch).acknowledge(batch)}
+    fun deliveredNoteReadKeys():Set<String> = noteReadPatch?.deliveredKeys().orEmpty()
+    fun releaseNoteReadContext(){noteReadPatch?.clear()}
+    fun confirmNoteOwner(call:ToolCall){noteReadPatch?.ownerConfirmed(call)}
+    suspend fun recoverNotePatch(call:ToolCall):ToolResult?=noteReadPatch?.recover(call)
     private fun ToolCall.s(key:String,default:String="")=arguments[key]?.jsonPrimitive?.content?:default
     private fun ToolCall.i(key:String,default:Int)=arguments[key]?.jsonPrimitive?.int?:default
     fun prepareIntent(call:ToolCall):Intent? {
@@ -133,6 +141,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private suspend fun executeUnlocked(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
+            if(call.name in NoteReadPatchToolCatalog.names){
+                check(call.name in capturedAvailableTools){"NOTE_TOOL_NOT_CAPTURED"}
+                return@withContext checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.execute(call)
+            }
             if(call.name in KakaoScreenToolCatalog.names){
                 check(connectionRunId!=null&&connectionIsRunLive()){"카카오톡 조회의 원래 실행이 끝났습니다."}
                 return@withContext com.user.localagent.integrations.KakaoScreenReader(context).readForRequest(call,kakaoReadBinding,checkNotNull(connectionThreadId)){

@@ -55,7 +55,7 @@ object IntentPlanning {
         "analyze_sms","analyze_conversation_import","list_analysis_sources","read_analysis_evidence","get_sms_summary","get_call_log_summary","search_contacts","list_messenger_notifications","list_imported_conversations","search_conversation_imports","search_conversation_history","prepare_sms","prepare_email","reply_messenger_notification","search_gmail_messages","read_gmail_message","create_gmail_draft","send_gmail_message","reply_gmail_message"->"messages"
         "list_calendar_events","prepare_calendar_event","create_reminder","update_reminder","delete_reminder","create_alarm"->"calendar"
         "create_document"->"documents";"list_project_files","read_project_file","write_project_file"->"projects";"generate_image"->"images"
-        "save_note","search_notes","update_note","delete_note"->"notes";"save_memory","search_memories","delete_memory"->"memory"
+        "save_note","search_notes","read_note","patch_note","update_note","delete_note"->"notes";"save_memory","search_memories","delete_memory"->"memory"
         "list_audio_recordings","search_audio_transcripts","transcribe_recording","analyze_audio_transcript"->"audio";"search_web","search_shopping","read_webpage","open_url"->"web";else->"general"
     }
 

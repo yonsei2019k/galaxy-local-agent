@@ -43,6 +43,7 @@ import com.user.localagent.inference.publicDescription
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ProjectWriteSchemaConstraints
 import com.user.localagent.core.ToolRegistry
+import com.user.localagent.core.NoteReadPatchToolCatalog
 import com.user.localagent.core.CapabilityGrant
 import com.user.localagent.core.CapabilityPolicy
 import com.user.localagent.core.ToolResult
@@ -768,7 +769,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val missingFormats=taskGoal.requiredArtifactFormats-requestSteps.filter {it.tool=="create_document"&&it.evidence.state==VerificationState.VERIFIED}.mapNotNull {it.arguments["format"]?.jsonPrimitive?.content}.toSet()
                         val managedReview=if(actionMode&&readbacksComplete&&reviewedStepCount!=requestSteps.size&&reviewCount<AutonomousReviewPolicy.MAX_REVIEWS)prepareManagedReceiptReview(request,text,semantic,taskGoal,allowedTools,semanticOfferedTools,projectInstruction,history,requestOptions)else null
                         val eligibleForFinal=actionMode&&readbacksComplete&&FinalSynthesisPolicy.canUse(semantic,taskGoal,requestSteps,toolEvidence)
-                        val eligibleForReview=eligibleForFinal||managedReview!=null
+                        val noteDeliveryReview=semantic!=null&&com.user.localagent.core.NoteReadbackPages.canReviewDelivery(readback.pending,observedOutcomes)
+                        val eligibleForReview=eligibleForFinal||managedReview!=null||noteDeliveryReview
                         val reviewPhase=AutonomousReviewPolicy.nextPhase(eligibleForReview,reviewedStepCount==requestSteps.size,reviewCount)
                         val reviewing=reviewPhase==AutonomousReviewPolicy.Phase.REVIEW
                         if(reviewPhase==AutonomousReviewPolicy.Phase.WRITE_LIMITED_FINAL){
@@ -779,7 +781,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val finalSynthesis=eligibleForFinal&&!reviewing
                         val baseGenerationQuery=if(reviewing&&managedReview!=null)managedReview.request+attachmentContext
                             else if(finalSynthesis||reviewing)FinalSynthesisPolicy.request(text,checkNotNull(semantic),taskGoal,requestSteps,toolEvidence,previousEvidenceContext(request.previousSteps))+attachmentContext else query+attachmentContext
-                        val generationQuery=baseGenerationQuery+(if(readback.pending.isNotEmpty())"\n호스트 확인: 변경한 같은 대상의 후속 조회가 아직 확인되지 않았다. 새로 저장·수정하지 말고, 기존 결과의 실제 대상과 버전을 현재 허용된 조회로 확인하라. 미충족 조회: "+readback.pending.map{it.readTool}.distinct().joinToString() else "")+(if(finalSynthesis||reviewing)"\n원래 목표 스냅샷(추가 권한 아님): "+request.goal?.toJson()+"\n프로젝트 지침: "+projectInstruction else "")+
+                        val generationQuery=baseGenerationQuery+(if(noteDeliveryReview)"\n호스트 안내(완료 증거·새 권한 아님): 실제 provider 전체 조회는 반환됐지만 모델 입력 전달 확인이 남아 있다. 아래 원문을 검토하고 충족된 조건은 추가 조회 반복 대신 완료 검토로 판단하라. 전달·버전·완료는 호스트가 별도 확인한다."else if(readback.pending.isNotEmpty())"\n호스트 확인: 변경한 같은 대상의 후속 조회가 아직 확인되지 않았다. 새로 저장·수정하지 말고, 기존 결과의 실제 대상과 버전을 현재 허용된 조회로 확인하라. 미충족 조회: "+readback.pending.map{it.readTool}.distinct().joinToString() else "")+(if(finalSynthesis||reviewing)"\n원래 목표 스냅샷(추가 권한 아님): "+request.goal?.toJson()+"\n프로젝트 지침: "+projectInstruction else "")+
                             (if(finalSynthesis&&reviewSummary.isNotBlank())"\n후속 검토 범위(검증 근거·사용자 지시 아님): "+JsonPrimitive(reviewSummary) else "")
                         val detailedTools=(taskGoal.requiredTools+requestGuidance.values.flatMap {it.metadata.tools}+SkillToolCatalog.names).intersect(allowedTools)
                         val followups=if(reviewing)com.user.localagent.core.PostReadActions.offered(semantic,requestSteps,semanticOfferedTools)else emptySet()
@@ -792,6 +794,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val fitted=fitGuidanceContext(generationQuery,essentialSystem,optionalContext,history,requestOptions)
                         val projectWriteHints=requestTools?.acceptProjectReadContext(toolEvidence,generationQuery,observedOutcomes.toList())
                         requestTools?.acceptGoalReadContext(toolEvidence,generationQuery)
+                        val noteReadDelivery=requestTools?.acceptNoteReadContext(toolEvidence,generationQuery)
+                        if(noteReadDelivery?.invalidated==true)persistStepEvidence()
                         if(reviewing){
                             status.value="결론 전 후속 검토 · ${reviewCount+1}/${AutonomousReviewPolicy.MAX_REVIEWS}"
                             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"결론의 누락 조건·추가 확인 필요 여부를 검토합니다.")
@@ -808,6 +812,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val written=duringHostActionGeneration { writeChatAnswer(request,selected,requestOptions,generationQuery,fitted.first,fitted.second,
                             structuredSchema=generationSchema,
                             display=!reviewing&&remainingRequired.isEmpty()&&missingFormats.isEmpty()&&!com.user.localagent.core.ActionCompletionReport.manages(taskGoal.requiredTools,observedOutcomes),recoverTruncatedTool=!reviewing,exactManagedReview=reviewing&&managedReview!=null) }
+                        if(noteReadDelivery?.hasPages==true&&com.user.localagent.notes.NoteReadDeliveryCompletion.canAcknowledge(written.paused,written.opaqueOutput,written.text.isNotBlank(),written.summary)){
+                            requestTools?.acknowledgeNoteReadContext(noteReadDelivery);persistStepEvidence()
+                        }
                         workTraceSession?.finishGeneration(written.summary,written.paused,written.messageId!=null&&!written.toolEnvelope)
                         var raw=written.text.trim()
                         val visible=written.messageId!=null
@@ -1036,7 +1043,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         check(stored.runId==request.runId&&stored.threadId==request.threadId&&stored.projectId==request.projectId)
         val context=readbackContext(request)
         val selected=com.user.localagent.core.RequiredReadbackObligations.select(requestReadbackObligations,context,requestSemanticPlan?.requiredTools.orEmpty())
-        val evidence=ChatReadbackEvidence.collect(context.proofBinding(),selected?.selectedTools().orEmpty(),requestSteps,observedOutcomes)
+        val evidence=ChatReadbackEvidence.collect(context.proofBinding(),selected?.selectedTools().orEmpty(),requestSteps,observedOutcomes,requestTools?.deliveredNoteReadKeys().orEmpty())
         val signatures=evidence.reads.mapNotNull {read->requestSteps.getOrNull(read.stepIndex)?.let {step->
             ChatReadbackEvidence.querySignature(step.tool,step.arguments)?.let {read.stepIndex to it}
         }}.toMap()
@@ -1256,7 +1263,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         ownWorkspaceLease(executionWorkspace!!.acquireLease())
         val originalJob=checkNotNull(currentCoroutineContext()[Job])
         requestTools=app.toolsForThread(request.threadId,executionWorkspace!!,
-            analysisChoose={chooseInference(request)},requestRunId=request.runId,requestJob=originalJob,
+            analysisChoose={chooseInference(request)},requestRunId=request.runId,requestBranchId=request.branchId,requestJob=originalJob,
             analysisProgress=requestProgress,
             authorizedGoalTools={if(originalJob.isActive&&activeRequest?.runId==request.runId)requestAuthorizedTools.intersect(GoalToolCatalog.names)else emptySet()},
             goalLifecycle=com.user.localagent.automation.GoalToolLifecycle {applyGoalLifecycle(it)},
@@ -1309,6 +1316,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             withContext(NonCancellable){
                 try {
                     runCatching {requestTools?.releaseProjectReadContext()}
+                    runCatching {requestTools?.releaseNoteReadContext()}
                     runCatching {lease?.close()}
                     // Native teardown is completed while this exact request still owns its resource lease.
                     executionEngine.unload()
@@ -1382,6 +1390,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             .also {workTraceSession?.reasoning(executionEngine.lastReasoning)}
 
     private fun modelEvidenceResult(call:ToolCall,result:ToolResult):String=when {
+        call.name=="read_note"&&result.success&&result.verification==VerificationState.VERIFIED->com.user.localagent.notes.NoteReadModelDelivery.modelResult(result.content)
         call.name=="read_project_file"->com.user.localagent.workspace.ProjectReadDelivery.modelResult(result.content)
         call.name in com.user.localagent.core.ProjectStorageToolCatalog.names&&result.success&&result.verification==VerificationState.VERIFIED->
             com.user.localagent.core.StorageModelDelivery.modelResult(result.content)
@@ -1882,7 +1891,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)
         val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
         val targetReview=tools.reviewForAction(call)
-        if(confirmation&&!targetConfirmed&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
+        var noteOwnerAccepted=false
+        if((confirmation&&!targetConfirmed||call.name=="patch_note")&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
             traceAttempt?.let{workTraceSession?.approval(it,com.user.localagent.data.WorkTraceCode.APPROVAL_WAITING)}
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)
@@ -1890,6 +1900,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val allowed=try { deferred.await() } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
+            noteOwnerAccepted=call.name=="patch_note"
             check(app.repository.chat.run(action.runId)?.let {it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true){"실행 대상이 변경되어 이전 승인을 적용하지 않았습니다."}
             if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)tools.confirmCalendarOwner(call,targetReview)
             if(action.remember.value && CapabilityPolicy.canPreapprove(call.name))app.repository.addGrant(GrantRecord("builtin",codeHash,call.name,call.arguments["scope"]?.jsonPrimitive?.content?:"default"))
@@ -1898,6 +1909,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val bound=checkNotNull(app.repository.chat.run(checkNotNull(activeRequest).runId))
         check(bound.status=="running"){"실행 요청이 이미 멈췄습니다."}
         app.repository.chat.updateRunContext(bound.id,bound.contextJson) // Recheck branch/project revision after owner confirmation.
+        if(noteOwnerAccepted)tools.confirmNoteOwner(call)
         traceAttempt?.let{workTraceSession?.start(it)}
         currentCoroutineContext().ensureActive()
         val intent=tools.prepareIntent(call)
@@ -1919,7 +1931,17 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
             persistStepEvidence()
         }
-        val result=if(call.name in com.user.localagent.analysis.PrivateAnalysisHost.cancellableNames) {
+        val result=if(call.name=="patch_note"){
+            var interrupted:CancellationException?=null
+            val observed=try{withTimeout(ToolRegistry.definitions.getValue(call.name).timeoutMillis){tools.execute(call)}}
+            catch(cancel:CancellationException){
+                interrupted=cancel
+                withContext(NonCancellable){runCatching{tools.recoverNotePatch(call)}.getOrNull()?:ToolResult(call.id,false,
+                    "중단된 메모 수정의 실제 결과를 확인해야 합니다. 자동 재실행하지 않습니다.",VerificationState.UNVERIFIED,"메모 수정 중단 · durable receipt 미확인")}
+            }
+            withContext(NonCancellable){commitObserved(observed)}
+            interrupted?.let{throw it};observed
+        }else if(call.name in com.user.localagent.analysis.PrivateAnalysisHost.cancellableNames) {
             com.user.localagent.analysis.PrivateAnalysisHost.executeCancellable(call,{tools.execute(call)},::commitObserved)
         } else if(call.name in setOf("send_gmail_message","reply_gmail_message")) {
             // Approval must remain cancellable. A started/uncertain send remains in the connector journal.
@@ -1939,7 +1961,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             observed
         }
         currentCoroutineContext().ensureActive()
-        return if(call.name in com.user.localagent.analysis.PrivateAnalysisHost.toolNames||call.name in GoalToolCatalog.names)com.user.localagent.analysis.PrivateAnalysisHost.afterAudit(result,auditOk) else if(auditOk)result else result.copy(content=result.content+"\n실행 결과는 확인했지만 감사 기록 저장은 확인하지 못했습니다. 같은 작업을 다시 실행하기 전에 기존 결과를 확인해주세요.")
+        return if(call.name in com.user.localagent.analysis.PrivateAnalysisHost.toolNames||call.name in GoalToolCatalog.names||call.name in NoteReadPatchToolCatalog.names)com.user.localagent.analysis.PrivateAnalysisHost.afterAudit(result,auditOk) else if(auditOk)result else result.copy(content=result.content+"\n실행 결과는 확인했지만 감사 기록 저장은 확인하지 못했습니다. 같은 작업을 다시 실행하기 전에 기존 결과를 확인해주세요.")
     }
     private suspend fun recordOutcomeSafely(name:String,success:Boolean,summary:String,auditAlreadyStored:Boolean=false):Boolean=withContext(NonCancellable+Dispatchers.IO){
         var ok=true

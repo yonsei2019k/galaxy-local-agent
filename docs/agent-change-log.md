@@ -1,3 +1,21 @@
+## 2026-11-15 — 1073 설치·1699JVM·94폰 PASS / 실제 메모 요청 FAIL 보존
+
+최초 full build1m44는 기존 registry count102→104와 Coordinator catalog import 누락으로 실패했다. 기대값은 실제 등록104로 고치고 import를 추가했으며 기존 JsonPrimitive와 patch_note private-data assertTrue도 유지했다. phase2 full build6m42 PASS, core873/app826=1699 JVM0fail/error/skip, lint0errors/144warnings/1hint다.694source+10public+6build를 서명 전에 대조했다. 원래 서명/ID/데이터를 유지해 main532316cdf7a951edb3cf195930db54dde9f900961d7f7a1ed19daf3eca805e24/testd7726b801618617316b73231170efc8bb69a359dc62d955463c5191b75a439d3를 설치하고 실제 base SHA와 원래 pin/direct Tailscale92ms를 독립 확인했다. 동일 test APK의 메모 native10(7.119s), 기존80, I/O4가 모두 PASS다. 겹치는 cold2는 합산하지 않는다.
+
+정상 send/실제 PC 모델의 메모 canary1073r1은81849ms FAIL/paused다. 실제 typed load5/receipt5, 생성2가 모두PC이며 승인0/verified tool0/실제 수정false/다른 합성메모불변/fixture cleanuptrue다. 최초 QA_RUN_COMPLETED 실패와 나중 QA_PREFS_CLEANUP 관측을 분리하며 후자를 원인으로 쓰지 않는다. 원래 terminal errorCode는 관측되지 않아 원인을 단정하지 않는다. 원 report의 postRunIdleVerified=false는 후속 assertion에 도달하지 못한 미관측이며 별도 실제 authenticated health에서 empty/idle을 확인했다. 진단 test-only 후보는 staged이며 아직 적용/빌드/설치하지 않았다. 모델이 선택한 성공적 patch나 실제 사람/Compose 승인 증거로 승격하지 않는다.
+
+동일 암호화DB24구간 조회 반복 중앙값58.580157→27.239883ms, 별도10회 SHA 연산묶음7.093125→3.566289ms이며 동등성/정리를 확인했다. 전체 저장/모델 시간 개선율로 쓰지 않는다. 실제 direct 의미 비교24계획/24시작/24기록/0미시작/cleanuptrue에서 current2/6, goal_first3/6, plain2/6, korean_answer2/6이다. 모든 조건의 정상 연결요청 target 누락과 인용문 오해가 남아 후보를 채택하지 않았다.
+
+별도 no-warmup 실제 worker 후보는 원래와 같은 정답/terminal/실제 모델SHA·8K/정리 기준12회 PASS지만 cold36.327초/warmhash48.321초로 개선이 불명확하다. 원본 backup과 유휴·PID·해시를 대조해 실제 worker를 기존 A30 engines4615d51f/owned64623369로 복구했고 인증된 empty/idle을 확인했다. canonical에는 이 후보를 적용하지 않았다. source/JVM/APK/설치/실제모델 결과는 이 경계대로 분리한다. 문서의 이 증거 갱신은 빌드 후 변경이다.
+
+## 2026-11-15 — 1073 메모 읽기·부분 수정 소스 실제 통합 / 당시 검증 전
+
+1072 성능/기기/실제 모델 결과를0267140에 보존한 뒤 root가 frozen note-v2 e58cdee4/manifesteb49c42a의28payload와 현재 baseline, F1 21441956/manifest6372abed 및 actual-note c8e4428a/manifestd0e0817e를 재대조해 통합했다. 기존 phase observer/typed target/실제 model pin/완료 disposition은 Coordinator3way의 정확 hunk로 보존했다. RequiredReadbackObligations의 누락 JsonPrimitive import와 NoteToolRegistryIntegrationTest의 isPrivateRead(patch_note) assertFalse→assertTrue 한 줄도 실제 반영했다. 이 시점은 소스 통합이며 아직 컴파일/회귀/설치/기기/실제 note 모델 결과는 없다.
+
+read_note는 실제 동일 id/collection/revision의 UTF-16 page2..900을 반환하고 모델의 실제 query에 온전하게 전달된 page만 literal patch 근거가 된다. patch_note는 같은 요청·branch/scope·버전/full-body hash·단일 oldText와 실제 owner diff 승인을 확인한 뒤 하나의 Room transaction에서 CAS·전체 저장 재조회·durable receipt를 묶는다. 취소 뒤에는 실제 receipt만 재조회하고 같은 수정을 자동 재실행하지 않는다. 새 readback ack는 정상 EOG의 실제 query 수신/반환 뒤에만 기록하며 실패한 최신 read는 오래된 whole proof를 무효화한다. 원래18-step/broad whole 기준을 유지하며 누락·부분 조회를 완료로 승격하지 않는다.
+
+F1은 모델이 명시한 patch_note에 한해 원래 offered search_notes/read_note를 prerequisite closure로 제공한다. 자동 실행/키워드 의도분류/TaskGoal 추가/읽기 전용 또는 옛 captured whitelist 권한 복원은 없다. patch는 mutation(read-only false)/승인필수이며 동시에 intrinsic private-data metadata true다. 일반 NLP 해석 실패와 cold-start 성능 실험은 별도 ignored 비교 작업으로 유지한다. Canonical/빌드/설치/실제 폰·PC 창은root 소유이며 다른 채팅은 frozen 후보·읽기만 유지한다.
+
 ## 2026-11-15 — 1072 설치·1616JVM·84폰 PASS / 직접 추론·I/O 개선 실측
 
 최종 phase4 full build8m12 PASS, core828/app788=1616 JVM0fail/error/skip, canonical worker Python12 PASS 및 lint0errors/144warnings/1hint다. 앞선 두 길이 예산 FAIL(44s/38s)은3000제한을 유지하고 새 일반 ANSWER 지침을 압축해 고쳤다. 세 번째 app compile1m14 FAIL의 nullable evidence는 evidence!=null을 명시해 전체 전달/hash/binding 요건을 보존했다. 최초 실패 로그를 보존하고 최종678source+10public+6build를 대조했다. 원래 서명/ID/데이터를 유지해 main cb78279de6db2f00eb6d9bd54157a56f0ba27a1ed24bbe86d2d991a99a1c43a0/test674d2f35c9cf87c6c559a6b5843ab781359e078b413629da32c37900ca0462c0 설치·독립 base SHA·원래 pin/direct overlay387ms를 확인했다. 같은 APK 통제80과 I/O4가 모두 PASS다.

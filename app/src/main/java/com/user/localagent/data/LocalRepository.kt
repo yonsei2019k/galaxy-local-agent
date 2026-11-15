@@ -346,6 +346,41 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         dao.memoriesForMessage(id).forEach {graph.eraseSource(it.id)};graph.eraseSource(id);dao.deleteMessageMemories(id)
         chatDao.deleteChunks(id);chatDao.deleteSegments(id);chatDao.deleteRefs(id);chatDao.deleteSourceScope("message",id);dao.deleteMessage(id);dao.invalidateSummaries()
     }
+    /** Host-only adapter: same scoped Room transaction owns CAS, actual readback and durable receipt. */
+    internal fun notePatchTransactions(binding:com.user.localagent.core.NoteReadBinding):com.user.localagent.notes.NotePatchTransactions=
+        object:com.user.localagent.notes.NotePatchTransactions {
+            override suspend fun <T> transaction(requireRunning:Boolean,block:suspend com.user.localagent.notes.NotePatchTransaction.()->T):T=database.withTransaction {
+                check(access!=null&&access.threadId==binding.threadId&&scopeKey==binding.scopeKey)
+                verifyScopeLive();check(chat.accessScope(binding.threadId)==access){"NOTE_ACCESS_CHANGED"}
+                val run=checkNotNull(chat.run(binding.runId))
+                check(run.threadId==binding.threadId&&run.branchId==binding.branchId&&run.projectId==access.projectId){"NOTE_RUN_BINDING_CHANGED"}
+                if(requireRunning)check(run.status=="running"){"NOTE_RUN_STOPPED"}
+                fun source(n:NoteRecord)=com.user.localagent.core.NoteSource(n.id,scopeKey,n.collection,n.title,n.body,n.updatedAt)
+                block(object:com.user.localagent.notes.NotePatchTransaction {
+                    override suspend fun note(id:String):com.user.localagent.core.NoteSource? {
+                        val n=dao.noteById(id)?:return null
+                        checkResource("note",id);check(n.collection !in com.user.localagent.core.InternalNoteCollections.protected)
+                        return source(n)
+                    }
+                    override suspend fun putPreservingMetadata(before:com.user.localagent.core.NoteSource,body:String):com.user.localagent.core.NoteSource {
+                        val n=checkNotNull(dao.noteById(before.id));check(source(n)==before){"NOTE_CAS_CONFLICT"}
+                        checkResource("note",n.id);check(n.collection !in com.user.localagent.core.InternalNoteCollections.protected)
+                        val updated=n.copy(body=body,updatedAt=nextResourceRevision(n.updatedAt));dao.note(updated);return source(updated)
+                    }
+                    override suspend fun receipt(operationId:String):String? {
+                        val stored=dao.toolRunById(operationId)?:return null
+                        check(stored.name==com.user.localagent.notes.NOTE_PATCH_RECEIPT&&stored.success&&stored.runId==binding.runId&&stored.threadId==binding.threadId){"NOTE_RECEIPT_BINDING_CHANGED"}
+                        return stored.summary
+                    }
+                    override suspend fun putReceipt(operationId:String,json:String) {
+                        check(operationId.matches(Regex("note-patch-[a-f0-9]{64}"))&&dao.toolRunById(operationId)==null)
+                        com.user.localagent.notes.NotePatchReceipt.parse(json)
+                        dao.toolRun(ToolRunRecord(id=operationId,name=com.user.localagent.notes.NOTE_PATCH_RECEIPT,success=true,summary=json,runId=binding.runId,threadId=binding.threadId))
+                    }
+                })
+            }
+        }
+
     suspend fun saveNote(title:String,body:String,collection:String="default",id:String?=null,expectedUpdatedAt:Long?=null):NoteRecord=database.withTransaction {
         verifyScopeLive();require(body.isNotBlank()&&body.length<=12000)
         val previous=id?.let {dao.noteById(it)}
@@ -525,7 +560,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         require(id.isNotBlank()&&id.length<=128&&id.none{it.code<32}){"검증 근거 식별자가 올바르지 않습니다."}
         verifyScopeLive()
         val record=dao.toolRunById(id)?:return null
-        check(record.name !in setOf("work_trace_v1","work_receipt_v1")){"진행 기록은 작업 완료의 검증 근거가 아닙니다."}
+        check(record.name !in setOf("work_trace_v1","work_receipt_v1",com.user.localagent.notes.NOTE_PATCH_RECEIPT)){"진행 기록은 작업 완료의 검증 근거가 아닙니다."}
         check(access==null||record.threadId==access.threadId){"다른 대화방의 실행 근거입니다."}
         return record
     }

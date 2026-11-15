@@ -40,7 +40,7 @@ object ToolRegistry {
         "save_memory" to "Remember a stable fact or preference about the owner for later conversations, only when the owner states it or asks to remember.",
         "search_memories" to "Search remembered owner facts and preferences.",
         "delete_memory" to "Delete one remembered fact by id after the owner explicitly asks.",
-        "update_note" to "Replace the text of one saved note by id.",
+        "update_note" to "Replace the entire saved note body by actual id; content is the complete intended body, not a search excerpt. For one literal edit in a longer note, use read_note then patch_note to preserve unread text.",
         "update_reminder" to "Change the title or time of one saved reminder by id.",
         "delete_note" to "Delete one saved note by id after the owner explicitly asks.",
         "delete_reminder" to "Delete one saved reminder by id after the owner explicitly asks.",
@@ -51,6 +51,7 @@ object ToolRegistry {
     private fun read(name:String,description:String,vararg args:Pair<String,Argument>)=ToolDefinition(name,Risk.LOW,mapOf(*args),description)
     private val analysisReads=setOf("list_imported_conversations","search_conversation_imports","get_sms_summary","get_call_log_summary","list_audio_recordings","search_audio_transcripts","search_conversation_history")
     private fun limitMax(name:String)=when(name){
+        "read_note"->NoteReadPatchSession.MAX_PAGE
         "list_reminders"->50
         "read_analysis_evidence"->10
         "search_publications"->5
@@ -104,7 +105,7 @@ object ToolRegistry {
         def("delete_reminder",Risk.HIGH,"id" to text(max=100)),
         def("list_messenger_notifications",Risk.LOW,"packageName" to text(max=80),"limit" to Argument("integer",false)),
         def("reply_messenger_notification",Risk.HIGH,"id" to text(max=100),"message" to text(max=2000))
-    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ProjectStorageToolCatalog.definitions).let { entries ->
+    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ProjectStorageToolCatalog.definitions+NoteReadPatchToolCatalog.definitions).let { entries ->
         require(entries.map {it.name}.distinct().size==entries.size){"도구 이름이 중복됩니다."}
         entries.associateBy {it.name}
     }
@@ -130,7 +131,7 @@ object ToolRegistry {
             val value=call.arguments[key]
             require(!spec.required || value!=null){"필수 인자가 없습니다: $key"}
             if(value!=null) when(spec.type) {
-                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
+                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (call.name=="patch_note" && (key=="newText" || (key=="oldText"&&value.content.isNotEmpty()))) || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
                 "integer" -> require(value is JsonPrimitive && !value.isString && (value.intOrNull!=null || (key=="seed"&&call.name=="generate_image"&&value.longOrNull!=null))){"$key 정수 필요"}
                 "boolean" -> require(value is JsonPrimitive&&!value.isString&&value.booleanOrNull!=null){"$key 참/거짓 값 필요"}
                 "array" -> when {
@@ -174,6 +175,7 @@ object ToolRegistry {
         if(call.name=="prepare_email") require(call.arguments.getValue("to").jsonPrimitive.content.matches(Regex("[^\\s@,;]+@[^\\s@,;]+\\.[^\\s@,;]+"))){"받는 주소 형식 오류"}
         if(call.name in OfficeToolCatalog.names)OfficeToolCatalog.validate(call)
         if(call.name in GoalToolCatalog.names)GoalToolCatalog.validate(call)
+        if(call.name in NoteReadPatchToolCatalog.names)NoteReadPatchToolCatalog.validate(call)
         if(call.name in ProjectStorageToolCatalog.names)ProjectStorageToolCatalog.validate(call)
         if(call.name in EvidenceToolCatalog.names)EvidenceToolCatalog.validate(call)
         if(call.name in PrivateAnalysisToolCatalog.names)PrivateAnalysisToolCatalog.validate(call)
@@ -193,7 +195,7 @@ object ToolRegistry {
                 if(d.description.isNotBlank())put("description",d.description)
                 put("parameters",buildJsonObject {
                     put("type","object");put("additionalProperties",false)
-                    put("properties",buildJsonObject {d.arguments.forEach {(key,spec)->put(key,GoalToolCatalog.argumentSchema(name,key)?:PrivateAnalysisToolCatalog.argumentSchema(name,key)?:OfficeToolCatalog.argumentSchema(name,key)?:buildJsonObject {
+                    put("properties",buildJsonObject {d.arguments.forEach {(key,spec)->put(key,NoteReadPatchToolCatalog.argumentSchema(name,key)?:GoalToolCatalog.argumentSchema(name,key)?:PrivateAnalysisToolCatalog.argumentSchema(name,key)?:OfficeToolCatalog.argumentSchema(name,key)?:buildJsonObject {
                         put("type",spec.type)
                         if(spec.description.isNotBlank())put("description",spec.description)
                         if(spec.type=="string")put("maxLength",spec.maxLength)

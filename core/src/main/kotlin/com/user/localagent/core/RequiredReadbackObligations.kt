@@ -1,6 +1,7 @@
 package com.user.localagent.core
 
 import java.security.MessageDigest
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Encrypted host checkpoint metadata. Criteria only: this object never grants or executes tools. */
 object RequiredReadbackObligations {
@@ -8,6 +9,7 @@ object RequiredReadbackObligations {
     enum class Pair(val mutation:String,val read:String,val kind:String) {
         NOTE_SAVE("save_note","search_notes","note"),
         NOTE_UPDATE("update_note","search_notes","note"),
+        NOTE_PATCH("patch_note","read_note","note_body_v1"),
         REMINDER_CREATE("create_reminder","list_reminders","reminder"),
         REMINDER_UPDATE("update_reminder","list_reminders","reminder"),
         PROJECT_WRITE("write_project_file","read_project_file","project_file")
@@ -88,10 +90,14 @@ object RequiredReadbackObligations {
         }.sortedBy { it.stepIndex }
         val updated=applied.map { mutation->
             val pair=state.selected.single { it.mutation==mutation.source.tool }
-            var latest=mutation.latestRead
+            val lastFailedNoteRead=if(pair==Pair.NOTE_PATCH)steps.withIndex().lastOrNull{(index,s)->
+                index>mutation.source.index&&s.tool==pair.read&&(s.evidence.state!=VerificationState.VERIFIED||s.evidence.effectNotApplied)&&
+                    (s.arguments["id"] as? JsonPrimitive)?.takeIf{it.isString}?.content==mutation.after.resource.stableId
+            }?.index else null
+            var latest=mutation.latestRead?.takeUnless{lastFailedNoteRead!=null&&it.source.index<=lastFailedNoteRead}
             val coverage=mutation.coverage.toMutableList()
             val sameTargetCoverage=applied.filter {it.after.resource==mutation.after.resource}.flatMap {it.coverage}
-            for(r in validReads.filter { it.tool==pair.read&&it.stepIndex>mutation.source.index }) {
+            for(r in validReads.filter { it.tool==pair.read&&it.stepIndex>mutation.source.index&&(lastFailedNoteRead==null||it.stepIndex>lastFailedNoteRead) }) {
                 if(latest!=null&&r.stepIndex<latest.source.index)continue
                 val targets=r.returned.filter { it.resource==mutation.after.resource }
                 if(targets.size>1)invalid=true

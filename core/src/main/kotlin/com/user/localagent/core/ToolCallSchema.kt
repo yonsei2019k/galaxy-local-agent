@@ -31,7 +31,10 @@ object ToolCallSchema {
         val properties=original.getValue("properties").jsonObject.mapValues {(key,value)->
             val changes=value.jsonObject.toMutableMap()
             val spec=definition.arguments.getValue(key)
-            if(spec.type=="string"&&spec.required)changes["minLength"]=JsonPrimitive(maxOf(changes["minLength"]?.jsonPrimitive?.intOrNull?:0,1))
+            if(spec.type=="string"&&spec.required){
+                val explicitEmpty=name=="patch_note"&&key=="newText"&&value.jsonObject["minLength"]?.jsonPrimitive?.intOrNull==0
+                changes["minLength"]=JsonPrimitive(if(explicitEmpty)0 else maxOf(changes["minLength"]?.jsonPrimitive?.intOrNull?:0,1))
+            }
             val enumeration=when {
                 name=="create_document"&&key=="format"->listOf("docx","xlsx","pdf","txt","csv")
                 name=="search_shopping"&&key=="store"->listOf("coupang","naver","danawa","11st","gmarket","amazon")
