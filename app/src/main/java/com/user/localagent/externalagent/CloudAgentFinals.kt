@@ -13,4 +13,9 @@ object CloudAgentFinals {
         resultState=="reported_done"&&!hasPlan&&phoneCalls==0&&recordedSteps==0
 
     fun toolFreeAnswer(answer:String):String=TOOL_FREE_PREFIX+"\n\n"+answer.trim()
+
+    /** True when an executed tool changed or handed off something; then the host report is authoritative. */
+    fun needsHostReport(executedTools:Collection<String>):Boolean=executedTools.any{name->
+        name in com.user.localagent.core.ActionCompletionReport.managedTools&&!com.user.localagent.core.ToolReadPolicy.isReadOnly(name)
+    }
 }

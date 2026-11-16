@@ -69,6 +69,19 @@ class AutomaticComputeConcurrencyTest {
             assertEquals(0,local.loads);assertEquals(0,remote.loads)
         }
     }
+    @Test fun pcOnlyReportsBusyInsteadOfWaitingBehindLongPcWork()=runBlocking {
+        val fixture=Fixture();val local=fixture.local("phone");val remote=Fake("pc")
+        // Another owner (e.g. an hour-long image generation) holds the PC lease.
+        val image=checkNotNull(fixture.broker.tryAcquire("image-owner",ComputeResource.PC))
+        try {
+            val engine=pcOnly(fixture,local,remote)
+            val started=System.currentTimeMillis()
+            try {engine.load(path,options);fail("Must not load while the PC is held")}catch(expected:PcBusy){/* reported */}
+            val waited=System.currentTimeMillis()-started
+            assertTrue("waited $waited",waited in AutomaticComputeEngine.PC_LEASE_WAIT_MS..(AutomaticComputeEngine.PC_LEASE_WAIT_MS+5_000))
+            assertEquals(0,local.loads);assertEquals(0,remote.loads)
+        } finally { image.close() }
+    }
     @Test fun pcOnlyStopsWhenTheConnectionDropsMidGeneration()=runBlocking {
         val fixture=Fixture();val local=fixture.local("phone");val remote=Fake("pc")
         remote.produce={throw IOException("synthetic disconnect")}

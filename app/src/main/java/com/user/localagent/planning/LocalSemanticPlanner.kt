@@ -220,7 +220,7 @@ class LocalSemanticPlanner internal constructor(
             when {
                 failure is PcBusy || (failure is PcRequired && generateSequence(failure.cause){it.cause}.take(4).any{it is PcBusy})->{
                     code="planning_pc_busy"
-                    message="PC가 다른 작업을 처리 중이어서 작업 계획을 완료하지 못했습니다. 해당 작업이 끝난 뒤 다시 요청해주세요. 도구는 실행하지 않았습니다."
+                    message="PC가 이미지 생성 등 다른 작업을 처리 중이어서 이번 요청을 시작하지 못했습니다. 그 작업이 끝나거나 이미지 작업실에서 일시정지한 뒤 다시 보내주세요. 요청은 보존했고 도구는 실행하지 않았습니다."
                 }
                 failure is PcRequired->{
                     code="planning_pc_required"

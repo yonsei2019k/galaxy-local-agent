@@ -131,7 +131,13 @@ class ScreenControl(context:Context) {
     }
 
     private fun service():ScreenBridgeService {
-        check(ScreenBridgeController(context).state().systemEnabled){"Android 접근성에서 'ZipHap.Agent 화면 연결'을 켜주세요."}
+        if(!ScreenBridgeController(context).state().systemEnabled){
+            // Android lists a force-stopped/crashed service as enabled but never binds it again on its own.
+            val listed=android.provider.Settings.Secure.getString(context.contentResolver,android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                .orEmpty().contains("${context.packageName}/")
+            error(if(listed)"Android가 'ZipHap.Agent 화면 연결' 서비스를 중지한 상태입니다. 설정 > 접근성에서 이 서비스를 껐다가 다시 켜주세요."
+                else "Android 설정 > 접근성에서 'ZipHap.Agent 화면 연결'을 켜주세요.")
+        }
         return ScreenBridgeService.current()?:error("화면 연결 서비스가 아직 연결되지 않았습니다.")
     }
 

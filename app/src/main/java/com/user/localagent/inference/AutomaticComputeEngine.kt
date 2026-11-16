@@ -88,6 +88,15 @@ class AutomaticComputeEngine internal constructor(
         return true
     }
 
+    /**
+     * PC-only requests wait briefly for the PC lease, then report PcBusy. Long PC work such as an image
+     * generation holds the lease for its whole run; waiting for it made chat fail as a load timeout.
+     */
+    private suspend fun bindPcOrBusy(maxWaitMs: Long = PC_LEASE_WAIT_MS) {
+        // The ordinary waiting bind keeps waitingForResource visible; only its duration is bounded.
+        withTimeoutOrNull(maxWaitMs) { check(bind(pc, ComputeResource.PC)) } ?: throw PcBusy()
+    }
+
     override suspend fun load(path: String, options: InferenceOptions) = mutex.withLock {
         recoverPendingCleanup()
         requestedPath = path; requestedOptions = options
@@ -96,7 +105,7 @@ class AutomaticComputeEngine internal constructor(
             val reachable = try { pcPreflight() } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { false }
             if (!reachable) throw PcRequired()
             currentCoroutineContext().ensureActive()
-            check(bind(pc, ComputeResource.PC))
+            bindPcOrBusy()
             pc.load(path, options); snapshot(); return@withLock
         }
         if (ownerRunId != null && !phoneOverflowPinned && eligibleForPc(path, options) && System.currentTimeMillis() >= retryAfter) {
@@ -132,7 +141,7 @@ class AutomaticComputeEngine internal constructor(
         val sameBoundProductionPc=pc is PcInferenceEngine&&active===pc&&resource.location.value==ComputeResource.PC
         if(!sameBoundProductionPc&&!pcPreflight())throw PcRequired()
         currentCoroutineContext().ensureActive()
-        check(bind(pc,ComputeResource.PC))
+        bindPcOrBusy()
         val receipt=loader.loadPairedPcText(target,options)
         check(externalPcAuthority()&&receipt.matches(target,options.contextSize)){"원래 PC의 모델 준비 결과를 확인하지 못했습니다."}
         snapshot()
@@ -289,6 +298,8 @@ class AutomaticComputeEngine internal constructor(
         val eligible: (String, InferenceOptions) -> Boolean, val preflight: suspend () -> Boolean, val report: (String) -> Unit,
         val externalPcAuthority: () -> Boolean, val analysisPcTarget: () -> PairedPcText?)
     companion object {
+        /** Bounded below the 90 s planning load budget so the owner sees "PC busy", not a timeout. */
+        const val PC_LEASE_WAIT_MS = 15_000L
         private fun components(context: Context, owner: String?,capturedPcRevision:Long?,allowCloudText:Boolean): Components {
             val settings = PcComputeSettings.get(context)
             val original = settings.snapshot()

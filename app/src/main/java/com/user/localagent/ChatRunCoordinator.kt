@@ -1146,7 +1146,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             controller.close();closed=true
             check(authority().permits(capture))
             val answerText=report.getValue("answer").jsonPrimitive.content
-            val final=if(com.user.localagent.core.ActionCompletionReport.manages(requestAuthorizedTools,observedOutcomes))
+            // Host-rendered reports replace model prose only when something was changed or handed off.
+            // A read-only answer (date, calendar, contacts, search) keeps the model's synthesis of verified reads.
+            val final=if(CloudAgentFinals.needsHostReport(observedOutcomes.map{it.call.name}))
                 com.user.localagent.core.ActionCompletionReport.render(requestAuthorizedTools,observedOutcomes)
                 else if(requestAuthorizedTools.isEmpty())"도구 실행 없이 생성한 답변:\n$answerText"
                 else "확인한 도구: ${requestAuthorizedTools.sorted().joinToString()}\n$answerText"

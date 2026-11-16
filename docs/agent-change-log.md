@@ -1,3 +1,23 @@
+## 2026-11-17 — 실기 결과 반영: E4B 시간 초과·일정 답 누락·연락처 인자 오류·화면 서비스 중지 (root, 소스)
+
+**실기 2008 결과.** CloudAgentCapabilityCanary는 QA 프로젝트를 만들어 쓰고 바로 삭제한다. 실제 Codex 요청 4건을 실행했다.
+- date: plan get_current_datetime → VERIFIED → completed, 24초
+- calendar: datetime+list_calendar_events 모두 VERIFIED, completed. 다만 최종 답이 "조회한 시각"뿐이라 일정 답이 사라졌다.
+- contacts: search_contacts의 query 값 형식 오류로 ExternalAgentProposal.checkedCall이 예외를 냈고 요청 전체가 failed가 됐다.
+- calculator: read_screen FAILED. 원인은 앱 스위치 꺼짐과 접근성 서비스 Crashed다.
+
+**접근성 서비스 중지 원인.** `am instrument`가 앱 프로세스를 강제 종료해 Android가 ScreenBridgeService를 Crashed로 두고 다시 묶지 않았다(enabled 목록에는 남고 bound 없음). 기기 검사가 소유자 설정을 깨뜨린 것이다. 화면 제어 실기는 instrumentation이 아니라 소유자 앱 조작+screencap으로 확인해야 한다.
+
+**E4B 실패 원인.** PC 전용 모드에서는 E4B를 골라도 PC lease를 기다린다. 06:52 시작한 PC 이미지 작업이 lease를 끝까지 쥐어 90초 load 예산을 넘겼다. 같은 시간대에 /v1/llm/load 요청은 없었다. E4B 폰 cold load는 PhoneModelLoadTimingDiagnostic 측정 12.7초(5088MB, 가용 3662→1875MB)라 로딩 속도 문제가 아니다.
+
+**수정.**
+- AutomaticComputeEngine.bindPcOrBusy: PC 전용 load·loadPairedPcText는 lease를 최대 15초만 기다리고 이후 PcBusy를 던진다. 기존 planning_pc_busy 안내 문구에 이미지 작업을 명시했다. 회귀 테스트 pcOnlyReportsBusyInsteadOfWaitingBehindLongPcWork를 추가했다.
+- 클라우드 최종 답: 변경·인계 도구가 있을 때만 호스트 보고서를 쓰고(CloudAgentFinals.needsHostReport), 조회만 한 경우에는 확인 도구 목록과 모델 답을 보여 준다.
+- checkedCall: 미등록 도구·범위·크기·정의 밖 인자 이름은 계속 즉시 거부한다. 정의된 인자의 값 오류는 runTool/performTool 검증에서 FAILED·미실행으로 모델에 돌려준다.
+- ScreenControl: Crashed 상태이면 "껐다가 다시 켜기"로 안내한다.
+
+**검사.** JVM core951/app944 PASS.
+
 ## 2026-11-17 — INSTALLED 2008(v0.1.8) / PC broker·MCP·지침 반영 / 이미지 체크포인트 보존
 
 c47d497 CI run 43881302905 build·sign-and-release success, v0.1.8 게시. 폰이 03:17에 자동 업데이트로 versionCode 2008을 설치했고, 설치 base.apk SHA fcd24548…338f가 릴리스 SHA256SUMS와 일치한다. 소유자 지시로 실행 중이던 Qwen Edit 50단계 이미지 작업 0a9bcb44를 .local/deploy-image-fast.ps1과 같은 loopback 원래 owner suspend 절차로 일시 정지했다. 저장 단계 20/50이고 requestHash·request·binding이 변하지 않았으며 compute idle과 sd-server 종료를 확인했다. 이후 PC 백업(D:/ZipHap/Compute/scratch/deploy-backup-20261116-2302)을 만들고 agent_bridge.py(128/200KB/패턴3), mcp/device_tools_mcp.py(패턴2), codex_agent_provider.py(plan_task 우선·도구로 사실 확인)를 배포했다. agent-provider.json의 mcpScriptSha256을 새 해시로 갱신하고 worker만 재시작했다. 재시작 뒤 health idle, providerConfigured true, activeProviders 0, 체크포인트 20/50 유지를 확인했다. 이미지 재개는 앱 이미지 작업실에서 소유자가 한다. 폰 접근성 서비스는 꺼져 있고(enabled_accessibility_services null) 클라우드 동의는 판2 재승인 전이라, 클라우드 전체 도구·화면 제어 실기 검증은 아직 0건이다.

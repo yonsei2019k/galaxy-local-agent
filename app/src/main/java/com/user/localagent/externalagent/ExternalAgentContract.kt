@@ -70,7 +70,13 @@ class ExternalAgentProposal(
     fun checkedCall(capture:ExternalAgentCapture):ToolCall {
         require(requestDigest==capture.requestDigest&&projectBinding==capture.projectBinding&&authorityRevision==capture.authorityRevision)
         require(tool in capture.phoneTools&&arguments.toString().toByteArray(Charsets.UTF_8).size<=32_768)
-        return ToolRegistry.validate(ToolCall(callId,tool,arguments))
+        val call=ToolCall(callId,tool,arguments)
+        // Unknown tools, scope, size and undeclared argument names stay hard rejections (never reach the executor).
+        // A declared argument with a bad value is never executed either: runTool's performTool validates again
+        // before any effect and returns a FAILED, effect-not-applied result, so the model can correct it.
+        val declared=ToolRegistry.definitions.getValue(tool).arguments.keys
+        require(arguments.keys.all{it in declared}){"허용되지 않은 도구 인자입니다."}
+        return runCatching{ToolRegistry.validate(call)}.getOrElse{if(it is IllegalArgumentException)call else throw it}
     }
     fun fingerprint():String = ExternalAgentContract.sha(buildJsonObject {
         put("callId",callId);put("sequence",sequence);put("tool",tool);put("arguments",ExternalAgentContract.sorted(arguments))
