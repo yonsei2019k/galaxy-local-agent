@@ -1,5 +1,11 @@
 # Galaxy Local Agent implementation contracts
 
+## Image route recovery and output identity1090
+
+Image polling and cleanup may recover only through known routes carrying the original server ID, certificate pin and token. Saved routes from a replacement pairing are excluded. Probes are bounded read-only health calls; a route change never creates/replays a write, resumes a paused job, changes its model or grants authority. Normal polling rechecks captured permissions and cancellation. Cleanup keeps the original job/owner and worker-instance proof; an unavailable route, false cleanup flag or404 from another worker cannot release the compute lease. Persisting a recovered endpoint is atomic and conditional on the pairing still matching.
+
+A retained image has its own immutable displayed seed/model/reference snapshot. Starting another attempt marks it previous; startup restoration marks it recent history. Only durable file and metadata save/readback marks a new current result. Retaining or displaying an older image never proves the current request completed. Build/device evidence is recorded separately in PROJECT_STATE.
+
 ## Explicit local image model and pause/recovery1089
 
 FLUX.2-klein4B is an explicit pinned local option,4 default/4–50 bounded steps; legacy Qwen/SDXL defaults and12–50 bounds remain. FLUX reference results keep the same effective identity; CFG1 negative conditions are rejected rather than ignored. Exact model/SHA/PNG dimensions/bytes precede phone persistence/readback and PC ACK. No silent model substitution, paid key, bundled model or permission expansion is introduced.

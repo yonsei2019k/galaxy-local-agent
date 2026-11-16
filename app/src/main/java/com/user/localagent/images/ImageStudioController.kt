@@ -82,7 +82,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
                 val directory=File(this@ImageStudioController.context.filesDir,"generated-images").canonicalFile
                 val file=File(directory,name).canonicalFile
                 require(file.parentFile==directory&&file.isFile)
-                mutableState.update {state->if(state.running||state.outputPath!=null)state else state.copy(outputPath=file.path,seed=info["seed"]?.jsonPrimitive?.longOrNull,prompt=info["prompt"]?.jsonPrimitive?.content.orEmpty(),phase="최근 생성 이미지",mode=info["mode"]?.jsonPrimitive?.content?:"txt2img",referenceSha256=info["referenceSha256"]?.jsonPrimitive?.contentOrNull,referenceWidth=info["referenceWidth"]?.jsonPrimitive?.intOrNull,referenceHeight=info["referenceHeight"]?.jsonPrimitive?.intOrNull,strength=info["strength"]?.jsonPrimitive?.floatOrNull,computeLocation=info["computeLocation"]?.jsonPrimitive?.content?:"phone",sourceModelId=info["modelFile"]?.jsonPrimitive?.contentOrNull)}
+                mutableState.update {state->if(state.running||state.outputPath!=null)state else state.copy(outputPath=file.path,seed=info["seed"]?.jsonPrimitive?.longOrNull,prompt=info["prompt"]?.jsonPrimitive?.content.orEmpty(),phase="최근 완성한 이미지",mode=info["mode"]?.jsonPrimitive?.content?:"txt2img",referenceSha256=info["referenceSha256"]?.jsonPrimitive?.contentOrNull,referenceWidth=info["referenceWidth"]?.jsonPrimitive?.intOrNull,referenceHeight=info["referenceHeight"]?.jsonPrimitive?.intOrNull,strength=info["strength"]?.jsonPrimitive?.floatOrNull,computeLocation=info["computeLocation"]?.jsonPrimitive?.content?:"phone",sourceModelId=info["modelFile"]?.jsonPrimitive?.contentOrNull).savedOutput(restored=true)}
             }
         }
     }}
@@ -143,7 +143,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
         if(resume==null&&pending!=null&&pcSettings.state.value.preferPcImages&&pcSettings.state.value.paired){mutableState.update{it.copy(error="PC 복구 작업을 먼저 이어받거나 ‘보관하고 새 작업’을 선택해주세요.",canResumePc=true)};return false}
         if(!operation.compareAndSet(false,true)){mutableState.update {it.copy(error="현재 이미지 작업을 마친 뒤 생성해주세요.")};return false}
         val computeOwner=resume?.owner?:UUID.randomUUID().toString()
-        mutableState.update {it.copy(phase="준비 중",running=true,prompt=prompt,error=null,progress=0f,step=0,totalSteps=initialSteps(steps,resume),mode=if(referenceUri==null)"txt2img"else"img2img",referenceSha256=null,referenceWidth=null,referenceHeight=null,strength=if(referenceUri==null)null else strength)}
+        mutableState.update {it.beginAttempt().copy(phase="준비 중",running=true,prompt=prompt,error=null,progress=0f,step=0,totalSteps=initialSteps(steps,resume),mode=if(referenceUri==null)"txt2img"else"img2img",referenceSha256=null,referenceWidth=null,referenceHeight=null,strength=if(referenceUri==null)null else strength)}
         activeJob=scope.launch {
             try {
                 standaloneEngine?.unload()
@@ -168,7 +168,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
         require(referenceUri==null||referenceUri.scheme=="content"&&!referenceUri.authority.isNullOrBlank()&&strength.isFinite()&&strength in .4f..0.85f)
         check(operation.compareAndSet(false,true)){"현재 이미지 작업을 마친 뒤 생성해주세요."}
         activeJob=currentCoroutineContext()[Job]
-        mutableState.update {it.copy(phase="준비 중",running=true,prompt=prompt,error=null,progress=0f,step=0,totalSteps=initialSteps(steps),mode=if(referenceUri==null)"txt2img"else"img2img",referenceSha256=null,referenceWidth=null,referenceHeight=null,strength=if(referenceUri==null)null else strength)}
+        mutableState.update {it.beginAttempt().copy(phase="준비 중",running=true,prompt=prompt,error=null,progress=0f,step=0,totalSteps=initialSteps(steps),mode=if(referenceUri==null)"txt2img"else"img2img",referenceSha256=null,referenceWidth=null,referenceHeight=null,strength=if(referenceUri==null)null else strength)}
         try{return perform(prompt,negativePrompt,steps,seed,referenceUri,strength)}finally{activeJob=null;operation.set(false);mutableState.update{it.copy(running=false)}}
     }
     private suspend fun perform(prompt:String,negative:String,requestedSteps:Int?,seed:Long,referenceUri:Uri?=null,strength:Float=.65f,
@@ -258,7 +258,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
                 check(saved!=null&&saved.body==metadata&&saved.collection=="generated-images"){"생성 이미지 메타데이터 저장을 확인하지 못했습니다."}
                 currentCoroutineContext().ensureActive();verifyAccess();committed=true;completed=true
                 if(result.computeLocation=="pc")withContext(NonCancellable){runCatching{remoteSession.acknowledgeSavedFile(artifact.file)}}
-                mutableState.update {it.copy(outputPath=artifact.file.path,seed=artifact.seed,progress=1f,step=result.samplingSteps,totalSteps=result.samplingSteps,error=null,computeLocation=result.computeLocation,sourceModelId=result.sourceModelId,strength=if(result.computeLocation=="phone"&&reference!=null)strength else null)}
+                mutableState.update {it.copy(outputPath=artifact.file.path,seed=artifact.seed,progress=1f,step=result.samplingSteps,totalSteps=result.samplingSteps,error=null,computeLocation=result.computeLocation,sourceModelId=result.sourceModelId,strength=if(result.computeLocation=="phone"&&reference!=null)strength else null).savedOutput()}
                 return artifact
             }finally {result.bitmap.recycle()}
         }catch(cancel:CancellationException){mutableState.update {it.copy(phase="중단했습니다",error=null)};throw cancel}

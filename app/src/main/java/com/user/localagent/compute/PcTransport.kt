@@ -142,6 +142,17 @@ class PcTransport(context:Context) {
             null
         }
     }.getOrNull()
+    /** Read-only recovery against the original certificate/token/identity, including after revocation.
+     * The caller still fences normal work; cleanup may only inspect that original job. */
+    internal suspend fun recoverOriginalRoute(original:PcConnection,failedEndpoint:String,computeOwner:String?):PcConnection?=
+        withContext(Dispatchers.IO){
+            findOriginalPcRoute(original,settings.snapshot(),failedEndpoint){candidate->
+                val health=json(candidate,"/v1/health",timeout=3000,computeOwner=computeOwner)
+                health["service"]?.jsonPrimitive?.content=="ZipHapCompute"&&
+                    health["serverId"]?.jsonPrimitive?.content==original.serverId&&
+                    (computeOwner==null||health["compute_owner_binding"]?.jsonPrimitive?.intOrNull==1)
+            }?.also{settings.updateEndpointIfSamePair(original,it.endpoint)}
+        }
     fun read(connection:HttpsURLConnection,limit:Int):ByteArray {
         val output=ByteArrayOutputStream()
         connection.inputStream.use {input->val bytes=ByteArray(32*1024);while(true){val count=input.read(bytes);if(count<0)break;require(output.size()+count<=limit);output.write(bytes,0,count)}}

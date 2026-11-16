@@ -65,6 +65,13 @@ class PcComputeSettings private constructor(private val context:Context) {
         PcComputeContract.endpoint(endpoint)
         connection=connection?.copy(endpoint=endpoint);persist()
     }
+    /** An old request may remember a route only while the same pairing is still selected. */
+    internal fun updateEndpointIfSamePair(expected:PcConnection,endpoint:String):Boolean=synchronized(lock){
+        val current=connection?:return@synchronized false
+        if(!expected.samePair(current))return@synchronized false
+        PcComputeContract.endpoint(endpoint)
+        connection=current.copy(endpoint=endpoint);persist();true
+    }
     /** Learned from the authenticated PC while reachable, so the phone can reach it away from home. */
     fun updateOverlay(endpoint:String)=synchronized(lock){
         PcComputeContract.endpoint(endpoint)

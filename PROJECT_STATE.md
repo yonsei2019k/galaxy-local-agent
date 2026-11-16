@@ -2,6 +2,12 @@
 
 Updated 2026-11-16. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Built/signed1090; image route recovery and previous-result identity, not yet installed
+
+1090 fixes captured image polling/cleanup routes by checking bounded known routes under the original server ID/certificate/token. Same-pair endpoint persistence is atomic; normal work retains permission/cancellation fences. No compute/write replay, automatic paused-job resume, force-cleared lease or new permission/model is introduced. Cleanup still needs actual cleanup_complete or original-worker404 proof. Previous/recent outputs retain their own seed/model/reference snapshot and explicit title; only durable new file+metadata readback becomes current.
+
+Full build18m19/core947+app937=1884 JVM PASS/0fail-error-skip/lint0errors145warnings1hint; new route7/state4 PASS. Frozen745 source/public10/config6 inputs verified. Main1090 a6e3c10fe484f26f3e7a78fcb521b758d18cb18aec8d1de4324d570de2ff423f and test0fb51415ee61689b70a46a4ae73fb8dbf1dc7af0253cb98b476020af8e1f703e signed/verified; package/version1090 and original trusted signer match. Wireless ADB is unreachable, so1090 is not installed and no actual phone network-handoff or screenshot-path pass is claimed. Last verified installation remains1089 below. Read-only worker GET confirms the latest original job remains paused/checkpoint10of50/cleanup_complete=true/no failure code; no resume/delete/model change or worker restart. [Details](docs/image-workflow-repair-2026-11-16.ko.md).
+
 ## Installed1089; fast local image generation/editing and preserved recovery
 
 Owner-approved update preserves the original Qwen request/seed/50steps/runtime binding and real checkpoint1, archives its exact encrypted phone ticket, and selects the explicit FLUX.2-klein4B/4-step option for new requests. Explicit pause is persisted and never undone by automatic resume; server checks `automatic`/`explicit` atomically, and phone shows pause rather than compute failure. Copy/readback-before-removal archive/restore is bounded4/64KiB/unchanged24h expiry. No model is bundled, paid key added, permission expanded or private image copied into Git.

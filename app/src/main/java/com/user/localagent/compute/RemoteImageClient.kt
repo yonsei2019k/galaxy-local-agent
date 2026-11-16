@@ -130,6 +130,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
             JsonObject(recoveryContext+mapOf("connectionPin" to JsonPrimitive(PcImageRecoveryTicket.pair(config,0)),"requestDigest" to JsonPrimitive(requestDigest)))))
         var delivered=false
         var discard=false
+        var route=config
         cleanupTarget=config to id
         try {
             var accepted=false
@@ -141,6 +142,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                 }
             }
             var networkFailures=0
+            var routeRecoveryTried=false
             var resumeAttempts=0
             var unchangedPolls=0
             var lastProgressKey=""
@@ -149,9 +151,18 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                     currentCoroutineContext().ensureActive()
                     checkCancellation()
                     requireOwnerAccess(config)
-                    val report=try{transport.json(config,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner).also {networkFailures=0}}
+                    val report=try{transport.json(route,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner).also {networkFailures=0;routeRecoveryTried=false}}
                     catch(cancel:CancellationException){throw cancel}
-                    catch(error:Exception){if(++networkFailures>=3)throw PcUnavailable();onProgress(ImageGenerationProgress("PC 연결 다시 확인 중"));delay(2000);continue}
+                    catch(error:Exception){
+                        if(!routeRecoveryTried){
+                            routeRecoveryTried=true
+                            val found=transport.recoverOriginalRoute(config,route.endpoint,computeOwner)
+                            currentCoroutineContext().ensureActive();checkCancellation();requireOwnerAccess(config)
+                            if(found!=null){route=found;currentConfig=found;cleanupTarget=found to id}
+                        }
+                        if(++networkFailures>=3)throw PcUnavailable()
+                        onProgress(ImageGenerationProgress("원래 PC의 LAN·Tailscale 연결 다시 확인 중"));delay(2000);continue
+                    }
                     requireOwnerAccess(config)
                     val phase=report.getValue("phase").jsonPrimitive.content
                     val step=report.getValue("step").jsonPrimitive.int
@@ -165,7 +176,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         onProgress(ImageGenerationProgress("PC ${saved}단계 저장 확인 · 원래 설정으로 이어서 계산 준비",saved,total,saved.toFloat()/total))
                         delay(5000L*resumeAttempts)
                         requireOwnerAccess(config)
-                        val latest=transport.json(config,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
+                        val latest=transport.json(route,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
                         requireOwnerAccess(config)
                         val latestPhase=latest.getValue("phase").jsonPrimitive.content
                         if(latestPhase !in setOf("resumable","suspended"))continue
@@ -174,10 +185,10 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         PcImageSuspended.fromReport(latestPhase,latest["paused"]?.jsonPrimitive?.boolean,latestSaved,steps)?.let{throw it}
                         require(latestSaved in 1..steps)
                         try {
-                            transport.json(config,"/v1/images/$id/resume","POST",buildJsonObject{if(health["image_resume_guard"]?.jsonPrimitive?.intOrNull==1)put("automatic",true)},15_000,computeOwner=computeOwner)
+                            transport.json(route,"/v1/images/$id/resume","POST",buildJsonObject{if(health["image_resume_guard"]?.jsonPrimitive?.intOrNull==1)put("automatic",true)},15_000,computeOwner=computeOwner)
                         }catch(cancel:CancellationException){throw cancel}catch(error:Exception){
                             val stopped=try{
-                                val current=transport.json(config,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
+                                val current=transport.json(route,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
                                 requireOwnerAccess(config)
                                 require(current.getValue("steps").jsonPrimitive.int==steps)
                                 PcImageSuspended.fromReport(current.getValue("phase").jsonPrimitive.content,current["paused"]?.jsonPrimitive?.boolean,
@@ -195,7 +206,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         PcImageModelCatalog.verifyResult(modelPin,report["modelId"]?.jsonPrimitive?.content,report["modelSha256"]?.jsonPrimitive?.content)
                         require(report["width"]?.jsonPrimitive?.int==1024&&report["height"]?.jsonPrimitive?.int==1024)
                         requireOwnerAccess(config)
-                        val connection=transport.open(config,"/v1/images/$id/png",timeout=30_000,computeOwner=computeOwner)
+                        val connection=transport.open(route,"/v1/images/$id/png",timeout=30_000,computeOwner=computeOwner)
                         val bytes=try{transport.cancellable(connection){requireOwnerAccess(config);require(connection.responseCode==200);transport.read(connection,32*1024*1024)}}finally{connection.disconnect()}
                         requireOwnerAccess(config)
                         val actual=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it.toInt()and 255)}
@@ -205,7 +216,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         val bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size)?:error("PC 생성 이미지를 읽지 못했습니다.")
                         try{currentCoroutineContext().ensureActive();checkCancellation();requireOwnerAccess(config)}catch(error:Throwable){bitmap.recycle();throw error}
                         delivered=true
-                        pendingDelivery=config to id
+                        pendingDelivery=route to id
                         val result=ImageGenerationResult(bitmap,report.getValue("seed").jsonPrimitive.long,1024,1024,report.getValue("elapsedMillis").jsonPrimitive.long,steps,computeLocation="pc",sourceModelId=modelPin.id,sourceModelSha256=modelPin.sha256)
                         return@withTimeout result
                     }
@@ -221,7 +232,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                 // Cleanup is allowed against this exact original target even after local permission revocation.
                 if(!delivered)runCatching{
                     val retain=recoverable&&!discard&&cancelRevision.get()==revision
-                    val result=transport.json(config,"/v1/images/$id"+if(retain)"/suspend"else"",if(retain)"POST"else"DELETE",if(retain)buildJsonObject{}else null,10_000,computeOwner=computeOwner)
+                    val result=transport.json(route,"/v1/images/$id"+if(retain)"/suspend"else"",if(retain)"POST"else"DELETE",if(retain)buildJsonObject{}else null,10_000,computeOwner=computeOwner)
                     if(result["cleanup_complete"]?.jsonPrimitive?.boolean==true){cleanupTarget=null;if(!retain)recovery?.clear(id)}
                 }
             }
@@ -239,19 +250,30 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
     /** A broker lease ending after download is not owner cancellation or delivery acknowledgement. */
     suspend fun releaseCompute(){
         val target=cleanupTarget?:return
+        var route=target.first
+        var routeRecoveryTried=false
         repeat(5){
             val verified=runCatching{
-                val checker=PcTransport(context);val connection=checker.open(target.first,"/v1/images/${target.second}",timeout=3000,computeOwner=computeOwner)
+                val checker=PcTransport(context);val connection=checker.open(route,"/v1/images/${target.second}",timeout=3000,computeOwner=computeOwner)
                 val status=try{checker.cancellable(connection){
                     val code=connection.responseCode
                     code to if(code==200)Json.parseToJsonElement(checker.read(connection,32768).toString(Charsets.UTF_8)).jsonObject else null
                 }}finally{connection.disconnect()}
                 if(status.first==404&&cleanupInstance!=null){
                     // Same live worker: an absent ID was never started, or was removed only after native exit.
-                    val health=checker.json(target.first,"/v1/health",timeout=3000,computeOwner=computeOwner)
+                    val health=checker.json(route,"/v1/health",timeout=3000,computeOwner=computeOwner)
                     health["image_recovery_instance"]?.jsonPrimitive?.contentOrNull==cleanupInstance
                 }else status.second?.get("cleanup_complete")?.jsonPrimitive?.booleanOrNull==true
-            }.getOrDefault(false)
+            }.getOrElse { error->
+                if(error is CancellationException)throw error
+                if(!routeRecoveryTried){
+                    routeRecoveryTried=true
+                    val recovered=try{PcTransport(context).recoverOriginalRoute(target.first,route.endpoint,computeOwner)}
+                        catch(cancel:CancellationException){throw cancel}catch(_:Exception){null}
+                    if(recovered!=null){route=recovered;cleanupTarget=recovered to target.second}
+                }
+                false
+            }
             if(verified){
                 if(discardId==target.second)recovery?.clear(target.second)
                 cleanupTarget=null;return

@@ -62,6 +62,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     var saving by remember{mutableStateOf(false)}
     var downloadJob by remember{mutableStateOf<Job?>(null)}
     var output by remember{mutableStateOf<ImageBitmap?>(null)}
+    var outputForPath by remember{mutableStateOf<String?>(null)}
     var previewFailed by remember{mutableStateOf(false)}
     var deleteModel by remember{mutableStateOf(false)}
     var deletePcRecovery by remember{mutableStateOf(false)}
@@ -101,6 +102,8 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     }}
     var referencePreview by remember{mutableStateOf<ImageBitmap?>(null)}
     val usePc=pc.paired&&pc.preferPcImages
+    val displayedOutput=state.displayedOutput
+    val visibleOutput=output.takeIf{outputForPath==state.outputPath}
     val pcModelTitle=if(fastPc)"FLUX.2 klein · 4B Q4_0"
         else if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"SDXL 1.0 · Q4_K"
         else if(transform)"Qwen-Image-Edit-2511 · 20B Q4_K_M"else"Qwen-Image-2512 · 20B Q4_K_M"
@@ -138,7 +141,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     LaunchedEffect(initialPrompt){if(initialPrompt.isNotBlank()){prompt=initialPrompt;onInitialPromptConsumed()}}
     LaunchedEffect(app){try{app.imageStudio.models.refresh()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("이미지 모델 상태를 확인하지 못했습니다.")}}
     LaunchedEffect(state.outputPath){
-        output=null;previewFailed=false
+        output=null;outputForPath=null;previewFailed=false
         val path=state.outputPath?:return@LaunchedEffect
         output=withContext(Dispatchers.IO){runCatching {
             val file=File(path);require(file.isFile)
@@ -149,6 +152,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
             while(bounds.outWidth/sample>1024||bounds.outHeight/sample>1024)sample*=2
             BitmapFactory.decodeFile(path,BitmapFactory.Options().apply{inSampleSize=sample})?.asImageBitmap()
         }.getOrNull()}
+        outputForPath=path
         previewFailed=output==null
     }
     val importPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->
@@ -229,11 +233,16 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 }
             }}}
             item {Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceContainer),contentAlignment=Alignment.Center){
-                if(compareReference&&referencePreview!=null&&referenceSha==state.referenceSha256)Image(bitmap=referencePreview!!,contentDescription="고정 기준 사진",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
-                else if(output!=null)Image(bitmap=output!!,contentDescription="생성한 이미지",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+                if(compareReference&&referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256)Image(bitmap=referencePreview!!,contentDescription="고정 기준 사진",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+                else if(visibleOutput!=null){
+                    Image(bitmap=visibleOutput,contentDescription=state.outputTitle,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+                    if(state.outputOrigin!=com.user.localagent.images.ImageOutputOrigin.CURRENT)Surface(modifier=Modifier.align(Alignment.TopStart).padding(10.dp),shape=RoundedCornerShape(8.dp)){
+                        Text(state.outputTitle,modifier=Modifier.padding(8.dp),style=MaterialTheme.typography.labelMedium)
+                    }
+                }
                 else Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)){
                     StudioPlaceholder(Modifier.size(70.dp),MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else "새로운 장면을 만들어 보세요.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else if(state.outputPath!=null)"완성 이미지 미리보기 준비 중"else "새로운 장면을 만들어 보세요.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }}
             if(!model.available||!model.qualityModel||model.downloading)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
@@ -274,25 +283,25 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
             }}}
             state.error?.takeIf{it.isNotBlank()}?.let {error->item {ZipHapCard {Text(error.take(700),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)}}}
             if(state.outputPath!=null)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Text("완성한 이미지",style=MaterialTheme.typography.titleMedium)
-                if(referencePreview!=null&&referenceSha==state.referenceSha256){
+                Text(state.outputTitle,style=MaterialTheme.typography.titleMedium)
+                if(referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256){
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         FilterChip(selected=compareReference,onClick={compareReference=true},label={Text("기준 사진 보기")})
                         FilterChip(selected=!compareReference,onClick={compareReference=false},label={Text("결과 보기")})
                     }
                     Text("결과를 비교해 특징이 유지됐는지 확인하세요. 기준 사진은 자동 교체되지 않습니다.",style=MaterialTheme.typography.bodySmall)
                 }
-                state.sourceModelId?.let {Text("실제 결과 모델: $it",style=MaterialTheme.typography.labelSmall)}
-                state.seed?.let {seed->Text("시드 $seed",style=MaterialTheme.typography.labelMedium)}
-                Text(if(state.computeLocation=="pc")"PC에서 계산 · 스마트폰에 저장"else"휴대폰에서 생성·저장",style=MaterialTheme.typography.labelMedium)
-                if(state.mode=="img2img"&&state.referenceWidth!=null&&state.referenceHeight!=null)Text("사진 변환 · 원본 ${state.referenceWidth}×${state.referenceHeight}"+(state.strength?.let{" · 강도 ${(it*100).roundToInt()}%"}?:" · 지시문에 따라 변환"),style=MaterialTheme.typography.labelMedium)
+                displayedOutput?.sourceModelId?.let {Text("이 이미지의 모델: $it",style=MaterialTheme.typography.labelSmall)}
+                displayedOutput?.seed?.let {seed->Text("이 이미지의 시드 $seed",style=MaterialTheme.typography.labelMedium)}
+                Text(if(displayedOutput?.computeLocation=="pc")"PC에서 계산 · 스마트폰에 저장"else"휴대폰에서 생성·저장",style=MaterialTheme.typography.labelMedium)
+                displayedOutput?.takeIf{it.mode=="img2img"&&it.referenceWidth!=null&&it.referenceHeight!=null}?.let {details->Text("사진 변환 · 원본 ${details.referenceWidth}×${details.referenceHeight}"+(details.strength?.let{" · 강도 ${(it*100).roundToInt()}%"}?:" · 지시문에 따라 변환"),style=MaterialTheme.typography.labelMedium)}
                 Button(enabled=!state.running&&!saving,onClick={scope.launch {
                     saving=true
                     try{app.imageStudio.exportToGallery();onStatus("생성한 이미지를 갤러리에 저장했습니다.")}
                     catch(cancel:CancellationException){throw cancel}
                     catch(_:Exception){onStatus("갤러리에 저장하지 못했습니다. 생성 이미지는 앱에 유지됩니다.")}
                     finally{saving=false}
-                }}){Text(if(saving)"저장 중" else "갤러리에 저장")}
+                }}){Text(if(saving)"저장 중" else if(state.outputOrigin==com.user.localagent.images.ImageOutputOrigin.PREVIOUS)"이전 결과를 갤러리에 저장"else "갤러리에 저장")}
             }}}
             item {Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
                 Text(if(pc.paired&&pc.preferPcImages)if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: $pcModelTitle\n라이선스: Apache 2.0"else if(model.qualityModel||!model.available)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: 기존 DreamShaper 8 LCM\n라이선스: CreativeML OpenRAIL-M",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)

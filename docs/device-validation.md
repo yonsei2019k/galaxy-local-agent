@@ -1,5 +1,9 @@
 # Device validation
 
+## 2026-11-16 built/signed1090 only; actual installation pending
+
+Image polling/cleanup same-pair route recovery and previous-output identity corrections pass core947+app937=1884 JVM checks, including new7 route/4 state cases, with0fail/error/skip. Full build18m19/lint0errors145warnings1hint. Main a6e3c10fe484f26f3e7a78fcb521b758d18cb18aec8d1de4324d570de2ff423f and test0fb51415ee61689b70a46a4ae73fb8dbf1dc7af0253cb98b476020af8e1f703e signed/verified; package/version1090/original update signer match. Current wireless ADB is unreachable; last verified installed1089 is unchanged. No actual1090 phone cleanup, external-network handoff or image-output UI pass is claimed. Read-only PC GET confirms retained original paused/checkpoint10of50/cleanup_complete=true; no image resume/delete/model change/worker restart. Existing1089 actual image evidence remains separate. See PROJECT_STATE and image-workflow-repair-2026-11-16.ko.md.
+
 ## 2026-11-15 installed1088: actual cloud phone tools and negative boundaries
 
 Production d04359c796a700020415c2e4eee7716456e257f55e9c89bb15cd8c2d896846ad and current test8ca09d192ca1f7a8129ec3e381f29981a298801cdf997bbd6d09af17fdeb62fe retain original appID/signing/data and match installed base SHA. Full1088 3m43/core945+app911=1856 JVM PASS/0fail-error-skip/lint0errors145warnings1Hint/753 inputs. Later test-only replacements preserve byte-identical production; final phase6 full49s PASS. Pinned direct Tailscale checks pass with original identity/VPN/no LAN fallback; external-network handoff untested.
