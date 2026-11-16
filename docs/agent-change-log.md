@@ -1,3 +1,11 @@
+## 2026-11-16 — 클라우드 도구 = 로컬 도구 전체 (root, 소스)
+
+소유자 지시로 `ExternalAgentContract.NORMAL_PHONE_TOOLS`를 ToolRegistry 전체(106)로 바꿨다. 소유자가 32개 상한이 로컬 모델 성능 때문인지 물어 확인했다: 상한은 91e03d9 클라우드 브리지 도입 때 `ExternalAgentCapture`(생성처는 executeCloudPhoneRequest 하나)와 PC `agent_bridge._create`에만 들어갔고, 로컬 경로는 offeredTools→semantic planTools로 도구를 줄여 이 상한을 쓰지 않는다. 따라서 phone capture·broker 상한만 128로, broker 목록 JSON은 200,000바이트로 올렸고 로컬 경로는 바꾸지 않았다. 실제 106개 등록 JSON(53,990바이트)을 export해 broker `_schema`·MCP `validate_schema`로 검사했다. 처음 15건이 고정 패턴 미허용으로 거부돼 날짜/양의 정수/소문자 UUID 3개 패턴을 두 허용 목록에 추가했고, 이후 106/106 통과했다. pc-worker 222 PASS, 1 FAIL(test_recovery surgical patch)는 변경 전 소스에서도 같은 import 오류로 재현되는 기존 문제다. ExternalAgentPlanTest의 patch_note 거부 기대값을 미등록 도구 거부로 바꿨다. MCP 스크립트 SHA 핀 갱신과 작업기 재시작은 배포 단계에서 한다.
+
+## 2026-11-16 — PUBLISHED v0.1.7 클라우드 도구 확대·화면 제어 / 실기 미검증
+
+75d3d5d를 codex/internal-release에 push, CI run 43869711369 build·sign-and-release success, v0.1.7 Latest 게시. 로컬 사전 검사: core951/app939+신규 scope2 PASS, release assemble·lint 0 errors/146 warnings/1 hint. 22:06 기준 폰 무선 ADB 미연결이라 설치 버전·해시·실기 흐름은 확인하지 않았다. PC provider 새 지침은 codex_agent_provider.py.next로만 준비했고, 이미지 작업 sd-server 상주(21:31 resume 이후 요청 없음) 때문에 작업기 재시작과 적용은 하지 않았다. 앱 쪽 계획 없는 답변 표시 수정은 지침 적용 없이도 동작한다. 화면 제어는 소유자의 접근성 시스템 동의와 앱 스위치, 클라우드 재동의가 있어야 실행된다.
+
 ## 2026-11-16 — ACTIVE 클라우드 휴대폰 도구 확대·화면 제어 (root, 소스)
 
 소유자 지시: 계획 없는 클라우드 답변 일시 정지 수정, 클라우드 모델에서 문자·일정·연락처·검색 등 사용, 스마트폰 화면 제어. 소유 파일: ChatRunCoordinator.executeCloudPhoneRequest/performTool 확인 조건, externalagent/(CloudAgentFinals 신규, ExternalAgentContract.NORMAL_PHONE_TOOLS, ExternalAgentSettings 동의 판2), integrations/ScreenControl.kt 신규·ScreenBridgePanel 스위치·screen_bridge_service.xml packageNames 제거, ToolExecutor 분기, core ScreenControlToolCatalog 신규·Tools 등록·ToolCapabilityCatalog, pc-worker/deployed/codex_agent_provider.py 지침. 계약 변경: 등록 도구 104→106, 클라우드 phone tool 5→28, 기존 클라우드 동의는 판1이라 재동의 필요, PREPARED는 즉시 일시 정지·provider 취소, 계획·호출 0인 reported_done은 미검증 표시 답변으로 완료(toolFreeAnswer receipt). JVM core951/app939 PASS(신규 포함 전), 릴리스/lint·설치·실기 미실행. PC provider 새 지침은 .next로 준비만 했고 이미지 작업(sd-server 상주) 때문에 작업기 재시작 전이다.

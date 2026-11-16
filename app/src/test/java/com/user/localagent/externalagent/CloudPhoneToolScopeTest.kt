@@ -1,21 +1,27 @@
 package com.user.localagent.externalagent
 
 import com.user.localagent.core.*
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.File
 
 class CloudPhoneToolScopeTest {
     private val tools=ExternalAgentContract.NORMAL_PHONE_TOOLS
 
-    @Test fun everyCloudPhoneToolIsRegisteredAndFitsTheBrokerBounds(){
-        assertTrue(tools.size<=32) // agent_bridge.py TOOL_CATALOG_BOUND
-        tools.forEach{assertTrue(it,it in ToolRegistry.definitions)}
+    @Test fun cloudIsOfferedEveryToolTheLocalModelIsOffered(){
+        assertEquals(ToolRegistry.definitions.keys,tools)
+        assertTrue(tools.size<=128) // agent_bridge.py / device_tools_mcp.py MAX_TOOLS
         assertFalse(tools.any{it.startsWith("pc_")})
-        // agent_bridge.py bounds the registered catalog JSON at 65,536 bytes.
-        assertTrue(ToolRegistry.schemaJson(tools.sorted()).toByteArray().size<60_000)
+        assertTrue(tools.all{it.matches(Regex("[a-z][a-z0-9_]{0,63}"))})
     }
-    @Test fun coversTheOwnerRequestedCategoriesWithoutDirectSendOrDelete(){
-        listOf("search_contacts","list_calendar_events","get_sms_summary","prepare_sms","search_web","read_screen","screen_action").forEach{assertTrue(it,it in tools)}
-        listOf("send_gmail_message","reply_gmail_message","reply_messenger_notification","delete_note","delete_reminder","delete_memory","patch_note").forEach{assertFalse(it,it in tools)}
+    @Test fun fullRegistrationFitsTheWireAndIsExportedForPcSchemaValidation(){
+        val capture=ExternalAgentCapture("10000000-0000-4000-8000-000000000001","thread","branch","project","binding",3,
+            "a".repeat(64),tools,true,pcWorkspaceProfile="phone-only",requirePlan=true)
+        val registration=capture.registration()
+        val catalogBytes=registration.getValue("phoneTools").toString().toByteArray().size
+        assertTrue("catalog $catalogBytes",catalogBytes<200_000) // agent_bridge.py catalog bound
+        // pc-worker/tests reads this file to run the broker and MCP schema validators on the real catalog.
+        File("build/cloud-phone-catalog.json").writeText(registration.getValue("phoneTools").toString())
     }
 }

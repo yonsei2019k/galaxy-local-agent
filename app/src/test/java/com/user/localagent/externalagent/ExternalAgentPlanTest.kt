@@ -59,7 +59,7 @@ class ExternalAgentPlanTest {
         assertTrue(runCatching{ExternalAgentController(c,broker,{live(c)},{error("no effect")},{})}.isFailure)
         assertEquals(0,broker.registrations)
         assertTrue(runCatching{ExternalAgentCapture(owner,"thread","branch","project","workspace",3,"a".repeat(64),
-            setOf("patch_note"),allowExternalAgent=true,requirePlan=true)}.isFailure)
+            setOf("not_a_registered_tool"),allowExternalAgent=true,requirePlan=true)}.isFailure)
     }
     @Test fun hostContextMustBePersistedBeforePlanAckAndNoActionRunsJustBecauseAPlanWasAccepted()=runBlocking {
         val c=capture();val b=Broker(c);var effects=0;var plans=0

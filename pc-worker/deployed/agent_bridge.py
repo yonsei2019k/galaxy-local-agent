@@ -44,7 +44,9 @@ PC_TOOLS = (
          "maxBytes": {"type": "integer", "minimum": 1, "maximum": 32768}}, "required": ["path"]}},
 )
 _PATTERNS = frozenset((r"^[a-f0-9]{64}$", r"^[a-fA-F0-9]{64}$", r"^[0-9]{1,19}$",
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    # Fixed anchored patterns of the full Android tool catalog (dates, goal versions, recording ids).
+    r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$", r"^[1-9][0-9]{0,18}$"))
 
 
 class BridgeError(Exception):
@@ -422,7 +424,7 @@ class AgentBridge:
         _require(profile is None or type(profile) is str and
                  (profile == "phone-only" or profile in self._profiles), "WORKSPACE_PROFILE")
         offered = body["phoneTools"]
-        _require(type(offered) is list and len(offered) <= 32, "TOOL_CATALOG_BOUND")
+        _require(type(offered) is list and len(offered) <= 128, "TOOL_CATALOG_BOUND")
         catalog = {}
         for spec in offered:
             _shape(spec, ("name", "description", "inputSchema"))
@@ -437,7 +439,7 @@ class AgentBridge:
             catalog.update({item["name"]: copy.deepcopy(item) for item in PC_TOOLS})
         _require(not require_plan or "plan_task" not in catalog, "PLAN_TOOL_RESERVED")
         _require(bool(catalog), "EMPTY_TOOL_CATALOG")
-        _bounded_json(list(catalog.values()), 65_536)
+        _bounded_json(list(catalog.values()), 200_000)
         _require(owner not in self._owners, "PARENT_ALREADY_REGISTERED", 409)
         _require(len(self._sessions) < self._limit, "SESSION_CAPACITY", 429)
         now = self._now()
