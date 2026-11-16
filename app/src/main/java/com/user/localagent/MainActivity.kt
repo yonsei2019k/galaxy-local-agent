@@ -165,8 +165,9 @@ class MainActivity : ComponentActivity() {
             com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(false)
             app.runs.chooseModel("auto",threadId);status.value="클라우드 도구 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다.";return
         }
-        if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId||busy.value||app.imageStudio.state.value.running||RuntimeGate.inference.get()||RuntimeGate.benchmark.get()){
-            status.value="현재 작업을 마치고 선택한 대화를 확인한 뒤 모델을 바꿔주세요.";return
+        // Preference only: the coordinator retains the model/authority captured by active requests.
+        if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId){
+            status.value="선택한 대화를 불러온 뒤 모델을 바꿔주세요.";return
         }
         val pairedText=com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(id)!=null&&com.user.localagent.compute.PcComputeSettings.get(this).state.value.let{it.paired&&!it.claudeText}
         if(id==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID){
@@ -188,7 +189,7 @@ class MainActivity : ComponentActivity() {
             onDismissRequest={externalAgentConsentThread.value=null},title={Text("클라우드 도구 연결")},
             text={Text("이 모델로 새로 보내는 요청과 허용된 도구 결과가 연결된 개인 PC의 Codex를 통해 클라우드에 전달됩니다. 현재는 시간·프로젝트 저장소 조회와 메모 저장·검색·읽기를 지원합니다. 변경 작업은 기존 실행 확인을 거치며 로컬 모델은 계속 선택할 수 있습니다.")},
             confirmButton={TextButton(onClick={
-                if(app.runs.selectedThreadId.value==threadId&&!busy.value){
+                if(app.runs.selectionReady.value&&app.runs.selectedThreadId.value==threadId){
                     com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(true)
                     app.runs.chooseModel(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID,threadId)
                 }

@@ -2,7 +2,7 @@ name: Android checks and trusted release
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, codex/internal-release]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,7 +17,8 @@ jobs:
       RELEASE_VERSION_NAME: 0.1.${{ github.run_number }}
     steps:
       - name: Set monotonic version code
-        run: printf 'RELEASE_VERSION_CODE=%s\n' "$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+        # Above historical local1090; this workflow's run number remains monotonic.
+        run: printf 'RELEASE_VERSION_CODE=%s\n' "$((2000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
@@ -33,7 +34,7 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --no-daemon --console=plain
+          ./gradlew :core:test :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:assembleDebugAndroidTest -x ':app:buildCMakeDebug[arm64-v8a]' --no-daemon --console=plain
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -41,8 +42,15 @@ jobs:
           path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 1
+      - name: Upload device-test artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: device-test-apk
+          path: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          if-no-files-found: error
+          retention-days: 1
   sign-and-release:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/internal-release')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -52,7 +60,7 @@ jobs:
       RELEASE_VERSION_NAME: 0.1.${{ github.run_number }}
     steps:
       - name: Set monotonic version code
-        run: printf 'RELEASE_VERSION_CODE=%s\n' "$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+        run: printf 'RELEASE_VERSION_CODE=%s\n' "$((2000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
@@ -93,5 +101,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          printf 'Automated tested build from commit %s. Device performance is verified separately on Galaxy S26.\n' "$GITHUB_SHA" > release/notes.txt
-          gh release create "v$RELEASE_VERSION_NAME" "release/galaxy-local-agent-$RELEASE_VERSION_NAME.apk" release/update.json release/SHA256SUMS --title "Galaxy Local Agent $RELEASE_VERSION_NAME" --notes-file release/notes.txt --target "$GITHUB_SHA"
+          printf 'Automated tested build from commit %s. Device installation and workflows are verified separately.\n' "$GITHUB_SHA" > release/notes.txt
+          gh release create "v$RELEASE_VERSION_NAME" "release/galaxy-local-agent-$RELEASE_VERSION_NAME.apk" release/update.json release/SHA256SUMS --title "ZipHap.Agent $RELEASE_VERSION_NAME" --notes-file release/notes.txt --target "$GITHUB_SHA" --latest
