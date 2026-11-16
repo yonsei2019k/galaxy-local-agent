@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:assembleDebugAndroidTest -x ':app:buildCMakeDebug[arm64-v8a]' --no-daemon --console=plain
+          ./gradlew :core:test :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:assembleDebugAndroidTest -Pkotlin.compiler.execution.strategy=in-process -x ':app:buildCMakeDebug[arm64-v8a]' --max-workers=2 --no-daemon --console=plain
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
