@@ -1,5 +1,11 @@
 # Galaxy Local Agent implementation contracts
 
+## Signed deployment branch and next-request selection2006
+
+Pushes to the dedicated `codex/internal-release` branch run the trusted CI build/sign/latest-manifest pipeline. Only configured trusted release refs may publish; PRs cannot release. Existing signing keys, APK/capability/permission checks, source identity and busy/cancellation fences remain. CI code is2000+workflow run number in both jobs. Phone checks and Android-confirmation limits are specified in [automatic update operations](docs/automatic-updates.ko.md); publication, installer request and installed-byte evidence are separate states.
+
+Model selection persists a next-request preference and must not be blocked solely by unrelated image/inference/benchmark busy state. The selected conversation must still be ready and unchanged, cloud consent is explicit, and active/queued request captures do not acquire a new model or new authority. This does not add cloud model catalogs, answer streaming or desktop conversation synchronization.
+
 ## Image route recovery and output identity1090
 
 Image polling and cleanup may recover only through known routes carrying the original server ID, certificate pin and token. Saved routes from a replacement pairing are excluded. Probes are bounded read-only health calls; a route change never creates/replays a write, resumes a paused job, changes its model or grants authority. Normal polling rechecks captured permissions and cancellation. Cleanup keeps the original job/owner and worker-instance proof; an unavailable route, false cleanup flag or404 from another worker cannot release the compute lease. Persisting a recovered endpoint is atomic and conditional on the pairing still matching.

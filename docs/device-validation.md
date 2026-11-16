@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-16 installed2006: actual trusted self-update and paired overlay
+
+CI43855300026 source08ad842aa0fe49de295c9d6a7f1b6f9ec9682dc4 passes full core/app JVM tests, release lint/release/device-test build18m18 and existing-key signing/latest v0.1.6 publication. Independent Ed25519 envelope/source/code/capability validation and APK signer/permission checks PASS. Phone2006 production base2b15ca1e83e85b0be2d66272128781da6b26738b33779586a04f9f77811c2aa0/test4c6d2f11c251686b19fd44889045a0ccb458446d0c9968bc643b2739a7844608 match exact verified artifacts.
+
+Actual phone UpdateValidation.requestTrustedSelfUpdate1 PASS invokes the real UpdateManager; receipt says installation requested/version2006, then independent package/base readback proves installation. Production was not installed by adb; test APK alone was signed locally and installed via adb. Current self-update needed no additional system-confirmation action. QA-triggered check does not establish unattended foreground/background timing on all devices. Prepublication baseline1 separately captured1090/stale-channel status/0 builtin default grants; no positive-grant carry proof is promoted. Existing strict four-positive-default-grant verify method was not invoked on this zero-grant baseline.
+
+Installed2006 actual pinned direct Tailscale phone check1 PASS; this home-Wi-Fi check is not external handoff. Owner-approved suspend preserved exact active10of50 checkpoint/request/owner/hash/creation/binding and independently cleaned/idle worker before update. No resume/delete/model substitution/worker restart. New cloud conversation/selection-under-busy UI/answer streaming/desktop room synchronization are not device-qualified by this update test. Private logs/receipts remain ignored under .local.
+
 ## 2026-11-16 built/signed1090 only; actual installation pending
 
 Image polling/cleanup same-pair route recovery and previous-output identity corrections pass core947+app937=1884 JVM checks, including new7 route/4 state cases, with0fail/error/skip. Full build18m19/lint0errors145warnings1hint. Main a6e3c10fe484f26f3e7a78fcb521b758d18cb18aec8d1de4324d570de2ff423f and test0fb51415ee61689b70a46a4ae73fb8dbf1dc7af0253cb98b476020af8e1f703e signed/verified; package/version1090/original update signer match. Current wireless ADB is unreachable; last verified installed1089 is unchanged. No actual1090 phone cleanup, external-network handoff or image-output UI pass is claimed. Read-only PC GET confirms retained original paused/checkpoint10of50/cleanup_complete=true; no image resume/delete/model change/worker restart. Existing1089 actual image evidence remains separate. See PROJECT_STATE and image-workflow-repair-2026-11-16.ko.md.

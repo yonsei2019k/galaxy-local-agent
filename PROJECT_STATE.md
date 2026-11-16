@@ -2,6 +2,16 @@
 
 Updated 2026-11-16. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Installed2006 (0.1.6); signed GitHub update path and next-request model choice
+
+Owner requested build/deploy/direct installation and future automatic GitHub updates. Release branch `codex/internal-release` is now tracked by this workspace; pushes run full core/app JVM tests, release lint, release/device-test APK builds, then existing-key signing and latest-release publication. CI code2000+run number stays above historical local1090. [Update operation contract](docs/automatic-updates.ko.md).
+
+Run43855300026/source08ad842aa0fe49de295c9d6a7f1b6f9ec9682dc4 passes build18m18 and signing/publication; v0.1.6 is latest. Signed manifest independently verifies exact source/code2006, original publisher key/certificate and unchanged capability set. Actual APK has no new Android permissions. Production2b15ca1e83e85b0be2d66272128781da6b26738b33779586a04f9f77811c2aa0 and test4c6d2f11c251686b19fd44889045a0ccb458446d0c9968bc643b2739a7844608 match installed base bytes. Phone's actual UpdateManager requested/installed the production update from GitHub; no adb install of production was used. QA explicitly invoked the update check; unattended foreground/background timing is not qualified by that invocation. The current install completed without an additional system-confirmation action. Existing source checks remain foreground60s/idle and background15min/unmetered/Android-scheduled, with system confirmation/new-permission review when required. Actual2006 pinned direct Tailscale phone check1 PASS; external-network handoff remains untested.
+
+MainActivity now permits changing only the next request's model preference while another task is busy; captured active/queued models and permissions remain unchanged. Busy cloud-consent confirmation also preserves selected-thread/ready checks without the irrelevant global busy denial. Response streaming, GPT/Claude model/reasoning selection and desktop Codex room synchronization remain unimplemented. No fresh cloud conversation/model-quality test is claimed for2006.
+
+Owner explicitly approved preserving/checkpointing and pausing before installation. Exact active image checkpoint10of50, original request/owner/hash/creation/binding and cleanup/empty-idle were verified after suspend; no model switch/delete/worker restart/automatic resume.1090 was independently verified installed before upgrade. Current update QA baseline had0 builtin default grants, so this run does not qualify positive grant-carry behavior. Private receipts remain ignored under .local.
+
 ## Built/signed1090; image route recovery and previous-result identity, not yet installed
 
 1090 is now downloadable from the [GitHub internal-test prerelease](https://github.com/yonsei2019k/galaxy-local-agent/releases/tag/internal-1090). Exact tested APK123208237bytes/server SHA256 match the signed artifact below; target source c6fe95a929777069a6b9cad2c0bd230f2880a2d1. Download/open uses Android's installer without ADB/Tailscale; original signing/appID are retained. Stable latest/update.json remains v0.1.4; this manual prerelease is not an automatic-channel rollout. Phone installation/readback remains unverified.
