@@ -114,7 +114,10 @@ class ScreenBridgeController(context: Context) {
     companion object { private val CONSENT_LOCK = Any() }
 }
 
-/** Never reads node text/contentDescription or event payloads. No logging, networking, gestures, or global actions. */
+/**
+ * The inspector and Kakao paths here read metadata only. Agent screen control (ScreenControl) uses this
+ * service separately, behind its own in-app switch, and reads visible text of the foreground app.
+ */
 class ScreenBridgeService : AccessibilityService() {
     private val version = AtomicLong(1)
     private var schema: ScreenSchema? = null

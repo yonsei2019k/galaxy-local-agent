@@ -54,6 +54,7 @@ class AgentCapabilities(context:Context) {
                 AppOpsManager.OPSTR_GET_USAGE_STATS,Process.myUid(),context.packageName)==AppOpsManager.MODE_ALLOWED
         })grants+="usage_access"
         if(check("screen_access"){ScreenBridgeController(context).state().systemEnabled})grants+="screen_access"
+        if(check("screen_control_access"){com.user.localagent.integrations.ScreenControl(context).ready()})grants+="screen_control_access"
         // System access alone never proves per-app content consent or an adapter's actual behavior.
         checks["kakao_screen_access"]=CapabilityCheck.UNCONFIRMED
 
@@ -165,6 +166,6 @@ internal object AgentCapabilityReport {
         "android.permission.READ_SMS","android.permission.READ_CALL_LOG","android.permission.READ_CONTACTS",
         "android.permission.READ_CALENDAR","android.permission.WRITE_CALENDAR","android.permission.READ_MEDIA_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE","android.permission.RECORD_AUDIO","android.permission.POST_NOTIFICATIONS",
-        "notification_access","usage_access","screen_access","kakao_screen_access",
+        "notification_access","usage_access","screen_access","screen_control_access","kakao_screen_access",
         "handler:calendar","handler:alarm","handler:sms","handler:email","handler:maps","handler:browser")
 }

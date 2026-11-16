@@ -73,9 +73,13 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val reviewedTargets=mutableMapOf<String,Pair<String,Long>>()
     private fun reviewKey(call:ToolCall)=call.name+":"+JsonObject(call.arguments.toSortedMap())
     /** The approval names a real scoped record, and its revision must still match at the mutation. */
+    /** Typing and commit-like taps need the owner even though navigation taps do not. */
+    suspend fun screenActionNeedsOwner(call:ToolCall):Boolean=call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION&&
+        com.user.localagent.integrations.ScreenControl(context).review(call).first
     suspend fun reviewForAction(call:ToolCall):String? {
         ToolRegistry.validate(call)
         if(call.name=="patch_note")return checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.review(resolveOwnerText(call))
+        if(call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION)return com.user.localagent.integrations.ScreenControl(context).review(call).second
         if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)return requestConnections.reviewForAction(call)
         val target=when(call.name){
             "update_note","delete_note"->{val note=repository.getNote(call.s("id"))?:error("대상 메모가 없어 변경·삭제하지 않았습니다.");Triple(note.toString(),note.updatedAt,"메모: ${note.title}\n범위: ${note.collection}\n현재 본문:\n${note.body.take(1200)}")}
@@ -144,6 +148,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             if(call.name in NoteReadPatchToolCatalog.names){
                 check(call.name in capturedAvailableTools){"NOTE_TOOL_NOT_CAPTURED"}
                 return@withContext checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.execute(if(call.name=="patch_note")resolveOwnerText(call)else call)
+            }
+            if(call.name in com.user.localagent.core.ScreenControlToolCatalog.names){
+                check(connectionRunId==null||connectionIsRunLive()){"화면 제어 요청이 중단됐습니다."}
+                return@withContext com.user.localagent.integrations.ScreenControl(context).execute(call)
             }
             if(call.name in KakaoScreenToolCatalog.names){
                 check(connectionRunId!=null&&connectionIsRunLive()){"카카오톡 조회의 원래 실행이 끝났습니다."}

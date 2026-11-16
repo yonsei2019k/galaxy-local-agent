@@ -187,7 +187,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun AppScreen() {
         externalAgentConsentThread.value?.let {threadId->AlertDialog(
             onDismissRequest={externalAgentConsentThread.value=null},title={Text("클라우드 도구 연결")},
-            text={Text("이 모델로 새로 보내는 요청과 허용된 도구 결과가 연결된 개인 PC의 Codex를 통해 클라우드에 전달됩니다. 현재는 시간·프로젝트 저장소 조회와 메모 저장·검색·읽기를 지원합니다. 변경 작업은 기존 실행 확인을 거치며 로컬 모델은 계속 선택할 수 있습니다.")},
+            text={Text(com.user.localagent.externalagent.ExternalAgentSettings.CONSENT_TEXT)},
             confirmButton={TextButton(onClick={
                 if(app.runs.selectionReady.value&&app.runs.selectedThreadId.value==threadId){
                     com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(true)

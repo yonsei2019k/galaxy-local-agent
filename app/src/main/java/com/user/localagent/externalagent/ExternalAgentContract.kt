@@ -107,7 +107,19 @@ object ExternalAgentContract {
     const val MAX_TTL_MS=900_000L
     const val MAX_WIRE_BYTES=262_144
     const val MAX_RESULT_BYTES=131_072
-    val NORMAL_PHONE_TOOLS:Set<String> = setOf("get_current_datetime","inspect_project_storage","save_note","search_notes","read_note")
+    /**
+     * Phone tools a cloud model may propose. Each still runs through runTool: project/mode policy,
+     * recipient choice, owner approval and the effect guard. PREPARED hand-offs pause the run.
+     * The PC broker accepts at most 32 tools per session.
+     */
+    val NORMAL_PHONE_TOOLS:Set<String> = linkedSetOf(
+        "get_current_datetime","inspect_project_storage","save_note","search_notes","read_note",
+        "list_calendar_events","find_free_time","search_contacts","get_sms_summary","get_call_log_summary",
+        "list_reminders","search_memories","search_web","read_webpage","search_shopping","search_youtube_videos",
+        "calculate","date_calculate",
+        "prepare_sms","prepare_calendar_event","prepare_email","create_reminder","create_alarm",
+        "open_map","open_tmap_destination","open_coupang",
+        "read_screen","screen_action")
     val PC_TOOLS:Set<String> = setOf("pc_inspect_workspace","pc_read_file")
     fun uuid(value:String) { require(runCatching { UUID.fromString(value).toString()==value }.getOrDefault(false)){"BRIDGE_UUID"} }
     fun bounded(value:String,max:Int) { require(value.isNotBlank()&&value.length<=max&&value.none { it.code<32 }){"BRIDGE_TEXT"} }

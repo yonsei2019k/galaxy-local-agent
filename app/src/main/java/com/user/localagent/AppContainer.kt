@@ -172,6 +172,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
         if(com.user.localagent.integrations.KakaoScreenReader(appContext).binding()!=null&&com.user.localagent.integrations.ScreenBridgeController(appContext).state().let{it.systemEnabled&&it.connected})grants+="kakao_screen_access"
         if(automation.hasUsageAccess())grants+="usage_access"
         if(com.user.localagent.integrations.ScreenBridgeController(appContext).state().systemEnabled)grants+="screen_access"
+        if(com.user.localagent.integrations.ScreenControl(appContext).ready())grants+="screen_control_access"
         val handlers=mutableSetOf<String>()
         handlers+=com.user.localagent.connections.ConsumerApps(appContext).installed().map {"consumer:${it.id}"}
         val candidates=mapOf("calendar" to android.content.Intent(android.content.Intent.ACTION_INSERT,android.provider.CalendarContract.Events.CONTENT_URI),

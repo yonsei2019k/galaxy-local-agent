@@ -1,3 +1,15 @@
+## 2026-11-16 — ACTIVE 클라우드 휴대폰 도구 확대·화면 제어 (root, 소스)
+
+소유자 지시: 계획 없는 클라우드 답변 일시 정지 수정, 클라우드 모델에서 문자·일정·연락처·검색 등 사용, 스마트폰 화면 제어. 소유 파일: ChatRunCoordinator.executeCloudPhoneRequest/performTool 확인 조건, externalagent/(CloudAgentFinals 신규, ExternalAgentContract.NORMAL_PHONE_TOOLS, ExternalAgentSettings 동의 판2), integrations/ScreenControl.kt 신규·ScreenBridgePanel 스위치·screen_bridge_service.xml packageNames 제거, ToolExecutor 분기, core ScreenControlToolCatalog 신규·Tools 등록·ToolCapabilityCatalog, pc-worker/deployed/codex_agent_provider.py 지침. 계약 변경: 등록 도구 104→106, 클라우드 phone tool 5→28, 기존 클라우드 동의는 판1이라 재동의 필요, PREPARED는 즉시 일시 정지·provider 취소, 계획·호출 0인 reported_done은 미검증 표시 답변으로 완료(toolFreeAnswer receipt). JVM core951/app939 PASS(신규 포함 전), 릴리스/lint·설치·실기 미실행. PC provider 새 지침은 .next로 준비만 했고 이미지 작업(sd-server 상주) 때문에 작업기 재시작 전이다.
+
+## 2026-11-16 — READONLY 이동통신망 클라우드 요청 일시 정지 원인 진단
+
+소유자가 Wi-Fi를 끄고(LTE+Tailscale) 클라우드 모델로 9자 요청을 보냈고 앱은 '종료 응답과 별도로 실행·후속 조회 근거가 충분하지 않아 일시 정지'를 표시했다. 이 문구는 provider 최종 report를 받은 뒤에만 나오므로 LTE→Tailscale→PC→Codex→폰 왕복은 동작했다(PC Tailscale에서 폰 direct 공인 주소 확인). 새 test-only `ExternalAgentRecentRunDiagnostic`(DB 쓰기 없음, 요청·인자·결과·답변 미출력)를 만들어 테스트 APK만 빌드·서명·설치(SHA abbce58d…, main 2006 미변경)하고 실행했다: run 240c1047, 20:58:23 생성, 9.7초, paused/execution_not_verified, externalAgentPlan 없음, 도구 단계 0, receipt 없음. 즉 Codex가 plan_task와 휴대폰 도구를 호출하지 않고 바로 reported_done 계열로 끝냈고, executeCloudPhoneRequest가 accepted plan=null을 미완료로 판정했다. 현재 계약상 계획 없는 직접 답변은 항상 일시 정지되고 답변 본문은 표시되지 않는다. 소스·provider·설정 수정 없음. 진단 test 파일은 미커밋.
+
+## 2026-11-16 — READONLY 집 밖 Tailscale + 클라우드 에이전트 준비 상태 점검
+
+소유자 질문: 외부에서 Tailscale로 클라우드 모델 작업이 되는가. 소스/설정/모델/작업기 변경 없음. PC: 작업기 실행 중, agent-provider.json의 Codex 실행 파일·MCP 스크립트 SHA 일치, Codex CLI ChatGPT 로그인 확인, Claude API 키 파일 없음(/v1/cloud/chat은 CLAUDE_KEY_REQUIRED 예상, 현재 제품 선택지는 Codex 기반 하나). 폰: 설치2006, 집 Wi-Fi+LTE+Tailscale VPN 연결, Tailscale peer s26 idle. GPU 유휴 확인 후 TailscaleTransportValidation 1개 PASS 201ms(VPN, 인증·서버 동일성·원래 인증서 핀, LAN fallback 불허), 검사 후 앱 실행 요청. 소스상 클라우드 경로(PcAgentBridgeTransport)는 PcTransport.available을 써서 저장 주소→LAN 탐색→Tailscale overlay 순으로 붙는다. 미검증: 실제 이동통신망에서 클라우드 에이전트 전체 요청, Wi-Fi↔LTE 전환 중 요청, 앞서 보고된 'PC 사용 불가' 원인. 기존 실제 클라우드 canary는 versionCode 1088 고정이라 2006에서 실행하지 않았다.
+
 ## 2026-11-16 — COMPLETE installed2006 signed GitHub self-update; cloud visibility gaps remain
 
 Owner-approved checkpoint10of50 pause and original request/owner/requestHash/createdWall/binding equality/cleanup/independent empty-idle verified. Home ADB independently proves installed1090 matched its published APK before upgrade. Root source MainActivity preference guard and trusted CI release branch are implemented. Workspace now tracks codex/internal-release; source08ad842aa0fe49de295c9d6a7f1b6f9ec9682dc4. Run5 was deliberately cancelled by the bounded in-process Kotlin follow-up; final run6/43855300026 succeeds full core/app JVM/lint/release/device-test build18m18, signing and latest v0.1.6/code2006 publication. Existing keys reused, no models/private artifacts/new permissions published. Existing foreground60s/idle and background15min/unmetered/OS-scheduled update checks remain.

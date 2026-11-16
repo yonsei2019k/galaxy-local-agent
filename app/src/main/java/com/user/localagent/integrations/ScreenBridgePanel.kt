@@ -72,6 +72,18 @@ fun ScreenBridgePanel(context: Context, open: (Intent) -> Unit, report: (String)
             runCatching { open(controller.settingsIntent()) }
                 .onFailure { status("Android 화면 접근 설정을 열지 못했습니다. 시스템 설정에서 직접 확인해주세요.") }
         }, modifier = Modifier.fillMaxWidth()) { Text("시스템 화면 접근 설정") }
+        val control = remember(appContext) { ScreenControl(appContext) }
+        var controlOn by remember(control) { mutableStateOf(control.enabled()) }
+        Text("에이전트 화면 제어", style = MaterialTheme.typography.titleMedium)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("대화 요청으로 지금 보이는 앱의 화면을 읽고 누르기·입력·스크롤·뒤로·홈·앱 열기를 실행합니다. 모든 앱이 대상이며, 글자 입력과 보내기·결제·삭제·확인 같은 버튼은 실행 전에 확인을 받습니다. 잠금·설정·권한·설치·결제 앱 화면과 비밀번호 칸은 다루지 않습니다. 클라우드 모델을 쓰면 화면 글자가 클라우드로 전달됩니다.",
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            Switch(checked = controlOn, onCheckedChange = { on ->
+                control.setEnabled(on); controlOn = on
+                status(if (on) "에이전트 화면 제어를 켰습니다. Android 접근성 서비스도 켜져 있어야 합니다." else "에이전트 화면 제어를 껐습니다.")
+            })
+        }
+        HorizontalDivider()
         Text("앱별 허용", style = MaterialTheme.typography.titleMedium)
         Text("스위치는 앱 내부 동의입니다. Android 서비스 권한을 대신 켜지 않습니다. 설치한 앱과 실제 화면이 지원되는지는 검사창에서 확인하세요.",
             style = MaterialTheme.typography.bodySmall)

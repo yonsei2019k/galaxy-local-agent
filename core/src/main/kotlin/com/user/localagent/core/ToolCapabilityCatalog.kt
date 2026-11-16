@@ -43,6 +43,7 @@ object ToolCapabilityCatalog {
                 "list_audio_recordings","transcribe_recording"->if(env.apiLevel>=33)"android.permission.READ_MEDIA_AUDIO" else "android.permission.READ_EXTERNAL_STORAGE"
                 "list_messenger_notifications","reply_messenger_notification"->"notification_access"
                 "read_kakao_screen"->"kakao_screen_access"
+                ScreenControlToolCatalog.READ,ScreenControlToolCatalog.ACTION->"screen_control_access"
                 else->null
             }
             val handler=consumer?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url"->"browser";else->null}

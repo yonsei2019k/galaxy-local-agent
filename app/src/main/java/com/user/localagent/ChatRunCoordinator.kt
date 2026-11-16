@@ -1048,6 +1048,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             request.externalAgentRevision,ExternalAgentContract.sha(request.text),tools,true,expiresAfterMs=360_000,
             pcWorkspaceProfile="phone-only",requirePlan=true)
         var plan:ExternalAgentPlan?=null
+        var preparedSeen=false
         var taskGoal:com.user.localagent.core.TaskGoal?=null
         val actual=linkedMapOf<String,PhoneAgentExecution>()
         suspend fun authority():ExternalAgentLiveAuthority {
@@ -1069,6 +1070,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 runTool(call)
             },recordActual={entry->
                 check(actual.put(entry.proposal.callId,entry)==null)
+                // Same as the local path: a handed-off Intent stops the run before the model can repeat it.
+                if(entry.result.success&&entry.result.verification==com.user.localagent.core.VerificationState.PREPARED)preparedSeen=true
                 check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
@@ -1106,10 +1109,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val value=client.providerStatus()
                     if(value.getValue("state").jsonPrimitive.content=="FINISHED")return@withTimeout value
                     controller.pumpOnce()
+                    if(preparedSeen)return@withTimeout value
                     if(controller.phase !in setOf(ExternalAgentController.Phase.ACTIVE,ExternalAgentController.Phase.RESULT_PENDING))return@withTimeout value
                     delay(250)
                 }
                 @Suppress("UNREACHABLE_CODE") error("BRIDGE_PROVIDER_LOOP")
+            }
+            if(preparedSeen){
+                publishActionFinal(request,requestAuthorizedTools,CloudAgentFinals.PREPARED_PAUSE,true);return
             }
             val report=provider["report"]?.takeUnless{it is JsonNull}?.jsonObject
             if(report==null){publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다. 실제 확인한 결과만 보존했습니다.",true);return}
@@ -1117,6 +1124,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(resultState=="needs_input"){
                 val question=report.getValue("question").jsonPrimitive.content
                 publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"요청을 마치려면 추가 정보가 필요합니다."},true);return
+            }
+            if(CloudAgentFinals.isToolFreeAnswer(resultState,plan!=null,actual.size,requestSteps.size)){
+                check(authority().permits(capture))
+                controller.close();closed=true
+                answer(CloudAgentFinals.toolFreeAnswer(report.getValue("answer").jsonPrimitive.content))
+                recordCloudReceipt(request.runId,null,0,report.getValue("elapsedMs"))
+                app.repository.chat.updateRun(request.runId,"completed")
+                workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
+                status.value="클라우드 응답 완료 · 도구 확인 없음"
+                return
             }
             val accepted=plan
             val evidence=client.taskEvidence()
@@ -1134,13 +1151,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 else if(requestAuthorizedTools.isEmpty())"도구 실행 없이 생성한 답변:\n$answerText"
                 else "확인한 도구: ${requestAuthorizedTools.sorted().joinToString()}\n$answerText"
             persistStepEvidence();answer(final)
-            val beforeClose=checkNotNull(app.repository.chat.run(request.runId))
-            val closeContext=Json.parseToJsonElement(beforeClose.contextJson).jsonObject
-            app.repository.chat.updateRunContext(request.runId,JsonObject(closeContext+mapOf("externalAgentReceipt" to buildJsonObject{
-                put("sessionClosed",true);put("planDigest",checkNotNull(accepted).planDigest)
-                put("actualPhoneCalls",actual.size);put("pcCalls",0);put("phoneEvidenceImported",false)
-                put("providerMs",report.getValue("elapsedMs"))
-            })).toString())
+            recordCloudReceipt(request.runId,checkNotNull(accepted).planDigest,actual.size,report.getValue("elapsedMs"))
             app.repository.chat.updateRun(request.runId,"completed")
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
             status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
@@ -1151,6 +1162,17 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 runCatching{controller.cancel()}
             }
         }
+    }
+
+    /** planDigest null marks a model-only answer: no plan, no phone call, not execution evidence. */
+    private suspend fun recordCloudReceipt(runId:String,planDigest:String?,phoneCalls:Int,providerMs:JsonElement) {
+        val beforeClose=checkNotNull(app.repository.chat.run(runId))
+        val closeContext=Json.parseToJsonElement(beforeClose.contextJson).jsonObject
+        app.repository.chat.updateRunContext(runId,JsonObject(closeContext+mapOf("externalAgentReceipt" to buildJsonObject{
+            put("sessionClosed",true);put("planDigest",planDigest);put("toolFreeAnswer",planDigest==null)
+            put("actualPhoneCalls",phoneCalls);put("pcCalls",0);put("phoneEvidenceImported",false)
+            put("providerMs",providerMs)
+        })).toString())
     }
 
     private suspend fun writeLimitedFinalNotice(request:QueuedChatRequest,limited:Boolean):Boolean {
@@ -2106,8 +2128,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val traceAttempt=workTraceSession?.attempt(call)
         val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}
         val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
-        val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)
         val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
+        val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)||tools.screenActionNeedsOwner(call)
         val targetReview=tools.reviewForAction(call)
         var noteOwnerAccepted=false
         if((confirmation&&!targetConfirmed||call.name=="patch_note")&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
