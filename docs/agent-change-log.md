@@ -1,3 +1,18 @@
+## 2026-11-17 — 원격 실기 결과: 일정 성공, 연락처 실패 → 수정 (root, 소스)
+
+**실기 증거.** v0.1.10 이상 앱, 외부망(LTE+Tailscale)에서 PC 원격 시험 요청을 실행했다. 모델은 `paired-pc-cloud-agent-v1`이다.
+- "오늘 일정 알려줘": 완료. `get_current_datetime`과 `list_calendar_events`가 VERIFIED였고, 실제 캘린더 일정 3건으로 답했다.
+- "연락처에 저장된 사람이 몇 명인지 알려줘": 실패(`IllegalArgumentException`, "query 길이 또는 내용 오류"). 도구 기록은 0건이었다.
+
+**원인.**
+- `search_contacts`는 검색어가 필수라서 "몇 명"을 셀 방법이 없었다. 모델은 빈 query를 보냈다.
+- 5bb8f97 이후 잘못된 인자는 FAILED·미실행 단계로 기록된다. 그런데 `ChatRunState`는 저장된 previousSteps를 복원할 때 모든 단계를 `ToolRegistry.validate`로 다시 검사했다. 이 때문에 모델이 고치기 전에 run 전체가 실패했다.
+
+**수정.**
+- 복원할 때 FAILED 단계는 선언된 인자 이름만 확인한다. 값은 검사하지 않으며, 효과 증거로 쓰지 않는다. 그 밖의 단계는 지금처럼 완전히 검증한다.
+- `search_contacts`에 빈 query(정확히 "")를 넘기면 저장된 연락처 수만 돌려준다. 이름·번호를 내보내지 않고 수신자 증거도 만들지 않는다. 공백 query와 query 누락은 여전히 거부한다.
+- core `ContactCountArgumentTest`를 추가했다.
+
 ## 2026-11-17 — PC 원격 시험 요청 기본 켜짐 (root, 소스)
 
 **배경.** 소유자는 외부에 있었고, v0.1.10의 스위치(기본 꺼짐, 3시간)를 켜 달라는 요청에 "니가 해"라고 답했다. 원격으로 스위치를 켤 경로는 없다.

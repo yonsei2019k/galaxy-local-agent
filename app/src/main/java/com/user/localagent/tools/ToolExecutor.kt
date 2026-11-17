@@ -345,6 +345,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     }
     private fun searchContacts(call:ToolCall):String {
         require(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED){"연락처 읽기 권한을 먼저 허용해주세요."}
+        if(call.s("query").isEmpty()){
+            // Count only: no names or numbers leave the provider, and no recipient evidence is created.
+            val count=context.contentResolver.query(ContactsContract.Contacts.CONTENT_URI,arrayOf(ContactsContract.Contacts._ID),null,null,null)?.use{it.count}
+                ?:error("연락처 제공자를 읽지 못했습니다.")
+            return "저장된 연락처 ${count}명 (이름·번호는 포함하지 않음)"
+        }
         val uri=Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,Uri.encode(call.s("query")))
         val result=contactLookup?.invoke(call.s("query"),101)?:mutableListOf<ContactCandidate>().also{items->
             context.contentResolver.query(uri,arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER),null,null,null)?.use {cursor->while(items.size<101&&cursor.moveToNext())items+=ContactCandidate(cursor.getString(0).orEmpty(),cursor.getString(1).orEmpty())}

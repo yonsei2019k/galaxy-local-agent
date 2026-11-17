@@ -32,7 +32,7 @@ object ToolRegistry {
         "create_alarm" to "Open the phone's clock app with an alarm at hour (0-23) and minute; optional label and repeat days. The clock app confirms setting it.",
         "save_note" to "Save a private note: title=optional heading; content=complete body/report. contentQuoteId only for complete owner BODY copied verbatim. One payload; read back.",
         "search_notes" to "Find notes by literal title/body. Returns id, collection and updatedAt for read_note/patch_note; obtain these via search, not owner questions. Preserve query spaces; omit unknown scope.",
-        "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person.",
+        "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person. An empty query returns only how many contacts are saved, without names or numbers.",
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
         "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
         "open_map" to "Open the default map app searching for a place or address. Does not start turn-by-turn navigation by itself.",
@@ -131,7 +131,7 @@ object ToolRegistry {
             val value=call.arguments[key]
             require(!spec.required || value!=null){"필수 인자가 없습니다: $key"}
             if(value!=null) when(spec.type) {
-                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (call.name=="search_notes" && key=="scope" && !spec.required && value.content.isEmpty()) || (call.name=="patch_note" && (key=="newText" || (key=="oldText"&&value.content.isNotEmpty()))) || (key=="query" && !spec.required && call.name in analysisReads) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
+                "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (call.name=="search_notes" && key=="scope" && !spec.required && value.content.isEmpty()) || (call.name=="patch_note" && (key=="newText" || (key=="oldText"&&value.content.isNotEmpty()))) || (key=="query" && !spec.required && call.name in analysisReads) || (key=="query" && call.name=="search_contacts" && value.content.isEmpty()) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
                 "integer" -> require(value is JsonPrimitive && !value.isString && (value.intOrNull!=null || (key=="seed"&&call.name=="generate_image"&&value.longOrNull!=null))){"$key 정수 필요"}
                 "boolean" -> require(value is JsonPrimitive&&!value.isString&&value.booleanOrNull!=null){"$key 참/거짓 값 필요"}
                 "array" -> when {

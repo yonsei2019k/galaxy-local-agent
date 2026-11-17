@@ -23,7 +23,7 @@ class CloudAgentFinalsTest {
             "a".repeat(64),setOf("search_contacts"),true,pcWorkspaceProfile="phone-only",requirePlan=true)
         fun proposal(tool:String,args:kotlinx.serialization.json.JsonObject)=ExternalAgentProposal("10000000-0000-4000-8000-000000000002",1,tool,args,
             capture.requestDigest,capture.projectBinding,capture.authorityRevision)
-        val bad=proposal("search_contacts",kotlinx.serialization.json.buildJsonObject{put("query","")})
+        val bad=proposal("search_contacts",kotlinx.serialization.json.buildJsonObject{put("query","   ")})
         assertEquals("search_contacts",bad.checkedCall(capture).name)
         assertThrows(IllegalArgumentException::class.java){com.user.localagent.core.ToolRegistry.validate(bad.checkedCall(capture))}
         assertThrows(IllegalArgumentException::class.java){proposal("save_note",kotlinx.serialization.json.buildJsonObject{}).checkedCall(capture)}
