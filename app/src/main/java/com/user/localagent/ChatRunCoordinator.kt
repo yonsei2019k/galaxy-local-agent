@@ -1137,7 +1137,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 publishActionFinal(request,requestAuthorizedTools,CloudAgentFinals.PREPARED_PAUSE,true);return
             }
             val report=provider["report"]?.takeUnless{it is JsonNull}?.jsonObject
-            if(report==null){publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다. 실제 확인한 결과만 보존했습니다.",true);return}
+            if(report==null){
+                // Name why it stopped (PC provider code or phone session phase) so a pause is diagnosable from the run.
+                val code=(provider["errorCode"] as? JsonPrimitive)?.contentOrNull?.takeIf{Regex("[A-Z_]{1,64}").matches(it)}
+                val why=code?:"SESSION_${controller.phase.name}"
+                publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다($why). 실제 확인한 결과만 보존했습니다.",true);return
+            }
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
                 val question=report.getValue("question").jsonPrimitive.content

@@ -1,3 +1,12 @@
+## 2026-11-18 — 클라우드 중단 사유 표시 (root, 소스)
+
+**실기(v0.1.16 추정, 외부망 Tailscale).**
+- 원격 계산기 요청이 `read_screen`, `screen_action`, `read_screen`, `screen_action` 4개 도구 모두 VERIFIED까지 진행했다. 연결 끊김(SocketException)은 다시 나지 않았다.
+- 그 뒤 provider report 없이 "클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다"로 일시 정지했다.
+- 앱이 PC가 보낸 `errorCode`를 버려서 원인을 알 수 없었다.
+
+**수정.** report가 없으면 PC provider의 오류 코드를 답변에 넣는다. 형식은 `[A-Z_]{1,64}`로 제한한다. 코드가 없으면 `SESSION_<controller phase>`를 넣는다. 원인 확인은 다음 실기에서 한다.
+
 ## 2026-11-18 — 실행 중 포그라운드 서비스 유지(삼성 백그라운드 동결) (root, 소스)
 
 **결함(실기, v0.1.15).** 원격 클라우드 계산기 요청이 `read_screen` VERIFIED 다음 `SocketException: Software caused connection abort`로 실패했다.
