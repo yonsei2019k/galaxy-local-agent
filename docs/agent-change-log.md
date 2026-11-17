@@ -1,3 +1,19 @@
+## 2026-11-17 — v0.1.12 연락처 실기 통과 / 카카오톡 26.9.2 화면 버전 추가 (root, 소스)
+
+**설치 확인.** ADB(Wi-Fi)에서 `com.user.localagent` versionCode 2012(0.1.12)를 확인했다.
+
+**연락처 실기 통과.**
+- 요청: "연락처에 저장된 사람이 몇 명인지 알려줘". PC 원격 시험으로 보냈고, 모델은 `paired-pc-cloud-agent-v1`이다.
+- 결과: completed. `search_contacts`가 VERIFIED였고, 답은 "총 410명"이었다.
+- 같은 시각 `content query content://com.android.contacts/contacts` 행 수 410과 일치했다.
+
+**카카오톡 버전 추가.**
+- 폰의 카카오톡이 26.9.2(29260920)로 올라가 본문 조회 허용 스위치가 잠겼다.
+- 대화 목록 화면에서 기기 안 `uiautomator dump`로 resource-id만 집계하고 덤프는 즉시 삭제했다. 본문은 PC로 가져오지 않았다.
+- 결과: 노드 138개, password 0개, EditText 0개였고, `ScreenAdapters.forbidden`에 걸리는 ID는 없었다. 구조는 기존 리더(보이는 글자만 읽기, 편집·비밀번호·금지 ID 차단)와 맞았다.
+- `SUPPORTED_VERSIONS`에 29260920을 추가했다.
+- 앱 안에서 `read_kakao_screen` 실제 조회는 아직 0건이다. 소유자가 스위치를 켠 뒤 확인해야 한다.
+
 ## 2026-11-17 — 원격 실기 결과: 일정 성공, 연락처 실패 → 수정 (root, 소스)
 
 **실기 증거.** v0.1.10 이상 앱, 외부망(LTE+Tailscale)에서 PC 원격 시험 요청을 실행했다. 모델은 `paired-pc-cloud-agent-v1`이다.

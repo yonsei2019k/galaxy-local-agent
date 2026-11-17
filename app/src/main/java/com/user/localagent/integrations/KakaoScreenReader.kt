@@ -82,5 +82,5 @@ class KakaoScreenReader(context:Context) {
         verify()
         return ToolResult(call.id,true,data.toString(),VerificationState.VERIFIED,"현재 보이는 카카오톡 화면만 조회 · 전체 방/과거 기록 완료 아님")
     }
-    companion object {const val PACKAGE="com.kakao.talk";val SUPPORTED_VERSIONS=setOf(29260910L);private val LOCK=Any()}
+    companion object {const val PACKAGE="com.kakao.talk";val SUPPORTED_VERSIONS=setOf(29260910L,29260920L);private val LOCK=Any()}
 }
