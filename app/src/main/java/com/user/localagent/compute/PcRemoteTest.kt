@@ -8,20 +8,19 @@ import kotlinx.serialization.json.*
 import java.util.UUID
 
 /**
- * Owner switch for test requests the paired PC queues for this phone. Off by default and time-limited:
- * it only lets the PC put a request into its own visible thread; tools, approvals and consent are unchanged.
+ * Owner switch for test requests the paired PC queues for this phone. On while a PC is paired (the owner asked
+ * for hands-off remote testing); turning it off persists until the owner turns it on again. It only lets the PC
+ * put a request into its own visible thread; tools, approvals and consent are unchanged.
  */
 class PcRemoteTestSettings private constructor(context:Context) {
     companion object {
-        const val DURATION_MS=3*60*60*1000L
         const val THREAD_TITLE="PC 원격 시험"
         @Volatile private var instance:PcRemoteTestSettings?=null
         fun get(context:Context)=instance?:synchronized(this){instance?:PcRemoteTestSettings(context.applicationContext).also{instance=it}}
     }
     private val prefs=context.getSharedPreferences("pc_remote_test_v1",Context.MODE_PRIVATE)
-    fun activeUntil():Long?=prefs.getLong("until",0L).takeIf{it>System.currentTimeMillis()}
-    fun enable(now:Long=System.currentTimeMillis()){prefs.edit().putLong("until",now+DURATION_MS).apply()}
-    fun disable(){prefs.edit().putLong("until",0L).apply()}
+    fun enabled():Boolean=!prefs.getBoolean("owner_off",false)
+    fun setEnabled(on:Boolean){prefs.edit().putBoolean("owner_off",!on).apply()}
     /** Each PC request ID is executed at most once on this phone, even if the PC delivers it again. */
     @Synchronized fun markHandled(requestId:String):Boolean {
         val seen=prefs.getString("handled","").orEmpty().split(',').filter{it.isNotBlank()}
@@ -57,7 +56,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         if(job?.isActive==true)return
         job=scope.launch(Dispatchers.IO){
             while(isActive){
-                if(settings.activeUntil()==null){delay(15_000);continue}
+                if(!settings.enabled()){delay(15_000);continue}
                 val config=runCatching{transport.available()}.getOrNull()
                 if(config==null){delay(20_000);continue}
                 val next=runCatching{transport.json(config,"/v1/remote/next","POST",buildJsonObject{},timeout=10_000)}.getOrNull()

@@ -75,20 +75,19 @@ import kotlinx.coroutines.*
             PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
             Text("휴대폰 단독은 설치된 SDXL을 사용합니다. Qwen은 새 이미지에2512, 참고 사진 편집에Edit2511을 사용합니다. FLUX는 생성·편집에 같은 모델을 사용합니다. PC 모델 선택은 새 작업부터 적용되며 보관된 복구 작업의 모델은 유지합니다.",style=MaterialTheme.typography.bodySmall)
             val remote=remember{com.user.localagent.compute.PcRemoteTestSettings.get(context)}
-            var remoteUntil by remember{mutableStateOf(remote.activeUntil())}
+            var remoteOn by remember{mutableStateOf(remote.enabled())}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 Column(Modifier.weight(1f)){
                     Text("PC 원격 시험 요청",style=MaterialTheme.typography.labelLarge)
-                    Text("켜면 3시간 동안 연결된 PC가 시험 요청을 보낼 수 있습니다. 요청은 '${com.user.localagent.compute.PcRemoteTestSettings.THREAD_TITLE}' 대화로 실행되고 답과 사용한 도구 기록이 PC로 돌아갑니다. 승인이 필요한 작업은 지금처럼 이 휴대폰에서 직접 승인합니다. 앱이 실행 중일 때만 받습니다."+
-                        (remoteUntil?.let{"\n허용 종료: "+java.text.SimpleDateFormat("HH:mm",java.util.Locale.KOREA).format(java.util.Date(it))}?:""),style=MaterialTheme.typography.bodySmall)
+                    Text("켜져 있으면 연결된 PC가 시험 요청을 보낼 수 있습니다. 요청은 '${com.user.localagent.compute.PcRemoteTestSettings.THREAD_TITLE}' 대화로 실행되고 답과 사용한 도구 기록이 PC로 돌아갑니다. 승인이 필요한 작업은 지금처럼 이 휴대폰에서 직접 승인합니다. 앱이 실행 중일 때만 받습니다. 끄면 다시 켤 때까지 받지 않습니다.",style=MaterialTheme.typography.bodySmall)
                 }
-                Switch(checked=remoteUntil!=null,onCheckedChange={on->
-                    if(on)remote.enable() else remote.disable()
-                    remoteUntil=remote.activeUntil()
+                Switch(checked=remoteOn,onCheckedChange={on->
+                    remote.setEnabled(on)
+                    remoteOn=remote.enabled()
                     onStatus(if(on)"PC 원격 시험 요청을 3시간 동안 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
                 },modifier=Modifier.testTag("pc_remote_test"))
             }
-            TextButton(enabled=!busy&&!checking,onClick={settings.forget();remote.disable();remoteUntil=null;onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
+            TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
         }
     }
     if(showPairing)PcPairingDialog(onDismiss={showPairing=false},onConnected={showPairing=false;checkConnection()},onImport={showPairing=false;picker.launch(arrayOf("application/json","text/plain","application/octet-stream"))})
