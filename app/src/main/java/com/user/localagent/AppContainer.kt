@@ -75,6 +75,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
     val knowledgeIngestion by lazy {com.user.localagent.automation.KnowledgeIngestionController(appContext,repository)}
     val planningFeedback by lazy {com.user.localagent.automation.PlanningFeedbackStore(repository)}
     val runs by lazy {ChatRunCoordinator(appContext,this)}
+    val remoteTests by lazy {com.user.localagent.compute.PcRemoteTestInbox(appContext,this)}
     suspend fun validatePrivateDataOrigin(origin:com.user.localagent.audio.PrivateDataPickerOrigin) {
         val expected=origin.scope
         val access=repository.chat.accessScope(expected.threadId)

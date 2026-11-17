@@ -1,3 +1,22 @@
+## 2026-11-17 — PC 원격 시험 요청(외부망 검증 경로) (root, 소스+PC 배포)
+
+**배경.** 소유자가 외부(모바일 데이터+Tailscale)에 있으면 무선 디버깅이 꺼져 ADB로 실기를 돌릴 수 없다. 앱의 PC 연동도 모두 폰이 먼저 요청하는 방식이라 PC가 시험 요청을 넣을 경로가 없었다. 소유자가 "외부에서도 되도록" 만들라고 지시했다.
+
+**계약.**
+- PC `remote_test.RemoteTestQueue`는 RAM 전용이다. 요청 등록(`POST /v1/remote/requests`)과 상태 조회(`GET /v1/remote/requests/{id}`)는 127.0.0.1에서 토큰을 갖고 할 때만 받는다.
+- 폰은 페어링 토큰으로 `POST /v1/remote/next`를 불러 요청을 한 번만 가져가고, `POST /v1/remote/requests/{id}/result`로 결과를 보고한다.
+- 요청 텍스트는 2000자 이하이고 `/` 명령은 받지 않는다. 대기는 8건까지다.
+- 요청 ID·본문·답은 requests.log에 남기지 않는다. 2xx는 기록하지 않고, 오류는 `/v1/remote`로만 적는다.
+- 앱 `PcRemoteTestSettings`는 기본 꺼짐이다. PC 설정의 "PC 원격 시험 요청"으로 3시간만 켜지고, PC 연결을 해제하면 꺼진다.
+- `PcRemoteTestInbox`는 앱 프로세스가 살아 있을 때 약 8초마다 확인한다.
+- 받은 요청은 새 "PC 원격 시험" 대화에 `ChatRunCoordinator.submitRemoteTest`로 넣는다. 이는 `send`와 같은 `submit` 경로라서 도구 정책, 승인, 클라우드 동의, 범위가 바뀌지 않는다. 첨부는 받지 않는다.
+- 같은 요청 ID는 폰에서 한 번만 실행된다.
+- 결과로 run 상태, 최종 답, 도구 실행 기록(이름·성공·요약 400자)을 보고한다.
+
+**검사.** pc-worker tests/test_remote_test 5 PASS. build.ps1 -Task Validate(core test·app unit test·lintRelease·assembleRelease·androidTest APK) BUILD SUCCESSFUL.
+
+**배포.** 백업은 D:/ZipHap/Compute/scratch/deploy-backup-20261117-remote에 있다. PC가 쉬는 것(compute_busy false)을 확인한 뒤 server.py와 remote_test.py만 반영하고 worker를 재시작했다. loopback에서 `/v1/remote` 404 UNKNOWN 응답을 확인했다. 앱 쪽은 아직 설치·실기 검증 0건이다.
+
 ## 2026-11-17 — 실기 결과 반영: E4B 시간 초과·일정 답 누락·연락처 인자 오류·화면 서비스 중지 (root, 소스)
 
 **실기 2008 결과.** CloudAgentCapabilityCanary는 QA 프로젝트를 만들어 쓰고 바로 삭제한다. 실제 Codex 요청 4건을 실행했다.

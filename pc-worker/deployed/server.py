@@ -18,6 +18,8 @@ from pathlib import Path
 
 from recovery_engines import RecoveryEngines
 from overlay_endpoint import overlay_endpoint
+from remote_test import RemoteTestQueue,RemoteTestError
+REMOTE_TESTS=RemoteTestQueue()
 def overlay():
  return overlay_endpoint(CONFIG['port'])
 LOG=r'D:\ZipHap\Compute\requests.log';LOG_LIMIT=2*1024*1024
@@ -36,6 +38,10 @@ def note(path,status,error):
  if path.startswith('/v1/agent/'):
   if status in (200,201) and not error:return
   path='/v1/agent'
+ # Remote test polls repeat every few seconds; request IDs and texts never enter the log.
+ if path.startswith('/v1/remote/'):
+  if status in (200,201) and not error:return
+  path='/v1/remote'
  # Successful image progress polls are ~95% of traffic and carry no diagnostic value.
  if status==200 and not error and POLL.match(path.split('?')[0]):return
  try:
@@ -115,6 +121,23 @@ class Handler(BaseHTTPRequestHandler):
    try:self.reply(AGENT_BRIDGE.bootstrap_agent(owner,request['sessionId'],local_authenticated=True))
    except BridgeError as error:self.reply({'error':error.code},error.status)
    return
+  if path.startswith('/v1/remote/'):
+   try:
+    local=self.client_address[0]=='127.0.0.1'
+    item=re.fullmatch(r'/v1/remote/requests/([0-9a-f-]{36})(/result)?',path)
+    if self.command=='POST' and path=='/v1/remote/requests':
+     if not local:self.reply({'error':'LOCAL_CONTROL_ONLY'},403);return
+     self.reply(REMOTE_TESTS.enqueue(self.body(8192)),201);return
+    if self.command=='POST' and path=='/v1/remote/next':
+     # Phone side: the owner's time-limited switch decides whether it polls at all.
+     if self.body(64)!={}:raise ValueError('NEXT_SHAPE')
+     self.reply(REMOTE_TESTS.claim());return
+    if item and self.command=='POST' and item[2]:self.reply(REMOTE_TESTS.report(item[1],self.body(65536)));return
+    if item and self.command=='GET' and not item[2]:
+     if not local:self.reply({'error':'LOCAL_CONTROL_ONLY'},403);return
+     self.reply(REMOTE_TESTS.status(item[1]));return
+    raise ValueError('REMOTE_ROUTE')
+   except RemoteTestError as error:self.reply({'error':error.code},error.status);return
   if path.startswith('/v1/agent/'):
    phone_caps=self.headers.get_all('X-ZipHap-Phone-Capability',[])
    agent_caps=self.headers.get_all('X-ZipHap-Agent-Capability',[])

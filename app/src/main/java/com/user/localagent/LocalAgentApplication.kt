@@ -10,6 +10,7 @@ class LocalAgentApplication : Application() {
         super.onCreate()
         com.user.localagent.updates.UpdateManager(this).apply {setBusy(false);schedule()}
         container.callFollowUp.restore()
+        container.remoteTests.start(maintenance)
         maintenance.launch {runCatching {com.user.localagent.audio.AudioChunkDecoder.cleanupOrphanedSessions(this@LocalAgentApplication)}}
     }
 }

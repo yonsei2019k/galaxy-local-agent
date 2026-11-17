@@ -406,7 +406,19 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
 
     fun send(inputText:String,expectedThreadId:String?=null):Boolean {
         if(!selectionReady.value||selectedThreadId.value.isBlank()||expectedThreadId!=null&&expectedThreadId!=selectedThreadId.value){status.value="대화를 준비 중이거나 대상이 변경되었습니다. 입력은 유지됩니다.";return false}
-        val snapshot=app.chatAttachments.state.value.toList()
+        return submit(inputText,selectedThreadId.value,preferredModelId.value,app.chatAttachments.state.value.toList(),UUID.randomUUID().toString())
+    }
+
+    /**
+     * Owner-enabled remote test request from the paired PC. It is queued exactly like a typed request in its own
+     * thread, so tool policy, approvals and consent are unchanged; it carries no attachments and no slash command.
+     */
+    internal fun submitRemoteTest(text:String,threadId:String,modelId:String,runId:String):Boolean {
+        require(!text.trimStart().startsWith("/"))
+        return submit(text,threadId,modelId,emptyList(),runId)
+    }
+
+    private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String):Boolean {
         val submission=com.user.localagent.core.ConversationSubmissionPolicy.parse(inputText)
         val routedInput=if(submission.explicitModeCommand!=null) {
             if(submission.commandOnly&&submission.explicitModeCommand!="/goal"&&snapshot.isEmpty()) {
@@ -420,8 +432,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val text=routedInput.ifBlank {if(snapshot.isNotEmpty())"첨부한 자료를 분석하고 핵심 내용을 정리해줘."else""}
         if(text.isBlank())return false
         if(text.length>12000){status.value="12,000자를 넘는 요청은 파일로 첨부해주세요. 입력 내용은 유지됩니다.";return false}
-        val threadId=selectedThreadId.value;val model=preferredModelId.value;val thinking=modelOptions.value.thinking;val mode=submission.mode.wireName
-        val reservedRunId=UUID.randomUUID().toString()
+        val thinking=modelOptions.value.thinking;val mode=submission.mode.wireName
         scope.launch {
             var committed=false
             var submitted:QueuedChatRequest?=null
