@@ -32,7 +32,7 @@ class PcExternalAgentClient(
         val active=(root.getValue("allowExternalAgent") as JsonPrimitive).also { require(!it.isString) }.boolean
         val state=AgentSessionState.valueOf(ExternalAgentContract.text(root,"state"))
         require(state!=AgentSessionState.ACTIVE||active&&captured.allowExternalAgent)
-        val tools=root.getValue("tools").jsonArray;require(tools.size<=106)
+        val tools=root.getValue("tools").jsonArray;require(tools.size<=128+ExternalAgentContract.PC_TOOLS.size){"BRIDGE_TOOL_CATALOG_BOUND"}
         val names=tools.map { item ->
             val t=item.jsonObject;ExternalAgentContract.fields(t,setOf("name","description","inputSchema"))
             require(t.getValue("inputSchema") is JsonObject)

@@ -15,7 +15,7 @@ class PcExternalAgentClientTest {
         setOf("get_current_datetime"),allowExternalAgent=true)
     private fun proposal()=ExternalAgentProposal(call,1,"get_current_datetime",buildJsonObject {},
         capture.requestDigest,capture.projectBinding,capture.authorityRevision)
-    private inner class Wire:AgentBridgeTransport {
+    private inner class Wire(val capture:ExternalAgentCapture=this@PcExternalAgentClientTest.capture):AgentBridgeTransport {
         val capability="synthetic_phone_capability_000000000000000000000"
         val calls=mutableListOf<Triple<String,JsonObject?,String?>>()
         var revision=0L
@@ -69,6 +69,11 @@ class PcExternalAgentClientTest {
             }
         }
         override fun cancelNetwork(){}
+    }
+    @Test fun wholeRegistryCatalogSurvivesTheSnapshotCheck()=runBlocking {
+        val all=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,"a".repeat(64),ToolRegistry.definitions.keys,allowExternalAgent=true)
+        val wire=Wire(all);val client=PcExternalAgentClient(all,wire)
+        client.register(all);assertEquals(0,client.poll().lastSequence)
     }
     @Test fun phoneRoleCapabilityIsSeparateAndResultAckBindsTheExactActualContent()=runBlocking {
         val wire=Wire();val client=PcExternalAgentClient(capture,wire)

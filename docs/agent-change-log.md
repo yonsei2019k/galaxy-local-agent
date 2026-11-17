@@ -1,3 +1,16 @@
+## 2026-11-18 — 클라우드 도구 목록 상한 106 → 128+PC (root, 소스)
+
+**결함(실기).** v0.1.14 설치 후 원격 클라우드 요청("계산기 열고 12+7")이 도구 호출 0회, `IllegalArgumentException: Failed requirement`로 즉시 실패했다.
+- 원인: `PcExternalAgentClient.snapshot`이 PC가 돌려준 도구 수를 `<=106`으로 검사했다.
+- 클라우드에 전체 레지스트리(브라우저 도구 6개 추가로 112개)와 PC 도구 2개를 보내므로 이 검사에 걸렸다. v0.1.12까지는 정확히 106개라 통과했다.
+
+**수정.**
+- 상한을 등록 상한과 같은 `128+PC_TOOLS`로 맞췄다. PC `agent_bridge.py`도 128까지 허용한다.
+- 메시지 `BRIDGE_TOOL_CATALOG_BOUND`를 붙였다.
+- 회귀 시험 `PcExternalAgentClientTest.wholeRegistryCatalogSurvivesTheSnapshotCheck`를 추가했다. 수정 전 실패, 수정 후 통과를 확인했다.
+
+**실기 증거.** v0.1.14(versionCode 2014)는 자동 업데이트로 설치됐다. 이 결함 때문에 화면 제어·브라우저·음성 실기는 아직 0건이다.
+
 ## 2026-11-18 — 백그라운드 음성 명령 (root, 소스)
 
 **요구(소유자).** 앱을 열지 않아도 버튼 하나를 누르고 말로 지시하면, 폰에 내장된 음성 인식이 텍스트로 바꿔 스마트폰 작업을 시킨다.
