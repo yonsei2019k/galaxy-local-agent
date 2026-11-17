@@ -1,3 +1,67 @@
+## 2026-11-18 — 백그라운드 음성 명령 (root, 소스)
+
+**요구(소유자).** 앱을 열지 않아도 버튼 하나를 누르고 말로 지시하면, 폰에 내장된 음성 인식이 텍스트로 바꿔 스마트폰 작업을 시킨다.
+
+**계약.**
+- 진입점 세 가지는 모두 `VoiceCommandActivity`를 연다. 이 화면은 반투명 하단 시트이고, 앞에 떠 있던 앱 위에 뜬다.
+  - 접근성 버튼: 기존 `ScreenBridgeService`가 `FLAG_REQUEST_ACCESSIBILITY_BUTTON`을 런타임에 요청한다.
+  - 빠른 설정 타일 "ZipHap 음성"
+  - 런처 별칭 "ZipHap 음성": 홈 아이콘이나 삼성 측면 버튼 "앱 열기"에 연결할 수 있다.
+- 인식은 `SpeechRecognizer.createOnDeviceSpeechRecognizer`만 쓴다. 기기 내 인식이 없으면 서버 인식으로 넘어가지 않고 안내만 한다.
+- 인식 결과는 화면에 보여 준다. 3초 뒤 자동으로 보내며, 그 사이 취소하거나 다시 말할 수 있다.
+- 결과는 새 "음성 명령" 대화에 `ChatRunCoordinator.submitVoiceCommand`로 넣는다. 이는 `send`와 같은 submit 경로라서 도구 정책, 승인, 동의, 범위가 바뀌지 않는다. 앞의 `/`는 지운다.
+- `AgentRunService`(specialUse FGS)는 실행이 끝날 때까지 프로세스를 유지한다.
+  - 승인이 필요하면 높은 중요도 알림을 띄운다. 알림을 누르면 해당 대화가 열리고, 승인은 앱 안에서 한다.
+  - 종료 시 결과 알림을 띄운다(답 400자). 최대 30분이다.
+
+**미검증.** 기기 빌드·설치·실기 0건이다. 확인할 것: 접근성 버튼 동작, 타일 추가, 한국어 온디바이스 인식 가능 여부, 다른 앱이 앞에 있을 때 화면 제어와 알림 승인 흐름.
+
+## 2026-11-18 — 웹 에이전트(앱 안 브라우저·PC headless) + 화면 제어 자기 앱 결함 수정 (root, 소스+PC 배포)
+
+**방향(소유자 결정).**
+- 피클형 웹 작업을 A+B+C로 나눈다.
+  - A: 앱 안 숨은 WebView. 기본 경로이며, 외부망에서도 동작한다.
+  - B: 기존 접근성 화면 제어. 앱 전용 서비스에 쓴다.
+  - C: PC headless Chrome. 집에서 쓰는 보조 경로다.
+- PC에 창이 뜨는 방식은 소유자가 거부했다. 처음 배포에서 띄운 전용 프로필 Chrome 창은 닫았고, PC는 `--headless=new`로만 실행한다.
+
+**공통 계약.**
+- `core WebAgentPolicy`는 `pc-worker/deployed/browser_agent.py`와 같은 규칙과 같은 시험 사례를 쓴다.
+  - 공개 http(s) 페이지만 연다. localhost, 사설 IP, CGNAT(Tailscale), .local, 사용자 정보, 비표준 포트는 막는다.
+  - password, cc-, OTP, 주민번호, 계좌 칸에는 입력하지 않는다.
+  - 결제, 주문, 예매, 예약 확정, 전송, 삭제 성격의 컨트롤은 승인 후에만 실행한다.
+  - 12자리를 넘는 숫자열은 입력을 거부한다.
+- `BrowserToolCatalog`를 두 개 둔다.
+  - PC: `open_pc_browser_page`, `read_pc_browser_page`, `act_on_pc_browser_page` (`pc_` 접두어는 클라우드 브리지의 PC 전용 도구라 사용 금지)
+  - 앱: `open_app_browser_page`, `read_app_browser_page`, `app_browser_action`
+  - 등록 도구 수는 112개가 됐다.
+- `BrowserAgentTools`는 요청마다 마지막 snapshot을 기억한다.
+  - 위험 클릭, 그리고 검색칸이 아닌 곳에 입력하거나 Enter를 누르는 동작은 기존 `screenActionNeedsOwner`·PendingAction 승인을 거친다.
+  - 승인 뒤에는 브라우저가 발급한 1회용 approvalId로 같은 snapshot·ref만 실행한다.
+  - 이미 읽은 페이지가 바뀌면 SNAPSHOT_STALE로 거부한다.
+  - 페이지 결과는 dataOnly로 표시하고 text는 6000자까지만 둔다.
+- PC 경로: `/v1/browser/{open,read,act,close}`는 페어링 토큰을 요구한다. 2xx는 로그에 남기지 않는다.
+- 앱 경로: `AppWebAgent`는 프로세스당 WebView 하나를 쓰고 화면 밖에 배치한다.
+  - intent:// 같은 외부 앱 전환은 막고, 결제 단계는 소유자 몫이라고 알린다.
+  - 설정 → 앱 연결 → "앱 브라우저 에이전트"에 스위치와 로그인 화면이 있다. 쿠키는 폰에만 남는다.
+- 스위치(`BrowserAgentSettings`)는 PC·앱 모두 기본 켜짐이다. 각 프로필은 로그인 없는 상태로 시작한다.
+
+**화면 제어 결함(실기 발견).**
+- 원격 시험 "계산기 열고 12+7"이 일시 정지로 끝났다(Codex, 2012).
+- 원인 1: ZipHap이 전경일 때 read_screen이 실패했다. 그래서 open_app으로 넘어갈 수 없었다. 이제 `ownAppView`를 성공으로 돌려준다(내용 없음, snapshotId=ziphap-foreground, open_app/home 안내).
+- 원인 2: manifest `<queries>`에 계산기 같은 일반 앱이 없었다. 그래서 getLaunchIntentForPackage가 null이었다. LAUNCHER intent query를 추가했다. QUERY_ALL_PACKAGES는 아니다.
+- open_app은 이제 앱 이름(예: 계산기)도 받는다. launcher 라벨과 정확히 일치하거나 단일 부분 일치일 때만 연다.
+- 소유자 요청으로 앱 안 "에이전트 화면 제어" 스위치를 ADB UI 조작으로 켰다. 접근성 서비스는 소유자가 직접 켰고, 연결된 상태를 확인했다.
+
+**검사.**
+- pc-worker test_browser_agent 6 PASS.
+- 실제 Chrome(headless)으로 확인했다.
+  - example.com: 열기, 클릭
+  - httpbin 양식: 입력, Submit order가 approval_required로 걸림, 틀린 approvalId가 APPROVAL_MISMATCH로 거부됨, 제출 안 됨
+  - 낡은 snapshot: SNAPSHOT_STALE로 거부됨
+- 배포된 worker 경로로 코레일 열기·읽기를 확인했다. 백업은 `deploy-backup-20261117-2336-browser`(창 버전)와 `-2348-browser`(headless)다.
+- 앱 실기(A·B 재시험)는 아직 0건이다.
+
 ## 2026-11-17 — v0.1.12 연락처 실기 통과 / 카카오톡 26.9.2 화면 버전 추가 (root, 소스)
 
 **설치 확인.** ADB(Wi-Fi)에서 `com.user.localagent` versionCode 2012(0.1.12)를 확인했다.

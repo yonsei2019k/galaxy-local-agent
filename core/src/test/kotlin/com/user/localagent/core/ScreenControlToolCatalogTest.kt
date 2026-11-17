@@ -16,8 +16,10 @@ class ScreenControlToolCatalogTest {
         ScreenControlToolCatalog.validate(call("action" to "tap","snapshotId" to "s","ref" to "e1"))
         ScreenControlToolCatalog.validate(call("action" to "back","snapshotId" to "s"))
         ScreenControlToolCatalog.validate(call("action" to "open_app","snapshotId" to "s","packageName" to "com.sec.android.app.popupcalculator"))
+        ScreenControlToolCatalog.validate(call("action" to "open_app","snapshotId" to "ziphap-foreground","packageName" to "계산기"))
         listOf(call("action" to "swipe","snapshotId" to "s"),call("action" to "tap","snapshotId" to "s"),
-            call("action" to "type","snapshotId" to "s","ref" to "e2"),call("action" to "open_app","snapshotId" to "s","packageName" to "not a package"),
+            call("action" to "type","snapshotId" to "s","ref" to "e2"),call("action" to "open_app","snapshotId" to "s","packageName" to "../data/x"),call("action" to "open_app","snapshotId" to "s","packageName" to "x".repeat(41)),
+            call("action" to "open_app","snapshotId" to "s"),
             call("action" to "scroll","snapshotId" to "s","direction" to "sideways")).forEach{
             assertThrows(IllegalArgumentException::class.java){ScreenControlToolCatalog.validate(it)}
         }

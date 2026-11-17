@@ -13,6 +13,7 @@ import com.user.localagent.automation.AssistantNotificationListener
 
 @Composable fun MessengerPanel(context:Context,onAsk:((String)->Unit)?=null,report:(String)->Unit) {
     KakaoScreenPanel(context,onAsk,report)
+    AppBrowserPanel(context)
     val messages by MessengerInbox.messages.collectAsState()
     val lifecycle=LocalLifecycleOwner.current
     var listenerGranted by remember {mutableStateOf(AssistantNotificationListener.granted(context))}

@@ -42,7 +42,7 @@ class ScreenControl(context:Context) {
     suspend fun execute(call:ToolCall):ToolResult=try {
         check(enabled()){"화면 제어가 꺼져 있습니다. 설정 > 화면 연결에서 '에이전트 화면 제어'를 켜주세요."}
         val result=when(call.name){
-            ScreenControlToolCatalog.READ->render(onMain{snapshot(service())})
+            ScreenControlToolCatalog.READ->try{render(onMain{snapshot(service())})}catch(own:OwnAppForeground){ownAppView()}
             ScreenControlToolCatalog.ACTION->act(call)
             else->error("지원하지 않는 화면 도구입니다.")
         }
@@ -124,11 +124,31 @@ class ScreenControl(context:Context) {
         }
     }
 
-    private fun openApp(packageName:String) {
+    /** Accepts a package name or the app's launcher label ("계산기"); only launcher apps, never refused ones. */
+    private fun openApp(requested:String) {
+        val packageName=resolveApp(requested)?:error("설치되지 않았거나 열 수 없는 앱입니다: $requested")
         if(refusedPackage(packageName))throw ScreenRefused("이 앱은 화면 제어 대상이 아닙니다.")
         val intent=context.packageManager.getLaunchIntentForPackage(packageName)?:error("설치되지 않았거나 열 수 없는 앱입니다.")
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+    private fun launcherApps():List<Pair<String,String>> {
+        val pm=context.packageManager
+        val query=Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return pm.queryIntentActivities(query,0).map{it.activityInfo.packageName to it.loadLabel(pm).toString()}
+            .distinctBy{it.first}.filterNot{refusedPackage(it.first)}
+    }
+    private fun resolveApp(requested:String):String? {
+        if(context.packageManager.getLaunchIntentForPackage(requested)!=null)return requested
+        val wanted=requested.trim().lowercase(Locale.ROOT)
+        val apps=launcherApps()
+        return (apps.firstOrNull{it.second.lowercase(Locale.ROOT)==wanted}?:apps.singleOrNull{wanted in it.second.lowercase(Locale.ROOT)})?.first
+    }
+    /** ZipHap itself is in front: report that (no content) so the agent can go home or open the target app first. */
+    private fun ownAppView():String=buildJsonObject {
+        put("untrustedScreenData",true);put("packageName",context.packageName);put("app","ZipHap.Agent");put("snapshotId","ziphap-foreground")
+        put("controllable",false)
+        put("note","지금 전경은 ZipHap.Agent 자신이라 화면 내용은 읽지 않습니다. 다른 앱을 쓰려면 screen_action action=open_app (packageName에 패키지 이름 또는 앱 이름, 예: 계산기) 또는 action=home 을 snapshotId=ziphap-foreground 로 실행한 뒤 read_screen 하세요.")
+    }.toString()
 
     private fun service():ScreenBridgeService {
         if(!ScreenBridgeController(context).state().systemEnabled){
@@ -148,7 +168,8 @@ class ScreenControl(context:Context) {
             .singleOrNull()?:error("전경 앱 창을 찾지 못했습니다.")
         val root=window.root?:error("전경 앱 화면을 읽지 못했습니다.")
         val packageName=root.packageName?.toString()?:error("전경 앱을 확인하지 못했습니다.")
-        if(refusedPackage(packageName))throw ScreenRefused(if(packageName==context.packageName)"ZipHap.Agent 자신의 화면은 조작하지 않습니다." else "시스템·권한·설치·잠금 화면은 다루지 않습니다.")
+        if(packageName==context.packageName)throw OwnAppForeground()
+        if(refusedPackage(packageName))throw ScreenRefused("시스템·권한·설치·잠금 화면은 다루지 않습니다.")
         val texts=mutableListOf<String>();val elements=mutableListOf<Element>()
         var visited=0;var truncated=false;var textBudget=6000
         fun visit(node:AccessibilityNodeInfo,depth:Int,sensitiveAncestor:Boolean) {
@@ -222,7 +243,8 @@ class ScreenControl(context:Context) {
 
     private suspend fun <T> onMain(block:()->T):T=withContext(Dispatchers.Main){block()}
 
-    class ScreenRefused(message:String):IllegalStateException(message)
+    open class ScreenRefused(message:String):IllegalStateException(message)
+    class OwnAppForeground:ScreenRefused("ZipHap.Agent 자신의 화면은 조작하지 않습니다.")
 
     companion object {
         private val refusedPackages=listOf("com.android.settings","com.samsung.android.settings","com.android.systemui","com.android.permissioncontroller",

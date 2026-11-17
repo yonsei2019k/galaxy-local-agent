@@ -84,8 +84,17 @@ import kotlinx.coroutines.*
                 Switch(checked=remoteOn,onCheckedChange={on->
                     remote.setEnabled(on)
                     remoteOn=remote.enabled()
-                    onStatus(if(on)"PC 원격 시험 요청을 3시간 동안 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
+                    onStatus(if(on)"PC 원격 시험 요청을 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
                 },modifier=Modifier.testTag("pc_remote_test"))
+            }
+            val browser=remember{com.user.localagent.compute.BrowserAgentSettings.pc(context)}
+            var browserOn by remember{mutableStateOf(browser.enabled())}
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                Column(Modifier.weight(1f)){
+                    Text("PC 백그라운드 브라우저",style=MaterialTheme.typography.labelLarge)
+                    Text("PC가 켜져 있을 때 에이전트가 PC에서 창 없이 웹페이지를 열고 읽고 누를 수 있습니다. PC 화면에는 아무것도 뜨지 않습니다. 로그인이 필요한 사이트는 앱 브라우저를 쓰세요. 결제·주문·예약 확정·전송 버튼과 검색칸 밖 입력은 이 휴대폰에서 승인해야 실행됩니다.",style=MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
             }
             TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
         }

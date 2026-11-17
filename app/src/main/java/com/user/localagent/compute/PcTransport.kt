@@ -81,6 +81,17 @@ class PcTransport(context:Context) {
             return Json.parseToJsonElement(String(read(connection,1024*1024),Charsets.UTF_8)).jsonObject
         }finally{connection.disconnect();if(current===connection)current=null}
     }
+    /** Like [json] but a 4xx answer with an error code is returned (status, body) for tools that explain refusals to the model. */
+    fun jsonWithStatus(config:PcConnection,path:String,body:JsonObject,timeout:Int):Pair<Int,JsonObject> {
+        val connection=open(config,path,"POST",body,timeout,null)
+        try {
+            val status=connection.responseCode
+            if(status in 200..299)return status to Json.parseToJsonElement(String(read(connection,1024*1024),Charsets.UTF_8)).jsonObject
+            val error=runCatching{Json.parseToJsonElement(connection.errorStream.bufferedReader().use{it.readText().take(4096)}).jsonObject}.getOrNull()
+            if(status !in 400..499||error?.get("error")==null){com.user.localagent.FailureLog.record(context,"pc_http $path",null,"$status");throw PcUnavailable()}
+            return status to error
+        }finally{connection.disconnect();if(current===connection)current=null}
+    }
     /**
      * [waitForRestart]: when the PC answered recently, a failed check is most likely a worker restart
      * (the supervisor brings it back within ~15 s), so wait and retry instead of failing the request.

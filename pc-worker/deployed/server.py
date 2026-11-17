@@ -20,6 +20,8 @@ from recovery_engines import RecoveryEngines
 from overlay_endpoint import overlay_endpoint
 from remote_test import RemoteTestQueue,RemoteTestError
 REMOTE_TESTS=RemoteTestQueue()
+from browser_agent import BrowserAgent,BrowserError
+BROWSER=BrowserAgent()
 def overlay():
  return overlay_endpoint(CONFIG['port'])
 LOG=r'D:\ZipHap\Compute\requests.log';LOG_LIMIT=2*1024*1024
@@ -42,6 +44,10 @@ def note(path,status,error):
  if path.startswith('/v1/remote/'):
   if status in (200,201) and not error:return
   path='/v1/remote'
+ # Browser pages, typed text and URLs never enter the log.
+ if path.startswith('/v1/browser/'):
+  if status in (200,201) and not error:return
+  path='/v1/browser'
  # Successful image progress polls are ~95% of traffic and carry no diagnostic value.
  if status==200 and not error and POLL.match(path.split('?')[0]):return
  try:
@@ -138,6 +144,15 @@ class Handler(BaseHTTPRequestHandler):
      self.reply(REMOTE_TESTS.status(item[1]));return
     raise ValueError('REMOTE_ROUTE')
    except RemoteTestError as error:self.reply({'error':error.code},error.status);return
+  if path.startswith('/v1/browser/'):
+   # Paired phone or loopback. Policy (public pages only, no sensitive typing, approval for irreversible clicks) lives in BrowserAgent.
+   operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close}.get(path)
+   if self.command!='POST' or operation is None:raise ValueError('BROWSER_ROUTE')
+   self.connection.settimeout(90)
+   request=self.body(8192)
+   try:self.reply(operation(request))
+   except BrowserError as error:self.reply({'error':error.code},error.status)
+   return
   if path.startswith('/v1/agent/'):
    phone_caps=self.headers.get_all('X-ZipHap-Phone-Capability',[])
    agent_caps=self.headers.get_all('X-ZipHap-Agent-Capability',[])

@@ -127,7 +127,18 @@ class ScreenBridgeService : AccessibilityService() {
     private val controller by lazy { ScreenBridgeController(this) }
     private var inspector: LinearLayout? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    override fun onServiceConnected() { active = WeakReference(this); invalidate() }
+    override fun onServiceConnected() { active = WeakReference(this); invalidate(); registerVoiceButton() }
+    /** The accessibility button (nav bar / floating) opens the voice command sheet from any app. */
+    private fun registerVoiceButton() {
+        runCatching {
+            serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON }
+            accessibilityButtonController.registerAccessibilityButtonCallback(object : android.accessibilityservice.AccessibilityButtonController.AccessibilityButtonCallback() {
+                override fun onClicked(controller: android.accessibilityservice.AccessibilityButtonController) {
+                    com.user.localagent.voice.VoiceCommand.launch(this@ScreenBridgeService)
+                }
+            })
+        }
+    }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Ignore only our own inspector's metadata events; never read text or content descriptions.
         if (event?.packageName?.toString() != packageName) invalidate()

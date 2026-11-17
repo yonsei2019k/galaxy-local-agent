@@ -413,6 +413,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
      * Owner-enabled remote test request from the paired PC. It is queued exactly like a typed request in its own
      * thread, so tool policy, approvals and consent are unchanged; it carries no attachments and no slash command.
      */
+    /** Spoken request from the voice sheet: same submit path, policy and approvals as a typed request. */
+    internal fun submitVoiceCommand(text:String,threadId:String,modelId:String,runId:String):Boolean {
+        require(text.isNotBlank()&&!text.trimStart().startsWith("/"))
+        return submit(text,threadId,modelId,emptyList(),runId)
+    }
     internal fun submitRemoteTest(text:String,threadId:String,modelId:String,runId:String):Boolean {
         require(!text.trimStart().startsWith("/"))
         return submit(text,threadId,modelId,emptyList(),runId)
