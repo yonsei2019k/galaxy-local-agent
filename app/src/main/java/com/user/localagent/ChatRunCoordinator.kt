@@ -438,6 +438,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(text.isBlank())return false
         if(text.length>12000){status.value="12,000자를 넘는 요청은 파일로 첨부해주세요. 입력 내용은 유지됩니다.";return false}
         val thinking=modelOptions.value.thinking;val mode=submission.mode.wireName
+        // Keep the process unfrozen for the whole run, including while screen control puts another app in front.
+        com.user.localagent.voice.AgentRunService.track(context,reservedRunId,threadId,text)
         scope.launch {
             var committed=false
             var submitted:QueuedChatRequest?=null

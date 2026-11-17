@@ -1,3 +1,17 @@
+## 2026-11-18 — 실행 중 포그라운드 서비스 유지(삼성 백그라운드 동결) (root, 소스)
+
+**결함(실기, v0.1.15).** 원격 클라우드 계산기 요청이 `read_screen` VERIFIED 다음 `SocketException: Software caused connection abort`로 실패했다.
+- logcat: `FreecessController FZ : com.user.localagent reason: Bg`가 몇 초마다 반복됐다.
+- ZipHap이 다른 앱 뒤에 있으면 삼성이 프로세스를 얼린다. 이때 PC·클라우드 연결이 끊긴다.
+- 화면 제어로 다른 앱이 앞으로 와도, 소유자가 앱을 전환해도 같은 문제가 난다.
+
+**계약.**
+- 공통 `ChatRunCoordinator.submit`이 모든 실행에서 `AgentRunService.track`을 호출한다. 입력, 음성, 원격 요청이 모두 이 경로를 거친다.
+- `AgentRunService`는 진행 중인 실행 여러 개를 추적한다. 모두 끝나면(queued/running/waiting_approval이 아님) 종료한다. 실행 기록이 60초 동안 없거나 30분이 지나도 추적을 끝낸다.
+- 승인·결과 알림은 ZipHap이 화면에 없을 때만 보낸다. 승인 자체는 지금처럼 앱 안에서 한다.
+- Android가 백그라운드에서 FGS 시작을 거부하면 유지 없이 진행한다. 원격 요청 수신은 백그라운드라 이렇게 될 수 있으며, 실기로 확인해야 한다.
+- 음성 화면에서 따로 부르던 `AgentRunService.start`는 없앴다. 이제 submit 경로에서 처리한다.
+
 ## 2026-11-18 — 클라우드 도구 목록 상한 106 → 128+PC (root, 소스)
 
 **결함(실기).** v0.1.14 설치 후 원격 클라우드 요청("계산기 열고 12+7")이 도구 호출 0회, `IllegalArgumentException: Failed requirement`로 즉시 실패했다.
@@ -9,7 +23,11 @@
 - 메시지 `BRIDGE_TOOL_CATALOG_BOUND`를 붙였다.
 - 회귀 시험 `PcExternalAgentClientTest.wholeRegistryCatalogSurvivesTheSnapshotCheck`를 추가했다. 수정 전 실패, 수정 후 통과를 확인했다.
 
-**실기 증거.** v0.1.14(versionCode 2014)는 자동 업데이트로 설치됐다. 이 결함 때문에 화면 제어·브라우저·음성 실기는 아직 0건이다.
+**실기 증거.**
+- v0.1.14(2014): 자동 설치됐지만 위 결함으로 클라우드 요청이 실패했다.
+- v0.1.15(2015): 백그라운드 15분 작업기로 자동 설치됐다.
+- 원격 클라우드 "앱 안 브라우저로 korail.com 첫 화면 메뉴" → completed. `open_app_browser_page`와 `read_app_browser_page`가 모두 VERIFIED였고, 실제 첫 화면 항목(언어, 바로가기, 승차권 조회)을 답했다.
+- 남은 실기: 화면 제어(계산기)와 음성 명령은 0건이다.
 
 ## 2026-11-18 — 백그라운드 음성 명령 (root, 소스)
 

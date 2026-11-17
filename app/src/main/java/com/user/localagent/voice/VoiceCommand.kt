@@ -143,7 +143,6 @@ class VoiceCommandActivity:ComponentActivity() {
             val runId=UUID.randomUUID().toString()
             val accepted=app.runs.submitVoiceCommand(request,thread.id,app.runs.preferredModelId.value,runId)
             if(!accepted){phase.value="지금은 요청을 받을 수 없습니다. 다른 작업이 끝난 뒤 다시 시도해주세요.";sent=false;return@launch}
-            AgentRunService.start(this@VoiceCommandActivity,runId,thread.id,request)
             finish()
         }
     }
@@ -152,62 +151,86 @@ class VoiceCommandActivity:ComponentActivity() {
 }
 
 /**
- * Keeps the process alive while a voice-started run works behind other apps, and turns owner approvals and
- * the final answer into notifications (the approval itself is still made in the app, as for typed requests).
+ * Holds a foreground service while any agent run is active, so the run keeps working when ZipHap goes behind
+ * another app (screen control opening an app, a voice request, or the owner switching away). Without it,
+ * Samsung's background freezer suspends the process within seconds and open PC/cloud connections abort.
+ * Approvals and final answers become notifications only while ZipHap is not on screen; the approval itself
+ * is still made in the app, as for typed requests.
  */
 class AgentRunService:Service() {
     companion object {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
-        fun start(context:Context,runId:String,threadId:String,text:String){
+        /** Called from the common submit path. A background start Android refuses only means no keep-alive. */
+        fun track(context:Context,runId:String,threadId:String,text:String):Boolean = runCatching {
             ContextCompat.startForegroundService(context,Intent(context,AgentRunService::class.java)
                 .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",text.take(200)))
+        }.isSuccess
+        internal fun appOnScreen():Boolean {
+            val info=ActivityManager.RunningAppProcessInfo();ActivityManager.getMyMemoryState(info)
+            return info.importance<=ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         }
     }
+    private class Tracked(val threadId:String,val text:String,val since:Long=System.currentTimeMillis()){var approvalNotified=false}
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
+    private val runs=LinkedHashMap<String,Tracked>()
     private var job:Job?=null
     override fun onBind(intent:Intent?):IBinder?=null
 
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
-        val runId=intent?.getStringExtra("runId");val threadId=intent?.getStringExtra("threadId")
-        if(runId==null||threadId==null){stopSelf();return START_NOT_STICKY}
         val manager=getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL,"에이전트 작업 진행",NotificationManager.IMPORTANCE_LOW))
         manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
-        val open=PendingIntent.getActivity(this,runId.hashCode(),Intent(this,MainActivity::class.java).putExtra("open_thread_id",threadId)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val ongoing=NotificationCompat.Builder(this,CHANNEL).setSmallIcon(R.drawable.ic_agent).setContentTitle("ZipHap 작업 중")
-            .setContentText(intent.getStringExtra("text").orEmpty()).setOngoing(true).setContentIntent(open).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
-        try{ServiceCompat.startForeground(this,ID,ongoing,if(Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)}
+        val runId=intent?.getStringExtra("runId");val threadId=intent?.getStringExtra("threadId")
+        if(runId!=null&&threadId!=null)runs[runId]=Tracked(threadId,intent.getStringExtra("text").orEmpty())
+        val latest=runs.entries.lastOrNull()
+        // startForeground must follow every startForegroundService, even one that brought nothing to track.
+        try{ServiceCompat.startForeground(this,ID,ongoing(latest?.key,latest?.value),if(Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)}
         catch(_:RuntimeException){stopSelf();return START_NOT_STICKY}
-        job?.cancel()
-        job=scope.launch{
-            val app=(application as LocalAgentApplication).container
-            var notifiedApproval=false
-            val started=System.currentTimeMillis()
-            while(isActive&&System.currentTimeMillis()-started<30*60_000L){
-                delay(2000)
-                val pending=app.runs.approval.value
-                if(pending!=null&&pending.runId==runId&&!notifiedApproval){
-                    notifiedApproval=true
-                    alert(manager,open,"승인이 필요합니다","눌러서 ZipHap에서 확인해주세요: "+(pending.reviewText?.lineSequence()?.firstOrNull{it.isNotBlank()}?:pending.call.name))
-                }else if(pending==null)notifiedApproval=false
-                val run=withContext(Dispatchers.IO){app.repository.chat.run(runId)}?:continue
-                if(run.status !in setOf("queued","running","waiting_approval")){
-                    val answer=withContext(Dispatchers.IO){
-                        app.repository.chat.messages(threadId).first().lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
-                    }
-                    alert(manager,open,if(run.status=="completed")"작업 완료" else "작업이 멈췄습니다",answer.ifBlank{run.status}.take(400))
-                    break
-                }
-            }
-            stopSelf()
-        }
+        if(runs.isEmpty()){stopSelf();return START_NOT_STICKY}
+        if(job?.isActive!=true)job=scope.launch{watch(manager)}
         return START_NOT_STICKY
     }
 
-    private fun alert(manager:NotificationManager,open:PendingIntent,title:String,text:String){
-        manager.notify(ID+1,NotificationCompat.Builder(this,ALERTS).setSmallIcon(R.drawable.ic_agent).setContentTitle(title).setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(open)
+    private fun open(runId:String,threadId:String)=PendingIntent.getActivity(this,runId.hashCode(),
+        Intent(this,MainActivity::class.java).putExtra("open_thread_id",threadId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    private fun ongoing(runId:String?,run:Tracked?)=NotificationCompat.Builder(this,CHANNEL).setSmallIcon(R.drawable.ic_agent)
+        .setContentTitle(if(runs.size>1)"ZipHap 작업 ${runs.size}개 진행 중" else "ZipHap 작업 중").setContentText(run?.text.orEmpty()).setOngoing(true)
+        .also{b->if(runId!=null&&run!=null)b.setContentIntent(open(runId,run.threadId))}.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
+
+    private suspend fun watch(manager:NotificationManager){
+        val app=(application as LocalAgentApplication).container
+        while(runs.isNotEmpty()){
+            delay(2000)
+            val pending=app.runs.approval.value
+            for((runId,run) in runs.entries.toList()){
+                if(pending!=null&&pending.runId==runId){
+                    if(!run.approvalNotified&&!appOnScreen()){
+                        run.approvalNotified=true
+                        alert(manager,runId,run,"승인이 필요합니다","눌러서 ZipHap에서 확인해주세요: "+(pending.reviewText?.lineSequence()?.firstOrNull{it.isNotBlank()}?:pending.call.name))
+                    }
+                }else run.approvalNotified=false
+                val row=withContext(Dispatchers.IO){app.repository.chat.run(runId)}
+                val age=System.currentTimeMillis()-run.since
+                val done=if(row==null)age>60_000L else row.status !in setOf("queued","running","waiting_approval")
+                if(done||age>30*60_000L){
+                    runs.remove(runId)
+                    if(row!=null&&!appOnScreen()){
+                        val answer=withContext(Dispatchers.IO){
+                            app.repository.chat.messages(run.threadId).first().lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
+                        }
+                        alert(manager,runId,run,if(row.status=="completed")"작업 완료" else "작업이 멈췄습니다",answer.ifBlank{row.status}.take(400))
+                    }
+                    runs.entries.lastOrNull()?.let{manager.notify(ID,ongoing(it.key,it.value))}
+                }
+            }
+        }
+        stopSelf()
+    }
+
+    private fun alert(manager:NotificationManager,runId:String,run:Tracked,title:String,text:String){
+        manager.notify(ID+1+(runId.hashCode() and 0xffff),NotificationCompat.Builder(this,ALERTS).setSmallIcon(R.drawable.ic_agent).setContentTitle(title).setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(open(runId,run.threadId))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPriority(NotificationCompat.PRIORITY_HIGH).build())
     }
     override fun onDestroy(){scope.cancel();super.onDestroy()}
