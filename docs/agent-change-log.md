@@ -1,3 +1,17 @@
+## 2026-11-17 — PC 작업기 접속 거부 장애: TLS 핸드셰이크를 요청 스레드로 이동 (root, PC 배포)
+
+**장애.** 13:36 이후 작업기가 Listen 상태인데도 모든 접속을 거부했다(loopback curl도 Connection refused). 포트에는 폰(Tailscale) 주소로 CloseWait·FinWait2 소켓이 쌓여 있었다. v0.1.10 게시(13:52) 전에 일어났으므로 원격 시험 폴링 때문은 아니다.
+
+**원인.** `server.socket=context.wrap_socket(...)`로 듣는 소켓을 감싸면 accept()가 serve 루프에서 TLS 핸드셰이크까지 한다. 끊긴 모바일·DERP 연결 하나가 핸드셰이크에서 멈추면 루프 전체가 막히고, backlog가 차면 새 접속이 거부된다.
+
+**수정.** `TLSServer.finish_request`가 요청 스레드에서 15초 제한으로 핸드셰이크한다. 실패하면 그 연결만 닫는다.
+
+**배포·확인.**
+- 백업: scratch/deploy-backup-20261117-remote/server.remote.py
+- GPU와 이미지 하위 프로세스가 놀고 있는 것을 확인한 뒤 멈춘 worker를 종료했고, supervisor가 13:58에 다시 시작했다.
+- 핸드셰이크하지 않는 TCP 연결 8개를 열어 둔 채 loopback health를 불러 0.46초에 200을 받았다.
+- RAM 대기열이 비워져 시험 요청 2건을 다시 넣었다.
+
 ## 2026-11-17 — PC 원격 시험 요청(외부망 검증 경로) (root, 소스+PC 배포)
 
 **배경.** 소유자가 외부(모바일 데이터+Tailscale)에 있으면 무선 디버깅이 꺼져 ADB로 실기를 돌릴 수 없다. 앱의 PC 연동도 모두 폰이 먼저 요청하는 방식이라 PC가 시험 요청을 넣을 경로가 없었다. 소유자가 "외부에서도 되도록" 만들라고 지시했다.

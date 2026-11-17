@@ -255,6 +255,22 @@ class Handler(BaseHTTPRequestHandler):
    except Exception:self.close_connection=True
  do_GET=do_POST=do_DELETE=handle_request
 
+class TLSServer(ThreadingHTTPServer):
+ # The TLS handshake runs in each request thread with a deadline. Wrapping the listening socket made
+ # accept() handshake on the serve loop, so one stalled client (a dropped mobile/relay link) blocked
+ # every later connection until the backlog overflowed and the PC refused all phones.
+ daemon_threads=True
+ def __init__(self,address,handler,context):
+  self.tls=context;super().__init__(address,handler)
+ def finish_request(self,request,client_address):
+  request.settimeout(15)
+  try:secure=self.tls.wrap_socket(request,server_side=True)
+  except (ssl.SSLError,OSError):return
+  try:super().finish_request(secure,client_address)
+  finally:
+   try:secure.close()
+   except OSError:pass
+
 def discovery():
  last={}
  with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
@@ -277,8 +293,7 @@ def discovery():
 if __name__=='__main__':
  context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
  context.load_cert_chain(HOME/'server-cert.pem',HOME/'server-key.pem')
- server=ThreadingHTTPServer(('0.0.0.0',CONFIG['port']),Handler);server.daemon_threads=True
- server.socket=context.wrap_socket(server.socket,server_side=True)
+ server=TLSServer(('0.0.0.0',CONFIG['port']),Handler,context)
  (HOME/'worker.pid').write_text(str(__import__('os').getpid()))
  threading.Thread(target=discovery,daemon=True).start()
  try:server.serve_forever(poll_interval=.5)
