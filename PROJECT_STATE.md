@@ -1,6 +1,16 @@
 # ZipHap.Agent project state
 
-Updated 2026-11-16. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
+Updated 2026-11-19. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
+
+## Installed2018 safe checkpoint: offline React/Rust host and bounded cloud conversation context
+
+Signed production2018/0.1.18 SHA256 `d3764cee8302cdd4639886a46d360b43f38a724a52cee9a2b19d8799d8e3d777` was installed by the already-authorized development path and independently matches the phone's base APK bytes. The version number is reused from earlier local2018 candidates; version alone cannot distinguish them. Original application/signing identity and installed data are retained, with no added Android permissions. Full frozen-source build/lint/release/test APK assembly10m2 PASS; core962+app977 JVM tests PASS with0failure/error/skip. Earlier command-path and lint-analysis failures remain retained privately.
+
+Actual phone Rust/JNI+offline-assets2 PASS. The ordinary singleton conversation then sends two synthetic requests through the actual PC/subscription provider; the second recalls the first request's unique alias, uses the same bound history, performs0phone tool calls, verifies closed sessions, removes the fixture and restores original selection/preferences/authority. Actual test18.093s PASS. This establishes one short two-turn workflow, not all long-term memory, cross-service autonomy or a general speed comparison. The installed host reports nonzero full-height root/workspace without runtime layout mutation and0console errors. Repeated cold starts, keyboard/pause workflows and the planned scenario campaign remain unqualified.
+
+PC context/privacy source is deployed with unchanged pairing. Capabilities are negotiated on an ACTIVE phone-only session; source eligibility preserves thread/branch/project/model/consent/PC revisions, and launch rechecks authority after negotiation and immediately before upload. Latest dialogue has budget priority; long text uses literal head/tail excerpts. This is not semantic compaction. Current-request digest and actual tool evidence are unchanged. PC group141 tests:140 PASS/one POSIX skip, including31 cooperation tests with actual temporary Windows DPAPI. Image workroom APIs/health reject agent-role lookups, private runtime roots are excluded from generic workspaces, new logs redact image locators and cooperation imports only explicit public summaries. Live readback confirms legacy developer bodies masked without deleting originals. Initial deployment verification assumed only one public author and failed; a separate readback verified the additional explicit publication and recorded success without a second restart.
+
+Latest owner direction: approved goals must continue across execution segments automatically; local image generation must become a separate app, while ZipHap gets a cloud-image page using existing subscription access where supported. Those changes are NOT in this checkpoint. Full bounded task memory/retrieval/compaction and broader service qualification remain pending. Rust PC isolation remains unqualified and its new production inference route stays disabled. Preserve the safe checkpoint before that larger refactor.
 
 ## Installed2006 (0.1.6); signed GitHub update path and next-request model choice
 

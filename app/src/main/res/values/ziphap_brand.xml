@@ -1,0 +1,9 @@
+<resources>
+    <color name="ziphap_launch_background">#F8F7F3</color>
+    <style name="Theme.ZipHap.Launch" parent="Theme.LocalAgent">
+        <item name="android:windowSplashScreenBackground">@color/ziphap_launch_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/ziphap_launch_background</item>
+        <item name="android:windowBackground">@color/ziphap_launch_background</item>
+    </style>
+</resources>

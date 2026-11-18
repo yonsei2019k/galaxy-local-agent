@@ -13,7 +13,7 @@ object PostReadActions {
         "read_project_file" to setOf("write_project_file")
     )
     fun offered(plan:SemanticRequestPlan?,steps:List<HarnessStep>,capturedOffered:Set<String>):Set<String> {
-        if(plan?.action!=SemanticAction.TOOL_TASK||steps.any{it.evidence.state==VerificationState.PREPARED})return emptySet()
+        if(plan?.action!=SemanticAction.TOOL_TASK||steps.any(PreparedHandoff::pendingEffect))return emptySet()
         return steps.filter{it.tool in plan.requiredTools&&it.evidence.state==VerificationState.VERIFIED}
             .flatMap{related[it.tool].orEmpty()}.toSet().intersect(capturedOffered)-plan.requiredTools
     }

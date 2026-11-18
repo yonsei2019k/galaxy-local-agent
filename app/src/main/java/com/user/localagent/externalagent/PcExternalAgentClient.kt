@@ -106,7 +106,7 @@ class PcExternalAgentClient(
     override suspend fun cancel(revision:Long):AgentSessionSnapshot =
         snapshot(call("POST","/cancel",buildJsonObject{put("revision",revision)}))
     private fun provider(root:JsonObject):JsonObject {
-        ExternalAgentContract.fields(root,setOf("state","report","errorCode"))
+        ExternalAgentContract.fields(root,setOf("state","report","errorCode"),setOf("progress"))
         require(ExternalAgentContract.text(root,"state") in setOf("RUNNING","FINISHED","CANCELLING"))
         root.getValue("errorCode").takeUnless{it==JsonNull}?.let {
             val code=(it as JsonPrimitive).also{p->require(p.isString)}.content
@@ -119,12 +119,34 @@ class PcExternalAgentClient(
             require(answer.codePointCount(0,answer.length)<=12_000&&question.codePointCount(0,question.length)<=300)
             require(ExternalAgentContract.long(report,"elapsedMs")>=0&&ExternalAgentContract.long(report,"mcpCalls") in 0..1000)
         }
+        ProviderProgress.parse(root["progress"])?.let{next->
+            if(latestProviderProgress?.sequence?.let{next.sequence>it}!=false)
+                latestProviderProgress=next.copy(toolName=next.toolName?.takeIf{it in captured.phoneTools||it in captured.pcTools})
+        }
         return root // Agent prose/status only, never parsed as VERIFIED or added to the phone ledger.
     }
-    suspend fun launchProvider(ownerRequest:String):JsonObject {
+    var latestProviderProgress:ProviderProgress?=null
+        private set
+    suspend fun launchProvider(ownerRequest:String,conversationContext:JsonObject?=null,beforeLaunch:suspend ()->Unit={}):JsonObject {
         require(captured.allowExternalAgent&&ownerRequest.isNotBlank()&&ownerRequest.toByteArray(Charsets.UTF_8).size<=65_536&&
             ExternalAgentContract.sha(ownerRequest)==captured.requestDigest){"BRIDGE_OWNER_REQUEST_CHANGED"}
-        return provider(call("POST","/launch",buildJsonObject{put("ownerRequest",ownerRequest)}))
+        beforeLaunch()
+        if(conversationContext!=null){
+            val support=call("GET","/context-capabilities")
+            require(support.keys==setOf("conversationContextVersions","maxContextBytes")&&
+                support.getValue("conversationContextVersions").jsonArray.any{it.jsonPrimitive.intOrNull==1}&&
+                support.getValue("maxContextBytes").jsonPrimitive.int>=CloudConversationContext.MAX_UTF8_BYTES){
+                "PC가 대화 맥락 전달을 지원하지 않습니다. PC 작업기를 업데이트한 뒤 다시 요청해주세요."
+            }
+        }
+        beforeLaunch()
+        return provider(call("POST","/launch",buildJsonObject{
+            put("ownerRequest",ownerRequest)
+            conversationContext?.let {
+                require(it.toString().toByteArray(Charsets.UTF_8).size<=CloudConversationContext.MAX_UTF8_BYTES)
+                put("conversationContext",it)
+            }
+        }))
     }
     suspend fun providerStatus():JsonObject=provider(call("GET","/provider"))
     suspend fun cancelProvider():JsonObject=provider(call("POST","/provider-cancel",buildJsonObject {}))

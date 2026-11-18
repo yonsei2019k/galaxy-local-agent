@@ -24,6 +24,8 @@ class PcComputeSettings private constructor(private val context:Context) {
     private val authorizationPreferences=context.getSharedPreferences("pc-compute-authorization-v1",Context.MODE_PRIVATE)
     @Volatile private var revision=authorizationPreferences.getLong("revision",0L).also {require(it>=0L)}
     val authorizationRevision:Long get()=revision
+    private val revisionChanges=MutableStateFlow(revision)
+    internal val authorityChanges:StateFlow<Long> =revisionChanges.asStateFlow()
     @Volatile private var connection:PcConnection?=null
     private val mutable=MutableStateFlow(PcComputeState())
     val state:StateFlow<PcComputeState> = mutable.asStateFlow()
@@ -109,6 +111,7 @@ class PcComputeSettings private constructor(private val context:Context) {
     fun forget()=synchronized(lock){advanceAuthorization();connection=null;store.write("");mutable.value=PcComputeState()}
     private fun advanceAuthorization(){
         revision=Math.addExact(revision,1L) // Fail closed for existing requests even if persistence fails.
+        revisionChanges.value=revision
         check(authorizationPreferences.edit().putLong("revision",revision).commit()){"PC 사용 권한의 변경 기록을 저장하지 못했습니다."}
     }
     private fun persist(){

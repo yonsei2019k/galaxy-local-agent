@@ -26,6 +26,14 @@ class TaskHarnessTest {
         assertTrue(result is HarnessDecision.Stop)
         assertTrue((result as HarnessDecision.Stop).pendingExternalCompletion)
     }
+    @Test fun screenOpenerDoesNotPauseAndCountsAsOpened(){
+        val goal=TaskGoal("쿠팡에서 AI 안경 찾아서 가격 알려줘",listOf("검색 화면을 열고 읽는다"),8,setOf("search_coupang"))
+        assertEquals(HarnessDecision.Finish::class,finish(goal,step("search_coupang",VerificationState.PREPARED),step("read_screen"))::class)
+        assertTrue(TaskHarness.decide(goal,listOf(step("search_coupang",VerificationState.PREPARED))) is HarnessDecision.Advance)
+        assertFalse(PreparedHandoff.pendingEffect("open_map",VerificationState.PREPARED))
+        assertTrue(PreparedHandoff.pendingEffect("prepare_email",VerificationState.PREPARED))
+        assertTrue(PreparedHandoff.pendingEffect("create_alarm",VerificationState.PREPARED))
+    }
     @Test fun preparedSmsNeverMeansSent(){
         val result=finish(TaskHarness.inferGoal("문자 보내줘"),step("prepare_sms",VerificationState.PREPARED))
         assertTrue(result is HarnessDecision.Stop && result.pendingExternalCompletion)

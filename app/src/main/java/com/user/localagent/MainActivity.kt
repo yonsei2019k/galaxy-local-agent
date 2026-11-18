@@ -196,6 +196,17 @@ class MainActivity : ComponentActivity() {
                 externalAgentConsentThread.value=null
             }){Text("연결하고 선택")}},dismissButton={TextButton(onClick={externalAgentConsentThread.value=null}){Text("취소")}})}
         var tab by rememberSaveable {mutableIntStateOf(0)}
+        var nativeChat by rememberSaveable {mutableStateOf(false)}
+        var composerEpoch by remember {mutableLongStateOf(0)}
+        val collaboration=remember{com.user.localagent.collab.CollaborationRoom.get(applicationContext)}
+        val collaborationState by collaboration.state.collectAsState()
+        var collaborationVisible by remember{mutableStateOf(false)}
+        LaunchedEffect(collaborationVisible){
+            if(collaborationVisible)lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED){
+                while(isActive){collaboration.refresh();delay(10_000)}
+            }
+        }
+        val submittedTokens=remember {linkedSetOf<String>()}
         var imageStudioStatus by rememberSaveable {mutableStateOf("")}
         val requested by requestedTab.collectAsState()
         LaunchedEffect(requested){requested?.let {tab=it;requestedTab.value=null}}
@@ -276,7 +287,84 @@ class MainActivity : ComponentActivity() {
             ),
         )
         Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
-            if(tab==0)ChatWorkspace(messages,working||preparingAttachments,state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chooseConversationModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
+            if(tab==0&&!nativeChat){
+                val runForRoom=steerRunId?.takeIf{steerThreadId==composerThreadId}
+                val epoch=(runForRoom.orEmpty()+currentBranchId).hashCode().toLong().and(0x7fffffff)
+                val modelChoices=listOf("auto" to "자동 · 구독 우선",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "구독 Codex")+
+                    installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{it.id to it.title}
+                val snapshot=buildJsonObject{
+                    put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
+                    put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
+                    put("status",if(runForRoom!=null||activeExecutions.isEmpty())state else "다른 대화에서 작업 중")
+                    put("modelId",chosenId);put("modelLabel",modelChoices.find{it.first==chosenId}?.second?:"선택한 모델")
+                    put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&attachments.isEmpty())
+                    put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
+                        put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
+                    })}})
+                    put("threads",buildJsonArray{roomThreads.filter{!it.archived&&it.deletedAt==null}.take(100).forEach{thread->add(buildJsonObject{
+                        put("id",thread.id);put("title",thread.title);put("selected",thread.id==composerThreadId)
+                    })}})
+                    put("models",buildJsonArray{modelChoices.forEach{(id,label)->add(buildJsonObject{put("id",id);put("label",label)})}})
+                    put("attachments",buildJsonArray{attachments.forEach{add(buildJsonObject{put("id",it.id);put("name",it.name)})}})
+                    put("collab",collaborationState)
+                    put("tasks",buildJsonArray{activeExecutions.filter{it.threadId==composerThreadId}.forEach{run->add(buildJsonObject{
+                        put("id",run.runId);put("phase",if(run.waitingForApproval)"approval"else "running")
+                        put("label",if(run.waitingForApproval)"승인 확인 필요"else "작업 진행 중");put("detail",run.status)
+                        put("canCancel",run.runId==runForRoom)
+                        put("evidence",buildJsonArray{roomActivities.values.firstOrNull{it.runId==run.runId&&it.threadId==composerThreadId}?.events.orEmpty().takeLast(8).forEach{event->add(buildJsonObject{
+                            put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
+                        })}})
+                    })}
+                        roomActivities.values.filter{it.threadId==composerThreadId&&it.assistantMessageId in messages.map{m->m.id}&&it.status !in setOf("queued","running","waiting_approval")&&activeExecutions.none{run->run.runId==it.runId}}
+                            .distinctBy{it.runId}.sortedBy{it.updatedAt}.takeLast(12).forEach{activity->add(buildJsonObject{
+                                put("id",activity.runId);put("phase",activity.status)
+                                put("label",when(activity.status){"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
+                                put("detail","실제 실행 기록을 확인할 수 있습니다.");put("canCancel",false)
+                                put("evidence",buildJsonArray{activity.events.takeLast(8).forEach{event->add(buildJsonObject{
+                                    put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
+                                })}})
+                            })}
+                    })
+                }.toString()
+                ReactChatHost(snapshot,onUnavailable={nativeChat=true},modifier=Modifier.fillMaxSize().padding(padding).imePadding(),onCommand={command->
+                    val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
+                    if(sameRoom){
+                        val payload=command.payload
+                        when(command.action){
+                            "draft"->chat.updateDraft(payload.getValue("text").jsonPrimitive.content,composerThreadId)
+                            "send"->{
+                                val token=payload.getValue("submitToken").jsonPrimitive.content
+                                val text=payload.getValue("text").jsonPrimitive.content
+                                if(attachmentPreparing.value){status.value="첨부 자료를 준비하고 있습니다. 준비가 끝난 뒤 보내주세요."}
+                                else if(token !in submittedTokens&&chat.sendFromReact(text,composerThreadId,currentBranchId,token)){
+                                    submittedTokens+=token;while(submittedTokens.size>128)submittedTokens.remove(submittedTokens.first())
+                                    if(chat.draft.value==text)chat.updateDraft("",composerThreadId)
+                                }
+                                composerEpoch++
+                            }
+                            "stop","steer"->{
+                                val id=payload.getValue("runId").jsonPrimitive.content
+                                if(id==runForRoom&&id==chat.activeRunId&&payload.getValue("actionEpoch").jsonPrimitive.long==epoch){
+                                    if(command.action=="stop")chat.stopRun(id,composerThreadId)
+                                    else if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty())chat.steer(payload.getValue("text").jsonPrimitive.content,id,composerThreadId)
+                                    else status.value="첨부 자료를 준비 중이거나 선택한 상태에서는 추가 지시를 적용할 수 없습니다. 입력은 유지했습니다."
+                                }else status.value="작업이 바뀌어 이전 화면의 지시를 적용하지 않았습니다."
+                                if(command.action!="stop")composerEpoch++
+                            }
+                            "selectThread"->payload.getValue("id").jsonPrimitive.content.takeIf{id->roomThreads.any{it.id==id&&!it.archived&&it.deletedAt==null}}?.let(chat::selectThread)
+                            "newThread"->chat.newThread()
+                            "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
+                            "attach"->{val room=roomThreads.firstOrNull{it.id==composerThreadId};if(room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}}
+                            "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else tab=when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4}}
+                            "collabRefresh"->collaboration.refresh(payload.getValue("bindingEpoch").jsonPrimitive.long)
+                            "collabSend"->collaboration.post(payload.getValue("clientMessageId").jsonPrimitive.content,payload.getValue("text").jsonPrimitive.content,payload.getValue("recipient").jsonPrimitive.content,payload.getValue("bindingEpoch").jsonPrimitive.long)
+                            "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&it.role=="assistant"})chat.copyMessage(id)}
+                            "nativeDetails"->nativeChat=true
+                        }
+                    }
+                })
+            }
+            else if(tab==0)ChatWorkspace(messages,working||preparingAttachments,state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chooseConversationModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
                 {if(steerRunId!=null)chat.stopRun(steerRunId,composerThreadId)else if(preparingAttachments)attachmentJob?.cancel()else roomAuxiliary?.let {chat.stopAuxiliary(it.operationId,it.threadId)}},
                 {index->if(index==-1){chat.newThread();tab=0}else {tab=index.coerceIn(0,10);if(tab==0)refreshVisibleHistory()}},
                 Modifier.fillMaxSize().padding(padding),projectName=project.name,onProjectClick={tab=10},onAttach={
@@ -297,6 +385,8 @@ class MainActivity : ComponentActivity() {
                 activityByMessageId=roomActivities,onLoadOlderActivity=chat.workActivityController::loadOlder,
                 activeGoalLabel=roomGoal?.takeIf {it.threadId==composerThreadId&&it.projectId.orEmpty()==selectedProjectId}?.outcome,
                 backgroundWork={Column {
+                    TextButton(onClick={nativeChat=false}){Text("새 대화 화면으로 돌아가기")}
+                    TextButton(onClick={nativeChat=false;collaborationVisible=true;collaboration.open()}){Text("Codex · Claude 협업방")}
                     if(imageWork.running)TextButton(onClick={tab=7}){Text("이미지 작업 진행 중 · ${imageWork.phase} · 열기")}
                     CallFollowUpConversationStatus(app,composerThreadId)
                     activeExecutions.filter {it.threadId!=composerThreadId}.forEach {run->

@@ -1,4 +1,4 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@android:color/black" />
-    <foreground android:drawable="@drawable/ic_agent" />
+    <background android:drawable="@color/ziphap_launch_background" />
+    <foreground android:drawable="@drawable/ziphap_launcher_foreground" />
 </adaptive-icon>

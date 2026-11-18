@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="ZipHap">
+  <!-- ZipHap clasp mark: two porcelain halves (the mascot's head lobes) held by one cobalt bead. -->
+  <rect width="48" height="48" rx="15" fill="#2546D6"/>
+  <g fill="#F6F5F1">
+    <circle cx="18" cy="21" r="10.5"/>
+    <circle cx="30" cy="21" r="10.5"/>
+    <rect x="9" y="22" width="30" height="13" rx="6.5"/>
+  </g>
+  <rect x="18.5" y="29.5" width="11" height="6" rx="3" fill="#2546D6" stroke="#F6F5F1" stroke-width="1.6"/>
+  <g fill="#1A1E33">
+    <ellipse cx="20" cy="22.5" rx="1.6" ry="2.2"/>
+    <ellipse cx="28" cy="22.5" rx="1.6" ry="2.2"/>
+  </g>
+</svg>

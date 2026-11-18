@@ -11,6 +11,7 @@ from unittest.mock import Mock
 from agent_bridge import AgentBridge, BridgeError
 from agent_provider_supervisor import AgentProviderSupervisor, load_config
 from codex_agent_provider import AgentReport, ProviderError
+from test_provider_conversation_context import fixture as context_fixture
 
 OWNER = "10000000-0000-4000-8000-000000000001"
 SID = "20000000-0000-4000-8000-000000000002"
@@ -60,6 +61,71 @@ class ProviderSupervisorTests(unittest.TestCase):
             manager.launch(OWNER, SID, "phone", "second")
         bridge.bootstrap_agent.assert_called_once()
 
+    def test_history_reaches_explicitly_supported_runner_without_changing_owner_request_binding(self):
+        seen = []
+        def runner(config, bootstrap, request, *, conversation_context=None, **kwargs):
+            seen.append((request, conversation_context))
+            return AgentReport("partial", "현재 요청 결과", "", 1, 0)
+        bridge, manager = self.fixture(runner)
+        context = context_fixture(); expected = json.loads(json.dumps(context))
+        manager.launch(OWNER, SID, "phone", "그 작업 이어서", conversation_context=context)
+        result = self.finished(manager)
+        context["recentTurns"][0]["text"] = "caller mutation after capture"
+        self.assertEqual([("그 작업 이어서", expected)], seen)
+        bound_requests = [call.kwargs["owner_request"] for call in bridge.authenticate_phone.call_args_list
+                          if call.kwargs["owner_request"] is not None]
+        self.assertTrue(bound_requests)
+        self.assertTrue(all(request == "그 작업 이어서" for request in bound_requests))
+        self.assertEqual(hashlib.sha256("그 작업 이어서".encode()).hexdigest(), manager.children[SID].digest)
+        self.assertEqual("partial", result["report"]["state"])
+        self.assertNotIn("recentTurns", repr(manager.children[SID]))
+        self.assertNotIn("recentTurns", json.dumps(result))
+
+    def test_context_is_part_of_retry_identity_including_terminal_runs(self):
+        calls = []
+        def runner(*args, conversation_context=None, **kwargs):
+            calls.append(conversation_context); return AgentReport("partial", "synthetic", "", 1, 0)
+        bridge, manager = self.fixture(runner)
+        context = context_fixture()
+        manager.launch(OWNER, SID, "phone", "current", context); self.finished(manager)
+        manager.launch(OWNER, SID, "phone", "current", dict(reversed(list(context.items()))))
+        for changed in (None, context | {"previousTask": None}):
+            with self.assertRaisesRegex(BridgeError, "PROVIDER_CONTEXT_CHANGED"):
+                manager.launch(OWNER, SID, "phone", "current", changed)
+        self.assertEqual(1, len(calls)); bridge.bootstrap_agent.assert_called_once()
+
+    def test_new_context_on_legacy_sid_cannot_silently_reuse_the_prior_report(self):
+        bridge, manager = self.fixture()
+        manager.launch(OWNER, SID, "phone", "current"); self.finished(manager)
+        with self.assertRaisesRegex(BridgeError, "PROVIDER_CONTEXT_CHANGED"):
+            manager.launch(OWNER, SID, "phone", "current", context_fixture())
+        bridge.bootstrap_agent.assert_called_once()
+
+    def test_nonempty_context_requires_declared_runner_support_before_bootstrap(self):
+        def legacy(config, bootstrap, request, *, external_allowed, cancelled, timeout):
+            self.fail("legacy runtime must not discard context")
+        def opaque(*args, **kwargs):
+            self.fail("generic kwargs are not an explicit context contract")
+        for runner in (legacy, opaque):
+            bridge, manager = self.fixture(runner)
+            with self.assertRaisesRegex(BridgeError, "PROVIDER_CONTEXT_UNSUPPORTED"):
+                manager.launch(OWNER, SID, "phone", "current", context_fixture())
+            bridge.bootstrap_agent.assert_not_called(); self.assertEqual({}, manager.children)
+
+    def test_invalid_context_never_gets_authority_or_launches(self):
+        bridge, manager = self.fixture()
+        for context in ({}, context_fixture() | {"approval": True}, context_fixture() | {"version": True}):
+            with self.assertRaisesRegex(BridgeError, "INVALID_CONVERSATION_CONTEXT"):
+                manager.launch(OWNER, SID, "phone", "current", context)
+        bridge.authenticate_phone.assert_not_called(); bridge.bootstrap_agent.assert_not_called()
+
+    def test_explicit_empty_history_remains_compatible_with_legacy_runner(self):
+        def legacy(config, bootstrap, request, *, external_allowed, cancelled, timeout):
+            return AgentReport("partial", "synthetic", "", 1, 0)
+        _, manager = self.fixture(legacy)
+        manager.launch(OWNER, SID, "phone", "current", {"version": 1, "recentTurns": [], "previousTask": None})
+        self.assertEqual("partial", self.finished(manager)["report"]["state"])
+
     def test_cancellation_is_owned_and_revocation_reaches_child(self):
         started = threading.Event(); release = threading.Event(); observed = []
         def runner(*args, **kwargs):
@@ -107,6 +173,95 @@ class ProviderSupervisorTests(unittest.TestCase):
         bridge.authenticate_phone.side_effect = BridgeError("CAPABILITY_ROLE", 403)
         for operation in (manager.status, manager.cancel):
             with self.assertRaises(BridgeError): operation(OWNER, SID, "agent")
+
+    def test_more_than_64_finished_runs_do_not_permanently_lock_provider(self):
+        bridge, manager = self.fixture()
+        first = None
+        for index in range(70):
+            sid = str(uuid.uuid4());first = first or sid
+            manager.launch(OWNER, sid, "phone", "synthetic request")
+            for _ in range(100):
+                if manager.status(OWNER, sid, "phone")["state"] == "FINISHED":break
+                threading.Event().wait(.005)
+            self.assertEqual("FINISHED",manager.status(OWNER,sid,"phone")["state"])
+        self.assertLessEqual(len(manager.children),64)
+        self.assertNotIn(first,manager.children)
+        self.assertEqual(70,bridge.bootstrap_agent.call_count)
+        self.assertGreaterEqual(bridge.dispatch_authenticated.call_count,6)
+        # Eviction first revokes the old broker authority; no terminal replay cache is silently dropped.
+        self.assertTrue(all(call.args[1].endswith("/cancel") for call in bridge.dispatch_authenticated.call_args_list))
+
+    def test_terminal_eviction_failure_preserves_replay_receipt_and_blocks_fresh_launch(self):
+        bridge, manager = self.fixture()
+        for index in range(64):
+            sid = str(uuid.uuid4());manager.launch(OWNER,sid,"phone","request")
+            for _ in range(100):
+                if manager.status(OWNER,sid,"phone")["state"] == "FINISHED":break
+                threading.Event().wait(.005)
+        before = set(manager.children)
+        bridge.dispatch_authenticated.side_effect = BridgeError("SYNTHETIC_REVOKE_FAILURE",503)
+        with self.assertRaises(BridgeError):manager.launch(OWNER,str(uuid.uuid4()),"phone","request")
+        self.assertEqual(before,set(manager.children))
+        self.assertEqual(64,bridge.bootstrap_agent.call_count)
+
+    def test_progress_is_bounded_sanitized_and_old_runner_signature_remains_compatible(self):
+        def runner(config,bootstrap,request,*,external_allowed,cancelled,timeout):
+            return AgentReport("partial","synthetic","",1,0)
+        _, manager = self.fixture(runner)
+        manager.launch(OWNER,SID,"phone","request");self.assertNotIn("progress",self.finished(manager))
+        def reported(*args,progress,**kwargs):
+            progress({"stage":"hidden_reasoning","text":"must not display"})
+            progress({"stage":"tool_running","calls":True})
+            progress({"stage":"planning","calls":0,"text":"private prompt","sequence":999,"elapsedMs":99999999})
+            progress({"stage":"tool_running","calls":0,"toolName":"save_note"})
+            for _ in range(600):progress({"stage":"tool_returned","calls":1,"reasoning":"secret"})
+            return AgentReport("reported_done","synthetic","",1,1)
+        bridge, manager = self.fixture(reported)
+        bridge.authenticate_phone.return_value = {"revision":1,"tools":[{"name":"save_note"}]}
+        manager.launch(OWNER,SID,"phone","request");value=self.finished(manager)
+        self.assertEqual({"sequence","stage","elapsedMs","calls"},set(value["progress"]))
+        self.assertEqual(512,value["progress"]["sequence"])
+        self.assertEqual("tool_returned",value["progress"]["stage"])
+        self.assertEqual(1,value["progress"]["calls"])
+        self.assertNotIn("secret",json.dumps(value));self.assertNotIn("private prompt",json.dumps(value))
+
+    def test_cancelled_runner_cannot_publish_late_success(self):
+        started = threading.Event();release = threading.Event()
+        def runner(*args,**kwargs):
+            started.set();release.wait(2)
+            return AgentReport("reported_done","late untrusted answer","",1,0)
+        _, manager=self.fixture(runner)
+        manager.launch(OWNER,SID,"phone","request");self.assertTrue(started.wait(1))
+        manager.cancel(OWNER,SID,"phone");release.set();result=self.finished(manager)
+        self.assertIsNone(result["report"]);self.assertEqual("PROVIDER_CANCELLED",result["errorCode"])
+
+    def test_generic_failure_with_unconfirmed_revoke_blocks_idle_and_new_work_until_reconciled(self):
+        def failed(*args,**kwargs):raise RuntimeError("synthetic failure")
+        bridge,manager=self.fixture(failed)
+        bridge.dispatch_authenticated.side_effect=BridgeError("SYNTHETIC_REVOKE_FAILURE",503)
+        manager.launch(OWNER,SID,"phone","request")
+        for _ in range(100):
+            with manager.lock:
+                if manager.children[SID].state=="REVOCATION_UNCONFIRMED":break
+            threading.Event().wait(.005)
+        self.assertEqual("REVOCATION_UNCONFIRMED",manager.status(OWNER,SID,"phone")["state"])
+        self.assertEqual(1,manager.health()["activeProviders"])
+        with self.assertRaisesRegex(BridgeError,"PROVIDER_BUSY"):manager.launch(OWNER,str(uuid.uuid4()),"phone","new request")
+        bridge.dispatch_authenticated.side_effect=None
+        bridge.dispatch_authenticated.return_value=(200,{"state":"REVOKED"})
+        self.assertEqual(0,manager.health()["activeProviders"])
+        self.assertEqual("FINISHED",manager.status(OWNER,SID,"phone")["state"])
+
+    def test_cancel_and_report_publication_share_the_same_gate(self):
+        started=threading.Event();release=threading.Event()
+        def runner(*args,**kwargs):
+            started.set();release.wait(2);return AgentReport("reported_done","must not publish after cancel","",1,0)
+        _,manager=self.fixture(runner);manager.launch(OWNER,SID,"phone","request");self.assertTrue(started.wait(1))
+        with manager.lock:
+            release.set()
+            manager.cancel(OWNER,SID,"phone")
+        value=self.finished(manager)
+        self.assertIsNone(value["report"]);self.assertEqual("PROVIDER_CANCELLED",value["errorCode"])
 
     def real_fixture(self):
         owner = str(uuid.uuid4()); request = "synthetic lifecycle owner request"

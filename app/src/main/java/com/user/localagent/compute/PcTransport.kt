@@ -36,7 +36,8 @@ class PcTransport(context:Context) {
     @Volatile private var current:HttpsURLConnection?=null
     fun open(config:PcConnection,path:String,method:String="GET",body:JsonObject?=null,timeout:Int=30_000,computeOwner:String?=null):HttpsURLConnection {
         if(!PcLocalNetwork.allowed(context))throw PcUnavailable()
-        require(Regex("/v1/[a-z0-9/-]+").matches(path))
+        require(Regex("/v1/[a-z0-9/-]+").matches(path)||
+            method=="GET"&&Regex("/v1/collab/messages\\?after=[0-9]{1,15}&limit=(?:[1-9]|[1-4][0-9]|50)").matches(path))
         val target=PcComputeContract.endpoint(config.endpoint)
         val expected=config.certificateSha256
         val trust=object:X509TrustManager {

@@ -1,5 +1,13 @@
 # Device validation
 
+## 2026-11-19 installed2018 safe checkpoint
+
+Actual production base SHA256 `d3764cee8302cdd4639886a46d360b43f38a724a52cee9a2b19d8799d8e3d777` matches the newly signed APK; package/code2018/name0.1.18 readback PASS. This code was reused for local candidates, so bytes distinguish them. Existing approved developer-update preparation1 PASS; install/test install/launch succeed with original identity/data and no new Android permissions.
+
+Frozen-source core962/app977 JVM checks0failure/error/skip; release lint and main/test packaging PASS10m2. Actual RustReactBoundaryCanary2 PASS. Actual CloudContextDeviceCanary1 PASS18.093s through ordinary singleton send→HTTP→subscription model→persisted answer. Two synthetic turns recall a unique alias; second-run history contains only the prior bound cloud run, phone tool calls0, host sessions closed, fixture deleted and original selection/preferences/authority restored. This is a positive conversation workflow, not a mutation/service workflow or30-scenario qualification.
+
+Read-only host probe after launch reports root/workspace360×741.7CSSpx on a360×741 viewport, packaged assets loaded and0console errors; it does not alter layout/reload or capture owner content. One probe attempt immediately after another instrumentation ended hit an Android startInstrumentation null-process exception; launch then retry succeeded. Do not turn this structural observation into repeated visual/keyboard QA. First ordinary two-turn workflow and fixture cleanup passed; keyboard, repeated restarts, paused jobs, long-history recall, autopilot and image-app split are not qualified by this checkpoint.
+
 ## 2026-11-16 installed2006: actual trusted self-update and paired overlay
 
 CI43855300026 source08ad842aa0fe49de295c9d6a7f1b6f9ec9682dc4 passes full core/app JVM tests, release lint/release/device-test build18m18 and existing-key signing/latest v0.1.6 publication. Independent Ed25519 envelope/source/code/capability validation and APK signer/permission checks PASS. Phone2006 production base2b15ca1e83e85b0be2d66272128781da6b26738b33779586a04f9f77811c2aa0/test4c6d2f11c251686b19fd44889045a0ccb458446d0c9968bc643b2739a7844608 match exact verified artifacts.

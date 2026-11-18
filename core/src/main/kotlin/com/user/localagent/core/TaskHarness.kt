@@ -177,10 +177,10 @@ object TaskHarness {
             }
         }
         if(unresolvedFailure)return HarnessDecision.Stop("아직 복구·검증되지 않은 실행이 있어 작업 완료를 확인할 수 없습니다.")
-        if(steps.any {it.evidence.state==VerificationState.PREPARED})return HarnessDecision.Stop("작성·확인 화면이 준비됐습니다. 외부 작업의 실제 완료는 아직 확인되지 않았습니다.",true)
+        if(steps.any(PreparedHandoff::pendingEffect))return HarnessDecision.Stop("작성·확인 화면이 준비됐습니다. 외부 작업의 실제 완료는 아직 확인되지 않았습니다.",true)
         if(steps.withIndex().any {(index,step)->step.evidence.state==VerificationState.UNVERIFIED&&!AnalysisCompletionEvidence.resolved(steps,index)})return HarnessDecision.Stop("아직 확인하지 않은 실행 결과가 있습니다.")
         if(goal.requiredTools.isEmpty())return HarnessDecision.Stop("요청한 작업의 실행·검증 기준을 확정하지 못해 완료를 주장하지 않습니다.")
-        val verified=steps.filter {it.evidence.state==VerificationState.VERIFIED}.map {it.tool}.toSet()
+        val verified=steps.filter {it.evidence.state==VerificationState.VERIFIED||it.evidence.state==VerificationState.PREPARED&&PreparedHandoff.opensScreenOnly(it.tool)}.map {it.tool}.toSet()
         val missing=goal.requiredTools-verified
         if(missing.isNotEmpty())return HarnessDecision.Stop("요청한 작업의 필수 결과가 확인되지 않았습니다: ${missing.sorted().joinToString()}")
         val completedFormats=steps.filter {it.tool=="create_document"&&it.evidence.state==VerificationState.VERIFIED}.mapNotNull {it.arguments["format"]?.jsonPrimitive?.content}.toSet()

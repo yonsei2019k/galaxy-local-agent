@@ -79,6 +79,7 @@ class ChatConverters {
     @Query("SELECT * FROM chat_branches WHERE id=:id") suspend fun branch(id:String):ChatBranchRecord?
     @Query("SELECT * FROM chat_branches WHERE threadId=:threadId AND deletedAt IS NULL ORDER BY createdAt,id") suspend fun branches(threadId:String):List<ChatBranchRecord>
     @Query("SELECT * FROM chat_runs WHERE id=:id") suspend fun run(id:String):ChatRunRecord?
+    @Query("SELECT * FROM chat_runs WHERE userMessageId=:messageId LIMIT 2") suspend fun runsForUserMessage(messageId:String):List<ChatRunRecord>
     @Query("SELECT * FROM chat_runs WHERE threadId=:threadId AND id IN (:runIds) ORDER BY createdAt DESC,id LIMIT 60") fun observeRunRows(threadId:String,runIds:List<String>):Flow<List<ChatRunRecord>>
     @Query("UPDATE chat_threads SET allowOwnerLearning=:enabled WHERE projectId=:projectId AND deletedAt IS NULL") suspend fun updateProjectLearningFlags(projectId:String,enabled:Boolean):Int
     @Query("SELECT * FROM messages WHERE runId=:runId AND role='assistant' ORDER BY createdAt,id LIMIT 1") suspend fun assistantForRun(runId:String):MessageRecord?
@@ -219,6 +220,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun thread(id:String)=dao.thread(id)?.takeIf {it.deletedAt==null}
     suspend fun branches(threadId:String)=dao.branches(threadId)
     suspend fun run(id:String)=dao.run(id)
+    suspend fun runForUserMessage(messageId:String)=dao.runsForUserMessage(messageId).singleOrNull()
     suspend fun assistantForRun(runId:String):MessageRecord? = dao.assistantForRun(runId)
     suspend fun runsForThread(threadId:String)=dao.runsForThread(threadId)
     suspend fun segmentsForMessage(messageId:String)=dao.segmentsForMessage(messageId)

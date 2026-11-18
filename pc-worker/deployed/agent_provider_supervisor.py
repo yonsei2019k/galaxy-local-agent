@@ -1,10 +1,12 @@
 """RAM-only cloud child lifecycle. A provider report is never effect evidence."""
 from dataclasses import dataclass, field
 import hashlib
+import inspect
 import json
 from pathlib import Path
 import threading
 import time
+import re
 
 _EVENTS = Path(__file__).resolve().parent.parent / "provider-events.log"
 
@@ -21,6 +23,8 @@ def _event(outcome, calls=None, elapsed_ms=None):
 
 from agent_bridge import BridgeError
 from codex_agent_provider import ProviderConfig, ProviderError, run
+from provider_conversation_context import (ConversationContextError, conversation_context_digest,
+                                           has_conversation_context, validate_conversation_context)
 
 
 def load_config(home):
@@ -53,10 +57,17 @@ def load_config(home):
 @dataclass
 class _Child:
     digest: str
+    owner: str = field(default="", repr=False)
+    capability: str = field(default="", repr=False)
+    tool_names: frozenset = field(default_factory=frozenset, repr=False)
     cancel: threading.Event = field(default_factory=threading.Event)
     state: str = "RUNNING"
     report: dict | None = field(default=None, repr=False)
     error: str | None = None
+    progress: dict | None = field(default=None, repr=False)
+    started: float = field(default_factory=time.monotonic, repr=False)
+    progress_updates: int = 0
+    context_digest: str = field(default="", repr=False)
 
 
 class AgentProviderSupervisor:
@@ -70,8 +81,20 @@ class AgentProviderSupervisor:
 
     def health(self):
         with self.lock:
+            self._reconcile_revocations()
             return {"providerConfigured": self.config is not None,
                     "activeProviders": sum(child.state != "FINISHED" for child in self.children.values())}
+
+    def _reconcile_revocations(self):
+        for sid, child in self.children.items():
+            if child.state != "REVOCATION_UNCONFIRMED":
+                continue
+            try:
+                self._revoke(child.owner, sid, child.capability)
+            except BridgeError:
+                continue
+            child.state = "FINISHED"
+            child.error = "PROVIDER_FAILED"
 
     def _revoke(self, owner, sid, capability):
         try:
@@ -87,32 +110,98 @@ class AgentProviderSupervisor:
 
     @staticmethod
     def _public(child):
-        return {"state": child.state, "report": None if child.report is None else dict(child.report),
-                "errorCode": child.error}
+        result = {"state": child.state, "report": None if child.report is None else dict(child.report),
+                  "errorCode": child.error}
+        if child.progress is not None:
+            result["progress"] = dict(child.progress)
+        return result
 
-    def launch(self, owner, sid, capability, request):
-        if type(request) is not str or not request.strip() or len(request.encode("utf-8")) > 48000:
+    def _collect_finished(self):
+        """Bound terminal RAM without making an evicted session replayable."""
+        for sid, child in list(self.children.items()):
+            if len(self.children) < 64:
+                break
+            if child.state != "FINISHED":
+                continue
+            # Revoke before dropping the idempotency receipt. An old launch can no longer
+            # obtain fresh agent authority, even while its original phone session exists.
+            self._revoke(child.owner, sid, child.capability)
+            del self.children[sid]
+
+    def _progress(self, child, value):
+        if type(value) is not dict or value.get("stage") not in {
+                "starting", "planning", "tool_running", "tool_returned", "verifying", "answering"}:
+            return
+        calls = value.get("calls", 0)
+        tool = value.get("toolName")
+        if type(calls) is not int or not 0 <= calls <= 128:
+            return
+        if tool is not None and (type(tool) is not str or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,79}", tool) is None):
+            return
+        with self.lock:
+            if child.state != "RUNNING" or child.cancel.is_set() or child.progress_updates >= 512:
+                return
+            # Timings and sequence belong to this supervisor, not model data/callback keys.
+            child.progress_updates += 1
+            child.progress = {"sequence": child.progress_updates, "stage": value["stage"],
+                              "elapsedMs": min(600000, max(0, round((time.monotonic() - child.started) * 1000))),
+                              "calls": max(calls, (child.progress or {}).get("calls", 0))}
+            if tool in child.tool_names:
+                child.progress["toolName"] = tool
+
+    def _supports_keyword(self, name, *, variadic=True):
+        try:
+            return any((p.name == name and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                                     inspect.Parameter.KEYWORD_ONLY)) or
+                       (variadic and p.kind == inspect.Parameter.VAR_KEYWORD)
+                       for p in inspect.signature(self.runner).parameters.values())
+        except (TypeError, ValueError):
+            return False
+
+    def launch(self, owner, sid, capability, request, conversation_context=None):
+        try:
+            valid_request = type(request) is str and request.strip() and len(request.encode("utf-8")) <= 48000
+        except UnicodeError:
+            valid_request = False
+        if not valid_request:
             raise BridgeError("PROVIDER_REQUEST", 400)
-        self._authorize(owner, sid, capability, request)
+        try:
+            context = validate_conversation_context(conversation_context)
+            context_digest = conversation_context_digest(context)
+        except ConversationContextError:
+            raise BridgeError("INVALID_CONVERSATION_CONTEXT", 400) from None
+        snapshot = self._authorize(owner, sid, capability, request)
         digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
         with self.lock:
+            self._reconcile_revocations()
             existing = self.children.get(sid)
             if existing:
                 if existing.digest != digest:
                     raise BridgeError("PROVIDER_REQUEST_CHANGED", 409)
+                if existing.context_digest != context_digest:
+                    raise BridgeError("PROVIDER_CONTEXT_CHANGED", 409)
                 return self._public(existing)
             if self.config is None:
                 raise BridgeError("PROVIDER_NOT_CONFIGURED", 503)
-            if len(self.children) >= 64 or any(c.state != "FINISHED" for c in self.children.values()):
+            # An explicit keyword declaration acknowledges the new data contract.
+            # A generic **kwargs legacy stub may silently discard it, so is insufficient.
+            if has_conversation_context(context) and not self._supports_keyword("conversation_context", variadic=False):
+                raise BridgeError("PROVIDER_CONTEXT_UNSUPPORTED", 503)
+            if any(c.state != "FINISHED" for c in self.children.values()):
+                raise BridgeError("PROVIDER_BUSY", 409)
+            self._collect_finished()
+            if len(self.children) >= 64:
                 raise BridgeError("PROVIDER_BUSY", 409)
             bootstrap = self.bridge.bootstrap_agent(owner, sid, local_authenticated=True)
-            child = _Child(digest)
+            tools = frozenset(item.get("name") for item in snapshot.get("tools", [])
+                              if type(item) is dict and type(item.get("name")) is str)
+            child = _Child(digest, owner, capability, tools, context_digest=context_digest)
             self.children[sid] = child
-            threading.Thread(target=self._run, args=(child, owner, sid, capability, request, bootstrap),
+            threading.Thread(target=self._run, args=(child, owner, sid, capability, request, bootstrap, context),
                              name="ziphap-cloud-child", daemon=True).start()
             return self._public(child)
 
-    def _run(self, child, owner, sid, capability, request, bootstrap):
+    def _run(self, child, owner, sid, capability, request, bootstrap, conversation_context):
         def revoked():
             if child.cancel.is_set():
                 return True
@@ -126,9 +215,23 @@ class AgentProviderSupervisor:
             def is_set(self):
                 return revoked()
         try:
-            result = self.runner(self.config, bootstrap, request, external_allowed=True,
-                                 cancelled=AuthorityCancellation(), timeout=300)
+            kwargs = {"external_allowed": True, "cancelled": AuthorityCancellation(), "timeout": 300}
+            if self._supports_keyword("progress"):
+                kwargs["progress"] = lambda value: self._progress(child, value)
+            if conversation_context is not None and self._supports_keyword("conversation_context", variadic=False):
+                kwargs["conversation_context"] = conversation_context
+            result = self.runner(self.config, bootstrap, request, **kwargs)
+            if (result.state not in {"reported_done","needs_input","partial","failed"} or
+                    type(result.answer) is not str or len(result.answer)>12000 or
+                    type(result.question) is not str or len(result.question)>300 or
+                    type(result.elapsed_ms) is not int or not 0<=result.elapsed_ms<=600000 or
+                    type(result.mcp_calls) is not int or not 0<=result.mcp_calls<=128):
+                raise ProviderError("PROVIDER_FINAL_FORMAT")
             with self.lock:
+                # Cancellation ACK and publication share this gate. Recheck the broker's
+                # exact current request too; a pre-lock check leaves a revocation race.
+                if revoked():
+                    raise ProviderError("PROVIDER_CANCELLED")
                 child.report = {"state": result.state, "answer": result.answer, "question": result.question,
                                 "elapsedMs": result.elapsed_ms, "mcpCalls": result.mcp_calls}
             _event("REPORT_" + str(result.state).upper()[:24], result.mcp_calls, result.elapsed_ms)
@@ -144,16 +247,17 @@ class AgentProviderSupervisor:
             _event(child.error)
         except Exception:
             child.cancel.set()
+            confirmed = True
             try:
                 self._revoke(owner, sid, capability)
             except BridgeError:
-                pass
+                confirmed = False
             with self.lock:
-                child.error = "PROVIDER_FAILED"
-            _event("PROVIDER_FAILED")
+                child.error = "PROVIDER_FAILED" if confirmed else "PROVIDER_REVOCATION_UNCONFIRMED"
+            _event(child.error)
         finally:
             with self.lock:
-                child.state = "FINISHED"
+                child.state = "REVOCATION_UNCONFIRMED" if child.error == "PROVIDER_REVOCATION_UNCONFIRMED" else "FINISHED"
 
     def status(self, owner, sid, capability):
         self._authorize(owner, sid, capability)
@@ -170,7 +274,15 @@ class AgentProviderSupervisor:
             if child is None:
                 raise BridgeError("PROVIDER_NOT_STARTED", 404)
             child.cancel.set()
+            previously_unconfirmed = child.state == "REVOCATION_UNCONFIRMED"
             if child.state != "FINISHED":
                 child.state = "CANCELLING"
-            self._revoke(owner, sid, capability)  # Before cancellation ACK, revoke unclaimed effects too.
+            try:
+                self._revoke(owner, sid, capability)  # Before cancellation ACK, revoke unclaimed effects too.
+            except BridgeError:
+                if previously_unconfirmed:
+                    child.state = "REVOCATION_UNCONFIRMED"
+                raise
+            if previously_unconfirmed:
+                child.state = "FINISHED"
             return self._public(child)

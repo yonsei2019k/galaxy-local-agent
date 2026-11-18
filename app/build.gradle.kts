@@ -34,6 +34,9 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     sourceSets["main"].assets.srcDir("../public")
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/react-assets").get().asFile)
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/rust/jniLibs").get().asFile)
+    sourceSets.named("main") { kotlin.directories += layout.buildDirectory.dir("generated/rust/kotlin").get().asFile.absolutePath }
     // Share private QA-report helpers between JVM and instrumentation tests only.
     sourceSets.named("test") { kotlin.directories += "src/sharedTest/java" }
     sourceSets.named("androidTest") { kotlin.directories += "src/sharedTest/java" }
@@ -42,6 +45,7 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation(project(":core"))
     implementation(platform("androidx.compose:compose-bom:2026.02.00"))
     implementation("androidx.activity:activity-compose:1.10.1")
@@ -77,4 +81,20 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+val buildRustEngine by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine(providers.environmentVariable("ZIPHAP_PYTHON").orElse("python").get(), "scripts/build-rust-android.py")
+    inputs.files(fileTree("../rust") { include("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/**"); exclude("target/**") })
+    inputs.file("../scripts/build-rust-android.py")
+    outputs.dir(layout.buildDirectory.dir("generated/rust"))
+}
+val buildReactUi by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine(providers.environmentVariable("ZIPHAP_PYTHON").orElse("python").get(), "scripts/build-react-ui.py")
+    inputs.files(fileTree("../web-ui") { exclude("node_modules/**", "dist/**") })
+    inputs.file("../scripts/build-react-ui.py")
+    outputs.dir(layout.buildDirectory.dir("generated/react-assets/react"))
+}
+tasks.named("preBuild").configure { dependsOn(buildRustEngine,buildReactUi) }
 

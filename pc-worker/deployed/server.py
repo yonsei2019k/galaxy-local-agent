@@ -8,13 +8,15 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-from security import HOME,load,private_v4
+from security import HOME,TOOLS,load,private_v4
 from engines import Busy,ReferenceUnavailable
 from owned_engines import OwnedEngines,OwnershipMismatch,RequestNotActive,ComputeCancelled,owner_value
 from pairing import Pairing
 from agent_bridge import AgentBridge,BridgeError
 from agent_provider_supervisor import AgentProviderSupervisor,load_config as load_agent_provider
+from provider_conversation_context import ConversationContextError,MAX_CONTEXT_BYTES,validate_conversation_context
 from pathlib import Path
+from collab_bridge import CollabBridge,load_config as load_collab_config
 
 from recovery_engines import RecoveryEngines
 from overlay_endpoint import overlay_endpoint
@@ -40,6 +42,9 @@ def note(path,status,error):
  if path.startswith('/v1/agent/'):
   if status in (200,201) and not error:return
   path='/v1/agent'
+ if path.startswith('/v1/collab/'):
+  if status in (200,201) and not error:return
+  path='/v1/collab'
  # Remote test polls repeat every few seconds; request IDs and texts never enter the log.
  if path.startswith('/v1/remote/'):
   if status in (200,201) and not error:return
@@ -48,8 +53,10 @@ def note(path,status,error):
  if path.startswith('/v1/browser/'):
   if status in (200,201) and not error:return
   path='/v1/browser'
- # Successful image progress polls are ~95% of traffic and carry no diagnostic value.
- if status==200 and not error and POLL.match(path.split('?')[0]):return
+ # Image requests/results remain private to their phone channel, including every suffix.
+ if path.startswith('/v1/images'):
+  if 200<=status<300:return
+  path='/v1/images';error='IMAGE_REQUEST_FAILED'
  try:
   import os
   with LOG_LOCK:
@@ -57,6 +64,7 @@ def note(path,status,error):
    with open(LOG,'a',encoding='utf-8') as out:out.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {path} {status} {error}\n")
  except OSError:pass
 CONFIG=load();TOKEN=CONFIG['token']
+COLLAB=CollabBridge(load_collab_config(HOME))
 def agent_workspace_profiles():
  # Host configuration only. Missing/invalid profiles never widen a workspace scope.
  try:
@@ -74,8 +82,11 @@ def agent_workspace_profiles():
              isinstance(value,str) and len(value)<=4096 and Path(value).is_absolute() and Path(value).is_dir() for key,value in profiles.items()):raise ValueError('PROFILE_CONFIG')
   return profiles
  except (OSError,ValueError,UnicodeError):return {}
-try:AGENT_BRIDGE=AgentBridge(workspace_profiles=agent_workspace_profiles())
-except (BridgeError,OSError):AGENT_BRIDGE=AgentBridge(workspace_profiles={})
+try:
+ coordination=Path(COLLAB.config['coordination']).resolve() if COLLAB.config else HOME.resolve()
+ private_coordination=next((parent for parent in coordination.parents if parent.name=='.local'),coordination)
+ AGENT_BRIDGE=AgentBridge(workspace_profiles=agent_workspace_profiles(),private_roots=(HOME,TOOLS,Path(LOG).parent,private_coordination))
+except (BridgeError,OSError,RuntimeError):AGENT_BRIDGE=AgentBridge(workspace_profiles={})
 AGENT_PROVIDER=AgentProviderSupervisor(AGENT_BRIDGE,load_agent_provider(HOME))
 ENGINE=RecoveryEngines(hashlib.sha256(TOKEN.encode()).hexdigest());PAIRING=Pairing(CONFIG)
 from media_engine import MediaEngine
@@ -86,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def reply(self,value,status=200):
   note(self.path,status,value.get('error') if isinstance(value,dict) else None)
-  data=json.dumps(value,separators=(',',':')).encode()
+  data=json.dumps(value,separators=(',',':'),ensure_ascii=False).encode('utf-8')
   self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(data)
  def authorized(self):
   return private_v4(self.client_address[0]) and hmac.compare_digest(self.headers.get('Authorization','')[:200],'Bearer '+TOKEN)
@@ -102,18 +113,32 @@ class Handler(BaseHTTPRequestHandler):
     if key in result:raise ValueError('DUPLICATE_JSON_KEY')
     result[key]=value
    return result
-  value=json.loads(raw,object_pairs_hook=pairs)
+  value=json.loads(raw.decode('utf-8',errors='strict'),object_pairs_hook=pairs)
   if not isinstance(value,dict):raise ValueError('JSON_OBJECT_REQUIRED')
   return value
  def dispatch(self):
   self.connection.settimeout(60)
   path=self.path
+  query=''
+  if '?' in path:
+   path,_,query=path.partition('?')
+   if path!='/v1/collab/messages' or self.command!='GET' or len(query)>80:raise ValueError('ROUTE')
+  if '%' in query:raise ValueError('ROUTE')
   if '?' in path or '%' in path or not path.startswith('/v1/'):raise ValueError('ROUTE')
   if self.command=='POST' and path in ('/v1/pair/start','/v1/pair/finish') and private_v4(self.client_address[0]):
    self.connection.settimeout(5)
    request=self.body(4096)
    self.reply(PAIRING.start(self.client_address[0],request) if path.endswith('/start') else PAIRING.finish(self.client_address[0],request));return
   if not self.authorized():self.reply({'error':'UNAUTHORIZED'},401);return
+  if (path=='/v1/images' or path.startswith('/v1/images/')) and self.headers.get_all('X-ZipHap-Agent-Capability',[]):
+   self.reply({'error':'IMAGE_PHONE_ONLY'},403);return
+  if path.startswith('/v1/collab/'):
+   if self.headers.get_all('X-ZipHap-Agent-Capability',[]) or self.headers.get_all('X-ZipHap-Phone-Capability',[]):
+    self.reply({'error':'COLLAB_PAIR_ONLY'},403);return
+   status,value=COLLAB.handle(self.command,path,query,self.body)
+   self.reply(value,status);return
+  if path=='/v1/health' and self.headers.get_all('X-ZipHap-Agent-Capability',[]):
+   self.reply({'error':'HEALTH_HOST_ONLY'},403);return
   if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id'],'deviceToolBridge':{'version':1,'restartPolicy':'RAM_ONLY_RESTART_REVOKES','bootstrapLoopbackOnly':True}|AGENT_PROVIDER.health()}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
   owners=self.headers.get_all('X-ZipHap-Compute-Owner',[])
   if len(owners)>1:raise ValueError('DUPLICATE_OWNER')
@@ -161,17 +186,32 @@ class Handler(BaseHTTPRequestHandler):
    capability=values[0] if values else None
    if capability is not None and (len(capability)>512 or not re.fullmatch(r'[A-Za-z0-9_-]{32,512}',capability)):raise ValueError('CAPABILITY_FORMAT')
    request=self.body(262144) if self.command=='POST' else None
-   host=re.fullmatch(r'/v1/agent/sessions/([0-9a-f-]{36})/(launch|provider|provider-cancel|evidence)',path)
+   host=re.fullmatch(r'/v1/agent/sessions/([0-9a-f-]{36})/(launch|provider|provider-cancel|evidence|context-capabilities)',path)
    if host:
     if len(phone_caps)!=1 or agent_caps:self.reply({'error':'PHONE_CONTROL_ONLY'},403);return
     sid=str(uuid.UUID(host[1]));action=host[2]
     try:
-     if self.command=='POST' and action=='launch' and set(request)=={'ownerRequest'}:
-      value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'])
+     if self.command=='POST' and action=='launch':
+      if set(request)=={'ownerRequest'}:
+       value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'])
+      elif set(request)=={'ownerRequest','conversationContext'}:
+       try:
+        if request['conversationContext'] is None:raise ConversationContextError()
+        context=validate_conversation_context(request['conversationContext'])
+       except ConversationContextError:raise BridgeError('INVALID_CONVERSATION_CONTEXT',400) from None
+       value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'],conversation_context=context)
+      else:raise ValueError('PROVIDER_ROUTE')
      elif self.command=='GET' and action=='provider':value=AGENT_PROVIDER.status(owner,sid,capability)
      elif self.command=='POST' and action=='provider-cancel' and request=={}:value=AGENT_PROVIDER.cancel(owner,sid,capability)
      elif self.command=='GET' and action=='evidence':value=AGENT_BRIDGE.task_evidence(owner,sid,capability)
+     elif self.command=='GET' and action=='context-capabilities':
+      snapshot=AGENT_BRIDGE.authenticate_phone(owner,sid,capability)
+      if snapshot.get('state')!='ACTIVE':raise BridgeError('SESSION_NOT_ACTIVE',410)
+      value={'conversationContextVersions':[1],'maxContextBytes':MAX_CONTEXT_BYTES}
      else:raise ValueError('PROVIDER_ROUTE')
+     # Older phone builds reject unknown response fields. Progress is a display-only negotiated extension.
+     if self.headers.get('X-ZipHap-Provider-Progress')!='1' and isinstance(value,dict):
+      value=dict(value);value.pop('progress',None)
      self.reply(value)
     except BridgeError as error:self.reply({'error':error.code},error.status)
     return

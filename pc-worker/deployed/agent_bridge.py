@@ -307,11 +307,11 @@ class AgentBridge:
     No configuration is read automatically and no credentials are logged.
     """
     def __init__(self, workspace_profiles=None, *, clock_ms=None, epoch_ms=None,
-                 pc_executor=None, max_sessions=64):
+                 pc_executor=None, max_sessions=64, private_roots=()):
         self._clock = clock_ms or (lambda: int(time.monotonic() * 1000))
         self._epoch = epoch_ms or (lambda: int(time.time() * 1000))
         _require("phone-only" not in (workspace_profiles or {}), "WORKSPACE_PROFILE_RESERVED")
-        self._profiles = {name: WorkspaceExecutor(path) for name, path in (workspace_profiles or {}).items()}
+        self._profiles = {name: WorkspaceExecutor(path, private_roots=private_roots) for name, path in (workspace_profiles or {}).items()}
         self._pc_executor = pc_executor
         self._limit = _integer(max_sessions, 1, 128)
         self._sessions = {}
@@ -754,9 +754,18 @@ class WorkspaceExecutor:
     component with OPEN_REPARSE_POINT and share-read only, rejects reparse handles,
     and enumerates through the verified directory handle, not a raced path string.
     """
-    def __init__(self, root):
+    def __init__(self, root, *, private_roots=()):
         self._root = Path(os.path.abspath(os.fspath(root)))
         _require(self._root.is_absolute(), "WORKSPACE_ROOT")
+        # Host-only exclusions: reject both a private subtree and a broad workspace
+        # containing it, before any enumeration or file content can be returned.
+        candidate = self._root.resolve(strict=True)
+        _require(not any(part.lower()=='.local' for part in candidate.parts) and not (candidate / '.local').exists(),
+                 "WORKSPACE_PRIVATE_RUNTIME", 403)
+        for private in private_roots:
+            protected = Path(private).resolve(strict=False)
+            _require(candidate != protected and candidate not in protected.parents and protected not in candidate.parents,
+                     "WORKSPACE_PRIVATE_RUNTIME", 403)
         info = self._root.lstat()
         _require(stat.S_ISDIR(info.st_mode) and not self._linked(info), "WORKSPACE_ROOT")
         _require(self._root.resolve(strict=True) == self._root, "WORKSPACE_ROOT_REPARSE")
@@ -788,6 +797,7 @@ class WorkspaceExecutor:
         parts = path.split("/") if path else []
         _require(len(parts) <= 16, "WORKSPACE_PATH")
         for item in parts:
+            _require(item.lower() != '.local', "WORKSPACE_PRIVATE_RUNTIME", 403)
             _require(item not in ("", ".", "..") and item[-1:] not in (" ", ".")
                      and not any(ord(c) < 32 for c in item), "WORKSPACE_PATH")
             name = item.split(".")[0].upper()
@@ -899,22 +909,29 @@ class WorkspaceExecutor:
                          "readOnly": True, "filesChanged": False}
         else:
             limit, entries = arguments.get("limit", 50), []
+            private_omitted = False
             with self._open(parts, directory=True) as fd:
                 if os.name == "nt":
                     iterator = self._win_entries(fd)
                     for name, folder, linked, size in iterator:
+                        if name.lower()=='.local':
+                            private_omitted = True
+                            continue
                         entries.append({"name": name, "directory": folder, "readable": not linked, "reparse": linked, "bytes": None if folder else size})
                         if len(entries) > limit:
                             break
                 else:
                     with os.scandir(fd) as iterator:
                         for entry in iterator:
+                            if entry.name.lower()=='.local':
+                                private_omitted = True
+                                continue
                             info = entry.stat(follow_symlinks=False)
                             linked, folder = self._linked(info), stat.S_ISDIR(info.st_mode)
                             entries.append({"name": entry.name, "directory": folder, "readable": not linked, "reparse": linked, "bytes": None if folder else info.st_size})
                             if len(entries) > limit:
                                 break
-            value = {"path": "/".join(parts), "entries": entries[:limit], "partial": len(entries) > limit,
-                     "enumerationComplete": len(entries) <= limit, "readOnly": True, "filesChanged": False,
+            value = {"path": "/".join(parts), "entries": entries[:limit], "partial": len(entries) > limit or private_omitted,
+                     "enumerationComplete": len(entries) <= limit and not private_omitted, "readOnly": True, "filesChanged": False,
                      "recursive": False}
         return {"success": True, "content": canonical(value).decode("utf-8"), "verification": "VERIFIED", "effectNotApplied": False}

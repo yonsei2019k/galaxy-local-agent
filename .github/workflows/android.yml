@@ -12,9 +12,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     env:
       RELEASE_VERSION_NAME: 0.1.${{ github.run_number }}
+      RUSTUP_TOOLCHAIN: 1.97.0
+      CARGO_BUILD_JOBS: 2
+      ZIPHAP_PYTHON: python
     steps:
       - name: Set monotonic version code
         # Above historical local1090; this workflow's run number remains monotonic.
@@ -26,6 +29,40 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0, official signed commit
+        with:
+          node-version: '24.20.0'
+          package-manager-cache: false
+      - name: Install pinned Rust and Android target
+        shell: bash
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal --component rustfmt --component clippy
+          rustup target add --toolchain 1.97.0 aarch64-linux-android
+      - name: Test Rust workspace and provider lifecycle
+        shell: bash
+        env:
+          PYTHONPATH: pc-worker/deployed:pc-worker/eval
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml --workspace --locked --jobs 2
+          python -m pip install --disable-pip-version-check -r scripts/ci-requirements.txt
+          python -c 'import cryptography; assert cryptography.__version__ == "50.0.2"'
+          python -m unittest discover -s pc-worker/tests -p 'test_*provider*.py'
+          python -m unittest discover -s pc-worker/tests -p 'test_server_agent_adapter.py'
+          python -m unittest discover -s pc-worker/tests -p 'test_private_image_workspace.py'
+          ZIPHAP_COLLAB_BIN="$GITHUB_WORKSPACE/rust/target/debug/ziphap-collab" python -m unittest discover -s pc-worker/tests -p 'test_collab_bridge.py'
+          python -m unittest discover -s pc-worker/eval -p 'test_*scenario*.py'
+          python -m unittest discover -s pc-worker/eval -p 'test_problem_solving_eval.py'
+          python -m unittest discover -s scripts/tests -p 'test_agent_scenario_attestation.py'
+      - name: Test and bundle pinned offline React UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build-react-ui.py --self-test
+          python scripts/build-react-ui.py --ci-tests
       - name: Install pinned Android SDK
         shell: bash
         run: |
@@ -91,7 +128,7 @@ jobs:
           umask 077
           mkdir -p release
           printf '%s' "$APK_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -p -f 4 unsigned/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -P 16 -f 4 unsigned/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias localagent --ks-pass env:APK_STORE_PASSWORD --key-pass env:APK_STORE_PASSWORD --out "release/galaxy-local-agent-$RELEASE_VERSION_NAME.apk" "$RUNNER_TEMP/aligned.apk"
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "release/galaxy-local-agent-$RELEASE_VERSION_NAME.apk"
           python scripts/release_manifest.py --apk "release/galaxy-local-agent-$RELEASE_VERSION_NAME.apk" --version-code "$RELEASE_VERSION_CODE" --version-name "$RELEASE_VERSION_NAME" --commit "$GITHUB_SHA" --tag "v$RELEASE_VERSION_NAME" --output release/update.json

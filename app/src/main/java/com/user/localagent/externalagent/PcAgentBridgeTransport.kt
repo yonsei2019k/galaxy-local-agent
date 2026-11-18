@@ -17,14 +17,17 @@ interface AgentBridgeTransport {
 }
 
 /** The existing pin, pairing token, no-redirect policy and fixed parent compute-owner are reused. */
-class PcAgentBridgeTransport(context:Context,private val parentRunId:String):AgentBridgeTransport {
-    companion object { const val PHONE_CAPABILITY_HEADER="X-ZipHap-Phone-Capability" }
+class PcAgentBridgeTransport(context:Context,private val parentRunId:String,private val beforeLaunchUpload:()->Unit={}):AgentBridgeTransport {
+    companion object {
+        const val PHONE_CAPABILITY_HEADER="X-ZipHap-Phone-Capability"
+        internal fun acceptsPath(path:String)=path.matches(Regex("/v1/agent/sessions(?:/[a-f0-9-]{36}(?:/(?:claim|result|cancel|close|plan-ack|launch|provider|provider-cancel|evidence|context-capabilities))?)?"))
+    }
     private val settings=PcComputeSettings.get(context.applicationContext)
     private val transport=PcTransport(context.applicationContext)
     private var captured:PcConnection?=null
     init { ExternalAgentContract.uuid(parentRunId) }
     override suspend fun exchange(path:String,method:String,body:JsonObject?,phoneCapability:String?):String=withContext(Dispatchers.IO) {
-        require(path.matches(Regex("/v1/agent/sessions(?:/[a-f0-9-]{36}(?:/(?:claim|result|cancel|close|plan-ack|launch|provider|provider-cancel|evidence))?)?")))
+        require(acceptsPath(path))
         require(method in setOf("GET","POST")&&(method!="GET"||body==null))
         phoneCapability?.let { require(it.matches(Regex("[A-Za-z0-9_-]{32,256}"))) }
         currentCoroutineContext().ensureActive()
@@ -36,13 +39,17 @@ class PcAgentBridgeTransport(context:Context,private val parentRunId:String):Age
         // open(body=null) does not connect yet, so role capability is set before any bytes are sent.
         val connection=transport.open(config,path,method,timeout=10_000,computeOwner=parentRunId)
         try {
+            connection.setRequestProperty("X-ZipHap-Provider-Progress","1")
             phoneCapability?.let { connection.setRequestProperty(PHONE_CAPABILITY_HEADER,it) }
             if(bytes!=null){
                 connection.doOutput=true;connection.setRequestProperty("Content-Type","application/json")
                 connection.setFixedLengthStreamingMode(bytes.size)
             }
             transport.cancellable(connection) {
-                if(bytes!=null)connection.outputStream.use { it.write(bytes) }
+                if(bytes!=null)connection.outputStream.use {
+                    if(path.endsWith("/launch"))beforeLaunchUpload()
+                    it.write(bytes)
+                }
                 if(connection.responseCode !in 200..299)throw PcUnavailable("외부 에이전트 세션이 만료되었거나 현재 요청과 맞지 않습니다.")
                 val raw=transport.read(connection,ExternalAgentContract.MAX_WIRE_BYTES)
                 Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)

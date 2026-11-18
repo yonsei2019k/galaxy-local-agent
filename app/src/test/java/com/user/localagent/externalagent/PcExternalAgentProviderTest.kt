@@ -1,6 +1,8 @@
 package com.user.localagent.externalagent
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -13,10 +15,20 @@ class PcExternalAgentProviderTest {
     private fun capture(requirePlan:Boolean=true)=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,
         ExternalAgentContract.sha(request),setOf("get_current_datetime","save_note","search_notes","read_note"),
         allowExternalAgent=true,pcWorkspaceProfile="phone-only",requirePlan=requirePlan)
+    @Test fun contextNegotiationUsesAnAllowedSessionPathOnly(){
+        assertTrue(PcAgentBridgeTransport.acceptsPath("/v1/agent/sessions/$session/context-capabilities"))
+        for(path in listOf("/v1/images/$session","/v1/agent/sessions/$session/../context-capabilities",
+            "/v1/agent/context-capabilities","https://example.invalid/v1/agent/sessions/$session/context-capabilities")){
+            assertFalse(PcAgentBridgeTransport.acceptsPath(path))
+        }
+    }
     private inner class Wire(private val c:ExternalAgentCapture):AgentBridgeTransport {
         val capability="synthetic_phone_capability_000000000000000000041"
         var plan:JsonElement=JsonNull;var revision=1L;var malformedReport=false
         var forgedPhoneResult=false
+        var expectedContext:JsonObject?=null
+        var supportsContext=true
+        var beforeSupportReply:suspend ()->Unit={}
         val calls=mutableListOf<Triple<String,JsonObject?,String?>>()
         fun offer(){
             val goal="현재 시각을 조회";val tools=listOf("get_current_datetime");val constraints=listOf("원문 보존")
@@ -67,7 +79,13 @@ class PcExternalAgentProviderTest {
                     plan=JsonObject(plan.jsonObject+("state" to JsonPrimitive(if(body.getValue("accepted").jsonPrimitive.boolean)"ACCEPTED"else"REJECTED")))
                     snapshot()
                 }
-                path.endsWith("/launch")->{check(method=="POST"&&body==buildJsonObject{put("ownerRequest",request)});provider()}
+                path.endsWith("/context-capabilities")->{beforeSupportReply();buildJsonObject {
+                    put("conversationContextVersions",buildJsonArray{if(supportsContext)add(1)})
+                    put("maxContextBytes",12000)
+                }.toString()}
+                path.endsWith("/launch")->{check(method=="POST"&&body==buildJsonObject{
+                    put("ownerRequest",request);expectedContext?.let{put("conversationContext",it)}
+                });provider()}
                 path.endsWith("/provider-cancel")->{check(method=="POST"&&body==buildJsonObject{});provider()}
                 path.endsWith("/provider")->{check(method=="GET"&&body==null);provider()}
                 path.endsWith("/evidence")->{check(method=="GET"&&body==null);evidence()}
@@ -97,6 +115,32 @@ class PcExternalAgentProviderTest {
         assertFalse(report.containsKey("verification"));assertEquals(report,client.providerStatus());assertEquals(report,client.cancelProvider())
         wire.malformedReport=true
         assertTrue(runCatching{client.providerStatus()}.isFailure)
+    }
+    @Test fun contextIsNegotiatedWithoutChangingTheCurrentOwnerRequest()=runBlocking {
+        val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)
+        client.register(c)
+        val history=buildJsonObject{put("version",1);put("recentTurns",buildJsonArray{});put("previousTask",JsonNull)}
+        wire.expectedContext=history
+        client.launchProvider(request,history)
+        assertTrue(wire.calls[1].first.endsWith("/context-capabilities"))
+        assertEquals(history,wire.calls.last().second?.get("conversationContext"))
+        assertEquals(ExternalAgentContract.sha(request),c.requestDigest)
+        wire.supportsContext=false
+        val launches=wire.calls.count{it.first.endsWith("/launch")}
+        assertTrue(runCatching{client.launchProvider(request,history)}.isFailure)
+        assertEquals(launches,wire.calls.count{it.first.endsWith("/launch")})
+    }
+    @Test fun revocationWhileContextNegotiationWaitsPreventsHistoryUpload()=runBlocking {
+        val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)
+        client.register(c)
+        val entered=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
+        wire.beforeSupportReply={entered.complete(Unit);release.await()}
+        var permitted=true
+        val history=buildJsonObject{put("version",1);put("recentTurns",buildJsonArray{});put("previousTask",JsonNull)}
+        val result=async{runCatching{client.launchProvider(request,history,beforeLaunch={check(permitted)})}}
+        entered.await();permitted=false;release.complete(Unit)
+        assertTrue(result.await().isFailure)
+        assertFalse(wire.calls.any{it.first.endsWith("/launch")})
     }
     @Test fun changingPlanGoalOrListOrderCannotReuseItsDigestAndPhoneOnlyCannotAcquirePcTools()=runBlocking {
         val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)

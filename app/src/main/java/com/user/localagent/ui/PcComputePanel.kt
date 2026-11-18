@@ -87,6 +87,7 @@ import kotlinx.coroutines.*
                     onStatus(if(on)"PC 원격 시험 요청을 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
                 },modifier=Modifier.testTag("pc_remote_test"))
             }
+            com.user.localagent.voice.BackgroundRunExemptionRow(onStatus)
             val browser=remember{com.user.localagent.compute.BrowserAgentSettings.pc(context)}
             var browserOn by remember{mutableStateOf(browser.enabled())}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){

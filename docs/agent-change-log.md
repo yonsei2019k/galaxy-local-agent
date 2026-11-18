@@ -1,3 +1,71 @@
+## 2026-11-19 — Installed safe2018 checkpoint; broader implementation continues (root)
+
+User explicitly prioritized packaging/install before leaving Wi-Fi. Frozen-source full build/lint/main+test APK assembly PASS10m2, core962/app977 PASS0failure/error/skip. Signed production SHA256 `d3764cee8302cdd4639886a46d360b43f38a724a52cee9a2b19d8799d8e3d777` exactly matches installed base2018/0.1.18. Developer-update preparation1 PASS, main/test installed and launched. Version2018 is reused; identify by SHA. No added Android permissions or data reset.
+
+Actual JNI/offline-assets2 PASS. Actual two-turn singleton cloud conversation1 PASS18.093s: unique alias recalled through the newly bound context,0phone tool calls, sessions closed, fixture removed, original selection/preferences/authority restored. Host read-only metadata confirms nonzero root/workspace height and0console errors without applying a temporary layout fix; repeated visual/IME QA remains pending. A null-process instrumentation startup failure is retained separately from the successful launch/retry.
+
+PC context/privacy deployed after generic compute/cleanup/provider idle was confirmed following the owner's stop instruction. Runtime source hashes independently match candidate source. Public-feed readback confirms legacy private developer bodies masked and explicit public summaries available; original encrypted/private records remain. A too-narrow initial assertion about the number of public authors failed and was corrected by independent readback, without restarting a second time. PC141 tests:140PASS/one POSIX skip; cooperation31 includes actual temporary Windows DPAPI. Corrected publication matching includes canonical sender/id/recipient/text/digest, so a reused ID cannot expose an older private body.
+
+Next owner requirements: continuous goal autopilot, separate local-image app, cloud-image page in ZipHap. They remain under implementation and are not claimed in the installed checkpoint. Preserve local work/results and existing account/pairing/update access. First finish this safe checkpoint record, then refactor; do not overwrite the verified APK before retaining it privately.
+
+## 2026-11-19 — ACTIVE context wiring, image-workroom privacy, and release validation (root)
+
+Owner approved implementing the staged plan, then explicitly selected keeping PC image computation while hiding image-workroom information from PC display, cooperation feeds and ordinary agent lookups. Root owns integration/build/sign/deploy/device; scenario_suite returned the bounded context helper after20 pure Kotlin tests and a read-only review; tool_gaps owns only the cooperation publication canonicalization fix until its return. Existing unrelated source and private records remain preserved.
+
+Source now connects eligible prior cloud-only, same thread/branch/project/consent/PC-revision conversation to the provider through a negotiated phone-only endpoint. The latest dialogue has budget priority over old task prose; literal head/tail excerpts preserve late corrections. This is NOT semantic compaction or complete long-term memory. Independent review caught a missing transport route, a consent-revocation window during negotiation and an ineligible prior-task overwrite; fixes and corresponding negotiation/revocation tests are being integrated. Launch upload rechecks live authority, while cancellation/close remain usable after revocation.
+
+Privacy source changes: image/health endpoints deny agent-role access; new image HTTP/failure logs omit job identifiers and private error text; generic workspaces exclude runtime/private coordination roots. Cooperation publication reads dedicated opt-in files, with legacy private agent records masked without deleting encrypted originals or changing sequence. Exact published-body verification is under independent correction before deployment. No prompt/result/checkpoint is deleted or resumed.
+
+Validation snapshot: React17 PASS; prior helper20 pure Kotlin PASS; first integrated JVM run core962/app975 PASS with0failure/error/skip. Subsequent review fixes require rerunning affected checks. PC bridge/context/provider/privacy group107 tests had106 PASS/one POSIX skip; cooperation27 PASS includes actual temporary Windows DPAPI. First build stopped for a missing Python command; next full build's lint analysis crashed while source edits were being integrated (retained original failure). Freeze source and rerun lint/build; do not disable lint. PC health currently indicates occupied compute, so no worker restart or APK installation has been performed for this change. Do not inspect/export image-workroom payloads to diagnose this wait. First release and actual two-turn cloud/device workflow remain pending.
+
+## 2026-11-19 — Conversation context status audit (root, source/test only)
+
+Follow-up efficiency audit: v1 truncates prefixes rather than maintaining semantic memory; MAX_TURNS=8 counts individual messages. A synthetic Python size-selection simulation with o200k_base reference tokenization produced short Korean8 messages:1302 bytes/382 tokens; long replies:11593 bytes/2401 tokens/3 messages; long previous task:11241 bytes/2327 tokens/0 recent messages. This simulation is not the Kotlin execution path, a selected-model tokenizer, an actual cloud bill or semantic-quality evaluation. It reveals budget starvation, not a measured failure rate. Added explicit design-only memory budget/retention/retrieval/validation targets to conversation-workflow.ko.md. No context wiring, APK, deployment or device qualification is claimed by these documentation changes.
+
+Fresh source inspection confirms that the cloud coordinator still calls `launchProvider(request.text)` and the Android client/server launch contract still carries only `ownerRequest`. The bounded Android context builder and PC context validation/provider support exist in source, but they are not wired end to end. The deployed worker has no `provider_conversation_context.py`. Context continuity is therefore NOT fixed in the installed application. Recent turns must retain exact conversation/branch/project/model/consent bindings; historical prose is data and cannot authorize actions or prove completion.
+
+Fresh PC context/provider/supervisor tests: 46 PASS, 0 failures/errors/skips (3.010s). Android context test source contains 14 cases; this audit did not execute them. No APK build, installation, worker deployment or actual multi-turn workflow was performed by this status audit. Earlier release/build receipts do not cover these pending context changes.
+
+## 2026-11-18 — ACTIVE Rust/React integration and pinned-room orchestration (root)
+
+Latest human direction: Codex is the primary implementer/orchestrator; Claude Pro is a limited review assistant. Existing pinned rooms are active again: ① model/inference read-only isolation remediation; ② tools/service-contract read-only review; ③ owns only new scripts/verify-rust-react-apk.py and scripts/tests/test_rust_react_apk.py. Root alone owns integration, shared contracts/docs, Gradle/signing, PC deployment, ADB and actual-model/device runs. All other earlier child source assignments have returned to root. Preserve the earlier Claude PREPARED and background setting changes; do not stage unrelated attachments.
+
+Rust workspace adds core contracts, Android UniFFI metadata journal, bounded PC stdio adapter and a pure cooperation journal. React is packaged offline in Android with a main-frame/origin-limited UI-only bridge, original mascot and launcher/splash. Main conversation stays the default; the optional cooperation room is under the main menu. Android persists native in-flight checkpoints to SQLCipher before dispatch, restores uncertainty without replay, separates owner handoff from no-effect, and rechecks live foreground receipt/authority/deadline after approval. No provider prose can create actual effect receipts. Snapshot evidence is associated with the exact host run; slash shortcuts without durable IDs stay on the existing native surface. Added permissions: none; battery exemption uses the system settings list and remains an owner decision.
+
+Cooperation messages are dataOnly=true/executionAuthority=false, posted as user only through paired authentication. Rust checks sequence/digest/author/content bounds; the PC adapter has pinned hidden child execution, OS file locks, DPAPI-encrypted atomic storage, bounded I/O and an append-only MD mirror. Android/React bind queued sends, refreshes and acknowledgements to a captured pairing epoch and discard stale responses. Receiving a cooperation message starts no model/tool. Actor identity in a file/message does not replace owner permission.
+
+Validation so far: root Rust workspace49 tests PASS before two added PC regressions; subsequent PC15/15 PASS including owned Windows descendant cleanup. Actual pinned CLI health/model catalogue metadata PASS, authenticated=true, ten models, inference invoked0. isolationQualified=false, so the new Rust production inference route MUST remain disabled. Existing Python provider/supervisor28 PASS; cooperation25 PASS includes real Windows DPAPI on synthetic temporary data; React14 DOM PASS, browser layouts validated with a synthetic host only. Evaluator selftests5 and signed-attestation11 PASS. Both30-case catalogs validate, planned300 attempts, actual0. Android build/install and actual workflows for this source are still pending; source/build/device evidence must not be combined. Current phone was reconnected read-only and reports0.1.17/code2017. The original build failures are retained privately; root is resolving generated-source integration before any release claim.
+
+## 2026-11-18 — ACTIVE approved Rust/Compose implementation
+
+User approved the full proposed plan: existing subscription Codex primary, own always-on PC, Rust core/PC with thin Compose/Android shell, shopping/Kakao/Google calendar first, bounded explicit action grants, no new paid API/server. Root owns rust workspace/Android FFI/build/CI/integration/deploy and shared contracts. scenario_suite owns rust/crates/ziphap-core; tool_gaps owns rust/crates/ziphap-pc plus existing PC provider/supervisor and tests; image_fast_ui owns voice/VoiceCommand, new keepalive/progress helpers, PcExternalAgentClient/tests. Root alone edits Coordinator integration and preserves the existing PREPARED handoff patch.
+
+Preexisting dirty Manifest/PcComputePanel/BackgroundRunExemption and PREPARED changes (Coordinator/ExternalAgentPhoneCompletion/PostReadActions/TaskHarness/tests/new PreparedHandoff) are not owned by this implementation and must not be overwritten or blindly committed. Existing worktree remains. Fresh authenticated worker health is empty-idle before any build; no model request, resume/delete or runtime restart issued. Existing local inference remains available; changing the fresh-request default to cloud still requires the existing external-transmission consent and does not upgrade old queued requests. Exact installed/device evidence is pending. All new Rust paths require actual integration/testing, not merely library tests, before a runtime capability is claimed.
+## 2026-11-18 — PREPARED 분리(화면 열기 vs 전송 직전) + 백그라운드 실행 허용 요청 (root, 소스)
+
+**결함(실기 스크린샷).**
+- 원격 시험 대화에서 `search_coupang`("AI 안경")이 쿠팡 검색 화면을 정상으로 열었다(PREPARED).
+- 그런데 PREPARED는 종류를 가리지 않고 항상 작업을 멈췄다. 로컬은 `ChatRunCoordinator` 989행, 클라우드는 `preparedSeen`과 `preparedCalls` 비어 있음 검사에서 멈춘다.
+- 그래서 열린 화면을 읽어 가격을 답하는 다음 단계로 가지 못했다. 도구 오류가 아니라 판정 규칙의 문제다.
+
+**계약.**
+- `core PreparedHandoff`가 PREPARED를 둘로 나눈다.
+  - 화면 열기(`screenOpeners`): ConsumerAppCatalog 전체(쿠팡·넷플릭스·T맵 열기, 검색, 상품), `open_map`, `open_url`. 실행을 멈추지 않는다. 필수 도구 충족으로 센다(화면을 여는 것이 그 도구 효과의 전부다). 이어서 `read_screen` 등으로 확인할 수 있다.
+  - 전송 직전 단계: 문자·메일·일정 작성, 알람, 메신저 답장 등 나머지 PREPARED는 지금처럼 멈추고 소유자 확인을 기다린다. 반복 실행도 막는다.
+- 적용 위치:
+  - `TaskHarness.decide`, `PostReadActions.offered`
+  - 로컬 루프(989행), 클라우드 `preparedSeen`
+  - `ExternalAgentPhoneCompletion`: `preparedCalls`에는 화면 열기 도구만 허용하고, 필수 도구는 VERIFIED이거나 화면 열기 PREPARED여야 한다.
+- 시험: `TaskHarnessTest.screenOpenerDoesNotPauseAndCountsAsOpened`
+
+**백그라운드 실행 허용.**
+- `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 권한을 추가했다.
+- PC 연결 패널에 "백그라운드 실행 허용" 행을 넣었다. 누르면 Android 시스템 동의 대화상자를 연다. 허용 여부는 `PowerManager.isIgnoringBatteryOptimizations`로 표시한다.
+- 목적: 백그라운드에서 시작된 원격 요청도 `AgentRunService`(FGS)를 시작할 수 있게 한다(Android 공식 예외 항목).
+- 새 권한이 들어가므로 이 업데이트는 자동 설치되지 않는다. 업데이트 화면에서 소유자가 승인해야 한다.
+
+**미검증.** 기기 실기는 0건이다.
+
 ## 2026-11-18 — 화면 제어 실기 결과 + PC provider 종료 코드 기록 (root, 소스+PC 배포)
 
 **PC.**
@@ -1680,3 +1748,6 @@ Owned patch_worker.py and new tests/test_patch_worker.py only. Surgical async-na
 
 ## 2026-11-16 — SOURCE distinguish retained image result from current attempt (image_fast_ui)
 Owned ImageStudioState/Controller/Panel and new ImageStudioStateTest only. Adds CURRENT/PREVIOUS/RESTORED output origin and immutable displayed-result seed/model/location/reference metadata. Both generation entry points mark retained output previous before resetting current request fields; progress/step reset while original file/output remains. Only durable image+metadata save/readback marks a new output current. Startup latest result uses 최근 완성한 이미지, not current request completion. Preview/card show 이전 작업의 결과 during a subsequent attempt and use the retained result's own metadata/reference comparison/export label. Preview bitmap is bound to its loaded outputPath so an old bitmap cannot temporarily appear under a newly saved result's metadata. Added4 pure state-transition tests for stale metadata/progress, pause/failure/retry, durable replacement and restored history. Owned-files diff check PASS; tests/build/runtime/device/install/commit not executed by child. Root owns cleanup/reconnect correction, full1090 validation and device proof. Ownership released to root.
+
+## 2026-11-18 — SOURCE foreground-start receipt and provider display progress (image_fast_ui)
+Owned VoiceCommand.kt/new RunKeepAliveState.kt, PcExternalAgentClient.kt/new ProviderProgress.kt and4 pure tests. Foreground tracking requests now carry perrun generation tokens; receipt becomes ACTIVE only after successful ServiceCompat.startForeground, fixed failures cover rejected start,5s timeout, tracking end and service destruction. Stale callbacks cannot promote failed generations; bounded64 RAM entries never evict active runs. RunKeepAlive.await(runId,max5000ms)/snapshot expose actual start ACK, not battery survival guarantee; no jobs cancelled and no new permissions. Optional provider progress metadata is backward compatible, fixed-stage/number/identifier bounded, unknown tool names removed unless in capturedphone/PCtools, sequence monotonic; latestProviderProgress label is host-rendered and never execution verification. Root integrates receipt/progress in coordinator.4 pure tests added for token/timeout/capacity and progress sanitation; child did not run Gradle/build/device/runtime/model/deploy/commit. Owned-source diff check PASS. Preexisting Manifest/PcComputePanel/BackgroundRunExemption preserved. Ownership released to root.

@@ -33,7 +33,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.util.UUID
 
-/** Entry points (accessibility button, quick-settings tile, launcher alias) all open the same voice sheet. */
+/** Entry points share a lightweight voice/text request sheet, without opening the main workspace. */
 object VoiceCommand {
     const val THREAD_TITLE="음성 명령"
     fun launch(context:Context){
@@ -53,6 +53,8 @@ class VoiceCommandActivity:ComponentActivity() {
     private val heard=mutableStateOf("")
     private val finalText=mutableStateOf<String?>(null)
     private val countdown=mutableStateOf<Int?>(null)
+    private val textMode=mutableStateOf(false)
+    private val typedText=mutableStateOf("")
     private var autoSend:Job?=null
     private val permission=registerForActivityResult(ActivityResultContracts.RequestPermission()){granted->
         if(granted)listen() else phase.value="마이크 권한이 필요합니다."
@@ -60,32 +62,53 @@ class VoiceCommandActivity:ComponentActivity() {
 
     override fun onCreate(savedInstanceState:Bundle?){
         super.onCreate(savedInstanceState)
+        textMode.value=intent?.getBooleanExtra("text_input",false)==true
         setContent{MaterialTheme(colorScheme=darkColorScheme()){Sheet()}}
+        if(textMode.value){phase.value="요청을 입력하고 보내기를 눌러주세요.";return}
         if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)listen()
         else permission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     @Composable private fun Sheet(){
-        Box(Modifier.fillMaxSize(),contentAlignment=Alignment.BottomCenter){
+        Box(Modifier.fillMaxSize().imePadding(),contentAlignment=Alignment.BottomCenter){
             Surface(Modifier.fillMaxWidth().padding(12.dp),shape=MaterialTheme.shapes.large,tonalElevation=6.dp){
                 Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
-                    Text("ZipHap 음성 명령",style=MaterialTheme.typography.titleMedium)
+                    Text("ZipHap 빠른 요청",style=MaterialTheme.typography.titleMedium)
                     Text(phase.value,style=MaterialTheme.typography.bodyMedium)
                     val shown=finalText.value?:heard.value
-                    if(shown.isNotBlank())Text(shown,style=MaterialTheme.typography.titleLarge)
+                    if(textMode.value)OutlinedTextField(value=typedText.value,onValueChange={if(it.length<=2000)typedText.value=it},
+                        modifier=Modifier.fillMaxWidth(),label={Text("어떤 작업을 할까요?")},minLines=2,maxLines=5,enabled=!sent)
+                    else if(shown.isNotBlank())Text(shown,style=MaterialTheme.typography.titleLarge)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        if(finalText.value!=null){
+                        if(textMode.value){
+                            Button(onClick={send()},enabled=typedText.value.isNotBlank()&&!sent){Text("보내기")}
+                            OutlinedButton(onClick={startVoice()}){Text("말로 요청")}
+                        }else if(finalText.value!=null){
                             Button(onClick={send()}){Text(countdown.value?.let{"보내기 ($it)"}?:"보내기")}
                             OutlinedButton(onClick={autoSend?.cancel();countdown.value=null;listen()}){Text("다시 말하기")}
                         }else if(recognizer!=null) OutlinedButton(onClick={recognizer?.stopListening()}){Text("말 끝")}
                         TextButton(onClick={autoSend?.cancel();finish()}){Text("취소")}
                     }
+                    if(!textMode.value)TextButton(onClick={switchToText()}){Text("글로 입력")}
                 }
             }
         }
     }
 
+    private fun switchToText(){
+        textMode.value=true;autoSend?.cancel();countdown.value=null
+        typedText.value=(finalText.value?:heard.value).take(2000)
+        recognizer?.destroy();recognizer=null
+        phase.value="요청을 입력하고 보내기를 눌러주세요."
+    }
+    private fun startVoice(){
+        textMode.value=false
+        if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)listen()
+        else permission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
     private fun listen(){
+        if(textMode.value)return
         recognizer?.destroy();recognizer=null
         finalText.value=null;heard.value=""
         if(Build.VERSION.SDK_INT<31||!SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
@@ -94,12 +117,13 @@ class VoiceCommandActivity:ComponentActivity() {
         val created=SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
         recognizer=created
         created.setRecognitionListener(object:RecognitionListener{
-            override fun onReadyForSpeech(params:Bundle?){phase.value="듣고 있어요. 말씀하세요."}
+            override fun onReadyForSpeech(params:Bundle?){if(!textMode.value)phase.value="듣고 있어요. 말씀하세요."}
             override fun onBeginningOfSpeech(){}
             override fun onRmsChanged(rmsdB:Float){}
             override fun onBufferReceived(buffer:ByteArray?){}
-            override fun onEndOfSpeech(){phase.value="인식 중"}
+            override fun onEndOfSpeech(){if(!textMode.value)phase.value="인식 중"}
             override fun onError(error:Int){
+                if(textMode.value)return
                 phase.value=when(error){
                     SpeechRecognizer.ERROR_NO_MATCH,SpeechRecognizer.ERROR_SPEECH_TIMEOUT->"말씀을 알아듣지 못했습니다. 다시 말하기를 눌러주세요."
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS->"마이크 권한이 필요합니다."
@@ -109,9 +133,11 @@ class VoiceCommandActivity:ComponentActivity() {
                 finalText.value=heard.value.takeIf{it.isNotBlank()}
             }
             override fun onPartialResults(partialResults:Bundle?){
+                if(textMode.value)return
                 partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let{heard.value=it}
             }
             override fun onResults(results:Bundle?){
+                if(textMode.value)return
                 val text=results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
                 if(text.isBlank()){phase.value="말씀을 알아듣지 못했습니다. 다시 말하기를 눌러주세요.";return}
                 finalText.value=text.take(2000)
@@ -129,20 +155,25 @@ class VoiceCommandActivity:ComponentActivity() {
         phase.value="마이크 준비 중"
     }
 
-    private var sent=false
+    private var sent by mutableStateOf(false)
     private fun send(){
-        val text=finalText.value?.takeIf{it.isNotBlank()}?:return
+        val text=(if(textMode.value)typedText.value else finalText.value)?.takeIf{it.isNotBlank()}?:return
         if(sent)return;sent=true
         autoSend?.cancel()
         // A spoken "/command" is never a slash command; the agent treats it as text.
         val request=text.trimStart().removePrefix("/").trim()
         val app=(application as LocalAgentApplication).container
+        val selectedModel=app.runs.preferredModelId.value
         lifecycleScope.launch{
             phase.value="에이전트에게 전달 중"
             val thread=withContext(Dispatchers.IO){app.repository.chat.createThread(null,VoiceCommand.THREAD_TITLE)}
             val runId=UUID.randomUUID().toString()
-            val accepted=app.runs.submitVoiceCommand(request,thread.id,app.runs.preferredModelId.value,runId)
+            val accepted=app.runs.submitVoiceCommand(request,thread.id,selectedModel,runId)
             if(!accepted){phase.value="지금은 요청을 받을 수 없습니다. 다른 작업이 끝난 뒤 다시 시도해주세요.";sent=false;return@launch}
+            if(!RunKeepAlive.await(runId).active){
+                phase.value="요청은 접수했지만 백그라운드 실행 유지를 확인하지 못했습니다. 자동으로 다시 보내지 않았습니다. 실행 상태를 확인해주세요."
+                return@launch
+            }
             finish()
         }
     }
@@ -160,17 +191,20 @@ class VoiceCommandActivity:ComponentActivity() {
 class AgentRunService:Service() {
     companion object {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
-        /** Called from the common submit path. A background start Android refuses only means no keep-alive. */
-        fun track(context:Context,runId:String,threadId:String,text:String):Boolean = runCatching {
-            ContextCompat.startForegroundService(context,Intent(context,AgentRunService::class.java)
-                .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",text.take(200)))
-        }.isSuccess
+        /** Submission success is distinct from RunKeepAlive.await's actual startForeground receipt. */
+        fun track(context:Context,runId:String,threadId:String,text:String):Boolean {
+            val token=RunKeepAlive.begin(runId)?:return false
+            return runCatching {
+                ContextCompat.startForegroundService(context,Intent(context,AgentRunService::class.java)
+                    .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",text.take(200)).putExtra("keepAliveToken",token))
+            }.onFailure{RunKeepAlive.acknowledge(runId,token,false,"FOREGROUND_START_REJECTED")}.isSuccess
+        }
         internal fun appOnScreen():Boolean {
             val info=ActivityManager.RunningAppProcessInfo();ActivityManager.getMyMemoryState(info)
             return info.importance<=ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         }
     }
-    private class Tracked(val threadId:String,val text:String,val since:Long=System.currentTimeMillis()){var approvalNotified=false}
+    private class Tracked(val threadId:String,val text:String,val token:String?,val since:Long=System.currentTimeMillis()){var approvalNotified=false}
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
     private val runs=LinkedHashMap<String,Tracked>()
     private var job:Job?=null
@@ -181,11 +215,16 @@ class AgentRunService:Service() {
         manager.createNotificationChannel(NotificationChannel(CHANNEL,"에이전트 작업 진행",NotificationManager.IMPORTANCE_LOW))
         manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
         val runId=intent?.getStringExtra("runId");val threadId=intent?.getStringExtra("threadId")
-        if(runId!=null&&threadId!=null)runs[runId]=Tracked(threadId,intent.getStringExtra("text").orEmpty())
+        val token=intent?.getStringExtra("keepAliveToken")
+        if(runId!=null&&threadId!=null)runs[runId]=Tracked(threadId,intent.getStringExtra("text").orEmpty(),token)
         val latest=runs.entries.lastOrNull()
         // startForeground must follow every startForegroundService, even one that brought nothing to track.
         try{ServiceCompat.startForeground(this,ID,ongoing(latest?.key,latest?.value),if(Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)}
-        catch(_:RuntimeException){stopSelf();return START_NOT_STICKY}
+        catch(_:RuntimeException){
+            if(runId!=null&&token!=null)RunKeepAlive.acknowledge(runId,token,false)
+            stopSelf();return START_NOT_STICKY
+        }
+        if(runId!=null&&token!=null)RunKeepAlive.acknowledge(runId,token,true)
         if(runs.isEmpty()){stopSelf();return START_NOT_STICKY}
         if(job?.isActive!=true)job=scope.launch{watch(manager)}
         return START_NOT_STICKY
@@ -215,6 +254,7 @@ class AgentRunService:Service() {
                 val done=if(row==null)age>60_000L else row.status !in setOf("queued","running","waiting_approval")
                 if(done||age>30*60_000L){
                     runs.remove(runId)
+                    run.token?.let{RunKeepAlive.acknowledge(runId,it,false,"FOREGROUND_TRACKING_ENDED")}
                     if(row!=null&&!appOnScreen()){
                         val answer=withContext(Dispatchers.IO){
                             app.repository.chat.messages(run.threadId).first().lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
@@ -233,7 +273,10 @@ class AgentRunService:Service() {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(open(runId,run.threadId))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPriority(NotificationCompat.PRIORITY_HIGH).build())
     }
-    override fun onDestroy(){scope.cancel();super.onDestroy()}
+    override fun onDestroy(){
+        runs.forEach{(id,run)->run.token?.let{RunKeepAlive.acknowledge(id,it,false,"FOREGROUND_SERVICE_STOPPED")}}
+        scope.cancel();super.onDestroy()
+    }
 }
 
 /** Quick-settings tile: pull down the shade from any app and tap to speak. */

@@ -409,6 +409,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return submit(inputText,selectedThreadId.value,preferredModelId.value,app.chatAttachments.state.value.toList(),UUID.randomUUID().toString())
     }
 
+    /** Stable UI submission ID prevents a repeated bridge message from creating another effectful run. */
+    internal fun sendFromReact(text:String,threadId:String,branchId:String,submissionId:String):Boolean {
+        if(!selectionReady.value||selectedThreadId.value!=threadId||
+            runCatching{UUID.fromString(submissionId).toString()==submissionId}.getOrDefault(false)!=true)return false
+        // Legacy slash commands predate durable submission IDs and may switch rooms. Keep them
+        // on the existing native command surface instead of replaying them through a stale page.
+        if(text.trimStart().startsWith("/")){status.value="빠른 명령은 상세 대화 화면에서 실행해주세요. 입력은 보존했습니다.";return false}
+        return submit(text,threadId,preferredModelId.value,app.chatAttachments.state.value.toList(),submissionId,branchId)
+    }
+
     /**
      * Owner-enabled remote test request from the paired PC. It is queued exactly like a typed request in its own
      * thread, so tool policy, approvals and consent are unchanged; it carries no attachments and no slash command.
@@ -423,7 +433,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return submit(text,threadId,modelId,emptyList(),runId)
     }
 
-    private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String):Boolean {
+    private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String,expectedBranchId:String?=null):Boolean {
         val submission=com.user.localagent.core.ConversationSubmissionPolicy.parse(inputText)
         val routedInput=if(submission.explicitModeCommand!=null) {
             if(submission.commandOnly&&submission.explicitModeCommand!="/goal"&&snapshot.isEmpty()) {
@@ -447,14 +457,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             initialized.await()
             queueMutation.withLock {
             val thread=app.repository.chat.thread(threadId)?:error("전송할 대화가 삭제되었습니다.")
+            check(expectedBranchId==null||thread.activeBranchId==expectedBranchId){"전송 전 대화 버전이 변경되었습니다. 입력을 보존했습니다."}
+            if(app.repository.chat.run(reservedRunId)!=null)return@withLock
             if(snapshot.isNotEmpty())app.chatAttachments.captureForRequest(reservedRunId,threadId,snapshot)
             val binding=app.workspaceFor(thread.projectId).bindingFingerprint()
             val pcBinding=capturePcDataBindingForNewRun(threadId)
             val pcTextAuthority=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
             val externalAuthority=ExternalAgentSettings.get(context).capture()
-            val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,model,thinking,runId=reservedRunId){user,run->
-                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,model,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=pcTextAuthority.allowCloudText,
-                    allowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null).also {submitted=it}.toJson()
+            // Only fresh requests inherit the owner-approved subscription-first default.
+            val resolvedModel=if(model=="auto"&&snapshot.isEmpty()&&externalAuthority.enabled&&com.user.localagent.compute.PcComputeSettings.get(context).state.value.paired)ExternalAgentSettings.MODEL_ID else model
+            val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,resolvedModel,thinking,runId=reservedRunId){user,run->
+                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=pcTextAuthority.allowCloudText,
+                    allowExternalAgent=resolvedModel==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(resolvedModel==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -986,7 +1000,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 val modelResult=modelEvidenceResult(call,result)
                                 toolEvidence+=buildJsonObject {put("tool",call.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(modelResult))}
                             }
-                            val next=if(result.verification==VerificationState.PREPARED)HarnessDecision.Stop("관련 앱에서 확인할 때까지 작업을 일시 정지했습니다. 실제 외부 작업의 완료는 확인되지 않았습니다.",pendingExternalCompletion=true)else if(actionMode)TaskHarness.decide(taskGoal,requestSteps)else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
+                            val next=if(com.user.localagent.core.PreparedHandoff.pendingEffect(call.name,result.verification))HarnessDecision.Stop("관련 앱에서 확인할 때까지 작업을 일시 정지했습니다. 실제 외부 작업의 완료는 확인되지 않았습니다.",pendingExternalCompletion=true)else if(actionMode)TaskHarness.decide(taskGoal,requestSteps)else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
                             if(next is HarnessDecision.Stop){publishActionFinal(request,taskGoal.requiredTools,next.reason,true);complete=true;return@roundStep}
                             // A full action budget may satisfy host checks; still allow the review/final-writing rounds.
                             query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)
@@ -1048,6 +1062,39 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
+    /** Only source-bound, previously cloud-authorized text from this branch can leave the phone. */
+    private suspend fun captureCloudContext(request:QueuedChatRequest):JsonObject? {
+        fun binding(value:QueuedChatRequest)=CloudConversationContext.Binding(value.runId,value.threadId,value.branchId,
+            value.projectId,value.externalAgentRevision,value.capturedPcRevision,value.modelId,value.allowExternalAgent,value.mode)
+        val chat=app.repository.chat
+        val currentBinding=binding(request)
+        val window=chat.pagedMessages(request.threadId,request.branchId,32).first()
+        val anchor=window.indexOfFirst{it.id==request.userMessageId&&it.role=="user"}
+        if(anchor<0)return null
+        val turns=mutableListOf<CloudConversationContext.Turn>()
+        var previous:CloudConversationContext.PreviousTask?=null
+        for(message in window.take(anchor)) {
+            if(message.role !in setOf("user","assistant"))continue
+            val run=message.runId?.let{chat.run(it)}?:if(message.role=="user")chat.runForUserMessage(message.id)else null
+            if(run==null||run.id==request.runId||run.threadId!=request.threadId||run.branchId!=request.branchId||
+                run.projectId!=request.projectId||run.status !in setOf("completed","paused","failed","cancelled","interrupted"))continue
+            val source=runCatching{QueuedChatRequest.fromJson(run.contextJson)}.getOrNull()?:continue
+            if(source.runId!=run.id||source.threadId!=run.threadId||source.branchId!=run.branchId||source.projectId!=run.projectId||
+                source.modelId!=run.modelId||source.attachments.isNotEmpty()||
+                (message.role=="user"&&(source.userMessageId!=message.id||source.text!=message.text)))continue
+            val sourceBinding=binding(source)
+            if(!CloudConversationContext.isEligible(currentBinding,sourceBinding))continue
+            turns+=CloudConversationContext.Turn(sourceBinding,message.role,message.text,sourceConfirmed=true)
+            val payload=runCatching{Json.parseToJsonElement(run.contextJson).jsonObject}.getOrNull()?:continue
+            val native=payload["sharedEngineState"] as? JsonObject
+            val uncertain=native?.get("uncertain")?.jsonPrimitive?.booleanOrNull!=false||
+                native?.get("in_flight")?.let{it !is JsonNull}==true
+            val goal=(payload["externalAgentPlan"] as? JsonObject)?.get("goal")?.jsonPrimitive?.contentOrNull.orEmpty()
+            previous=CloudConversationContext.PreviousTask(sourceBinding,run.status,source.text,goal,uncertain,sourceConfirmed=true)
+        }
+        return CloudConversationContext.build(currentBinding,turns,previous)
+    }
+
     /** Cloud owns interpretation/next actions; this parent retains scope, approval and evidence. */
     private suspend fun executeCloudPhoneRequest(request:QueuedChatRequest) {
         if(!request.allowExternalAgent||request.externalAgentRevision==null||request.capturedPcRevision==null||
@@ -1056,6 +1103,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             publishActionFinal(request,emptySet(),"이 요청에는 새 클라우드 도구 권한이 없거나 아직 지원하지 않는 첨부·이어가기 조건이 있습니다. 원문을 보존했습니다. 모델과 권한을 확인한 뒤 새 요청으로 보내주세요.",true);return
         }
         val externalSettings=ExternalAgentSettings.get(context)
+        val keepAlive=com.user.localagent.voice.RunKeepAlive.await(request.runId)
+        if(!keepAlive.active){
+            publishActionFinal(request,emptySet(),"백그라운드 실행 유지를 확인하지 못해 작업을 시작하지 않았습니다. 빠른 요청 또는 앱에서 다시 시작하고, 시스템의 백그라운드 실행 허용을 확인해주세요.",true)
+            return
+        }
         val pcSettings=com.user.localagent.compute.PcComputeSettings.get(context)
         val disabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
         val tools=ExternalAgentContract.NORMAL_PHONE_TOOLS.filterTo(linkedSetOf()) {it !in disabled&&AgentWorkModePolicy.allows(AgentWorkMode.parse(request.mode),it)}
@@ -1069,11 +1121,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         var preparedSeen=false
         var taskGoal:com.user.localagent.core.TaskGoal?=null
         val actual=linkedMapOf<String,PhoneAgentExecution>()
+        var nativeDeadlineAt=Long.MAX_VALUE
         suspend fun authority():ExternalAgentLiveAuthority {
             val external=externalSettings.capture();val pc=pcSettings.captureTextAuthority()
             val thread=app.repository.chat.thread(request.threadId);val run=app.repository.chat.run(request.runId)
             val currentDisabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
-            val active=activeRequest?.runId==request.runId&&requestJob?.isActive==true&&pendingSteerRunId!=request.runId&&
+            val active=android.os.SystemClock.elapsedRealtime()<nativeDeadlineAt&&com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active&&activeRequest?.runId==request.runId&&requestJob?.isActive==true&&pendingSteerRunId!=request.runId&&
                 run?.status=="running"&&run.threadId==request.threadId&&run.branchId==request.branchId&&run.projectId==request.projectId&&
                 thread?.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
                 app.repository.chat.accessScope(request.threadId)==scope&&executionWorkspace?.bindingFingerprint()==request.workspaceBinding
@@ -1081,15 +1134,52 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 external.enabled&&external.revision==request.externalAgentRevision&&pc.revision==request.capturedPcRevision,
                 tools-currentDisabled,active=active,cancelled=!currentCoroutineContext().isActive,awaitingApproval=approval.value!=null)
         }
-        val client=PcExternalAgentClient(capture,PcAgentBridgeTransport(context,request.runId))
+        fun nativeBinding()=buildJsonObject{
+            put("runId",request.runId);put("threadId",request.threadId);put("branchId",request.branchId)
+            put("projectId",request.projectId);put("scopeId",binding)
+            put("authorizationRevision",externalSettings.capture().revision)
+        }.toString()
+        val savedNative=app.repository.chat.run(request.runId)?.contextJson?.let{Json.parseToJsonElement(it).jsonObject["sharedEngineState"]}
+        val nativeJournal=com.user.localagent.engine.RustExecutionJournal(nativeBinding(),buildJsonObject{
+            put("profileId","subscription-codex");put("provider","codex_cli");put("modelId","provider-configured")
+            put("reasoning",JsonNull);put("maxToolCalls",18);put("deadlineMs",330000);put("cloudAuthorized",request.allowExternalAgent)
+        }.toString(),savedNative?.toString())
+        nativeDeadlineAt=Json.parseToJsonElement(nativeJournal.checkpoint()).jsonObject.getValue("deadlineAtMs").jsonPrimitive.long
+        suspend fun persistNativeState(checkpoint:String=nativeJournal.checkpoint()) {
+            val stored=checkNotNull(app.repository.chat.run(request.runId))
+            check(stored.threadId==request.threadId&&stored.branchId==request.branchId&&stored.projectId==request.projectId)
+            val old=Json.parseToJsonElement(stored.contextJson).jsonObject
+            app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("sharedEngineState" to Json.parseToJsonElement(checkpoint))).toString())
+        }
+        fun noEffect(call:ToolCall,reason:String):ToolResult {
+            val result=ToolResult(call.id,false,reason,VerificationState.FAILED,reason,effectNotApplied=true)
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,result)
+            requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,reason,effectNotApplied=true))
+            return result
+        }
+        val client=PcExternalAgentClient(capture,PcAgentBridgeTransport(context,request.runId,beforeLaunchUpload={
+            runBlocking { check(authority().permits(capture)){"클라우드 전송 권한이나 실행 대상이 변경되었습니다."} }
+        }))
         val controller=ExternalAgentController(capture,client,::authority,
             execute={call->
-                check(authority().permits(capture)&&call.name in requestAuthorizedTools)
-                runTool(call)
+                if(!authority().permits(capture)||call.name !in requestAuthorizedTools)
+                    noEffect(call,"실행 권한이나 대상이 변경되어 도구를 시작하지 않았습니다.")
+                else if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
+                    noEffect(call,"백그라운드 실행 유지가 종료되어 도구를 시작하지 않았습니다.")
+                else if(runCatching{nativeJournal.begin(nativeBinding(),call)}.isFailure)
+                    noEffect(call,"공통 실행 기록이 재실행·만료·미확인 상태를 감지해 도구를 시작하지 않았습니다.")
+                else {
+                    // SQLCipher commit is the write-ahead boundary. A process death after this point
+                    // restores an uncertain in-flight call and cannot silently replay a write.
+                    persistNativeState()
+                    val result=runTool(call)
+                    withContext(NonCancellable){nativeJournal.outcome(call,result);persistNativeState()}
+                    result
+                }
             },recordActual={entry->
                 check(actual.put(entry.proposal.callId,entry)==null)
                 // Same as the local path: a handed-off Intent stops the run before the model can repeat it.
-                if(entry.result.success&&entry.result.verification==com.user.localagent.core.VerificationState.PREPARED)preparedSeen=true
+                if(entry.result.success&&com.user.localagent.core.PreparedHandoff.pendingEffect(entry.proposal.tool,entry.result.verification))preparedSeen=true
                 check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
@@ -1120,11 +1210,25 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             controller.start().also{bridgeSessionId=it.sessionId}
             status.value="클라우드 모델이 요청을 해석하고 있습니다."
             check(authority().permits(capture))
-            client.launchProvider(request.text)
+            val conversationContext=captureCloudContext(request)
+            check(authority().permits(capture))
+            val storedContext=checkNotNull(app.repository.chat.run(request.runId))
+            val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
+            app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
+                "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
+            client.launchProvider(request.text,conversationContext,beforeLaunch={check(authority().permits(capture))})
             val provider=withTimeout(330_000) {
+                var lastStage:String?=null
                 while(true){
                     check(authority().permits(capture)){"클라우드 도구 권한이나 실행 대상이 변경되었습니다."}
                     val value=client.providerStatus()
+                    client.latestProviderProgress?.let{progress->
+                        status.value=progress.label
+                        if(progress.stage!=lastStage){
+                            lastStage=progress.stage
+                            workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.INFERENCE_STARTED,progress.label)
+                        }
+                    }
                     if(value.getValue("state").jsonPrimitive.content=="FINISHED")return@withTimeout value
                     controller.pumpOnce()
                     if(preparedSeen)return@withTimeout value
@@ -1151,8 +1255,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(CloudAgentFinals.isToolFreeAnswer(resultState,plan!=null,actual.size,requestSteps.size)){
                 check(authority().permits(capture))
                 controller.close();closed=true
+                persistNativeState(nativeJournal.sealCheckpoint())
                 answer(CloudAgentFinals.toolFreeAnswer(report.getValue("answer").jsonPrimitive.content))
-                recordCloudReceipt(request.runId,null,0,report.getValue("elapsedMs"))
+                recordCloudReceipt(request.runId,null,0,report.getValue("elapsedMs"),nativeJournal.snapshot())
                 app.repository.chat.updateRun(request.runId,"completed")
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
                 status.value="클라우드 응답 완료 · 도구 확인 없음"
@@ -1176,27 +1281,39 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 else if(requestAuthorizedTools.isEmpty())"도구 실행 없이 생성한 답변:\n$answerText"
                 else "확인한 도구: ${requestAuthorizedTools.sorted().joinToString()}\n$answerText"
             persistStepEvidence();answer(final)
-            recordCloudReceipt(request.runId,checkNotNull(accepted).planDigest,actual.size,report.getValue("elapsedMs"))
+            persistNativeState(nativeJournal.sealCheckpoint())
+            recordCloudReceipt(request.runId,checkNotNull(accepted).planDigest,actual.size,report.getValue("elapsedMs"),nativeJournal.snapshot())
             app.repository.chat.updateRun(request.runId,"completed")
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
             status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
         } finally {
             externalEffectGuard=null
-            if(!closed)withContext(NonCancellable){
-                runCatching{withTimeout(5000){client.cancelProvider()}}
-                runCatching{controller.cancel()}
+            withContext(NonCancellable){
+                try {
+                    val checkpoint=nativeJournal.sealCheckpoint()
+                    if(app.repository.chat.run(request.runId)?.status !in com.user.localagent.data.ChatStore.TERMINAL)
+                        persistNativeState(checkpoint)
+                }
+                finally {
+                    runCatching{nativeJournal.close()}
+                    if(!closed){
+                        runCatching{withTimeout(5000){client.cancelProvider()}}
+                        runCatching{controller.cancel()}
+                    }
+                }
             }
         }
     }
 
     /** planDigest null marks a model-only answer: no plan, no phone call, not execution evidence. */
-    private suspend fun recordCloudReceipt(runId:String,planDigest:String?,phoneCalls:Int,providerMs:JsonElement) {
+    private suspend fun recordCloudReceipt(runId:String,planDigest:String?,phoneCalls:Int,providerMs:JsonElement,nativeEvents:String?=null) {
         val beforeClose=checkNotNull(app.repository.chat.run(runId))
         val closeContext=Json.parseToJsonElement(beforeClose.contextJson).jsonObject
         app.repository.chat.updateRunContext(runId,JsonObject(closeContext+mapOf("externalAgentReceipt" to buildJsonObject{
             put("sessionClosed",true);put("planDigest",planDigest);put("toolFreeAnswer",planDigest==null)
             put("actualPhoneCalls",phoneCalls);put("pcCalls",0);put("phoneEvidenceImported",false)
             put("providerMs",providerMs)
+            nativeEvents?.let{put("sharedEngineVersion",2);put("sharedEngineEvents",Json.parseToJsonElement(it))}
         })).toString())
     }
 

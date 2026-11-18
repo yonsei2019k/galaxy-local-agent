@@ -216,7 +216,7 @@ class OwnedEngines(Engines):
    super().run_image(key,prompt,negative,reference,strength)
   except InterruptedError:job.update(phase='cancelled',error=None)
   except Exception as failure:
-   with open(r'D:\ZipHap\Compute\requests.log','a',encoding='utf-8') as out:out.write(f"{time.strftime('%H:%M:%S')} image_job {key} failed {type(failure).__name__}\n")
+   with open(r'D:\ZipHap\Compute\requests.log','a',encoding='utf-8') as out:out.write(f"{time.strftime('%H:%M:%S')} image_job failed PC_IMAGE_COMPUTE_FAILED\n")
    job.update(phase='cancelled' if job['cancel'].is_set() else 'failed',error='PC_IMAGE_COMPUTE_FAILED')
   finally:
    terminate(job.get('process'),wait=True)

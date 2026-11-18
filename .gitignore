@@ -25,4 +25,7 @@ device-results/
 .agent_state/
 .local/
 __pycache__/
+rust/target/
+web-ui/node_modules/
+web-ui/dist/
 pc-worker/provider-events.log*
