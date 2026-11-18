@@ -4,6 +4,20 @@ import hashlib
 import json
 from pathlib import Path
 import threading
+import time
+
+_EVENTS = Path(__file__).resolve().parent.parent / "provider-events.log"
+
+
+def _event(outcome, calls=None, elapsed_ms=None):
+    """Operator diagnostics: fixed outcome codes and counts only, never request, answer or tool content."""
+    try:
+        if _EVENTS.exists() and _EVENTS.stat().st_size > 1024 * 1024:
+            _EVENTS.replace(_EVENTS.with_suffix(".log.1"))
+        with _EVENTS.open("a", encoding="utf-8") as out:
+            out.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {outcome} calls={calls} ms={elapsed_ms}\n")
+    except OSError:
+        pass
 
 from agent_bridge import BridgeError
 from codex_agent_provider import ProviderConfig, ProviderError, run
@@ -117,6 +131,7 @@ class AgentProviderSupervisor:
             with self.lock:
                 child.report = {"state": result.state, "answer": result.answer, "question": result.question,
                                 "elapsedMs": result.elapsed_ms, "mcpCalls": result.mcp_calls}
+            _event("REPORT_" + str(result.state).upper()[:24], result.mcp_calls, result.elapsed_ms)
         except ProviderError as error:
             child.cancel.set()
             revoked = True
@@ -126,6 +141,7 @@ class AgentProviderSupervisor:
                 revoked = False
             with self.lock:
                 child.error = error.code if revoked else "PROVIDER_REVOCATION_UNCONFIRMED"
+            _event(child.error)
         except Exception:
             child.cancel.set()
             try:
@@ -134,6 +150,7 @@ class AgentProviderSupervisor:
                 pass
             with self.lock:
                 child.error = "PROVIDER_FAILED"
+            _event("PROVIDER_FAILED")
         finally:
             with self.lock:
                 child.state = "FINISHED"

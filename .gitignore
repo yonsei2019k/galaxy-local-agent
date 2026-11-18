@@ -25,3 +25,4 @@ device-results/
 .agent_state/
 .local/
 __pycache__/
+pc-worker/provider-events.log*
