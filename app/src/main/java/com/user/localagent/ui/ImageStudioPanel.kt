@@ -185,7 +185,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
             item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
                 Text(if(usePc)"PC · $pcModelTitle"else if(model.qualityModel)"휴대폰 · SDXL"else if(model.available)"휴대폰 · 설치 모델"else"휴대폰 · 모델 준비 필요",style=MaterialTheme.typography.titleSmall)
                 TextButton(onClick={computeSettings=!computeSettings}){Text(if(computeSettings)"연결·모델 설정 접기"else"연결·모델 변경")}
-                if(computeSettings)PcComputePanel(state.running,onStatus)
+                if(computeSettings)PcComputePanel(state.running,onStatus=onStatus)
             }}}
             item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){

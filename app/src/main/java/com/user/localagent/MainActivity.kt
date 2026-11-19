@@ -565,7 +565,8 @@ class MainActivity : ComponentActivity() {
             if(section==2)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}}
             if(section==2)item {com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}}
             if(section==2)item {OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))},modifier=Modifier.fillMaxWidth()){Text("Google·메일·문서 앱 연결 설정")}}
-            if(section==2)item {PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get()){status.value=it}}
+            if(section==2)item {PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),
+                loadQaLessons=app.repository.chat::remoteQaLessons){status.value=it}}
             if(section==3){
             item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
             item {ExtensionInspectionPanel{status.value=it}}

@@ -19,7 +19,8 @@ import com.user.localagent.compute.PcCandidate
 import com.user.localagent.compute.PcPairingChallenge
 import kotlinx.coroutines.*
 
-@Composable fun PcComputePanel(busy:Boolean,onStatus:(String)->Unit) {
+@Composable fun PcComputePanel(busy:Boolean,
+    loadQaLessons:(suspend ()->Map<com.user.localagent.data.RemoteQaLesson,Long>)?=null,onStatus:(String)->Unit) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
     val settings=remember{PcComputeSettings.get(context)}
     val state by settings.state.collectAsState()
@@ -86,6 +87,18 @@ import kotlinx.coroutines.*
                     remoteOn=remote.enabled()
                     onStatus(if(on)"PC 원격 시험 요청을 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
                 },modifier=Modifier.testTag("pc_remote_test"))
+            }
+            if(loadQaLessons!=null){
+                var lessons by remember { mutableStateOf<Map<com.user.localagent.data.RemoteQaLesson,Long>?>(null) }
+                TextButton(onClick={scope.launch {
+                    try {lessons=loadQaLessons()}
+                    catch(cancel:CancellationException){throw cancel}
+                    catch(_:Exception){onStatus("시험 교훈을 불러오지 못했습니다.")}
+                }}){Text("시험 교훈 보기")}
+                lessons?.let{items->
+                    if(items.isEmpty())Text("보관된 시험에서 확인된 교훈이 없습니다.")
+                    else items.forEach{(lesson,count)->Text("${lesson.guidance} · 관련 시험 ${count}건",style=MaterialTheme.typography.bodySmall)}
+                }
             }
             com.user.localagent.voice.BackgroundRunExemptionRow(onStatus)
             val browser=remember{com.user.localagent.compute.BrowserAgentSettings.pc(context)}

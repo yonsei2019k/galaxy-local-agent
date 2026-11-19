@@ -22,6 +22,18 @@ import java.util.UUID
 /** Isolated synthetic v3 database. No model/network/owner DB access. */
 @RunWith(AndroidJUnit4::class)
 class ChatQueueValidation {
+    @Test fun archivedQaLessonsSurviveReopenWithoutCountingTheSameRoomTwice()=runBlocking(Dispatchers.IO){fixture{repo,_,reopen->
+        val room=repo.chat.createRemoteTestThread()
+        val run=enqueue(repo,room,"Synthetic timeout")
+        repo.chat.startRun(run.id)
+        repo.chat.updateRun(run.id,"failed",errorCode=RemoteQaLesson.STATUS_TIMEOUT.code)
+        assertEquals(1,repo.chat.archiveFinishedRemoteTests(Long.MAX_VALUE))
+        val restored=reopen()
+        assertEquals(1L,restored.chat.remoteQaLessons()[RemoteQaLesson.STATUS_TIMEOUT])
+        restored.chat.archiveThread(room.id,false)
+        assertEquals(1,restored.chat.archiveFinishedRemoteTests(Long.MAX_VALUE))
+        assertEquals(1L,restored.chat.remoteQaLessons()[RemoteQaLesson.STATUS_TIMEOUT])
+    }}
     @Test fun officeMenuCreatesTheFiveFixedRoomsOnce()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val first=repo.chat.openFixedOfficeRooms()
         val second=repo.chat.openFixedOfficeRooms()

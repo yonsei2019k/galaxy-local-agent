@@ -1,5 +1,7 @@
 ## Fixed Office seats and remote QA retention
 
+Archiving a marked QA thread now records encrypted local counts for exact host-observed status timeout and provider busy codes. The recording marker and archive commit together; repeated archive does not count the same room twice. PC settings can show fixed recovery guidance and counts. This reads no prompts or results and does not add facts to model memory. Core/Android JVM checks and instrumentation compilation passed; the database reopen test was compiled but not run on hardware. Offline simulation100/100 still passes. No packaged APK or push for this increment.
+
 OfficeWork now binds an assignment to its work ID and named recipients. Exact duplicate reports are idempotent; conflicting reports and a run reused by another employee are rejected. Chair collection is gated on all assigned reports and retains failures. Core regression passes. This policy is not yet wired to the Android agent scheduler or a durable work store.
 
 The product layout defines one main room for chair 이수빈, one shared 사무실 room, and individual rooms for 본부장 김호영, 대리 김규민 and 대리 김서율. The owner-facing 사무실 menu provisions those five conversation records in one transaction with durable IDs. Reopening does not duplicate rooms. The core metadata permits only the chair to assign work and publish the main summary, and directs employee results to the chair. It grants no execution authority. Actual identity-bound agent dispatch and result collection are still pending.

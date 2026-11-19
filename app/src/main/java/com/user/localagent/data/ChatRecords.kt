@@ -370,8 +370,29 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     suspend fun archiveFinishedRemoteTests(cutoff:Long):Int=database.withTransaction {
         val finished=dao.finishedRemoteTests(cutoff)
-        finished.forEach{dao.thread(it.copy(archived=true,updatedAt=now()))}
+        finished.forEach{thread->
+            val marker="chat.remoteQaLessonsRecorded."+thread.id
+            if(dao.metaValue(marker)==null){
+                val lessons=dao.runsForThread(thread.id).mapNotNull{RemoteQaLesson.observed(it.status,it.errorCode)}.toSet()
+                for(lesson in lessons){
+                    val key="chat.remoteQaLesson."+lesson.name
+                    val count=(dao.metaValue(key)?:0L).coerceIn(0L,999_999L)+1
+                    database.knowledgeDao().meta(KnowledgeMeta(key,count))
+                }
+                database.knowledgeDao().meta(KnowledgeMeta(marker,1))
+            }
+            dao.thread(thread.copy(archived=true,updatedAt=now()))
+        }
         finished.size
+    }
+
+    suspend fun remoteQaLessons():Map<RemoteQaLesson,Long> = database.withTransaction {
+        buildMap {
+            for(lesson in RemoteQaLesson.entries){
+                val count=dao.metaValue("chat.remoteQaLesson."+lesson.name)?:0L
+                if(count>0)put(lesson,count)
+            }
+        }
     }
     suspend fun pinThread(threadId:String,pinned:Boolean=true):ChatThreadRecord=mutateThread(threadId){it.copy(pinned=pinned)}
     suspend fun archiveThread(threadId:String,archived:Boolean=true):ChatThreadRecord=mutateThread(threadId){it.copy(archived=archived)}
