@@ -392,8 +392,12 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     /** User text and its restartable queue envelope commit together before submission is acknowledged. */
     suspend fun enqueueUserRun(threadId:String,branchId:String,text:String,modelId:String,thinking:Boolean,runId:String=UUID.randomUUID().toString(),
-        expectedPreviousRunId:String?=null,beforeCommit:()->Unit={},
+        expectedPreviousRunId:String?=null,remoteTestThreadRevision:Long?=null,beforeCommit:()->Unit={},
         contextFactory:(MessageRecord,ChatRunRecord)->String):ChatRunRecord=database.withTransaction {
+        if(remoteTestThreadRevision!=null){
+            val thread=activeBranch(threadId,branchId)
+            check(thread.projectId==null&&thread.revision==remoteTestThreadRevision){"REMOTE_TEST_SCOPE_CHANGED"}
+        }
         if(expectedPreviousRunId!=null){
             val last=dao.messagePage(threadId,branchId,null,1).singleOrNull()
             check(last?.role=="assistant"&&last.runId==expectedPreviousRunId){"REMOTE_TEST_HISTORY_CHANGED"}

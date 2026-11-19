@@ -495,14 +495,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         require(text.isNotBlank()&&!text.trimStart().startsWith("/"))
         return submit(text,threadId,modelId,emptyList(),runId)
     }
-    internal fun submitRemoteTest(text:String,threadId:String,modelId:String,runId:String,expectedBranchId:String?=null,
-        previousRunId:String?=null,stillAuthorized:()->Boolean={true}):Boolean {
+    internal fun submitRemoteTest(text:String,threadId:String,modelId:String,runId:String,expectedBranchId:String,
+        threadRevision:Long,previousRunId:String?,stillAuthorized:()->Boolean):Boolean {
         require(!text.trimStart().startsWith("/"))
-        return submit(text,threadId,modelId,emptyList(),runId,expectedBranchId,previousRunId,stillAuthorized)
+        return submit(text,threadId,modelId,emptyList(),runId,expectedBranchId,previousRunId,stillAuthorized,threadRevision)
     }
 
     private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String,expectedBranchId:String?=null,
-        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null):Boolean {
+        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null):Boolean {
         val submission=com.user.localagent.core.ConversationSubmissionPolicy.parse(inputText)
         val routedInput=if(submission.explicitModeCommand!=null) {
             if(submission.commandOnly&&submission.explicitModeCommand!="/goal"&&snapshot.isEmpty()) {
@@ -536,7 +536,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             // Only fresh requests inherit the owner-approved subscription-first default.
             val resolvedModel=if(model=="auto"&&snapshot.isEmpty()&&externalAuthority.enabled&&com.user.localagent.compute.PcComputeSettings.get(context).state.value.paired)ExternalAgentSettings.MODEL_ID else model
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,resolvedModel,thinking,runId=reservedRunId,
-                expectedPreviousRunId=previousRunId,beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
+                expectedPreviousRunId=previousRunId,remoteTestThreadRevision=remoteThreadRevision,
+                beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
                 QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=pcTextAuthority.allowCloudText,
                     allowExternalAgent=resolvedModel==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(resolvedModel==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null).also {submitted=it}.toJson()
             }

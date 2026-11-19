@@ -22,6 +22,22 @@ import java.util.UUID
 /** Isolated synthetic v3 database. No model/network/owner DB access. */
 @RunWith(AndroidJUnit4::class)
 class ChatQueueValidation {
+    @Test fun movedRemoteTestThreadCannotAcceptQueuedFollowUp()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val thread=repo.chat.createThread(title="Synthetic remote test")
+        val run=enqueue(repo,thread,"Synthetic first turn")
+        repo.chat.startRun(run.id)
+        repo.chat.writeRunAnswer(run.id,"Synthetic first answer")
+        repo.chat.updateRun(run.id,"completed")
+        val project=repo.chat.createProject("Synthetic private project")
+        val moved=repo.chat.moveThread(thread.id,project.id)
+        assertEquals(thread.activeBranchId,moved.activeBranchId)
+        val before=repo.chat.messages(thread.id).first().map{it.id}
+        assertTrue(runCatching{
+            repo.chat.enqueueUserRun(thread.id,thread.activeBranchId,"Synthetic follow-up","auto",false,
+                expectedPreviousRunId=run.id,remoteTestThreadRevision=thread.revision){_,_->"{}"}
+        }.isFailure)
+        assertEquals(before,repo.chat.messages(thread.id).first().map{it.id})
+    }}
     @Test fun queuedTurnsReservePrimaryOrderAndNativeAnswersShareThatSlot()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val thread=repo.chat.createThread(title="Synthetic ordered queue")
         val allocated=UUID.randomUUID().toString()

@@ -65,7 +65,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
     private val pairing=PcComputeSettings.get(context.applicationContext)
     private val transport=PcTransport(context)
     private var job:Job?=null
-    private data class Continuation(val threadId:String,val branchId:String,val runId:String,val model:String,
+    private data class Continuation(val threadId:String,val branchId:String,val threadRevision:Long,val runId:String,val model:String,
         val connection:PcConnection,val epoch:Long,val expiresAt:Long)
     private val continuations=linkedMapOf<String,Continuation>()
 
@@ -102,7 +102,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         val thread=if(request.afterRequestId==null)app.repository.chat.createThread(null,PcRemoteTestSettings.THREAD_TITLE)
         else previous?.takeIf{conversationSupported&&it.model==request.model}?.let { link ->
             app.repository.chat.thread(link.threadId)?.takeIf { candidate ->
-                candidate.projectId==null&&candidate.activeBranchId==link.branchId&&
+                candidate.projectId==null&&candidate.revision==link.threadRevision&&candidate.activeBranchId==link.branchId&&
                     app.repository.chat.messages(candidate.id,link.branchId).first().lastOrNull()?.runId==link.runId
             }
         }
@@ -110,7 +110,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         val runId=UUID.randomUUID().toString()
         val accepted=withContext(Dispatchers.Main){
             settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true&&
-                app.runs.submitRemoteTest(request.text,thread.id,request.model,runId,thread.activeBranchId,previous?.runId){
+                app.runs.submitRemoteTest(request.text,thread.id,request.model,runId,thread.activeBranchId,thread.revision,previous?.runId){
                     settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true
                 }
         }
@@ -127,10 +127,13 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         val messages=app.repository.chat.messages(thread.id,thread.activeBranchId).first()
         val answer=messages.lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
         val tools=app.repository.chat.toolRunsForThread(thread.id,runId).first()
-        val canFollowUp=conversationSupported&&state=="completed"&&settings.epoch==epoch&&messages.lastOrNull()?.runId==runId
+        val finalThread=app.repository.chat.thread(thread.id)
+        val canFollowUp=conversationSupported&&state=="completed"&&settings.epoch==epoch&&
+            finalThread?.projectId==null&&finalThread?.revision==thread.revision&&
+            messages.lastOrNull()?.let{it.role=="assistant"&&it.runId==runId}==true
         if(canFollowUp){
             if(continuations.size>=16)continuations.remove(continuations.keys.first())
-            continuations[id]=Continuation(thread.id,thread.activeBranchId,runId,request.model,config,epoch,SystemClock.elapsedRealtime()+30*60_000L)
+            continuations[id]=Continuation(thread.id,thread.activeBranchId,thread.revision,runId,request.model,config,epoch,SystemClock.elapsedRealtime()+30*60_000L)
         }
         report(config,id,state?:"timeout",answer.take(20_000),tools.takeLast(64).map{Triple(it.name.take(96),it.success,it.summary.take(400))},runId,
             app.repository.chat.run(runId)?.errorCode?.take(96),receipt(),canFollowUp)
