@@ -354,6 +354,7 @@ class MainActivity : ComponentActivity() {
                             "selectThread"->payload.getValue("id").jsonPrimitive.content.takeIf{id->roomThreads.any{it.id==id&&!it.archived&&it.deletedAt==null}}?.let(chat::selectThread)
                             "newThread"->chat.newThread()
                             "renameThread"->chat.renameThread(composerThreadId,payload.getValue("title").jsonPrimitive.content)
+                            "openOffice"->chat.openFixedOfficeRooms()
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
                             "attach"->{val room=roomThreads.firstOrNull{it.id==composerThreadId};if(room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}}
                             "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else tab=when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4}}

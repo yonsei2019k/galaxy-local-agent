@@ -15,12 +15,13 @@ const panels: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
 
-export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew, onNavigate, onDetails, onClose }: {
+export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew, onOpenOffice, onNavigate, onDetails, onClose }: {
   snapshot: Snapshot | null
   enabled: boolean
   collaborationOpen: boolean
   onSelect(id: string): void
   onNew(): void
+  onOpenOffice(): void
   onNavigate(panel: Panel): void
   onDetails(): void
   onClose?(): void
@@ -45,6 +46,9 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
         ))}</ul> : snapshot?.ready && <p className="no-threads">대화가 없습니다.</p>}
       </nav>
       <nav className="utility-nav" aria-label="앱 메뉴">
+        <button type="button" className="sidebar-row" disabled={!enabled} onClick={onOpenOffice}>
+          <Icon name="group" /><span>사무실</span>
+        </button>
         {panels.map(({ panel, label, icon }) => (
           <button key={panel} type="button" className="sidebar-row" disabled={!enabled}
             aria-current={panel === 'collab' && collaborationOpen ? 'page' : undefined} onClick={() => onNavigate(panel)}>

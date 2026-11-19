@@ -76,6 +76,15 @@ class ChatConverters {
     @Query("SELECT * FROM chat_threads WHERE projectId=:projectId AND deletedAt IS NULL") suspend fun liveProjectThreads(projectId:String):List<ChatThreadRecord>
     @Query("DELETE FROM chat_projects WHERE id=:id") suspend fun deleteProjectRow(id:String)
     @Query("SELECT * FROM chat_threads WHERE id=:id") suspend fun thread(id:String):ChatThreadRecord?
+    @Query("""SELECT t.* FROM chat_threads t
+        JOIN knowledge_meta m ON m.`key`='chat.remoteQa.' || t.id AND m.value=1
+        WHERE t.deletedAt IS NULL AND t.archived=0 AND t.pinned=0 AND t.projectId IS NULL
+        AND t.updatedAt < :cutoff
+        AND EXISTS (SELECT 1 FROM chat_runs r WHERE r.threadId=t.id)
+        AND NOT EXISTS (SELECT 1 FROM chat_runs r WHERE r.threadId=t.id
+        AND (r.updatedAt >= :cutoff OR r.status NOT IN ('completed','failed','cancelled','interrupted')))
+        ORDER BY t.updatedAt LIMIT 20""")
+    suspend fun finishedRemoteTests(cutoff:Long):List<ChatThreadRecord>
     @Query("SELECT * FROM chat_branches WHERE id=:id") suspend fun branch(id:String):ChatBranchRecord?
     @Query("SELECT * FROM chat_branches WHERE threadId=:threadId AND deletedAt IS NULL ORDER BY createdAt,id") suspend fun branches(threadId:String):List<ChatBranchRecord>
     @Query("SELECT * FROM chat_runs WHERE id=:id") suspend fun run(id:String):ChatRunRecord?
@@ -331,6 +340,38 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val renamed=mutateThread(threadId){it.copy(title=title(title))}
         database.knowledgeDao().meta(KnowledgeMeta("chat.title.manual.$threadId",1))
         renamed
+    }
+    suspend fun createRemoteTestThread():ChatThreadRecord=database.withTransaction {
+        val thread=createThread(title="PC 원격 시험").copy(allowOwnerLearning=false)
+        dao.thread(thread)
+        database.knowledgeDao().meta(KnowledgeMeta("chat.remoteQa."+thread.id,1))
+        thread
+    }
+    suspend fun openFixedOfficeRooms():ChatThreadRecord=database.withTransaction {
+        val rooms=com.user.localagent.core.office.ZipHapRoom.entries.associateWith { room ->
+            val id=UUID.nameUUIDFromBytes("ziphap.fixed-office.v1.${room.name}".toByteArray(Charsets.UTF_8)).toString()
+            val marker="chat.fixedOffice.${room.name}"
+            val prior=dao.thread(id)
+            if(prior!=null){
+                check(dao.metaValue(marker)==1L&&prior.deletedAt==null){"사무실 대화의 저장 상태를 확인해주세요."}
+                prior
+            }else{
+                check(dao.metaValue(marker)==null){"삭제된 사무실 대화는 자동으로 다시 만들지 않습니다."}
+                val label=if(room==com.user.localagent.core.office.ZipHapRoom.MAIN)
+                    checkNotNull(room.agent).label else room.label
+                val thread=ChatThreadRecord(id=id,title=label,allowOwnerLearning=false)
+                dao.thread(thread)
+                dao.branch(ChatBranchRecord(id=thread.activeBranchId,threadId=id))
+                database.knowledgeDao().meta(KnowledgeMeta(marker,1))
+                thread
+            }
+        }
+        rooms.getValue(com.user.localagent.core.office.ZipHapRoom.OFFICE)
+    }
+    suspend fun archiveFinishedRemoteTests(cutoff:Long):Int=database.withTransaction {
+        val finished=dao.finishedRemoteTests(cutoff)
+        finished.forEach{dao.thread(it.copy(archived=true,updatedAt=now()))}
+        finished.size
     }
     suspend fun pinThread(threadId:String,pinned:Boolean=true):ChatThreadRecord=mutateThread(threadId){it.copy(pinned=pinned)}
     suspend fun archiveThread(threadId:String,archived:Boolean=true):ChatThreadRecord=mutateThread(threadId){it.copy(archived=archived)}

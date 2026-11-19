@@ -72,7 +72,15 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
     @Synchronized fun start(scope:CoroutineScope){
         if(job?.isActive==true)return
         job=scope.launch(Dispatchers.IO){
+            var nextArchiveAt=0L
             while(isActive){
+                val elapsed=SystemClock.elapsedRealtime()
+                if(elapsed>=nextArchiveAt){
+                    nextArchiveAt=elapsed+60_000L
+                    try {app.repository.chat.archiveFinishedRemoteTests(System.currentTimeMillis()-30*60_000L)}
+                    catch(error:CancellationException){throw error}
+                    catch(_:Exception){/* A later sweep can retry; the test history is preserved. */}
+                }
                 if(!settings.enabled()){delay(15_000);continue}
                 val epoch=settings.epoch
                 val config=runCatching{transport.available()}.getOrNull()
@@ -100,10 +108,10 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         if(request==null||!settings.enabled()||!settings.markHandled(id)){report(config,id,"rejected","",emptyList(),null,"REQUEST_REFUSED",receipt(),epoch);return}
         continuations.entries.removeAll{it.value.expiresAt<=started||it.value.epoch!=epoch||!it.value.connection.samePair(config)}
         val previous=request.afterRequestId?.let{continuations.remove(it)}
-        val thread=if(request.afterRequestId==null)app.repository.chat.createThread(null,PcRemoteTestSettings.THREAD_TITLE)
+        val thread=if(request.afterRequestId==null)app.repository.chat.createRemoteTestThread()
         else previous?.takeIf{conversationSupported&&it.model==request.model}?.let { link ->
             app.repository.chat.thread(link.threadId)?.takeIf { candidate ->
-                candidate.projectId==null&&candidate.revision==link.threadRevision&&candidate.activeBranchId==link.branchId&&
+                !candidate.archived&&candidate.projectId==null&&candidate.revision==link.threadRevision&&candidate.activeBranchId==link.branchId&&
                     app.repository.chat.messages(candidate.id,link.branchId).first().lastOrNull()?.runId==link.runId
             }
         }

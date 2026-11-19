@@ -116,6 +116,7 @@ export default function App() {
     collaborationOpen,
     onSelect: id => sidebarRequest({ action: 'selectThread', payload: { id } }),
     onNew: () => sidebarRequest({ action: 'newThread' }),
+    onOpenOffice: () => sidebarRequest({ action: 'openOffice' }),
     onNavigate: panel => sidebarRequest({ action: 'navigate', payload: { panel } }),
     onDetails: () => sidebarRequest({ action: 'nativeDetails' }),
   }

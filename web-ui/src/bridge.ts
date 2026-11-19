@@ -105,7 +105,7 @@ type Intent =
   | { action: 'selectThread' | 'selectModel'; payload: { id: string } }
   | { action: 'renameThread'; payload: { title: string } }
   | { action: 'navigate'; payload: { panel: Panel } }
-  | { action: 'newThread' | 'attach' | 'nativeDetails' | 'ready' }
+  | { action: 'newThread' | 'openOffice' | 'attach' | 'nativeDetails' | 'ready' }
 
 interface RunTarget {
   runId: string

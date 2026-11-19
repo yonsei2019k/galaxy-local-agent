@@ -22,6 +22,30 @@ import java.util.UUID
 /** Isolated synthetic v3 database. No model/network/owner DB access. */
 @RunWith(AndroidJUnit4::class)
 class ChatQueueValidation {
+    @Test fun officeMenuCreatesTheFiveFixedRoomsOnce()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val first=repo.chat.openFixedOfficeRooms()
+        val second=repo.chat.openFixedOfficeRooms()
+        assertEquals(first.id,second.id)
+        assertEquals(setOf("사무실","회장 이수빈","본부장 김호영","대리 김규민","대리 김서율"),
+            repo.chat.threads.first().map{it.title}.toSet())
+    }}
+    @Test fun archiveSweepPreservesRemoteResultsAndIgnoresAnOrdinaryRoomWithTheSameTitle()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val remote=repo.chat.createRemoteTestThread()
+        val ordinary=repo.chat.createThread(title=remote.title)
+        val waiting=repo.chat.createRemoteTestThread()
+        val done=enqueue(repo,remote,"Synthetic completed QA")
+        repo.chat.startRun(done.id)
+        repo.chat.writeRunAnswer(done.id,"Synthetic QA finding")
+        repo.chat.updateRun(done.id,"completed")
+        enqueue(repo,ordinary,"Synthetic ordinary turn")
+        enqueue(repo,waiting,"Synthetic queued QA")
+        assertEquals(1,repo.chat.archiveFinishedRemoteTests(Long.MAX_VALUE))
+        assertTrue(requireNotNull(repo.chat.thread(remote.id)).archived)
+        assertFalse(requireNotNull(repo.chat.thread(ordinary.id)).archived)
+        assertFalse(requireNotNull(repo.chat.thread(waiting.id)).archived)
+        val answer=requireNotNull(repo.chat.assistantForRun(done.id))
+        assertEquals("Synthetic QA finding",repo.chat.fullMessageText(answer.id))
+    }}
     @Test fun movedRemoteTestThreadCannotAcceptQueuedFollowUp()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val thread=repo.chat.createThread(title="Synthetic remote test")
         val run=enqueue(repo,thread,"Synthetic first turn")

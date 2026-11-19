@@ -116,6 +116,11 @@ fun ChatRunCoordinator.renameThread(id: String, title: String) = manage {
     status.value = "대화 이름을 저장하고 확인했습니다."
 }
 
+fun ChatRunCoordinator.openFixedOfficeRooms() = manage {
+    val room=app.repository.chat.openFixedOfficeRooms()
+    selectThread(room.id)
+}
+
 fun ChatRunCoordinator.pinThread(id: String, pinned: Boolean) = manage {
     app.repository.chat.pinThread(id, pinned)
     check(app.repository.chat.thread(id)?.pinned == pinned)

@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","newThread","renameThread","selectModel","stop","steer","attach","navigate","copy","nativeDetails","collabRefresh","collabSend")
+    private val actions=setOf("ready","send","draft","selectThread","newThread","renameThread","openOffice","selectModel","stop","steer","attach","navigate","copy","nativeDetails","collabRefresh","collabSend")
     fun parse(raw:String):ReactUiCommand?=runCatching {
         require(raw.toByteArray(Charsets.UTF_8).size<=64*1024)
         val o=Json.parseToJsonElement(raw).jsonObject
