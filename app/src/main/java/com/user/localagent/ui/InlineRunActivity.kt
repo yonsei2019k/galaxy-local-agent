@@ -21,7 +21,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -121,7 +120,7 @@ private fun TranscriptRow(event:UiRunActivityEvent){
     val thought=THOUGHT_PREFIX in event.label||THOUGHT_PREFIX in event.detail
     var open by rememberSaveable(event.id){mutableStateOf(false)}
     val evidence=displayedWorkEvidence(event)
-    val accent=when(evidence){UiWorkEvidence.FAILED->ZipHapColors.Error;UiWorkEvidence.VERIFIED->ZipHapColors.Mint;UiWorkEvidence.PREPARED->Color(0xFFE1B96D);else->ZipHapColors.TextSecondary}
+    val accent=when(evidence){UiWorkEvidence.FAILED->ZipHapColors.Error;UiWorkEvidence.VERIFIED->ZipHapColors.Mint;UiWorkEvidence.PREPARED->ZipHapColors.SunText;else->ZipHapColors.TextSecondary}
     Column(Modifier.fillMaxWidth().testTag("activity_event_${event.id}"),verticalArrangement=Arrangement.spacedBy(2.dp)){
         if(thought){
             val raw=(if(THOUGHT_PREFIX in event.label)event.label else event.detail).substringAfter(THOUGHT_PREFIX)

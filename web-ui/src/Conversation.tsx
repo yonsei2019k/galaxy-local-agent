@@ -7,7 +7,7 @@ import { isLiveTaskPhase } from './composer'
 const phasePresentation: Record<string, { title: string; tone: string; icon: IconName }> = {
   queued: { title: '대기 중', tone: 'neutral', icon: 'clock' },
   running: { title: '진행 중', tone: 'active', icon: 'activity' },
-  waiting_resource: { title: '실행 자원 대기', tone: 'neutral', icon: 'clock' },
+  waiting_resource: { title: '작업 순서 기다리는 중', tone: 'neutral', icon: 'clock' },
   approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
   waiting_approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
   paused: { title: '일시 정지', tone: 'review', icon: 'pause' },
@@ -37,16 +37,15 @@ function Welcome() {
           : <BrandMark className="mascot-fallback" />}
       </div>
       <h1>무엇을 도와드릴까요?</h1>
-      <p>작업이 진행되는 동안 다른 앱을 사용할 수 있어요.</p>
     </div>
   )
 }
 
-function Message({ message, enabled, onCopy, onDetails }: {
+function Message({ message, enabled, onCopy, onMessageMenu }: {
   message: ConversationMessage
   enabled: boolean
   onCopy(messageId: string): void
-  onDetails(): void
+  onMessageMenu(messageId: string): void
 }) {
   const user = message.role === 'user'
   const assistant = message.role === 'assistant'
@@ -55,19 +54,19 @@ function Message({ message, enabled, onCopy, onDetails }: {
       {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> ZipHap</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
       <div className="message-text" dir="auto">{message.text}</div>
-      {assistant && (
+      {(assistant || user) && (
         <div className="message-actions">
+          {assistant && <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
+            aria-label="답변 복사" title="답변 복사" onClick={() => onCopy(message.id)}><Icon name="copy" /></button>}
           <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
-            aria-label="답변 복사" title="답변 복사" onClick={() => onCopy(message.id)}><Icon name="copy" /></button>
-          <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
-            aria-label="기존 화면에서 결과 열기" title="기존 화면에서 결과 열기" onClick={onDetails}><Icon name="open" /></button>
+            aria-label={assistant ? '답변 메뉴' : '메시지 메뉴'} onClick={() => onMessageMenu(message.id)}>···</button>
         </div>
       )}
     </article>
   )
 }
 
-function TaskCard({ task, enabled, onDetails }: { task: Task; enabled: boolean; onDetails(): void }) {
+function TaskCard({ task }: { task: Task }) {
   const phase = taskPhase(task)
   const heading = useId()
   return (
@@ -79,27 +78,22 @@ function TaskCard({ task, enabled, onDetails }: { task: Task; enabled: boolean; 
       {task.detail && <p className="task-detail" dir="auto">{task.detail}</p>}
       {task.evidence && task.evidence.length > 0 && (
         <details className="task-evidence">
-          <summary><Icon name="file" /> 실행 기록 <Icon name="down" className="details-chevron" /></summary>
+          <summary><Icon name="file" /> 작업 내역 <Icon name="down" className="details-chevron" /></summary>
           <ul>{task.evidence.map(item => (
             <li key={item.id}><div className="evidence-label">{item.label}</div>{item.detail && <p dir="auto">{item.detail}</p>}</li>
           ))}</ul>
         </details>
       )}
-      {(phase.icon === 'shield' || task.phase === 'paused') && (
-        <button type="button" className="text-button task-action" disabled={!enabled} onClick={onDetails}>
-          <Icon name="open" /> {phase.icon === 'shield' ? '승인 요청 확인' : '작업 세부 정보'}
-        </button>
-      )}
     </article>
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onDetails }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMenu }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
   onCopy(messageId: string): void
-  onDetails(): void
+  onMessageMenu(messageId: string): void
 }) {
   const view = useRef<HTMLElement>(null)
   const pinnedToEnd = useRef(true)
@@ -146,17 +140,17 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onDetails }
             {previousTasks.length > 0 && <details className="task-evidence">
               <summary><Icon name="history" /> 이전 작업 기록 <Icon name="down" className="details-chevron" /></summary>
               <div className="tasks">
-                {previousTasks.map(item => <TaskCard key={item.id} task={item} enabled={enabled} onDetails={onDetails} />)}
+                {previousTasks.map(item => <TaskCard key={item.id} task={item} />)}
               </div>
             </details>}
             {pausedTasks.length > 0 && <section className="tasks" aria-label="일시 정지된 작업">
-              {pausedTasks.map(item => <TaskCard key={item.id} task={item} enabled={enabled} onDetails={onDetails} />)}
+              {pausedTasks.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
             <div className="messages" role="log" aria-label="메시지">
-              {messages.map(item => <Message key={item.id} message={item} enabled={enabled} onCopy={onCopy} onDetails={onDetails} />)}
+              {messages.map(item => <Message key={item.id} message={item} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />)}
             </div>
             {liveTasks.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
-              {liveTasks.map(item => <TaskCard key={item.id} task={item} enabled={enabled} onDetails={onDetails} />)}
+              {liveTasks.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
           </div>
         )}

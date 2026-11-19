@@ -63,7 +63,7 @@ class VoiceCommandActivity:ComponentActivity() {
     override fun onCreate(savedInstanceState:Bundle?){
         super.onCreate(savedInstanceState)
         textMode.value=intent?.getBooleanExtra("text_input",false)==true
-        setContent{MaterialTheme(colorScheme=darkColorScheme()){Sheet()}}
+        setContent{com.user.localagent.ui.ZipHapTheme{Sheet()}}
         if(textMode.value){phase.value="요청을 입력하고 보내기를 눌러주세요.";return}
         if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)listen()
         else permission.launch(Manifest.permission.RECORD_AUDIO)

@@ -19,7 +19,7 @@ object BriefingNotifications {
         if(ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return
         val intent=Intent(context,BriefingReviewActivity::class.java)
         val pending=PendingIntent.getActivity(context,2301,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        manager.notify(2301,NotificationCompat.Builder(context,"briefing-results").setSmallIcon(R.mipmap.ic_launcher)
+        manager.notify(2301,NotificationCompat.Builder(context,"briefing-results").setSmallIcon(R.drawable.ic_agent)
             .setContentTitle("새 자료 분석 결과").setContentText("일정 등록 ${registered}개 · 확인 필요 ${review}개")
             .setContentIntent(pending).addAction(0,"확인·수정",pending).setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())

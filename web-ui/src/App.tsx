@@ -118,9 +118,8 @@ export default function App() {
     onNew: () => sidebarRequest({ action: 'newThread' }),
     onOpenOffice: () => sidebarRequest({ action: 'openOffice' }),
     onNavigate: panel => sidebarRequest({ action: 'navigate', payload: { panel } }),
-    onDetails: () => sidebarRequest({ action: 'nativeDetails' }),
+    onChatMenu: () => sidebarRequest({ action: 'chatMenu' }),
   }
-  const openNative = () => { request({ action: 'nativeDetails' }) }
   const openMenu = () => setMobileOpen(true)
 
   return (
@@ -132,7 +131,8 @@ export default function App() {
           onRename={title => request({ action: 'renameThread', payload: { title } })}
           onSelectModel={id => request({ action: 'selectModel', payload: { id } })} />
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
-          onCopy={messageId => request({ action: 'copy', payload: { messageId } })} onDetails={openNative} />
+          onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
+          onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })} />
         <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} status={status}
           onDraft={text => {
             if (!snapshot?.ready) return
@@ -155,7 +155,9 @@ export default function App() {
           }} onAttach={() => request({ action: 'attach' })} onStop={() => {
             const target = runControls(snapshot).stop
             if (target) request({ action: 'stop', payload: target })
-          }} onDetails={openNative} />
+          }} onRemoveAttachment={id => request({ action: 'removeAttachment', payload: { id } })}
+          onCancelPreparation={() => request({ action: 'cancelPreparation' })}
+          onOpenWaitingApproval={() => request({ action: 'openWaitingApproval' })} />
       </div>
       <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}

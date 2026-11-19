@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private val approval get()=app.runs.approval
 
     private var attachmentJob:Job?=null
+    private var attachmentJobThreadId:String?=null
     private var attachmentScope:Triple<String,Long,String>?=null
     private val attachmentPreparing=MutableStateFlow(false)
 
@@ -91,7 +93,7 @@ class MainActivity : ComponentActivity() {
                 app.workspaceFor(projectId).select(uri)
                 status.value="선택한 프로젝트의 폴더를 연결했습니다. 작성 중인 설정은 유지됩니다."
             }catch(cancel:CancellationException){throw cancel}
-            catch(error:Exception){status.value=error.message?:"프로젝트 폴더를 연결하지 못했습니다."}
+            catch(error:Exception){status.value=error.message?:"프로젝트를 연결하지 못했습니다."}
         }
     }
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result->
@@ -101,22 +103,22 @@ class MainActivity : ComponentActivity() {
     private val attachFiles=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()){uris->
         val origin=attachmentScope
         attachmentScope=null
-        if(uris.isNotEmpty()&&!attachmentPreparing.value){attachmentPreparing.value=true;attachmentJob=lifecycleScope.launch {
+        if(uris.isNotEmpty()&&!attachmentPreparing.value){attachmentJobThreadId=origin?.first;attachmentPreparing.value=true;attachmentJob=lifecycleScope.launch {
             try{
                 check(origin!=null){"첨부할 원래 대화를 확인하지 못했습니다. 해당 방에서 다시 선택해주세요."}
                 val room=app.repository.chat.thread(origin.first)
                 check(room!=null&&room.revision==origin.second&&room.activeBranchId==origin.third){"자료를 선택하는 동안 원래 대화가 변경되었습니다. 다시 선택해주세요."}
                 status.value="첨부 파일을 기기에 준비 중";app.chatAttachments.add(uris,origin.first);status.value="원래 대화에 파일을 첨부했습니다. 해당 방에서 요청을 입력해주세요."
             }
-            catch(cancel:CancellationException){throw cancel}
+            catch(cancel:CancellationException){status.value="파일 첨부를 취소했어요.";throw cancel}
             catch(error:Exception){status.value=error.message?:"첨부 파일을 준비하지 못했습니다."}
-            finally{attachmentJob=null;attachmentPreparing.value=false}
+            finally{attachmentJob=null;attachmentJobThreadId=null;attachmentPreparing.value=false}
         }}
     }
     private val importModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri != null) lifecycleScope.launch {
             runCatching { app.models.importModel(uri, "가져온 로컬 모델") }
-                .onSuccess { status.value = "모델을 가져왔습니다. 원본 SHA-256을 등록해 검증해주세요." }
+                .onSuccess { status.value = "파일을 가져왔어요. 배포처의 확인 코드를 입력해 주세요." }
                 .onFailure { status.value = it.message ?: "모델 가져오기 실패" }
         }
     }
@@ -126,8 +128,9 @@ class MainActivity : ComponentActivity() {
         folderProjectId=savedInstanceState?.getString("folder-project-id")
         savedInstanceState?.let {saved->saved.getString("attachment-thread-id")?.let {id->saved.getString("attachment-branch-id")?.let {branch->attachmentScope=Triple(id,saved.getLong("attachment-thread-revision"),branch)}}}
         if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10)
-        enableEdgeToEdge()
-        WindowCompat.getInsetsController(window,window.decorView).apply {isAppearanceLightStatusBars=false;isAppearanceLightNavigationBars=false}
+        val lightBars=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
+        enableEdgeToEdge(lightBars,lightBars)
+        WindowCompat.getInsetsController(window,window.decorView).apply {isAppearanceLightStatusBars=true;isAppearanceLightNavigationBars=true}
         lifecycleScope.launch { runCatching { app.models.refresh() } }
         app.runs.refreshVisibleHistory()
         openCallReport(intent)
@@ -196,7 +199,10 @@ class MainActivity : ComponentActivity() {
                 externalAgentConsentThread.value=null
             }){Text("연결하고 선택")}},dismissButton={TextButton(onClick={externalAgentConsentThread.value=null}){Text("취소")}})}
         var tab by rememberSaveable {mutableIntStateOf(0)}
-        var nativeChat by rememberSaveable {mutableStateOf(false)}
+        var chatScreenAttempt by remember {mutableIntStateOf(0)}
+        var chatScreenUnavailable by remember {mutableStateOf(false)}
+        var chatMenuOpen by rememberSaveable {mutableStateOf(false)}
+        var chatManagerOpen by rememberSaveable {mutableStateOf(false)}
         var composerEpoch by remember {mutableLongStateOf(0)}
         val collaboration=remember{com.user.localagent.collab.CollaborationRoom.get(applicationContext)}
         val collaborationState by collaboration.state.collectAsState()
@@ -215,19 +221,14 @@ class MainActivity : ComponentActivity() {
         val selectedThreadId by chat.selectedThreadId.collectAsState()
         // Freeze the value, not the delegated State getter, in callbacks retained by an old IME.
         val composerThreadId=selectedThreadId
-        val selectedProjectId by chat.selectedProjectId.collectAsState()
         val roomDraft by chat.draft.collectAsState()
-        val answerStates by chat.answerStates.collectAsState()
         val queuedRequests by chat.queued.collectAsState()
         val activeExecutions by chat.activeExecutions.collectAsState()
         val auxiliaryExecution by chat.auxiliaryExecution.collectAsState()
-        val runMode by chat.runMode.collectAsState()
+        val preparingAttachments by attachmentPreparing.collectAsState()
         val roomGoal by chat.goalState.collectAsState()
-        val roomViewport by chat.viewportState.collectAsState()
         val composerReady by chat.selectionReady.collectAsState()
-        val roomHasEarlier by chat.hasEarlier.collectAsState()
         val roomActivities by chat.workActivities.collectAsState()
-        val runEvents by chat.runTimeline.collectAsState()
         var queueOpen by rememberSaveable{mutableStateOf(false)}
         var goalEditorThreadId by rememberSaveable{mutableStateOf<String?>(null)}
         var skillLibraryOpen by rememberSaveable{mutableStateOf(false)}
@@ -241,9 +242,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(selectedThreadId){if(goalEditorThreadId!=selectedThreadId)goalEditorThreadId=null}
-        val roomProjects by app.repository.chat.projects.collectAsState(initial=emptyList())
         val roomThreads by app.repository.chat.threads.collectAsState(initial=emptyList())
         val currentBranchId=roomThreads.firstOrNull{it.id==selectedThreadId}?.activeBranchId.orEmpty()
+        var messageMenuId by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
+        var messageEdit by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
+        val answerStates by chat.answerStates.collectAsState()
         var roomBranches by remember(selectedThreadId){mutableStateOf<List<UiChatBranch>>(emptyList())}
         LaunchedEffect(selectedThreadId,currentBranchId){
             roomBranches=emptyList()
@@ -252,52 +255,35 @@ class MainActivity : ComponentActivity() {
             }catch(cancel:CancellationException){throw cancel}catch(_:Exception){status.value="대화 버전 목록을 불러오지 못했습니다."}
         }
         val pending by approval.collectAsState()
-        val working by busy.collectAsState()
         val messages by lines.collectAsState()
         val installed by app.models.models.collectAsState()
-        val pairedTextSettings by com.user.localagent.compute.PcComputeSettings.get(this@MainActivity).state.collectAsState()
         val chosenId by preferredModelId.collectAsState()
-        val imageWork by app.imageStudio.state.collectAsState()
-        val webWork by app.webResearch.state.collectAsState()
-        val project by app.projectWorkspace.state.collectAsState()
-        val projectFolders by produceState<Map<String,String>>(emptyMap(),roomProjects.map{it.id}) {
-            val ids=roomProjects.map{it.id}
-            if(ids.isEmpty())value=emptyMap()
-            else combine(ids.map{app.workspaceFor(it).state}){states->ids.zip(states.map{it.name}).toMap()}.collect{value=it}
-        }
         val attachments by app.chatAttachments.state.collectAsState()
-        val preparingAttachments by attachmentPreparing.collectAsState()
         val steerRunId=chat.activeRunId
         val steerThreadId=chat.activeThreadId
-        val roomAuxiliary=auxiliaryExecution?.takeIf {it.threadId==composerThreadId}
-        val navigation=ChatNavigation(
-            projects=roomProjects.filterNot{it.archived}.map{UiProject(it.id,it.title,folderLabel=projectFolders[it.id]?:"프로젝트 전용 폴더",instructions=it.settings.instructions,modelId=it.settings.modelId,thinking=it.settings.thinking,contextSize=it.settings.contextSize,memoryMode=it.settings.memoryMode,useOwnerMemory=it.settings.useOwnerMemory,learnOwnerFacts=it.settings.learnOwnerFacts,revision=it.revision,disabledTools=it.settings.disabledTools)},
-            threads=roomThreads.map{thread->UiThread(thread.id,thread.projectId.orEmpty(),thread.title,thread.pinned,thread.archived,thread.deletedAt!=null,thread.updatedAt,
-                runStatus=activeExecutions.firstOrNull {it.threadId==thread.id}?.let {run->
-                    when {run.waitingForApproval->"승인 대기";run.waitingForResource=="PHONE"->"휴대폰 계산 대기";run.waitingForResource=="PC"->"PC 계산 대기";run.computeLocation=="PC"->"PC에서 실행 중";run.computeLocation=="PHONE"->"휴대폰에서 실행 중";else->"작업 준비 중"}
-                }?:queuedRequests.count{it.threadId==thread.id}.takeIf{it>0}?.let{"대기 ${it}개"}.orEmpty())},
-            selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
-            actions=ChatNavigationActions(
-                onSelectThread=chat::selectThread,onNewThread=chat::newThread,onSelectProject=chat::selectProject,
-                onSaveProject=chat::saveProject,onDeleteProject=chat::deleteProject,onChooseProjectFolder={id->folderProjectId=id;projectFolder.launch(null)},
-                onRenameThread=chat::renameThread,onPinThread=chat::pinThread,onArchiveThread=chat::archiveThread,
-                onClearThread=chat::clearThread,onDeleteThread=chat::deleteThread,onDuplicateThread=chat::duplicateThread,
-                onMoveThread=chat::moveThread,onExportThread=chat::exportThread,
-                onSearchThreads=chat::searchThreads,
-            ),
-        )
         Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
-            if(tab==0&&!nativeChat){
+            if(tab==0&&chatScreenUnavailable){
+                Column(Modifier.fillMaxSize().padding(padding).padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){
+                    Text("대화를 열지 못했어요.",style=MaterialTheme.typography.titleMedium)
+                    Text("다시 열어 보고, 계속 안 되면 앱을 종료한 뒤 다시 실행해 주세요.")
+                    TextButton(onClick={chatScreenAttempt++;chatScreenUnavailable=false}){Text("다시 열기")}
+                    TextButton(onClick={tab=4}){Text("설정")}
+                }
+            }else if(tab==0){
                 val runForRoom=steerRunId?.takeIf{steerThreadId==composerThreadId}
+                val roomAuxiliary=auxiliaryExecution?.takeIf{it.threadId==composerThreadId}
+                val approvalThread=activeExecutions.firstOrNull{it.threadId!=composerThreadId&&it.waitingForApproval}?.threadId
                 val epoch=(runForRoom.orEmpty()+currentBranchId).hashCode().toLong().and(0x7fffffff)
-                val modelChoices=listOf("auto" to "자동 · 구독 우선",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "구독 Codex")+
+                val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex")+
                     installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{it.id to it.title}
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
+                    put("canCancelPreparation",preparingAttachments&&attachmentJobThreadId==composerThreadId||roomAuxiliary!=null)
+                    put("otherApprovalPending",approvalThread!=null)
                     put("status",if(runForRoom!=null||activeExecutions.isEmpty())state else "다른 대화에서 작업 중")
                     put("modelId",chosenId);put("modelLabel",modelChoices.find{it.first==chosenId}?.second?:"선택한 모델")
-                    put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&attachments.isEmpty())
+                    put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&!preparingAttachments&&attachments.isEmpty())
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
                         put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
                     })}})
@@ -319,14 +305,14 @@ class MainActivity : ComponentActivity() {
                             .distinctBy{it.runId}.sortedBy{it.updatedAt}.takeLast(12).forEach{activity->add(buildJsonObject{
                                 put("id",activity.runId);put("phase",activity.status)
                                 put("label",when(activity.status){"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
-                                put("detail","실제 실행 기록을 확인할 수 있습니다.");put("canCancel",false)
+                                put("detail","");put("canCancel",false)
                                 put("evidence",buildJsonArray{activity.events.takeLast(8).forEach{event->add(buildJsonObject{
                                     put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
                                 })}})
                             })}
                     })
                 }.toString()
-                ReactChatHost(snapshot,onUnavailable={nativeChat=true},modifier=Modifier.fillMaxSize().padding(padding).imePadding(),onCommand={command->
+                key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={chatScreenUnavailable=true},modifier=Modifier.fillMaxSize().padding(padding).imePadding(),onCommand={command->
                     val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
                     if(sameRoom){
                         val payload=command.payload
@@ -361,51 +347,95 @@ class MainActivity : ComponentActivity() {
                             "collabRefresh"->collaboration.refresh(payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "collabSend"->collaboration.post(payload.getValue("clientMessageId").jsonPrimitive.content,payload.getValue("text").jsonPrimitive.content,payload.getValue("recipient").jsonPrimitive.content,payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&it.role=="assistant"})chat.copyMessage(id)}
-                            "nativeDetails"->nativeChat=true
+                            "messageMenu"->{
+                                val id=payload.getValue("messageId").jsonPrimitive.content
+                                if(messages.any{it.id==id&&it.role in setOf("user","assistant")})messageMenuId=id
+                            }
+                            "chatMenu"->chatMenuOpen=true
+                            "removeAttachment"->{
+                                val id=payload.getValue("id").jsonPrimitive.content
+                                if(app.chatAttachments.state.value.any{it.id==id})app.chatAttachments.remove(id)
+                            }
+                            "cancelPreparation"->{
+                                if(attachmentJobThreadId==composerThreadId)attachmentJob?.cancel()
+                                else chat.auxiliaryExecution.value?.takeIf{it.threadId==composerThreadId}?.let{chat.stopAuxiliary(it.operationId,it.threadId)}
+                            }
+                            "openWaitingApproval"->approvalThread?.takeIf{id->chat.activeExecutions.value.any{it.threadId==id&&it.waitingForApproval}}?.let(chat::selectThread)
                         }
+                    }else if(command.action in setOf("send","steer","attach","removeAttachment")){
+                        status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
-                })
+                })}
             }
-            else if(tab==0)ChatWorkspace(messages,working||preparingAttachments,state,installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)},chosenId,{id->chooseConversationModel(id,composerThreadId)},{text->sendToThread(text,composerThreadId)},
-                {if(steerRunId!=null)chat.stopRun(steerRunId,composerThreadId)else if(preparingAttachments)attachmentJob?.cancel()else roomAuxiliary?.let {chat.stopAuxiliary(it.operationId,it.threadId)}},
-                {index->if(index==-1){chat.newThread();tab=0}else {tab=index.coerceIn(0,10);if(tab==0)refreshVisibleHistory()}},
-                Modifier.fillMaxSize().padding(padding),projectName=project.name,onProjectClick={tab=10},onAttach={
-                    val room=roomThreads.firstOrNull{it.id==composerThreadId}
-                    if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId&&room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}
-                },
-                attachments=attachments.map {ChatAttachmentChip(it.id,it.name,when{it.mimeType.startsWith("image/")->"사진";it.mimeType.startsWith("video/")->"영상";else->"파일"})},
-                onRemoveAttachment={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)app.chatAttachments.remove(it)},navigation=navigation,composerKey=composerThreadId,
-                draftValue=roomDraft,onDraftChange={value->chat.updateDraft(value,composerThreadId)},
-                messageActions=UiMessageActions(onEdit=chat::editMessage,onRegenerate=chat::regenerate,onFork=chat::forkMessage,onCopy=chat::copyMessage,onExport=chat::exportMessage),
-                answerStates=answerStates,onContinue=chat::continueAnswer,queuedCount=queuedRequests.size,queuedPreview=queuedRequests.take(3).map{request->(roomThreads.firstOrNull{it.id==request.threadId}?.title?:"대화")+" · "+request.text.lineSequence().firstOrNull().orEmpty().ifBlank{"첨부 자료 분석"}.take(100)},onQueue={text->sendToThread(text,composerThreadId)},
-                branches=roomBranches,currentBranchId=currentBranchId,onSelectBranch={branchId->chat.selectBranch(selectedThreadId,branchId)},
-                onShowQueue={queueOpen=true},
-                onManageGoal={if(chat.selectionReady.value&&chat.selectedThreadId.value==composerThreadId)goalEditorThreadId=composerThreadId},onShowSkills={skillLibraryOpen=true},
-                runTimeline=runEvents.filter{it.threadId.isBlank()||it.threadId==selectedThreadId},
-                onSteer=if(working&&steerRunId!=null&&steerThreadId==selectedThreadId)({text->chat.steer(text,steerRunId,steerThreadId)})else null,
-                activeRunKey=steerRunId,viewport=roomViewport,onViewportChange=chat::updateViewport,hasEarlier=roomHasEarlier,onLoadEarlier=chat::loadEarlier,composerReady=composerReady,pairedPcTextAvailable=pairedTextSettings.paired&&!pairedTextSettings.claudeText,
-                activityByMessageId=roomActivities,onLoadOlderActivity=chat.workActivityController::loadOlder,
-                activeGoalLabel=roomGoal?.takeIf {it.threadId==composerThreadId&&it.projectId.orEmpty()==selectedProjectId}?.outcome,
-                backgroundWork={Column {
-                    TextButton(onClick={nativeChat=false}){Text("새 대화 화면으로 돌아가기")}
-                    TextButton(onClick={nativeChat=false;collaborationVisible=true;collaboration.open()}){Text("Codex · Claude 협업방")}
-                    if(imageWork.running)TextButton(onClick={tab=7}){Text("이미지 작업 진행 중 · ${imageWork.phase} · 열기")}
-                    CallFollowUpConversationStatus(app,composerThreadId)
-                    activeExecutions.filter {it.threadId!=composerThreadId}.forEach {run->
-                        TextButton(onClick={chat.selectThread(run.threadId)}){
-                            Text(if(run.waitingForApproval)"다른 대화에 확인할 작업이 있습니다 · 열기"else if(run.computeLocation=="PC")"다른 대화에서 PC 계산 중 · 열기"else"다른 대화에서 작업 중 · 열기")
-                        }
-                    }
-                }})
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
                 Row(Modifier.fillMaxWidth().height(56.dp),verticalAlignment=Alignment.CenterVertically) {
-                    TextButton(onClick={if(tab in setOf(4,7,10)){tab=0;refreshVisibleHistory()}else tab=4}){Text(if(tab in setOf(4,7,10))"‹ 대화"else"‹ 설정·참고")}
-                    Text(listOf("","모델 관리","기억과 작업","문서 작업실","설정·참고","자료 연결과 분석","대화 기록","이미지 작업실","문자·일정 분석","웹·쇼핑 검색","프로젝트 폴더")[tab],style=MaterialTheme.typography.titleMedium)
+                    TextButton(onClick={if(tab in setOf(4,7,10)){tab=0;refreshVisibleHistory()}else tab=4}){Text(if(tab in setOf(4,7,10))"‹ 대화"else"‹ 설정")}
+                    Text(listOf("","답변 방식","기억과 작업","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자·일정 분석","웹·쇼핑 검색","프로젝트")[tab],style=MaterialTheme.typography.titleMedium)
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state
                 if(panelStatus.isNotBlank())Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
                 when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen{tab=it};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
             }
+        }
+        if(chatMenuOpen)AlertDialog(onDismissRequest={chatMenuOpen=false}, title={Text("대화 메뉴")}, text={Column {
+            TextButton(onClick={chatMenuOpen=false;chatManagerOpen=true}){Text("대화와 프로젝트 관리")}
+            TextButton(onClick={chatMenuOpen=false;tab=6}){Text("이전 대화 찾기")}
+            TextButton(onClick={chatMenuOpen=false;queueOpen=true}){Text("대기 중인 요청")}
+            TextButton(onClick={chatMenuOpen=false;goalEditorThreadId=composerThreadId}){Text("이 대화의 목표")}
+            TextButton(onClick={chatMenuOpen=false;skillLibraryOpen=true}){Text("도움 기능")}
+            if(roomBranches.size>1)roomBranches.forEach{branch->
+                TextButton(enabled=branch.id!=currentBranchId,onClick={chatMenuOpen=false;chat.selectBranch(composerThreadId,branch.id)}){Text(branch.title)}
+            }
+        }}, confirmButton={TextButton(onClick={chatMenuOpen=false}){Text("닫기")}})
+        if(chatManagerOpen){
+            val projects by app.repository.chat.projects.collectAsState(initial=emptyList())
+            val selectedProjectId by chat.selectedProjectId.collectAsState()
+            val navigation=ChatNavigation(
+                projects=projects.filterNot{it.archived}.map{project->
+                    val settings=project.settings
+                    UiProject(project.id,project.title,instructions=settings.instructions,modelId=settings.modelId,
+                        thinking=settings.thinking,contextSize=settings.contextSize,memoryMode=settings.memoryMode,
+                        useOwnerMemory=settings.useOwnerMemory,learnOwnerFacts=settings.learnOwnerFacts,
+                        revision=project.revision,disabledTools=settings.disabledTools)
+                },
+                threads=roomThreads.map{room->UiThread(room.id,room.projectId.orEmpty(),room.title,room.pinned,
+                    room.archived,room.deletedAt!=null,room.updatedAt)},
+                selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
+                modelChoices=installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{UiModelChoice(it.id,it.title)},
+                actions=ChatNavigationActions(onSelectThread=chat::selectThread,onNewThread=chat::newThread,
+                    onSelectProject=chat::selectProject,onSaveProject=chat::saveProject,onDeleteProject=chat::deleteProject,
+                    onChooseProjectFolder={id->folderProjectId=id;projectFolder.launch(null)},onRenameThread=chat::renameThread,
+                    onPinThread=chat::pinThread,onArchiveThread=chat::archiveThread,onClearThread=chat::clearThread,
+                    onDeleteThread=chat::deleteThread,onDuplicateThread=chat::duplicateThread,onMoveThread=chat::moveThread,
+                    onExportThread=chat::exportThread,onSearchThreads=chat::searchThreads),
+            )
+            androidx.compose.ui.window.Dialog(onDismissRequest={chatManagerOpen=false}){
+                Surface(shape=MaterialTheme.shapes.large,modifier=Modifier.fillMaxHeight(0.9f)){
+                    ChatNavigator(navigation,onDismiss={chatManagerOpen=false},
+                        onOpenImages={chatManagerOpen=false;tab=7},onOpenSettings={chatManagerOpen=false;tab=4})
+                }
+            }
+        }
+        messages.firstOrNull{it.id==messageMenuId}?.let {message->
+            fun closeMenu(){messageMenuId=null;messageEdit=null}
+            AlertDialog(onDismissRequest=::closeMenu,title={Text(if(message.role=="assistant")"답변 메뉴"else"메시지 메뉴")},text={
+                val editing=messageEdit
+                if(editing!=null)OutlinedTextField(editing,{messageEdit=it},label={Text("메시지")},maxLines=6)
+                else Column {
+                    if(message.role=="user")TextButton(onClick={messageEdit=message.text}){Text("수정해서 보내기")}
+                    else {
+                        GeneratedImageChatPreview(message.text)
+                        if(answerStates[message.id]?.canContinue==true)TextButton(onClick={closeMenu();chat.continueAnswer(message.id)}){Text("답변 이어받기")}
+                        TextButton(onClick={closeMenu();chat.regenerate(message.id)}){Text("다시 답변 받기")}
+                        TextButton(onClick={closeMenu();chat.exportMessage(message.id)}){Text("답변 저장")}
+                    }
+                    TextButton(onClick={closeMenu();chat.forkMessage(message.id)}){Text("여기서 새 대화 시작")}
+                }
+            },confirmButton={
+                val editing=messageEdit
+                if(editing==null)TextButton(onClick=::closeMenu){Text("닫기")}
+                else TextButton(enabled=editing.isNotBlank()&&editing.length<=12000,onClick={closeMenu();chat.editMessage(message.id,editing)}){Text("보내기")}
+            },dismissButton={if(messageEdit!=null)TextButton(onClick={messageEdit=null}){Text("취소")}})
         }
         if(queueOpen)RunQueueDialog(
             items=queuedRequests.map{request->UiQueuedRun(request.runId,request.threadId,request.text.lineSequence().firstOrNull().orEmpty().take(100),request.text,
@@ -424,7 +454,7 @@ class MainActivity : ComponentActivity() {
                 onDismiss={goalEditorThreadId=null},feedback=state,
                 onDeleteVersioned={snapshot->chat.deleteGoal(goalThread,snapshot){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}})
         }
-        pending?.let { action -> ActionApprovalDialog(action,action.reviewText?:actionSummary(action.call)) }
+        pending?.takeIf{it.threadId==composerThreadId}?.let { action -> ActionApprovalDialog(action,action.reviewText?:actionSummary(action.call)) }
     }
     @Composable private fun ColumnScope.ModelsScreen() {
         val installed by app.models.models.collectAsState()
@@ -474,7 +504,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if(model.id=="gemma-e4b")Text("음성·사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
                 }
-                if(!model.verified)TextButton(onClick={hashTarget=model.id;expectedHash=""}){Text("원본 SHA-256 등록")}
+                if(!model.verified)TextButton(onClick={hashTarget=model.id;expectedHash=""}){Text("확인 코드 입력")}
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("선택")}
                     TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("벤치마크")}
@@ -503,7 +533,7 @@ class MainActivity : ComponentActivity() {
                 Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
                     Text(candidate.title,fontWeight=FontWeight.Bold)
                     Text(if(candidate.id=="asr-qwen-17b")"정확도 우선 · 지원 파일 포함 약 2.8GB"else"가벼운 모드 · 지원 파일 포함 약 1.2GB",style=MaterialTheme.typography.bodySmall)
-                    Text("기기 내 처리 · Apache 2.0 · 공식 배포 파일·SHA-256 확인",style=MaterialTheme.typography.bodySmall)
+                    Text("휴대폰에서 처리 · 공식 배포 파일",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         Button(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.downloadBundle(candidate);status.value="음성 인식 파일 검증 완료"}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"}}}){Text("다운로드")}
                         FilterChip(selected=asr.modelId==candidate.id,enabled=app.models.asrReady(candidate.id),onClick={scope.launch {app.models.selectAsr(candidate.id)}},label={Text("전사용")})
@@ -512,7 +542,7 @@ class MainActivity : ComponentActivity() {
             }
             item {InfoCard("모델 역할을 나눕니다","E2B는 빠른 대화, E4B·Qwen은 수동 비교용입니다. 이미지 작업실에서는 별도 로컬 이미지 모델을 사용하며, 대화 모델을 먼저 메모리에서 내립니다.")}
         }
-        hashTarget?.let {id->AlertDialog(onDismissRequest={hashTarget=null},title={Text("배포자의 SHA-256 확인")},text={Column{Text("내가 신뢰하는 원본 배포자가 제공한 64자리 해시를 입력하세요.");OutlinedTextField(value=expectedHash,onValueChange={expectedHash=it.trim()},label={Text("SHA-256")})}},confirmButton={TextButton(enabled=expectedHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={scope.launch {runCatching {app.models.verifyImported(id,expectedHash)}.onSuccess{status.value="원본 해시가 일치합니다.";hashTarget=null}.onFailure{status.value=it.message?:"검증 실패"}}}){Text("파일 검증")}},dismissButton={TextButton(onClick={hashTarget=null}){Text("취소")}})}
+        hashTarget?.let {id->AlertDialog(onDismissRequest={hashTarget=null},title={Text("파일 확인")},text={Column{Text("배포처가 알려준 64자리 확인 코드를 입력해 주세요.");OutlinedTextField(value=expectedHash,onValueChange={expectedHash=it.trim()},label={Text("확인 코드")})}},confirmButton={TextButton(enabled=expectedHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={scope.launch {runCatching {app.models.verifyImported(id,expectedHash)}.onSuccess{status.value="파일이 배포처의 원본과 일치해요.";hashTarget=null}.onFailure{status.value=it.message?:"검증 실패"}}}){Text("파일 검증")}},dismissButton={TextButton(onClick={hashTarget=null}){Text("취소")}})}
     }
     private suspend fun runBenchmark(path:String,minutes:Int=0) {
         status.value="벤치마크 시작 · 다른 작업은 잠시 기다려주세요"
@@ -554,11 +584,10 @@ class MainActivity : ComponentActivity() {
         var section by rememberSaveable {mutableIntStateOf(0)}
         val assistantBusy by app.runs.busy.collectAsState()
         val imageWork by app.imageStudio.state.collectAsState()
-        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("참고·도구","자동화","앱 연결","패치·확장").forEachIndexed {index,label->FilterChip(section==index,onClick={section=index},label={Text(label)})}}
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("일반","자동 작업","앱 연결","업데이트").forEachIndexed {index,label->FilterChip(section==index,onClick={section=index},label={Text(label)})}}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(section==0){
-                item {Text("대화에서 파일·사진·영상을 첨부하고 문서·쇼핑·작업을 요청하세요. 아래 화면은 설정과 결과 확인용입니다.",style=MaterialTheme.typography.bodySmall)}
-                items(listOf("프로젝트 폴더" to 10,"모델 관리" to 1,"기억과 할 일" to 2,"내장 도구·권한 상태" to 3,"대화 기록" to 6,"자료 연결·분석" to 5,"문자·일정 후보 관리" to 8,"웹·쇼핑 출처 기록" to 9)){(label,destination)->OutlinedButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}}
+                items(listOf("프로젝트" to 10,"답변 방식" to 1,"기억과 할 일" to 2,"파일 작업" to 3,"대화 기록" to 6,"연결된 자료" to 5,"문자와 일정" to 8,"검색 기록" to 9)){(label,destination)->OutlinedButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}}
             }
             if(section==1)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
             if(section==1)item {CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}}

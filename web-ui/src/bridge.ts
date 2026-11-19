@@ -53,6 +53,8 @@ export interface Snapshot {
   actionEpoch?: number
   canSteer?: boolean
   attachments?: Attachment[]
+  canCancelPreparation?: boolean
+  otherApprovalPending?: boolean
   composerEpoch?: number
   theme?: 'light' | 'dark' | 'system'
   collab?: CollaborationSnapshot
@@ -96,16 +98,16 @@ export type Panel = 'chat' | 'settings' | 'images' | 'tools' | 'projects' | 'his
 
 type Intent =
   | { action: 'draft'; payload: { text: string } }
-  | { action: 'copy'; payload: { messageId: string } }
+  | { action: 'copy' | 'messageMenu'; payload: { messageId: string } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }
   | { action: 'steer'; payload: RunTarget & { text: string } }
   | { action: 'collabSend'; payload: { bindingEpoch: number; clientMessageId: string; text: string; recipient: Recipient } }
   | { action: 'collabRefresh'; payload: { bindingEpoch: number } }
-  | { action: 'selectThread' | 'selectModel'; payload: { id: string } }
+  | { action: 'selectThread' | 'selectModel' | 'removeAttachment'; payload: { id: string } }
   | { action: 'renameThread'; payload: { title: string } }
   | { action: 'navigate'; payload: { panel: Panel } }
-  | { action: 'newThread' | 'openOffice' | 'attach' | 'nativeDetails' | 'ready' }
+  | { action: 'newThread' | 'openOffice' | 'attach' | 'chatMenu' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
 
 interface RunTarget {
   runId: string
@@ -195,6 +197,8 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.activeRunId !== undefined && value.activeRunId !== null && typeof value.activeRunId !== 'string') return null
   if (value.actionEpoch !== undefined && !epoch(value.actionEpoch)) return null
   if (value.canSteer !== undefined && typeof value.canSteer !== 'boolean') return null
+  if (value.canCancelPreparation !== undefined && typeof value.canCancelPreparation !== 'boolean') return null
+  if (value.otherApprovalPending !== undefined && typeof value.otherApprovalPending !== 'boolean') return null
   if (value.attachments !== undefined && !list(value.attachments, attachment)) return null
   if (value.composerEpoch !== undefined && !epoch(value.composerEpoch)) return null
   if (value.theme !== undefined && value.theme !== 'light' && value.theme !== 'dark' && value.theme !== 'system') return null

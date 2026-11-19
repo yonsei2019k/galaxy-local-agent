@@ -1,8 +1,9 @@
-/* ZipHap design system — "Porcelain & Clasp". Owner: Claude (Codex assignment X-005). See docs/ziphap-design-system.ko.md.
-   Palette comes from the mascot: porcelain ivory body, ink-navy eyes, cobalt clasp, apricot blush.
-   Concept: two ivory halves held together by one cobalt clasp. Cobalt marks the one thing you act on; state is shown by
-   shape as well as color (filled tile = settled, ringed tile = needs you, spinning ring = actually running).
-   Theme: App.tsx sets data-theme on .workspace (it already folds in the system preference). Offline: no font/CDN loads. */
+/* ZipHap design system — "Sunlit Porcelain". Owner: Claude (Codex assignment X-005, owner direction 2026-11-19).
+   Bright white surfaces with vivid point colors; no black UI. One bright theme is used even when the system is dark
+   (owner: "검은 배경이 아니라 밝고 화사하게"). Point colors have roles and never stand in for each other:
+   cobalt = the one action, coral = needs the owner, mint = done/connected, sun = waiting, lilac = creative/collaboration.
+   Text uses the text-safe shades (WCAG AA); the soft tints are backgrounds only. See docs/ziphap-design-system.ko.md.
+   Offline: no font/CDN loads. */
 
 :root {
   font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR",
@@ -10,9 +11,9 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
-  background: #f6f5f1;
+  background: #f7f8fc;
+  color-scheme: light;
 }
-:root:has(.workspace[data-theme="dark"]) { background: #121420; }
 
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -25,52 +26,60 @@ button, select, summary, textarea { outline-offset: 3px; }
 button { touch-action: manipulation; }
 svg { width: 20px; height: 20px; flex: none; }
 
-.workspace {
-  /* Brand primitives */
-  --porcelain: #f6f5f1;   /* mascot body, page */
-  --ink: #1a1e33;         /* mascot eyes, text */
-  --clasp: #2546d6;       /* mascot clasp, the single action color */
-  --blush: #e98a5f;       /* mascot cheeks, used only for "needs you" */
+.workspace,
+.workspace[data-theme="dark"] {
+  /* Point colors (fills) and their text-safe shades and soft tints */
+  --cobalt: #3355f0;  --cobalt-text: #2e4be0;  --cobalt-soft: #e6ebff;
+  --coral: #c9401f;   --coral-text: #c2401f;   --coral-soft: #ffe9e2;
+  --mint: #0b7f5d;    --mint-text: #0b7a5b;    --mint-soft: #ddf7ee;
+  --sun: #ffb020;     --sun-text: #8a5a00;     --sun-soft: #fff3d6;
+  --lilac: #7c4deb;   --lilac-text: #6d3fe0;   --lilac-soft: #f0e9ff;
+
+  /* Brand primitives (kept names) */
+  --porcelain: #f7f8fc;
+  --ink: #171b33;
+  --clasp: var(--cobalt);
+  --blush: var(--coral);
 
   /* Surfaces */
   --canvas: var(--porcelain);
-  --sidebar: #efede6;
-  --sidebar-hover: #e5e2d9;
-  --surface: #fffefb;
-  --surface-soft: #f1efe9;
-  --line: #e2dfd6;
-  --line-strong: #8e8a80;  /* input/control borders: 3:1 on canvas */
+  --sidebar: #ffffff;
+  --sidebar-hover: #f0f2f8;
+  --surface: #ffffff;
+  --surface-soft: #f0f2f8;
+  --line: #e3e6ef;
+  --line-strong: #868ca4;  /* input/control borders: >= 3:1 */
 
   /* Text */
-  --muted: #61677f;
-  --secondary: #454b63;
+  --muted: #5e6480;
+  --secondary: #4c5270;
 
   /* Action */
-  --accent: var(--clasp);
-  --accent-hover: #1a37b4;
+  --accent: var(--cobalt);
+  --accent-hover: #2340d0;
   --accent-ink: #ffffff;
-  --accent-soft: #e5eafc;
-  --focus: #2546d6;
-  --disabled: #e7e8ee;
-  --disabled-ink: #5b6278;
+  --accent-soft: var(--cobalt-soft);
+  --focus: var(--cobalt);
+  --disabled: #e3e6ef;
+  --disabled-ink: #5e6480;
 
   /* State (semantic, separate from the accent) */
-  --review: #8f4318;      --review-soft: #fbe9de;   --review-ring: #c8693e;
-  --fail: #a8241c;        --fail-soft: #fbe3e0;
-  --complete: #1d6e4c;    --complete-soft: #dff1e7;
-  --neutral: #525a6e;     --neutral-soft: #ebecf0;
+  --review: var(--coral-text);  --review-soft: var(--coral-soft);  --review-ring: var(--coral);
+  --fail: #c62828;              --fail-soft: #fde7e7;
+  --complete: var(--mint-text); --complete-soft: var(--mint-soft);
+  --neutral: #5e6480;           --neutral-soft: #eef0f6;
 
   /* Collaboration parties (never reuse state colors for people) */
-  --party-codex: #2546d6;
-  --party-claude: #8a4a2c;
+  --party-codex: var(--cobalt-text);
+  --party-claude: var(--lilac-text);
 
   /* Mascot halo and depth */
-  --halo-start: #fffefb;
-  --halo-end: #ebe9e2;
-  --halo-line: #dcd8ce;
-  --halo-shadow: #1a1e3326;
-  --shadow: #1a1e3314;
-  --bead-highlight: #ffffff38;
+  --halo-start: #ffffff;
+  --halo-end: #e6ebff;
+  --halo-line: #d6ddff;
+  --halo-shadow: #3355f033;
+  --shadow: #171b3314;
+  --bead-highlight: #ffffff40;
 
   /* Type and rhythm */
   --fs-caption: 11.5px;
@@ -93,48 +102,6 @@ svg { width: 20px; height: 20px; flex: none; }
   background: var(--canvas);
   color: var(--ink);
   color-scheme: light;
-}
-
-.workspace[data-theme="dark"] {
-  color-scheme: dark;
-  --porcelain: #121420;
-  --ink: #eceae3;
-  --clasp: #8198ff;
-  --blush: #f3a983;
-
-  --canvas: #121420;
-  --sidebar: #0e1019;
-  --sidebar-hover: #23273a;
-  --surface: #1a1d2b;
-  --surface-soft: #212536;
-  --line: #2c3044;
-  --line-strong: #6b7088;
-
-  --muted: #8e93a8;
-  --secondary: #b7baca;
-
-  --accent: var(--clasp);
-  --accent-hover: #a3b4ff;
-  --accent-ink: #0d1130;
-  --accent-soft: #1d2550;
-  --focus: #a3b4ff;
-  --disabled: #23273a;
-  --disabled-ink: #9ea3b8;
-
-  --review: #f3b08c;      --review-soft: #3a2418;   --review-ring: #f3a983;
-  --fail: #ff8e85;        --fail-soft: #3b1817;
-  --complete: #72d2a3;    --complete-soft: #13301f;
-  --neutral: #aeb3c6;     --neutral-soft: #24273a;
-
-  --party-codex: #8198ff;
-  --party-claude: #f3b08c;
-
-  --halo-start: #242838;
-  --halo-end: #161926;
-  --halo-line: #2f3448;
-  --halo-shadow: #00000080;
-  --shadow: #00000059;
-  --bead-highlight: #ffffff2e;
 }
 
 .main-column { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
@@ -543,3 +510,49 @@ svg { width: 20px; height: 20px; flex: none; }
 @media (forced-colors: active) {
   .task-icon, .send-button, .new-thread, .brand-mark { forced-color-adjust: auto; border: 1px solid CanvasText; }
 }
+
+/* Point color accents ("Sunlit Porcelain") ----------------------------------------------------------- */
+/* App menu: each destination gets its own soft colored icon tile (order follows Workspace.tsx: office, collab,
+   projects, images, tools, history, settings). Color is decoration here; the label carries the meaning. */
+.utility-nav .sidebar-row svg {
+  box-sizing: content-box;
+  width: 16px;
+  height: 16px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--tile-bg, var(--surface-soft));
+  color: var(--tile-fg, var(--secondary));
+}
+.utility-nav .sidebar-row:nth-child(1) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
+.utility-nav .sidebar-row:nth-child(2) { --tile-bg: var(--lilac-soft);  --tile-fg: var(--lilac-text); }
+.utility-nav .sidebar-row:nth-child(3) { --tile-bg: var(--sun-soft);    --tile-fg: var(--sun-text); }
+.utility-nav .sidebar-row:nth-child(4) { --tile-bg: var(--coral-soft);  --tile-fg: var(--coral-text); }
+.utility-nav .sidebar-row:nth-child(5) { --tile-bg: var(--mint-soft);   --tile-fg: var(--mint-text); }
+.utility-nav .sidebar-row:nth-child(6) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
+.utility-nav .sidebar-row:nth-child(7) { --tile-bg: var(--surface-soft); --tile-fg: var(--secondary); }
+.utility-nav .sidebar-row[aria-current="page"] svg { background: var(--tile-fg); color: var(--surface); }
+
+/* Selected conversation: a bright cobalt tint instead of a grey slab. */
+.thread-nav .sidebar-row[aria-current="page"] { background: var(--cobalt-soft); color: var(--cobalt-text); box-shadow: none; }
+
+/* Welcome: the mascot sits on a sunlit plate of soft cobalt, coral and mint light. */
+.mascot-field::before {
+  background:
+    radial-gradient(circle at 28% 30%, var(--cobalt-soft) 0 34%, transparent 62%),
+    radial-gradient(circle at 76% 34%, var(--coral-soft) 0 26%, transparent 56%),
+    radial-gradient(circle at 52% 82%, var(--mint-soft) 0 30%, transparent 62%),
+    var(--surface);
+}
+.welcome h1 { color: var(--ink); }
+
+/* Top bar on white; the model dot says "set and ready" in mint. */
+.topbar { background: var(--surface); }
+.active-model span { background: var(--mint); }
+
+/* Collaboration: each party keeps its own bright color. */
+.collab-message--claude { border-color: var(--lilac-soft); }
+.collab-message--codex { border-color: var(--cobalt-soft); }
+
+/* Waiting tasks read as "on hold" in sunshine yellow rather than grey. */
+.task-card--neutral { --phase-color: var(--sun-text); --phase-bg: var(--sun-soft); }
+.task-card--neutral .task-icon { background: var(--sun-soft); box-shadow: inset 0 0 0 1.5px var(--sun); }

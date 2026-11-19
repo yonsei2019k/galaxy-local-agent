@@ -306,7 +306,7 @@ fun ChatWorkspace(
                 color = ZipHapColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             WorkspaceModelSelector(models, selectedModelId, onModelChange,composerReady,pairedPcTextAvailable)
         }
-        HorizontalDivider(color = Color(0xFF23262A), thickness = 1.dp)
+        HorizontalDivider(color = ZipHapColors.OutlineSoft, thickness = 1.dp)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
             AssistChip(onClick=onProjectClick,label={Text("프로젝트 · ${projectName.take(28)}",maxLines=1,overflow=TextOverflow.Ellipsis)},modifier=Modifier.testTag("project_selector"))
             if(branches.isNotEmpty())WorkspaceBranchSelector(branches,currentBranchId,onSelectBranch)
@@ -480,12 +480,12 @@ fun ChatWorkspace(
                 val enabled = canSubmit
                 Box(
                     Modifier.padding(bottom = 8.dp).size(40.dp).clip(CircleShape)
-                        .background(if (enabled) ZipHapColors.TextPrimary else Color(0xFF34383D))
+                        .background(if (enabled) ZipHapColors.Cobalt else ZipHapColors.OutlineSoft)
                         .testTag("send_button")
                         .clickable(enabled = enabled, role = Role.Button) { submit() }
                         .semantics { contentDescription = if (steering) "현재 작업에 반영" else if (busy) "다음 작업으로 예약" else "보내기" },
                     contentAlignment = Alignment.Center,
-                ) { SendMark(false, Modifier.size(19.dp), if (enabled) ZipHapColors.Background else Color(0xFF70767E)) }
+                ) { SendMark(false, Modifier.size(19.dp), if (enabled) ZipHapColors.OnCobalt else ZipHapColors.TextSecondary) }
             }
         }
     }

@@ -19,7 +19,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -36,42 +36,77 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.user.localagent.runtime.R
 
-/** Quiet charcoal surfaces; mint is reserved for small status indicators. */
+/**
+ * "Sunlit Porcelain": bright white surfaces with vivid point colors (owner direction 2026-11-19: no black UI).
+ * Text-safe shades are used for text (WCAG AA >= 4.5:1 on white); the soft tints are backgrounds only.
+ * Cobalt = the one primary action, Coral = needs the owner, Mint = done/connected, Sun = waiting, Lilac = creative/collab.
+ */
 object ZipHapColors {
-    val Background = Color(0xFF111315)
-    val Surface = Color(0xFF1B1D20)
-    val Elevated = Color(0xFF25282C)
-    val TextPrimary = Color(0xFFF3F4F6)
-    val TextSecondary = Color(0xFF979DA6)
-    val Outline = Color(0xFF35383D)
-    val Mint = Color(0xFFA8C8BC)
-    val Error = Color(0xFFEAA5A0)
-    // Keep existing feature screens source-compatible while using the neutral palette.
+    val Background = Color(0xFFF7F8FC)
+    val Surface = Color(0xFFFFFFFF)
+    val Elevated = Color(0xFFEEF2FF)        // cobalt-tinted container (user bubble, selected rows)
+    val SurfaceSoft = Color(0xFFF0F2F8)
+    val TextPrimary = Color(0xFF171B33)
+    val TextSecondary = Color(0xFF5E6480)
+    val Outline = Color(0xFF868CA4)          // control borders, >= 3:1
+    val OutlineSoft = Color(0xFFE3E6EF)      // card borders and dividers
+
+    val Cobalt = Color(0xFF3355F0)
+    val CobaltSoft = Color(0xFFE6EBFF)
+    val OnCobalt = Color(0xFFFFFFFF)
+    val Coral = Color(0xFFC9401F)
+    val CoralSoft = Color(0xFFFFE9E2)
+    val Mint = Color(0xFF0B7F5D)             // text-safe; also status dots
+    val MintSoft = Color(0xFFDDF7EE)
+    val Sun = Color(0xFFFFB020)              // fill only, with TextPrimary on it
+    val SunText = Color(0xFF8A5A00)
+    val SunSoft = Color(0xFFFFF3D6)
+    val Lilac = Color(0xFF7C4DEB)
+    val LilacSoft = Color(0xFFF0E9FF)
+    val Error = Color(0xFFC62828)
+    val ErrorSoft = Color(0xFFFDE7E7)
+
+    // Keep existing feature screens source-compatible: the old names now map onto the bright palette.
     val DeepNavy = Background
     val NavySurface = Surface
     val NavyElevated = Elevated
-    val Periwinkle = TextSecondary
+    val Periwinkle = Cobalt
 }
 
-private val ZipHapScheme = darkColorScheme(
-    primary = ZipHapColors.TextPrimary,
-    onPrimary = ZipHapColors.Background,
-    primaryContainer = ZipHapColors.Elevated,
-    onPrimaryContainer = ZipHapColors.TextPrimary,
-    secondary = ZipHapColors.TextSecondary,
-    onSecondary = ZipHapColors.Background,
-    secondaryContainer = ZipHapColors.Elevated,
-    onSecondaryContainer = ZipHapColors.TextPrimary,
+private val ZipHapScheme = lightColorScheme(
+    primary = ZipHapColors.Cobalt,
+    onPrimary = ZipHapColors.OnCobalt,
+    primaryContainer = ZipHapColors.CobaltSoft,
+    onPrimaryContainer = Color(0xFF1A2A8C),
+    secondary = ZipHapColors.Coral,
+    onSecondary = Color.White,
+    secondaryContainer = ZipHapColors.CoralSoft,
+    onSecondaryContainer = Color(0xFF8C2A12),
+    tertiary = ZipHapColors.Mint,
+    onTertiary = Color.White,
+    tertiaryContainer = ZipHapColors.MintSoft,
+    onTertiaryContainer = Color(0xFF075C43),
     background = ZipHapColors.Background,
     onBackground = ZipHapColors.TextPrimary,
     surface = ZipHapColors.Surface,
     onSurface = ZipHapColors.TextPrimary,
-    surfaceVariant = ZipHapColors.Elevated,
+    surfaceVariant = ZipHapColors.SurfaceSoft,
     onSurfaceVariant = ZipHapColors.TextSecondary,
+    surfaceTint = ZipHapColors.Cobalt,
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFFBFBFE),
+    surfaceContainer = ZipHapColors.SurfaceSoft,
+    surfaceContainerHigh = Color(0xFFEAEDF5),
+    surfaceContainerHighest = Color(0xFFE3E6EF),
+    inverseSurface = ZipHapColors.TextPrimary,
+    inverseOnSurface = Color.White,
+    inversePrimary = Color(0xFFB9C6FF),
     outline = ZipHapColors.Outline,
-    outlineVariant = Color(0xFF2B2E32),
+    outlineVariant = ZipHapColors.OutlineSoft,
     error = ZipHapColors.Error,
-    onError = ZipHapColors.Background,
+    onError = Color.White,
+    errorContainer = ZipHapColors.ErrorSoft,
+    onErrorContainer = Color(0xFF8C1D18),
 )
 /** Official Pretendard v1.3.9 static OTFs, bundled under SIL OFL 1.1; no runtime font network. */
 private val ZipHapFontFamily = FontFamily(
@@ -118,13 +153,13 @@ fun ZipHapHeader(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text("ZipHap.Agent", style = MaterialTheme.typography.labelMedium, color = ZipHapColors.TextSecondary)
+        Text("ZipHap.Agent", style = MaterialTheme.typography.labelMedium, color = ZipHapColors.Cobalt)
         Text(title, style = MaterialTheme.typography.titleLarge, color = ZipHapColors.TextPrimary, fontWeight = FontWeight.SemiBold)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             if (busy) {
-                CircularProgressIndicator(Modifier.size(11.dp), color = ZipHapColors.TextSecondary, strokeWidth = 1.5.dp)
+                CircularProgressIndicator(Modifier.size(11.dp), color = ZipHapColors.Cobalt, strokeWidth = 1.5.dp)
             } else {
-                Box(Modifier.size(5.dp).background(ZipHapColors.Mint, CircleShape))
+                Box(Modifier.size(7.dp).background(ZipHapColors.Mint, CircleShape))
             }
             Text(status, style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -181,12 +216,14 @@ fun ZipHapEmptyState(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            androidx.compose.material3.Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = ZipHapColors.Periwinkle,
-                modifier = Modifier.size(32.dp)
-            )
+            Box(Modifier.size(56.dp).background(ZipHapColors.CobaltSoft, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = ZipHapColors.Cobalt,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
             Spacer(Modifier.height(12.dp))
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(5.dp))

@@ -27,6 +27,7 @@ import kotlinx.coroutines.*
     var checking by remember{mutableStateOf(false)}
     var networkAllowed by remember{mutableStateOf(PcLocalNetwork.allowed(context))}
     var showPairing by remember{mutableStateOf(false)}
+    var showConnectionOptions by remember{mutableStateOf(false)}
     var pendingDiscovery by remember{mutableStateOf(false)}
     fun checkConnection(){scope.launch {
         checking=true
@@ -55,32 +56,32 @@ import kotlinx.coroutines.*
         }
     }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-        Text("내 PC의 계산 자원",style=MaterialTheme.typography.titleMedium)
-        Text("작업·대화·기억·완성 파일은 스마트폰에서 관리합니다. 이미지에서 PC를 선택하면 연결 실패 시 멈추며 휴대폰으로 자동 전환하지 않습니다.",style=MaterialTheme.typography.bodySmall)
+        Text("내 PC",style=MaterialTheme.typography.titleMedium)
         Text(state.status,style=MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
             OutlinedButton(enabled=!busy&&!checking,onClick={connect()},modifier=Modifier.testTag("pc_connect")){Text(if(checking)"확인 중"else if(state.paired)"연결 확인"else"내 PC 연결")}
             if(state.paired)TextButton(enabled=!busy&&!checking,onClick={connect(true)}){Text("다른 PC 연결")}
         }
         if(state.paired){
-            Text("대화 엔진",style=MaterialTheme.typography.labelLarge)
+            Text("답변 방식",style=MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                FilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("오픈소스 · PC")},modifier=Modifier.testTag("text_engine_local"))
+                FilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("내 PC")},modifier=Modifier.testTag("text_engine_local"))
                 FilterChip(selected=state.claudeText,onClick={settings.claudeText(true)},enabled=!busy,label={Text("Claude")},modifier=Modifier.testTag("text_engine_claude"))
             }
-            if(state.claudeText)Text("Claude를 고르면 대화 내용과 도구 결과가 인터넷을 거쳐 Anthropic으로 전송되고 API 요금이 듭니다. 음성과 사진 분석은 계속 PC에서 처리합니다.",style=MaterialTheme.typography.bodySmall)
+            if(state.claudeText)Text("Claude를 쓰면 대화와 작업 결과가 Anthropic으로 전송되고 별도 요금이 듭니다.",style=MaterialTheme.typography.bodySmall)
+            TextButton(onClick={showConnectionOptions=!showConnectionOptions}){Text(if(showConnectionOptions)"접기"else"연결 설정 더 보기")}
+            if(showConnectionOptions){
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("이미지 · PC")})
                 FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("이미지 · 휴대폰")})
             }
             PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
-            Text("휴대폰 단독은 설치된 SDXL을 사용합니다. Qwen은 새 이미지에2512, 참고 사진 편집에Edit2511을 사용합니다. FLUX는 생성·편집에 같은 모델을 사용합니다. PC 모델 선택은 새 작업부터 적용되며 보관된 복구 작업의 모델은 유지합니다.",style=MaterialTheme.typography.bodySmall)
             val remote=remember{com.user.localagent.compute.PcRemoteTestSettings.get(context)}
             var remoteOn by remember{mutableStateOf(remote.enabled())}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 Column(Modifier.weight(1f)){
-                    Text("PC 원격 시험 요청",style=MaterialTheme.typography.labelLarge)
-                    Text("켜져 있으면 연결된 PC가 시험 요청을 보낼 수 있습니다. 요청은 '${com.user.localagent.compute.PcRemoteTestSettings.THREAD_TITLE}' 대화로 실행되고 답과 사용한 도구 기록이 PC로 돌아갑니다. 승인이 필요한 작업은 지금처럼 이 휴대폰에서 직접 승인합니다. 앱이 실행 중일 때만 받습니다. 끄면 다시 켤 때까지 받지 않습니다.",style=MaterialTheme.typography.bodySmall)
+                    Text("PC에서 시험 요청 받기",style=MaterialTheme.typography.labelLarge)
+                    Text("집합이 실행 중일 때 연결된 PC가 시험 요청을 보내고 결과를 받아요. 승인할 작업은 휴대폰에서 확인해요.",style=MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked=remoteOn,onCheckedChange={on->
                     remote.setEnabled(on)
@@ -105,12 +106,13 @@ import kotlinx.coroutines.*
             var browserOn by remember{mutableStateOf(browser.enabled())}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 Column(Modifier.weight(1f)){
-                    Text("PC 백그라운드 브라우저",style=MaterialTheme.typography.labelLarge)
-                    Text("PC가 켜져 있을 때 에이전트가 PC에서 창 없이 웹페이지를 열고 읽고 누를 수 있습니다. PC 화면에는 아무것도 뜨지 않습니다. 로그인이 필요한 사이트는 앱 브라우저를 쓰세요. 결제·주문·예약 확정·전송 버튼과 검색칸 밖 입력은 이 휴대폰에서 승인해야 실행됩니다.",style=MaterialTheme.typography.bodySmall)
+                    Text("PC에서 웹 작업",style=MaterialTheme.typography.labelLarge)
+                    Text("PC 화면에 창을 띄우지 않고 웹 작업을 해요. 결제·주문·예약 확정·전송이나 검색 외 입력은 휴대폰에서 승인해요.",style=MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
             }
             TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
+            }
         }
     }
     if(showPairing)PcPairingDialog(onDismiss={showPairing=false},onConnected={showPairing=false;checkConnection()},onImport={showPairing=false;picker.launch(arrayOf("application/json","text/plain","application/octet-stream"))})

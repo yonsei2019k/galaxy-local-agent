@@ -146,8 +146,9 @@ describe('native conversation', () => {
     click('답변 복사')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a', action: 'copy', payload: { messageId: 'answer-a' } })
     expect(postIntent(base, { action: 'copy', payload: { messageId: 'answer-a' } })).toBe(false)
-    click('승인 요청 확인')
-    expect(requests().at(-1)).toMatchObject({ action: 'nativeDetails', payload: {} })
+    expect(host.querySelector('.task-state')?.textContent).toBe('승인 필요')
+    click('답변 메뉴')
+    expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'answer-a' } })
   })
 
   it('keeps the first draft on a busy submission rejection and reuses its retry token', () => {
@@ -156,21 +157,21 @@ describe('native conversation', () => {
     snapshot(active)
     edit('원문을 유지합니다')
     expect(requests().at(-1)).toMatchObject({ action: 'draft', payload: { text: '원문을 유지합니다' } })
-    click('대기열에 추가')
+    click('다음에 보내기')
     const sent = requests().at(-1)
     expect(sent).toMatchObject({ action: 'send', payload: { text: '원문을 유지합니다', submitToken: expect.stringMatching(/^[0-9a-f-]{36}$/) } })
-    expect(button('대기열에 추가').disabled).toBe(true)
+    expect(button('다음에 보내기').disabled).toBe(true)
     expect(input().value).toBe('원문을 유지합니다')
 
     snapshot({ ...active, draft: '원문을 유지합니다', status: '현재 요청을 대기열에 넣을 수 없습니다.', composerEpoch: 1 })
     expect(input().value).toBe('원문을 유지합니다')
-    expect(button('대기열에 추가').disabled).toBe(false)
-    click('대기열에 추가')
+    expect(button('다음에 보내기').disabled).toBe(false)
+    click('다음에 보내기')
     expect(requests().at(-1)).toEqual(sent)
 
     snapshot({ ...active, draft: '', composerEpoch: 2 })
     expect(input().value).toBe('')
-    expect(button('대기열에 추가').disabled).toBe(true)
+    expect(button('다음에 보내기').disabled).toBe(true)
   })
 
   it('ignores an intermediate stale draft echo and preserves a newer edit during submit', () => {
@@ -199,6 +200,23 @@ describe('native conversation', () => {
     expect(requests().at(-1).payload.submitToken).not.toBe(first.payload.submitToken)
   })
 
+  it('removes a selected file and opens chat actions without leaving the conversation', () => {
+    mount()
+    snapshot({ ...base, draft: '요청 원문', attachments: [{ id: 'unused-file', name: '다른 자료.txt' }] })
+    click('다른 자료.txt 빼기')
+    expect(requests().at(-1)).toMatchObject({ threadId: 'thread-a', branchId: 'branch-a',
+      action: 'removeAttachment', payload: { id: 'unused-file' } })
+    snapshot({ ...base, draft: '요청 원문', canCancelPreparation: true, otherApprovalPending: true })
+    click('준비 취소')
+    expect(requests().at(-1)).toMatchObject({ action: 'cancelPreparation', payload: {} })
+    click('확인이 필요한 대화 열기')
+    expect(requests().at(-1)).toMatchObject({ action: 'openWaitingApproval', payload: {} })
+    click('대화 메뉴')
+    expect(requests().at(-1)).toMatchObject({ action: 'chatMenu' })
+    expect(input().value).toBe('요청 원문')
+    expect(host.textContent).not.toContain('기존 화면')
+  })
+
   it('pins stop and steer to the native execution id and action epoch', () => {
     mount()
     snapshot(running({ draft: '현재 작업 추가 지시' }))
@@ -217,7 +235,7 @@ describe('native conversation', () => {
     snapshot(running({ draft }))
     expect(input().value).toBe(draft)
     expect(button('추가 지시').disabled).toBe(true)
-    expect(button('대기열에 추가').disabled).toBe(false)
+    expect(button('다음에 보내기').disabled).toBe(false)
   })
 
   it('keeps a paused clarification visible and never targets a paused or completed historical run', () => {
@@ -237,8 +255,7 @@ describe('native conversation', () => {
     expect(button('보내기').disabled).toBe(false)
     const approval = { ...paused, phase: 'waiting_approval' }
     snapshot({ ...staleNativeTarget, actionEpoch: 3, tasks: [approval, completed] })
-    click('승인 요청 확인')
-    expect(requests().at(-1)).toMatchObject({ action: 'nativeDetails' })
+    expect(host.querySelector('.task-card--review .task-state')?.textContent).toBe('승인 필요')
     click('현재 작업 중단')
     expect(requests().at(-1)).toMatchObject({ action: 'stop', payload: { runId: 'run-a', actionEpoch: 3 } })
     expect(input().value).toBe('이전 질문의 답을 작성 중')

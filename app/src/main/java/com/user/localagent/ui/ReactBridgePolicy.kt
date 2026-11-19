@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","newThread","renameThread","openOffice","selectModel","stop","steer","attach","navigate","copy","nativeDetails","collabRefresh","collabSend")
+    private val actions=setOf("ready","send","draft","selectThread","newThread","renameThread","openOffice","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageMenu","chatMenu","cancelPreparation","openWaitingApproval","collabRefresh","collabSend")
     fun parse(raw:String):ReactUiCommand?=runCatching {
         require(raw.toByteArray(Charsets.UTF_8).size<=64*1024)
         val o=Json.parseToJsonElement(raw).jsonObject
@@ -20,11 +20,11 @@ internal object ReactBridgePolicy {
         val allowed=when(action){
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
-            "copy"->setOf("messageId")
+            "copy","messageMenu"->setOf("messageId")
             "renameThread"->setOf("title")
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
             "collabRefresh"->setOf("bindingEpoch")
-            "selectThread","selectModel"->setOf("id")
+            "selectThread","selectModel","removeAttachment"->setOf("id")
             "stop"->setOf("runId","actionEpoch")
             "steer"->setOf("runId","actionEpoch","text")
             "navigate"->setOf("panel")

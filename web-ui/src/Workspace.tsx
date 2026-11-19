@@ -9,13 +9,13 @@ import { runControls } from './composer'
 const panels: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'collab', label: '협업방', icon: 'group' },
   { panel: 'projects', label: '프로젝트', icon: 'folder' },
-  { panel: 'images', label: '이미지 작업실', icon: 'image' },
-  { panel: 'tools', label: '도구', icon: 'tools' },
+  { panel: 'images', label: '이미지 만들기', icon: 'image' },
+  { panel: 'tools', label: '파일 작업', icon: 'tools' },
   { panel: 'history', label: '대화 기록', icon: 'history' },
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
 
-export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew, onOpenOffice, onNavigate, onDetails, onClose }: {
+export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew, onOpenOffice, onNavigate, onChatMenu, onClose }: {
   snapshot: Snapshot | null
   enabled: boolean
   collaborationOpen: boolean
@@ -23,7 +23,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
   onNew(): void
   onOpenOffice(): void
   onNavigate(panel: Panel): void
-  onDetails(): void
+  onChatMenu(): void
   onClose?(): void
 }) {
   const threads = snapshot?.threads ?? []
@@ -55,7 +55,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
             <Icon name={icon} /><span>{label}</span>
           </button>
         ))}
-        <button type="button" className="sidebar-row" disabled={!enabled} onClick={onDetails}><Icon name="native" /><span>기존 화면</span></button>
+        <button type="button" className="sidebar-row" disabled={!enabled} onClick={onChatMenu}><Icon name="chat" /><span>대화 메뉴</span></button>
       </nav>
     </div>
   )
@@ -84,7 +84,7 @@ export function Header({ snapshot, enabled, onMenu, onSelectModel, onRename }: {
   onRename(title: string): boolean
 }) {
   const nextModel = snapshot?.models.find(model => model.id === snapshot.modelId)
-  const selectedLabel = snapshot?.modelLabel || nextModel?.label || '모델 선택'
+  const selectedLabel = snapshot?.modelLabel || nextModel?.label || '답변 방식'
   const activeLabel = runControls(snapshot).active ? snapshot?.activeModelLabel : undefined
   const currentThread = snapshot?.threads.find(thread => thread.selected)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
@@ -126,7 +126,8 @@ export function Header({ snapshot, enabled, onMenu, onSelectModel, onRename }: {
 const MAX_REQUEST_LENGTH = 12_000
 const MAX_STEER_LENGTH = 4_000
 
-export function Composer({ snapshot, enabled, draft, pending, status, onDraft, onSubmit, onAttach, onStop, onDetails }: {
+export function Composer({ snapshot, enabled, draft, pending, status, onDraft, onSubmit, onAttach, onStop, onRemoveAttachment,
+  onCancelPreparation, onOpenWaitingApproval }: {
   snapshot: Snapshot | null
   enabled: boolean
   draft: string
@@ -136,7 +137,9 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   onSubmit(kind: 'send' | 'steer'): void
   onAttach(): void
   onStop(): void
-  onDetails(): void
+  onRemoveAttachment(id: string): void
+  onCancelPreparation(): void
+  onOpenWaitingApproval(): void
 }) {
   const statusId = useId()
   const hasText = draft.trim().length > 0
@@ -148,20 +151,24 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   const tooLong = draft.length > MAX_REQUEST_LENGTH
   const tooLongForSteer = draft.length > MAX_STEER_LENGTH
   const sendReady = enabled && !pending && !tooLong && (hasText || attachments.length > 0)
-  const sendLabel = busy ? '대기열에 추가' : '보내기'
+  const sendLabel = busy ? '다음에 보내기' : '보내기'
   const note = tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : status
 
   return (
     <footer className="composer-footer">
       <div className="composer-width">
         <div className="composer-status" id={statusId} role="status">{note}</div>
+        {enabled && snapshot?.otherApprovalPending && <button type="button" className="text-button" onClick={onOpenWaitingApproval}>확인이 필요한 대화 열기</button>}
         <form className="composer" aria-label="메시지 작성" onSubmit={event => {
           event.preventDefault()
           if (sendReady) onSubmit('send')
         }}>
           {attachments.length > 0 && <div className="attachments" aria-label="첨부 파일">
-            {attachments.map(attachment => <span className="attachment" key={attachment.id} title={attachment.name}><Icon name="file" /><span>{attachment.name}</span></span>)}
-            <button type="button" className="icon-button icon-button--compact" aria-label="첨부 파일 관리" title="첨부 파일 관리" disabled={!enabled} onClick={onDetails}><Icon name="open" /></button>
+            {attachments.map(attachment => <span className="attachment" key={attachment.id} title={attachment.name}>
+              <Icon name="file" /><span>{attachment.name}</span>
+              <button type="button" className="icon-button icon-button--compact" aria-label={`${attachment.name} 빼기`}
+                disabled={!enabled || pending} onClick={() => onRemoveAttachment(attachment.id)}><Icon name="close" /></button>
+            </span>)}
           </div>}
           <div className="editor">
             <div className="editor-size" aria-hidden="true">{draft}{'\n'}</div>
@@ -178,6 +185,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
           <div className="composer-tools">
             <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="파일 첨부" title="파일 첨부" onClick={onAttach}><Icon name="clip" /></button>
             <div className="composer-actions">
+              {enabled && snapshot?.canCancelPreparation === true && <button type="button" className="text-button" onClick={onCancelPreparation}>준비 취소</button>}
               {canStop && <button type="button" className="icon-button stop-button" aria-label="현재 작업 중단" title="현재 작업 중단" onClick={onStop}><Icon name="stop" /></button>}
               {canSteer && <button type="button" className="steer-button" disabled={!sendReady || !hasText || tooLongForSteer}
                 aria-label="추가 지시" title={tooLongForSteer ? '추가 지시는 4,000자까지 입력할 수 있어요.' : '실행 중인 작업에 추가 지시'} onClick={() => onSubmit('steer')}>

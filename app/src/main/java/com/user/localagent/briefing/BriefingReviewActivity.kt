@@ -2,6 +2,7 @@ package com.user.localagent.briefing
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -18,7 +19,8 @@ import kotlinx.serialization.json.*
 /** Private activity reached by an immutable notification PendingIntent; no exported action receiver. */
 class BriefingReviewActivity:ComponentActivity() {
     override fun onCreate(savedInstanceState:Bundle?) {super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        val lightBars=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
+        enableEdgeToEdge(lightBars,lightBars)
         val app=(application as LocalAgentApplication).container
         setContent {com.user.localagent.ui.ZipHapTheme {Surface {Column(Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("일정·업무 확인",style=MaterialTheme.typography.headlineSmall)

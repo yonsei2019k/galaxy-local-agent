@@ -18,6 +18,13 @@ class ReactBridgePolicyTest {
         assertNull(ReactBridgePolicy.parse(wire("draft","""{"text":"${"x".repeat(12001)}"}""")))
         assertNull(ReactBridgePolicy.parse(wire("stop","""{"runId":"r","actionEpoch":-1}""")))
     }
+    @Test fun oldChatRouteIsClosedAndScopedMenuActionsRemainAvailable(){
+        assertNull(ReactBridgePolicy.parse(wire("nativeDetails","{}")))
+        assertNotNull(ReactBridgePolicy.parse(wire("chatMenu","{}")))
+        assertNotNull(ReactBridgePolicy.parse(wire("messageMenu","""{"messageId":"m"}""")))
+        assertNotNull(ReactBridgePolicy.parse(wire("removeAttachment","""{"id":"one-file"}""")))
+        assertNull(ReactBridgePolicy.parse(wire("removeAttachment","""{"id":"one-file","approved":true}""")))
+    }
     @Test fun steerAndCollaborationStayBoundedDataOnly(){
         assertNull(ReactBridgePolicy.parse(wire("steer","""{"runId":"r","actionEpoch":1,"text":" "}""")))
         assertNull(ReactBridgePolicy.parse(wire("steer","""{"runId":"r","actionEpoch":1,"text":"${"x".repeat(4001)}"}""")))
