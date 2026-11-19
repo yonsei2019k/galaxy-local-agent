@@ -2,6 +2,10 @@
 
 Updated 2026-11-19. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Published v0.1.25 and paired PC mailbox update
+
+GitHub run 44505952144 built signed v0.1.25/versionCode2025 from e8b8b30 and archived the 100/100 synthetic report. Independent release checks passed the pinned update manifest, APK hash/certificate, package/version, 16 KiB alignment and bounded Rust/React audit. The paired compute worker now loads the new read-only clarification mailbox module after an idle graceful restart. Direct Tailscale reachability and the existing installed2024 two-turn mailbox case were confirmed separately. The first post-publication phone reply still reported versionCode2024, so it does not qualify the new APK.
+
 ## Rust goal budget candidate and v0.1.24 phone evidence
 
 The paired phone reported versionCode2024 and remembered a unique alias in a same-conversation Tailscale follow-up. A separate G01-v2 real phone read/proposal baseline matched its arithmetic and constraint oracle. The current candidate moves cumulative goal continuation budget decisions into Rust through UniFFI. Whole-goal evidence mapping/finalization remains with the Android host and the multi-segment device qualification is pending. The pinned Rust PC probe reported MCP_DISABLED_UNCONFIRMED; no inference ran and Python remains the production provider. Offline simulation100/100 passed with no model, phone or service calls. See the device validation and change log for the separate evidence levels.

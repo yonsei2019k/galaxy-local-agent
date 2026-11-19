@@ -1,5 +1,9 @@
 # Device validation
 
+## Published v0.1.25 rollout check
+
+After the PC mailbox module update, installed2024 completed a same-conversation alias canary (two turns, 12058ms and 9042ms, no tools). An independent peer ping confirmed a direct Tailscale path at 27ms. Two later requests sent after v0.1.25 publication still returned versionCode2024 and were stopped by the version assertion. The v0.1.25 APK is independently verified, but read-only clarification continuation and timeout diagnostics on installed2025 require a fresh receipt from that version.
+
 ## 2027-01-01 Jeju travel pre-payment canary on phone v0.1.24
 
 Sent one natural-language Tailscale request with the dates, family and budget preferences, intentionally omitting departure airport and children's adult/child fare ages. The phone reported versionCode2024 and paused after 90852ms. It asked which airports to use and both children's ages on the travel date, explicitly saying dates of birth were unnecessary. The receipt contains two memory searches and six web searches, with no booking, payment or held inventory action reported. This confirms question generation with sparse input. It does not verify the checkout draft, live price/capacity, itinerary, cross-chat reuse or a successful follow-up. The published remote mailbox did not return a follow-up marker for this paused request.

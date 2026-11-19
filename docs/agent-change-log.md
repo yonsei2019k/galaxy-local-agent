@@ -1,3 +1,9 @@
+## Published v0.1.25 and PC clarification mailbox deployment
+
+GitHub run 44505952144 built and published v0.1.25/versionCode2025 from e8b8b30. CI preserved the full synthetic report (100/100, zero phone/model/service calls). The downloaded release independently passed pinned Ed25519 manifest verification, exact commit/package/version/URL checks, APK SHA256 and certificate verification, 16 KiB alignment and the bounded Rust/React audit. The published permissions match all 23 declarations in v0.1.24. Released APK SHA256 `e284c6cda3cf43f4324e33180363d6c54ecde0a0dd3e46a8b78bc450291432a0`. The earlier local 2026 artifact remains a separate build.
+
+After confirming zero active providers and idle compute/cleanup, replaced only the deployed PC remote-test mailbox module and used its graceful stop endpoint. The existing supervisor started a new authenticated healthy worker. The paired Android peer answered a direct Tailscale ping in 27ms. Separately, installed2024 completed a two-turn phone mailbox baseline and recalled the synthetic alias (12058ms, 9042ms; zero tools).
+
 ## Bridge retry evidence and isolated simulation exceptions
 
 The Android client records when an existing safe retry is scheduled, with operation and next attempt number. A propagated socket timeout captures the controller phase, broker status, pending call state, sequence, last observed provider state and elapsed time before cleanup. Retry limits, pairing, authority and mutation behavior are unchanged. Kotlin regressions confirmed a recovered GET, no retry of an uncertain claim, and the authenticated provider-busy recovery path.
