@@ -300,6 +300,7 @@ class _Session:
     last_ack: dict | None = None
     require_plan: bool = False
     plan: dict | None = field(default=None, repr=False)
+    browser_recovery_tools: frozenset[str] | None = None
 
 
 class AgentBridge:
@@ -551,7 +552,7 @@ class AgentBridge:
             return False
 
     def read_recovery_context(self, owner, session_id, capability, *, before_plan=False):
-        """Reconsider before any write, using only receipts already visible to this agent."""
+        """Reconsider safe reads, or finish a planned browser observation without navigating again."""
         with self._lock:
             session, _ = self._session(owner, session_id)
             _require(self._role(session, capability) == "phone", "CAPABILITY_ROLE", 403)
@@ -559,6 +560,27 @@ class AgentBridge:
             plan = session.plan
             if before_plan and session.require_plan and session.profile == "phone-only" and plan is None and not session.calls:
                 return {"planAccepted": False, "acceptedTools": [], "failedReads": [], "observedReads": []}
+            browser_tools = {"open_app_browser_page", "read_app_browser_page"}
+            if (session.require_plan and plan and plan["state"] == "ACCEPTED"
+                    and set(plan["requiredTools"]) == browser_tools and session.active is None
+                    and session.calls
+                    and all(call.tool in browser_tools and call.state == "COMPLETED"
+                            and call.source == "PHONE_EXECUTOR" and call.result and call.result["success"]
+                            and call.result["verification"] == "VERIFIED" and not call.result["effectNotApplied"]
+                            for call in session.calls.values())):
+                calls = list(session.calls.values())
+                if calls[-1].tool == "read_app_browser_page" and before_plan and any(
+                        call.tool == "open_app_browser_page" for call in calls[:-1]):
+                    context = {"planAccepted": True, "acceptedTools": [], "browserObservationComplete": True,
+                               "failedReads": [], "observedReads": [{"tool": calls[-1].tool,
+                               "arguments": {}, "result": calls[-1].result["content"]}]}
+                    if len(canonical(context)) <= 16384:
+                        session.browser_recovery_tools = frozenset()
+                        return context
+                if len(calls) < MAX_CALLS and all(call.tool == "open_app_browser_page" for call in calls):
+                    session.browser_recovery_tools = frozenset({"read_app_browser_page"})
+                    return {"planAccepted": True, "acceptedTools": ["read_app_browser_page"],
+                            "browserOpened": True, "failedReads": [], "observedReads": []}
             reads = FAILED_READS_HAVE_NO_EFFECT | {"calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
             if (not session.require_plan or not plan or plan["state"] != "ACCEPTED"
                     or not plan["requiredTools"] or not set(plan["requiredTools"]) <= reads | {"patch_note", "screen_action"}
@@ -676,6 +698,8 @@ class AgentBridge:
                         c = s.calls[cid]
                         _require(hmac.compare_digest(c.payload_digest, payload), "CALL_PAYLOAD_CONFLICT", 409)
                         return 200, self._call_view(c)  # Never dispatch the same call twice.
+                    if s.browser_recovery_tools is not None:
+                        _require(tool in s.browser_recovery_tools, "BROWSER_RECOVERY_READ_ONLY", 403)
                     _require(tool in s.tools, "TOOL_NOT_OFFERED", 403)
                     _require(not tool.startswith("pc_") or s.profile in self._profiles,
                              "WORKSPACE_PROFILE", 403)

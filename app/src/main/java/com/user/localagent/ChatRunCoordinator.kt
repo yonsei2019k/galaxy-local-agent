@@ -1145,10 +1145,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 step.evidence.state == VerificationState.FAILED && step.evidence.effectNotApplied &&
                                     com.user.localagent.core.ToolInterruptionPolicy.hasNoMutation(step.tool)
                             } == true && allowedTools.any(com.user.localagent.core.ToolInterruptionPolicy::hasNoMutation)
-                        if(canReconsiderRead && useStructured && written.summary?.mayBeTruncated==false &&
+                        val canReviewObservedReads = !readRecoveryUsed && !reviewing && !finalSynthesis &&
+                            round+1 < com.user.localagent.core.WorkSegments.TOTAL_ROUNDS && toolEvidence.isNotEmpty() &&
+                            requestSteps.isNotEmpty() && requestSteps.all { step ->
+                                isReadTool(step.tool) && step.evidence.state==VerificationState.VERIFIED
+                            }
+                        if((canReconsiderRead || canReviewObservedReads) && useStructured && written.summary?.mayBeTruncated==false &&
                             runCatching { com.user.localagent.core.NextActionQuestion.parse(raw) }.getOrNull()!=null){
                             readRecoveryUsed=true
-                            query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)+READ_RECOVERY_GUIDANCE
+                            val guidance=when {
+                                canReconsiderRead -> READ_RECOVERY_GUIDANCE
+                                requestSteps.size>=taskGoal.stepBudget ->
+                                    "\n실행 예산이 끝났다. 이미 조회한 근거를 검토해 확인된 내용과 남은 범위를 답하라. 도구를 호출하지 마라. 실제로 필요한 사용자 선택만 질문하라."
+                                else -> "\n확인 질문 전에 이미 조회한 내용이 요청에 답하기에 충분한지 검토하라. 필요하면 허용된 조회를 사용하라. 이미 주어졌거나 조회할 수 있는 정보를 다시 묻지 마라."
+                            }
+                            query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)+guidance
                             return@roundStep
                         }
                         if(useStructured&&pauseForOwnerInput(request,raw,written.summary?.mayBeTruncated==true)){

@@ -2,6 +2,14 @@
 
 Public research with no observed source now pauses instead of treating a skill read or plan as a result. When the cloud egress check withholds a result during a plan constrained to public research tools, eligible same-run, verified read evidence is saved in the encrypted run and passed to the existing private local inference path. The handler continues by using the already-read observations. It cannot dispatch new tools, send the answer to the PC test mailbox, or replay an unknown effect. The host stops processing cloud calls and requests cancellation before local generation starts. Missing model readiness and insufficient evidence remain visible outcomes. Installed 2029 renderer and research evidence is recorded in device-validation.md.
 
+## 2026-11-20 — 조회 후 확인 질문과 브라우저 검증
+
+로컬 실행이 검증된 조회만 수행한 뒤 확인 질문을 만들면, 같은 요청과 조회 근거를 사용해 질문의 필요성을 한 번 더 판단한다. 조회 호출 예산은 기존 제한을 따른다.
+
+앱 브라우저로 페이지 내용에 답하는 요청은 열기와 읽기를 계획하도록 안내한다. 두 도구가 모두 승인되고 열린 페이지에 대한 성공 영수증만 있는 경우, 제공자 복구는 기존 페이지 읽기만 허용한다. 새 탐색, 클릭, 입력은 복구에서 실행하지 않는다. 동일 호출 ID의 결과 확인은 기존 실행을 재개하지 않는다. PC 회귀 247건 중 238건 통과, 9건 건너뜀. 기존 워커를 유휴 상태에서 업데이트했고 재시작 후 같은 이미지 복구 지점을 확인했다. 코어 1,003건, 안드로이드 JVM 1,036건을 통과했다. 서명한 2030 앱·시험 APK를 2029 위에 설치하고 기기 SHA와 설치 후 기존 이미지 복구 지점을 각각 확인했다.
+
+실기기 첫 공개 페이지 시험은 open_app_browser_page와 read_app_browser_page가 VERIFIED였으나 제공자 REPORT_PARTIAL로 멈췄다. 열린 페이지의 완료된 조회 뒤에도 제공자가 미완료로 끝낼 경우, 마지막 검증된 관측으로 한 번 더 답변을 검토하고 모든 새 도구 호출을 막도록 PC 워커를 보완했다. 합성 회귀 통과 및 워커 재배포 후 실제 재시험은 열기 1회·읽기 1회로 completed(30.015초)였다. 제공자는 첫 응답에서 완료를 반환했다. 답변은 페이지 제목과 첫 본문 문장 요지를 포함했고 본문의 별도 큰 제목은 확인하지 못했다고 명시했다. 회장 방 원래 메일 요청의 실기기 재실행은 미확인이다.
+
 ## 2026-11-19 — 판단 중단 복구와 대화 모델 분리
 
 일반 대화와 개인 자료 처리 경로를 분리했다. 신규 일반 요청은 승인된 Codex 경로를 선택한다. 기존 로컬 전용 요청의 클라우드 권한은 늘리지 않는다. 이미지 입력, 명시적 개인정보 선택, 인식 가능한 계정·식별 정보는 휴대폰 또는 페어링 PC의 로컬 모델로 처리한다. 음성 전사는 기존 경로를 유지한다. 클라우드가 개인 자료 조회를 처음 제안하면 호출 수 0인 상태에서 계획 거부를 확인한 뒤 일반 대화의 동일 요청을 로컬로 전환한다. 반환 본문에서 민감 정보가 발견되면 실제 실행을 기기에 기록하고 전송을 중단한다. 자유문 개인정보의 완전한 자동 판별은 보장할 수 없어 개인정보 전용 선택을 제공한다.
