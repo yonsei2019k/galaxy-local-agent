@@ -421,6 +421,11 @@ class AgentBridgePlanTests(unittest.TestCase):
         _, ack = self.claim(observation)
         self.post_result(observation, ack)
         self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+        synthesis = self.broker.read_recovery_context(self.owner, self.sid, self.phone, before_plan=True)
+        self.assertTrue(synthesis["browserObservationComplete"])
+        self.assertEqual([], synthesis["acceptedTools"])
+        self.assertEqual(verified()["content"], synthesis["observedReads"][0]["result"])
+        self.assertEqual(403, self.propose(read_tool)[1][0])
 
     def test_recovery_context_requires_phone_accepted_reads_and_proven_absence_of_effect(self):
         context = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone)
