@@ -247,7 +247,7 @@ class ScreenControl(context:Context) {
     class OwnAppForeground:ScreenRefused("ZipHap.Agent 자신의 화면은 조작하지 않습니다.")
 
     companion object {
-        private val refusedPackages=listOf("com.android.settings","com.samsung.android.settings","com.android.systemui","com.android.permissioncontroller",
+        private val refusedPackages=listOf("com.user.localagent.images","com.android.settings","com.samsung.android.settings","com.android.systemui","com.android.permissioncontroller",
             "com.google.android.permissioncontroller","com.android.packageinstaller","com.google.android.packageinstaller","com.samsung.android.packageinstaller",
             "com.android.vending","com.samsung.android.spay","com.samsung.android.samsungpass","com.samsung.android.biometrics","com.android.keychain",
             "com.google.android.gms","com.samsung.android.authfw","com.sec.android.app.firewall")

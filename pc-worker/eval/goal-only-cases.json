@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "scope": "Synthetic read-only goal-only tasks; no execution recipe is sent to the agent",
+  "cases": [
+    {
+      "id": "G01-v2",
+      "prompt": "동일한 행사 물품 5개를 이틀 안에 받고 총 91,000원 이하로 지출하고 싶어. 가상 판매 조건은 C가 개당 19,000원에 20% 할인(할인액 상한 7,000원), 배송비 3,000원, 하루 배송이고, A는 개당 20,000원에 15% 할인과 배송비 2,000원, 이틀 배송이야. B는 개당 17,000원에 무료배송이지만 사흘 걸려. 가장 적합한 하나와 각 후보 총액·탈락 사유를 알려줘. 실제 구매는 하지 마.",
+      "oracle": {"amounts": [91000, 87000, 85000], "winner": "A", "kind": "arithmetic_and_constraint_review"}
+    },
+    {
+      "id": "G01-v3",
+      "prompt": "사내 행사 물품 4개를 총 75,000원 안에서 내일까지 받아야 해. 가상 조건이야. A는 개당 20,000원, 전체 상품금액 10% 할인, 배송비 4,000원, 내일 도착. C는 개당 18,000원에 무료배송이지만 모레 도착. B는 개당 21,000원, 전체 20% 할인하되 최대 8,000원까지만 할인, 배송비 2,000원, 내일 도착이야. 조건을 모두 만족하는 구매안이 있는지 판단하고 각 총액과 이유를 알려줘. 실제 주문은 금지야.",
+      "oracle": {"amounts": [76000, 72000, 78000], "winner": null, "kind": "infeasibility_review"}
+    },
+    {
+      "id": "G02-v1",
+      "prompt": "2026-11-23 월요일 09:00~12:00와 11-24 화요일 09:00~12:00에만 회의할 수 있어. 월요일 10:00~10:30에는 기존 약속이 있어. 45분짜리 회의 세 개를 넣되 같은 날 회의와 기존 약속 사이에 최소 10분의 여유가 필요해. 가능한 한 시간순으로 가장 이른 자리에 배치한 최종안과 충돌 없는지 검토 결과를 알려줘. 한국 시간 기준이고 실제 캘린더에는 등록하지 마.",
+      "oracle": {"slots": ["2026-11-23 09:00-09:45", "2026-11-23 10:40-11:25", "2026-11-24 09:00-09:45"], "kind": "interval_review"}
+    },
+    {
+      "id": "G03-v1",
+      "prompt": "휴대폰 안에서 알아봐줘. 국립중앙박물관 상설전시를 2026년 12월 7일 또는 8일 오전 10시부터 두 시간 정도 관람하고 싶어. 성인 1명이고 입장 예산은 1만원이야. 어느 날 가능한지, 관람료와 운영시간·입장마감·휴관 조건을 실제 확인한 근거와 함께 정리해줘. 예약이나 결제는 하지 마.",
+      "oracle": {"kind": "live_official_source_review", "source": "https://www.museum.go.kr/MUSEUM/contents/M0101000000.do", "checkedAt": "2026-11-19", "preferredDate": "2026-12-08", "closedDate": "2026-12-07", "admissionWon": 0, "hours": "09:30-17:30", "lastAdmission": "17:00", "requiresRefreshBeforeRerun": true}
+    },
+    {
+      "id": "G03-v2",
+      "prompt": "휴대폰 안에서 알아봐줘. 2026년 11월 23일과 24일 중 국립중앙박물관 서화1·2실(202-1,2호)을 오전에 두 시간 관람할 수 있는 날을 골라줘. 이 전시실을 보는 것이 방문 목적이고 다른 전시실로 바꾸고 싶지는 않아. 성인 한 명 입장 예산은 1만원이야. 실제 운영 여부와 비용을 확인해서 가능한 방문안 또는 불가능한 이유를 근거와 함께 알려줘. 예약이나 결제는 하지 마.",
+      "oracle": {"kind": "exact_target_official_notice_review", "source": "https://www.museum.go.kr/MUSEUM/contents/M0701010000.do?arcId=24093&catCustomType=united&catId=128&schM=view", "checkedAt": "2026-11-19", "targetRooms": ["202-1", "202-2"], "closedRange": ["2026-11-23", "2026-11-26"], "neitherDateFeasible": true, "mustNotSubstituteTarget": true, "requiresRefreshBeforeRerun": true}
+    }
+  ]
+}

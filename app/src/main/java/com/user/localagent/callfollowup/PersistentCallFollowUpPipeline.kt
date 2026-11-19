@@ -18,7 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.work.*
 import com.user.localagent.AppContainer
 import com.user.localagent.MainActivity
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 import com.user.localagent.audio.AudioChunkDecoder
 import com.user.localagent.benchmark.RuntimeGate
 import com.user.localagent.core.*

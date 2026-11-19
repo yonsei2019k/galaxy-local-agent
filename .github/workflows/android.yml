@@ -53,6 +53,7 @@ jobs:
           python -m unittest discover -s pc-worker/tests -p 'test_*provider*.py'
           python -m unittest discover -s pc-worker/tests -p 'test_server_agent_adapter.py'
           python -m unittest discover -s pc-worker/tests -p 'test_private_image_workspace.py'
+          python -m unittest discover -s pc-worker/tests -p 'test_public_read_recovery.py'
           ZIPHAP_COLLAB_BIN="$GITHUB_WORKSPACE/rust/target/debug/ziphap-collab" python -m unittest discover -s pc-worker/tests -p 'test_collab_bridge.py'
           python -m unittest discover -s pc-worker/eval -p 'test_*scenario*.py'
           python -m unittest discover -s pc-worker/eval -p 'test_problem_solving_eval.py'
@@ -71,7 +72,7 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:assembleDebugAndroidTest -Pkotlin.compiler.execution.strategy=in-process -x ':app:buildCMakeDebug[arm64-v8a]' --max-workers=2 --no-daemon --console=plain
+          ./gradlew :core:test :app:testDebugUnitTest :android-runtime:lintRelease :app:lintRelease :local-image:lintRelease :app:assembleRelease :local-image:assembleRelease :app:assembleDebugAndroidTest -Pkotlin.compiler.execution.strategy=in-process -x ':android-runtime:buildCMakeDebug[arm64-v8a]' --max-workers=2 --no-daemon --console=plain
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

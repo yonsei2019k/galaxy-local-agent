@@ -83,6 +83,61 @@ internal data class HostActionPhaseSnapshot(
     val schemaKind:HostActionSchemaKind,val clarificationBranchTaken:Boolean?=null,
 )
 
+/** Host checkpoint inspection only. Missing/malformed cloud state never becomes a clean effect. */
+internal fun goalNativeEffectsUnresolved(row:com.user.localagent.data.ChatRunRecord,scopeKey:String,requireClosed:Boolean):Boolean = try {
+    val request=QueuedChatRequest.fromJson(row.contextJson)
+    check(request.runId==row.id&&request.threadId==row.threadId&&request.branchId==row.branchId&&request.projectId==row.projectId&&request.modelId==row.modelId)
+    val context=Json.parseToJsonElement(row.contextJson).jsonObject
+    val raw=context["sharedEngineState"]
+    if(raw==null||raw is JsonNull)true else {
+        val native=raw.jsonObject
+        check(native.keys==setOf("binding","calls","inFlight","inFlightTool","uncertain","closed","budget","startedAtMs","deadlineAtMs","events"))
+        fun boolean(key:String)=native.getValue(key).jsonPrimitive.let{check(!it.isString);it.boolean}
+        check(!boolean("uncertain")&&(!requireClosed||boolean("closed")))
+        check(native.getValue("inFlight") is JsonNull&&native.getValue("inFlightTool") is JsonNull)
+        val binding=native.getValue("binding").jsonObject
+        val expectedScope=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
+        check(binding==buildJsonObject {put("runId",request.runId);put("threadId",request.threadId);put("branchId",request.branchId);put("projectId",request.projectId);put("scopeId",expectedScope);put("authorizationRevision",request.externalAgentRevision)})
+        val calls=native.getValue("calls").jsonArray.map {it.jsonPrimitive.let {v->check(v.isString);v.content}}
+        val budget=native.getValue("budget").jsonPrimitive.let{check(!it.isString);it.int}
+        check(budget in 1..128&&calls.size<=budget&&calls.distinct().size==calls.size)
+        val started=native.getValue("startedAtMs").jsonPrimitive.long
+        val deadline=native.getValue("deadlineAtMs").jsonPrimitive.long
+        check(started>=0&&deadline>started)
+        val events=native.getValue("events").jsonArray
+        check(events.size in 2..512)
+        val pending=linkedMapOf<String,String>();val finished=linkedSetOf<String>()
+        var lastTime=started
+        events.forEachIndexed {index,value->
+            val event=value.jsonObject
+            check(event.keys==setOf("sequence","timestampMs","kind")&&event.getValue("sequence").jsonPrimitive.long==index+1L)
+            val at=event.getValue("timestampMs").jsonPrimitive.long;check(at>=lastTime);lastTime=at
+            val kind=event.getValue("kind").jsonObject
+            when(kind.getValue("type").jsonPrimitive.content) {
+                "created"->check(index==0&&kind.size==1)
+                "started"->check(index==1&&kind.size==1)
+                "tool_started"->{check(index>1&&kind.keys==setOf("type","effect_id","tool"));val id=kind.getValue("effect_id").jsonPrimitive.content;val tool=kind.getValue("tool").jsonPrimitive.content;check(id in calls&&id !in finished&&tool in ToolRegistry.definitions&&pending.put(id,tool)==null)}
+                "tool_finished"->{check(index>1&&kind.keys==setOf("type","effect_id","state"));val id=kind.getValue("effect_id").jsonPrimitive.content;val tool=checkNotNull(pending.remove(id));check(finished.add(id));when(kind.getValue("state").jsonPrimitive.content){"verified","not_applied"->Unit;"handed_off"->check(com.user.localagent.core.PreparedHandoff.opensScreenOnly(tool));else->error("uncertain")}}
+                else->error("unresolved native event")
+            }
+        }
+        check(pending.isEmpty()&&finished==calls.toSet())
+        false
+    }
+}catch(_:Exception){true}
+
+/** A prior run's scope comes from its captured host context, never today's broader scope. */
+internal fun goalSourceNativeEffectsUnresolved(row:com.user.localagent.data.ChatRunRecord):Boolean = try {
+    val request=QueuedChatRequest.fromJson(row.contextJson)
+    val native=Json.parseToJsonElement(row.contextJson).jsonObject["sharedEngineState"]
+    // A clean visible list is not a write-ahead record for any provider.
+    if(native==null||native is JsonNull)true
+    else {
+        val sourceScope=request.goalSegment?.scopeKey?:request.readbackObligations?.context?.scopeKey
+        sourceScope==null||goalNativeEffectsUnresolved(row,sourceScope,true)
+    }
+}catch(_:Exception){true}
+
 /** App-owned execution scope: leaving a chat/activity never changes an active request target. */
 class ChatRunCoordinator internal constructor(internal val context:android.content.Context,internal val app:AppContainer,
     private val workerBinding:ChatRequestWorkerBinding?=null,
@@ -99,6 +154,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     internal var executionWorkspace:com.user.localagent.workspace.ProjectWorkspace?=null
     internal val queueOwner:ChatRunCoordinator get()=workerBinding?.parent?:this
     private val activeWorkers=java.util.concurrent.ConcurrentHashMap<String,ChatRunCoordinator>()
+    private val goalStopEpochs=java.util.concurrent.ConcurrentHashMap<String,Long>()
+    private val goalQueuedEpochs=java.util.concurrent.ConcurrentHashMap<String,Long>()
+    private var admittedGoalStopEpoch=0L
+    private var requestCleanupSucceeded=false
+    private var requestTaskGoalForLedger:com.user.localagent.core.TaskGoal?=null
+    private var requestAutopilotPauseReason:GoalAutopilotPauseReason?=null
+    private var goalCleanupHold:java.io.Closeable?=null
     private val workerObservers=mutableMapOf<String,Job>()
     val activeExecutions=MutableStateFlow<List<ActiveChatExecution>>(emptyList())
     val hasActiveRuns=MutableStateFlow(false)
@@ -144,7 +206,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     val workActivityController:ChatWorkActivityController=workerBinding?.parent?.workActivityController?:ChatWorkActivityController(app.repository,scope)
     val workActivities:StateFlow<Map<String,UiRunActivity>> =workActivityController.activities
     private var workTraceSession:ChatWorkTraceSession?=null
+    private var requestSteeredAway=false
     internal var pendingSteerRunId:String?=null
+        set(value){if(value!=null&&value==activeRequest?.runId)requestSteeredAway=true;field=value}
     internal var pendingGoalStopRunId:String?=null
     internal val goalRunCallerJobs:java.util.concurrent.ConcurrentHashMap<String,Job> =workerBinding?.parent?.goalRunCallerJobs?:java.util.concurrent.ConcurrentHashMap<String,Job>()
     internal val capturedActiveRequest:QueuedChatRequest? get()=activeRequest?:selectedWorker()?.activeRequest
@@ -235,6 +299,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             stopThreadWork(selectedThreadId.value)
             return
         }
+        activeRequest?.let {queueOwner.goalStopEpochs.merge(it.threadId,1L,Long::plus)}
         executionEngine.cancel();requestResearch?.cancel();ownedRequestJob?.cancel()
         approval.value?.decision?.complete(false)
     }
@@ -264,6 +329,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         queueOwner.ownedRequestJob?.takeIf {it.isActive&&queueOwner.auxiliaryThreadId==id}
     fun stopThreadWork(id:String){
         if(workerBinding!=null){queueOwner.stopThreadWork(id);return}
+        goalStopEpochs.merge(id,1L,Long::plus)
+        scope.launch {cancelStoppedGoalContinuations(id)}
         executionForThread(id)?.stop()
         if(auxiliaryThreadId==id&&ownedRequestJob?.isActive==true){executionEngine.cancel();ownedRequestJob?.cancel()}
     }
@@ -530,20 +597,27 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             candidate.goal?.let {
                                 val access=app.repository.chat.accessScope(candidate.threadId)
                                 val actual=goals.loadGuarded(access)
-                                val parent=candidate.parentGoalStartRunId?.let {id->app.repository.chat.run(id)}
+                                requireGoalSegmentScope(candidate,access)
+                                requireCapturedGoalAuthority(candidate)
+                                if(candidate.goalSegment?.parentRunId!=null)check((goalQueuedEpochs[candidate.runId]?:0L)==(goalStopEpochs[candidate.threadId]?:0L)){"중지 요청 이후 이전 목표 구간을 시작하지 않았습니다."}
+                                val parent=(candidate.goalSegment?.parentRunId?:candidate.parentGoalStartRunId)?.let {id->app.repository.chat.run(id)}
+                                if(candidate.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,candidate.goalSegment.scopeKey,true)) {"이전 구간의 공통 실행 기록이 불확실해 다시 실행하지 않았습니다."}
                                 requireGoalLaunchBinding(candidate,actual,parent,goalRunCallerJobs[candidate.runId]?.isCancelled==true)
                             }
                             if(candidate.continuation!=null)app.repository.chat.resumeRun(candidate.runId)else app.repository.chat.startRun(candidate.runId)
                             goalRunCallerJobs.remove(candidate.runId)
+                            goalQueuedEpochs.remove(candidate.runId)
                             queued.value=queued.value.filterNot {it.runId==candidate.runId}
                             candidate
                         }catch(cancel:CancellationException){throw cancel}
                         catch(error:Exception){
                             goalRunCallerJobs.remove(candidate.runId)
+                            goalQueuedEpochs.remove(candidate.runId)
                             queued.value=queued.value.filterNot {it.runId==candidate.runId}
                             runCatching {app.repository.chat.cancelQueuedRun(candidate.runId)}
                             runCatching {app.repository.chat.updateRun(candidate.runId,"failed",error.javaClass.simpleName)}
                             status.value="대기 요청의 대상이 변경되어 실행하지 않았습니다. 원문은 대화에 보존됩니다."
+                            if(candidate.goalSegment!=null)scope.launch {pauseRejectedGoalCandidate(candidate)}
                             null
                         }
                     }
@@ -564,6 +638,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         continue
                     }
                     worker.activeRequest=request
+                    worker.admittedGoalStopEpoch=goalStopEpochs[request.threadId]?:0L
                     activeWorkers[request.runId]=worker
                     val job=worker.executeRequest(request)
                     worker.ownedRequestJob=job
@@ -572,14 +647,20 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     scope.launch {
                         try {job.join()}
                         finally {
-                            withContext(NonCancellable){
-                                completedSteps[request.runId]=worker.completedSteps[request.runId].orEmpty()
-                                while(completedSteps.size>40)completedSteps.remove(completedSteps.keys.first())
-                                answerStates.value=answerStates.value+worker.answerStates.value
-                                workerObservers.remove(request.runId)?.cancelAndJoin()
-                                activeWorkers.remove(request.runId,worker)
-                                worker.activeRequest=null
-                                publishExecutions()
+                            try {
+                                withContext(NonCancellable){
+                                    completedSteps[request.runId]=worker.completedSteps[request.runId].orEmpty()
+                                    while(completedSteps.size>40)completedSteps.remove(completedSteps.keys.first())
+                                    answerStates.value=answerStates.value+worker.answerStates.value
+                                    workerObservers.remove(request.runId)?.cancelAndJoin()
+                                    activeWorkers.remove(request.runId,worker)
+                                    worker.activeRequest=null
+                                    publishExecutions()
+                                }
+                                continueApprovedGoalAfterCleanup(request,worker,job.isCancelled)
+                                if(activeWorkers.values.none {it.activeRequest?.threadId==request.threadId}&&queued.value.none {it.threadId==request.threadId})goalStopEpochs.remove(request.threadId)
+                            } finally {
+                                runCatching {worker.goalCleanupHold?.close()};worker.goalCleanupHold=null
                             }
                             drain()
                         }
@@ -590,8 +671,124 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
+    private suspend fun requireCapturedGoalAuthority(request:QueuedChatRequest) {
+        if(request.goal==null)return
+        if(request.goalSegment!=null&&request.continuation==null)check(request.allowTools&&request.mode in setOf("act","debug"))
+        val pc=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
+        request.capturedPcRevision?.let{check(pc.revision==it){"목표 실행의 PC 권한 버전이 변경되었습니다."}}
+        if(request.allowCloudText)check(pc.allowCloudText)
+        if(request.modelId==ExternalAgentSettings.MODEL_ID) {
+            val external=ExternalAgentSettings.get(context).capture()
+            check(request.allowExternalAgent&&external.enabled&&external.revision==request.externalAgentRevision&&request.capturedPcRevision!=null) {"목표 실행의 클라우드 권한이 만료되었습니다."}
+        }
+        request.pcDataBinding?.let{check(queueOwner.capturePcDataBindingForNewRun(request.threadId)==it){"목표 실행의 PC 자료 선택이 변경되었습니다."}}
+        for(id in request.goal.linkedRunIds.filterNot {it==request.runId}) {
+            val source=checkNotNull(app.repository.chat.run(id)){"이전 목표 실행의 실제 기록이 없습니다."}
+            check(source.threadId==request.threadId&&source.projectId==request.projectId&&source.status !in setOf("queued","running","waiting_approval")&&!goalSourceNativeEffectsUnresolved(source)) {
+                "이전 목표 실행의 실제 공통 기록이 없거나 효과가 불확실해 새 실행으로 우회하지 않았습니다."
+            }
+        }
+    }
+
+    /** Invoked only by the live queue owner after the worker's job, teardown and observers join. */
+    private suspend fun continueApprovedGoalAfterCleanup(request:QueuedChatRequest,worker:ChatRunCoordinator,cancelled:Boolean) {
+        if(request.goalSegment==null||request.continuation!=null||!currentCoroutineContext().isActive||!scope.isActive)return
+        if(worker.requestSteeredAway||worker.pendingSteerRunId==request.runId)return // Explicit steering owns the next queue CAS.
+        try {
+            goalMutation.withLock {
+                val access=app.repository.chat.accessScope(request.threadId)
+                val goal=goals.loadGuarded(access)?:return@withLock
+                if(goal.status!=com.user.localagent.core.GoalStatus.ACTIVE||!sameGoalWork(checkNotNull(request.goal),goal)||goal.linkedRunIds.lastOrNull()!=request.runId)return@withLock
+                var parent=checkNotNull(app.repository.chat.run(request.runId))
+                if(parent.status !in com.user.localagent.data.ChatStore.TERMINAL+"paused")
+                    parent=app.repository.chat.updateRun(parent.id,"failed",errorCode="goal_cleanup_checkpoint_failed")
+                val stored=requireGoalRunBinding(goal,parent)
+                val stopped=cancelled||(goalStopEpochs[request.threadId]?:0L)!=worker.admittedGoalStopEpoch
+                val checkpointMatches=stored.previousSteps.size==worker.completedSteps[request.runId].orEmpty().size&&
+                    stored.previousSteps.zip(worker.completedSteps[request.runId].orEmpty()).all{(a,b)->a.tool==b.tool&&a.arguments==b.arguments&&a.evidence==b.evidence}
+                val decision=if(stopped)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.STOPPED)
+                else if(worker.requestAutopilotPauseReason!=null)GoalSegmentDecision.Pause(checkNotNull(worker.requestAutopilotPauseReason))
+                else if(!worker.requestCleanupSucceeded||worker.toolInFlight||!checkpointMatches)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+                else {
+                    requireGoalSegmentScope(stored,access);requireCapturedGoalAuthority(stored)
+                    val thread=checkNotNull(app.repository.chat.thread(request.threadId))
+                    check(thread.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
+                        app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
+                    goalSegmentDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),goalNativeEffectsUnresolved(parent,access.scopeKey,true))
+                }
+                check(goals.loadGuarded(access)==goal&&app.repository.chat.run(parent.id)==parent)
+                when(decision) {
+                    is GoalSegmentDecision.Continue->{
+                        check((goalStopEpochs[request.threadId]?:0L)==worker.admittedGoalStopEpoch)
+                        val receipt=queueNextGoalSegment(access,goal,parent,decision,checkNotNull(currentCoroutineContext()[Job]))
+                        goalQueuedEpochs[checkNotNull(receipt.queuedRunId)]=worker.admittedGoalStopEpoch
+                        if((goalStopEpochs[request.threadId]?:0L)!=worker.admittedGoalStopEpoch){cancelStoppedGoalContinuationsLocked(request.threadId);return@withLock}
+                        status.value="확인된 결과를 보존하고 같은 목표를 이어갑니다 · ${decision.binding.totalSegments}/${GoalSegmentBinding.MAX_SEGMENTS}"
+                    }
+                    is GoalSegmentDecision.Pause->pauseApprovedGoal(access,goal,parent,decision.reason)
+                }
+            }
+        }catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){
+            // A changed/deleted scope is never recreated to record a pause in another room.
+            goalMutation.withLock {
+                runCatching {
+                    val access=app.repository.chat.accessScope(request.threadId)
+                    val goal=goals.loadGuarded(access)
+                    val parent=app.repository.chat.run(request.runId)
+                    if(goal!=null&&parent!=null&&goal.id==request.goal?.id&&goal.threadId==request.threadId&&goal.projectId==request.projectId&&
+                        goal.status==com.user.localagent.core.GoalStatus.ACTIVE&&goal.linkedRunIds.lastOrNull()==request.runId)
+                        pauseApprovedGoal(access,goal,parent,GoalAutopilotPauseReason.STOPPED)
+                }
+            }
+        }
+    }
+
+    private suspend fun pauseApprovedGoal(access:com.user.localagent.data.ChatAccessScope,goal:GoalDefinition,
+        parent:com.user.localagent.data.ChatRunRecord,reason:GoalAutopilotPauseReason) {
+        check(parent.id in goal.linkedRunIds&&parent.status in com.user.localagent.data.ChatStore.TERMINAL+"paused"&&goals.loadGuarded(access)==goal)
+        val paused=goals.saveGuarded(access,goal.copy(status=com.user.localagent.core.GoalStatus.PAUSED))
+        check(goals.loadGuarded(access)==paused)
+        app.repository.chat.updateRun(parent.id,parent.status,errorCode=reason.code)
+        if(selectedThreadId.value==access.threadId&&selectedProjectId.value==access.projectId.orEmpty())goalState.value=paused
+        status.value=reason.description
+    }
+
+    private suspend fun pauseRejectedGoalCandidate(candidate:QueuedChatRequest) {
+        goalMutation.withLock {runCatching {
+            val access=app.repository.chat.accessScope(candidate.threadId)
+            val goal=goals.loadGuarded(access);val row=app.repository.chat.run(candidate.runId)
+            if(goal!=null&&row!=null&&goal.status==com.user.localagent.core.GoalStatus.ACTIVE&&goal.linkedRunIds.lastOrNull()==candidate.runId&&
+                candidate.goal?.let{sameGoalWork(it,goal)}==true&&row.status in com.user.localagent.data.ChatStore.TERMINAL)
+                pauseApprovedGoal(access,goal,row,GoalAutopilotPauseReason.STOPPED)
+        }}
+    }
+    private suspend fun cancelStoppedGoalContinuations(threadId:String) {
+        goalMutation.withLock {cancelStoppedGoalContinuationsLocked(threadId)}
+    }
+    /** goalMutation is held; use the same goal -> queue lock order as explicit lifecycle requests. */
+    private suspend fun cancelStoppedGoalContinuationsLocked(threadId:String) {
+        val cancelled=queueMutation.withLock {
+            val stale=queued.value.filter {it.threadId==threadId&&it.goalSegment?.parentRunId!=null&&
+                (goalQueuedEpochs[it.runId]?:0L)!=(goalStopEpochs[threadId]?:0L)}
+            stale.forEach {candidate->
+                app.repository.chat.cancelQueuedRun(candidate.runId)
+                queued.value=queued.value.filterNot {it.runId==candidate.runId}
+                goalRunCallerJobs.remove(candidate.runId);goalQueuedEpochs.remove(candidate.runId)
+            }
+            stale
+        }
+        for(candidate in cancelled) {
+            val access=app.repository.chat.accessScope(candidate.threadId)
+            val goal=goals.loadGuarded(access);val row=app.repository.chat.run(candidate.runId)
+            if(goal!=null&&row!=null&&goal.status==com.user.localagent.core.GoalStatus.ACTIVE&&goal.linkedRunIds.lastOrNull()==candidate.runId&&
+                candidate.goal?.let{sameGoalWork(it,goal)}==true)
+                pauseApprovedGoal(access,goal,row,GoalAutopilotPauseReason.STOPPED)
+        }
+    }
+
     fun cancelQueued(id:String){scope.launch {queueMutation.withLock {
-        try {app.repository.chat.cancelQueuedRun(id);queued.value=queued.value.filterNot {it.runId==id};goalRunCallerJobs.remove(id)}
+        try {app.repository.chat.cancelQueuedRun(id);queued.value=queued.value.filterNot {it.runId==id};goalRunCallerJobs.remove(id);goalQueuedEpochs.remove(id)}
         catch(_:Exception){status.value="이미 시작된 요청은 대기열에서 취소하지 않았습니다. 실행 중지 버튼을 사용해주세요."}
     }}}
 
@@ -652,6 +849,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return scope.launch(start=CoroutineStart.LAZY) {
             app.cancelIdleUnload()
             busy.value=true
+            requestCleanupSucceeded=false;requestTaskGoalForLedger=null;requestAutopilotPauseReason=null
             requestSteps.clear();requestSteps.addAll(request.previousSteps);observedOutcomes.clear()
             requestReadbackObligations=request.readbackObligations
             requestDirectSelectedTools=emptySet()
@@ -667,6 +865,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 workTraceSession=ChatWorkTraceSession.open(app.repository,request){workActivityController.markUnavailable(request.runId)}
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.RUN_STARTED,
                     request.goal?.outcome,if(request.goal==null)com.user.localagent.data.WorkSummarySource.HOST else com.user.localagent.data.WorkSummarySource.USER_GOAL)
+                if(!prepareGoalAutopilotHold(request))return@launch
                 val requestProgress=makeRequestProgress(request,workTraceSession)
                 liveComputeProgress=observeComputeProgress(request,workTraceSession,this)
                 prepareRequestTools(request,requestProgress){lease=it}
@@ -694,7 +893,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
                 requestFeedbackGeneration=try {app.planningFeedback.generation()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){null}
                 val storedUserMessage=request.userMessageId
-                if(workMode!=AgentWorkMode.RESEARCH)try {app.knowledgeIngestion.ingestDirectMessage(storedUserMessage)}
+                if(workMode!=AgentWorkMode.RESEARCH&&request.goal==null)try {app.knowledgeIngestion.ingestDirectMessage(storedUserMessage)}
                 catch(cancel:CancellationException){throw cancel}
                 catch(_:Exception){runCatching {recordAudit("knowledge_capture",false,"직접 대화의 기억 저장 검증 실패")}}
                 val disabledTools=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
@@ -742,7 +941,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
                 val direct=routeRule(text)
                 val projectFileRequest=com.user.localagent.core.ProjectPaths.isBoundFileRequest(text)
-                val hostHandled=semantic?.action==com.user.localagent.core.SemanticAction.PUBLIC_RESEARCH
+                val hostHandled=request.goal==null&&semantic?.action==com.user.localagent.core.SemanticAction.PUBLIC_RESEARCH
                 if(hostHandled)responsePaused=executeSemanticResearch(semantic!!,semanticChoice!!,request,semanticOfferedTools)
                 if(hostHandled) {
                     // The local meaning plan selects research; lexical routes never override its action.
@@ -802,6 +1001,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     runBoundedRounds(com.user.localagent.core.WorkSegments.TOTAL_ROUNDS) roundStep@{ round ->
                         if(complete) return@roundStep
                         ensureActive()
+                        if(pauseGoalBudgetIfExhausted(request)){complete=true;stoppedInRound=true;return@roundStep}
                         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용을 위한 안전한 실행 지점")
                         status.value="다음 행동 판단 · ${round+1}/${com.user.localagent.core.WorkSegments.TOTAL_ROUNDS} · 실행 ${requestSteps.size}/${taskGoal.stepBudget}"
                         budgetRound=round
@@ -965,7 +1165,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 complete=true;return@roundStep
                             }
                             traceDecision(call.name,round,remainingRequired)
-                            val result=try {runTool(call)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
+                            val result=try {runGoalBoundTool(call,taskGoal)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
                             if(call.name in setOf(GoalToolCatalog.START,GoalToolCatalog.RESUME)&&result.success&&result.verification==VerificationState.VERIFIED&&
                                 TaskHarness.decide(taskGoal,requestSteps,requestedFinish=true) is HarnessDecision.Finish) {
                                 answer("목표에 연결된 작업 한 건을 대기열에 저장했습니다. 이어서 같은 대화에서 진행합니다. 목표 자체의 완료는 확인 후 판단합니다.")
@@ -1086,9 +1286,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(!CloudConversationContext.isEligible(currentBinding,sourceBinding))continue
             turns+=CloudConversationContext.Turn(sourceBinding,message.role,message.text,sourceConfirmed=true)
             val payload=runCatching{Json.parseToJsonElement(run.contextJson).jsonObject}.getOrNull()?:continue
-            val native=payload["sharedEngineState"] as? JsonObject
-            val uncertain=native?.get("uncertain")?.jsonPrimitive?.booleanOrNull!=false||
-                native?.get("in_flight")?.let{it !is JsonNull}==true
+            val uncertain=goalNativeEffectsUnresolved(run,app.repository.chat.accessScope(source.threadId).scopeKey,true)
             val goal=(payload["externalAgentPlan"] as? JsonObject)?.get("goal")?.jsonPrimitive?.contentOrNull.orEmpty()
             previous=CloudConversationContext.PreviousTask(sourceBinding,run.status,source.text,goal,uncertain,sourceConfirmed=true)
         }
@@ -1098,10 +1296,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     /** Cloud owns interpretation/next actions; this parent retains scope, approval and evidence. */
     private suspend fun executeCloudPhoneRequest(request:QueuedChatRequest) {
         if(!request.allowExternalAgent||request.externalAgentRevision==null||request.capturedPcRevision==null||
-            !request.allowTools||request.continuation!=null||request.previousSteps.isNotEmpty()||request.goal!=null||
+            !request.allowTools||request.continuation!=null||request.previousSteps.isNotEmpty()||(request.goal!=null&&request.goalSegment==null)||
             request.readbackObligations!=null||request.attachments.isNotEmpty()||request.mode !in setOf("act","debug")){
             publishActionFinal(request,emptySet(),"이 요청에는 새 클라우드 도구 권한이 없거나 아직 지원하지 않는 첨부·이어가기 조건이 있습니다. 원문을 보존했습니다. 모델과 권한을 확인한 뒤 새 요청으로 보내주세요.",true);return
         }
+        if(request.goal!=null) {
+            val access=app.repository.chat.accessScope(request.threadId)
+            requireGoalSegmentScope(request,access);requireCapturedGoalAuthority(request)
+            val parent=(request.goalSegment?.parentRunId?:request.parentGoalStartRunId)?.let {app.repository.chat.run(it)}
+            requireGoalLaunchBinding(request,goals.loadGuarded(access),parent,false)
+            if(request.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
+        }
+        if(pauseGoalBudgetIfExhausted(request))return
         val externalSettings=ExternalAgentSettings.get(context)
         val keepAlive=com.user.localagent.voice.RunKeepAlive.await(request.runId)
         if(!keepAlive.active){
@@ -1126,7 +1332,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val external=externalSettings.capture();val pc=pcSettings.captureTextAuthority()
             val thread=app.repository.chat.thread(request.threadId);val run=app.repository.chat.run(request.runId)
             val currentDisabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+            val liveGoal=request.goal?.let {original->goals.loadGuarded(scope)?.let {it.status==com.user.localagent.core.GoalStatus.ACTIVE&&sameGoalWork(original,it)&&request.runId in it.linkedRunIds}==true}?:true
             val active=android.os.SystemClock.elapsedRealtime()<nativeDeadlineAt&&com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active&&activeRequest?.runId==request.runId&&requestJob?.isActive==true&&pendingSteerRunId!=request.runId&&
+                liveGoal&&requestAutopilotPauseReason==null&&(queueOwner.goalStopEpochs[request.threadId]?:0L)==admittedGoalStopEpoch&&
                 run?.status=="running"&&run.threadId==request.threadId&&run.branchId==request.branchId&&run.projectId==request.projectId&&
                 thread?.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
                 app.repository.chat.accessScope(request.threadId)==scope&&executionWorkspace?.bindingFingerprint()==request.workspaceBinding
@@ -1142,7 +1350,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val savedNative=app.repository.chat.run(request.runId)?.contextJson?.let{Json.parseToJsonElement(it).jsonObject["sharedEngineState"]}
         val nativeJournal=com.user.localagent.engine.RustExecutionJournal(nativeBinding(),buildJsonObject{
             put("profileId","subscription-codex");put("provider","codex_cli");put("modelId","provider-configured")
-            put("reasoning",JsonNull);put("maxToolCalls",18);put("deadlineMs",330000);put("cloudAuthorized",request.allowExternalAgent)
+            put("reasoning",JsonNull);put("maxToolCalls",minOf(18,GoalSegmentBinding.MAX_TOOL_CALLS-(request.goalSegment?.consumedToolCalls?:0)));put("deadlineMs",330000);put("cloudAuthorized",request.allowExternalAgent)
         }.toString(),savedNative?.toString())
         nativeDeadlineAt=Json.parseToJsonElement(nativeJournal.checkpoint()).jsonObject.getValue("deadlineAtMs").jsonPrimitive.long
         suspend fun persistNativeState(checkpoint:String=nativeJournal.checkpoint()) {
@@ -1162,6 +1370,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }))
         val controller=ExternalAgentController(capture,client,::authority,
             execute={call->
+                enforceGoalToolFence(request,call)
                 if(!authority().permits(capture)||call.name !in requestAuthorizedTools)
                     noEffect(call,"실행 권한이나 대상이 변경되어 도구를 시작하지 않았습니다.")
                 else if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
@@ -1190,6 +1399,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     requestDirectSelectedTools=requestAuthorizedTools
                     taskGoal=com.user.localagent.core.TaskGoal(request.text,listOf(proposed.goal)+proposed.constraints,
                         com.user.localagent.core.WorkSegments.STEP_BUDGET,requestAuthorizedTools)
+                    requestTaskGoalForLedger=taskGoal
                     val stored=checkNotNull(app.repository.chat.run(request.runId))
                     val old=Json.parseToJsonElement(stored.contextJson).jsonObject
                     val checkpoint=buildJsonObject {
@@ -1231,12 +1441,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     }
                     if(value.getValue("state").jsonPrimitive.content=="FINISHED")return@withTimeout value
                     controller.pumpOnce()
+                    if(pauseGoalBudgetIfExhausted(request))return@withTimeout value
                     if(preparedSeen)return@withTimeout value
                     if(controller.phase !in setOf(ExternalAgentController.Phase.ACTIVE,ExternalAgentController.Phase.RESULT_PENDING))return@withTimeout value
                     delay(250)
                 }
                 @Suppress("UNREACHABLE_CODE") error("BRIDGE_PROVIDER_LOOP")
             }
+            if(requestAutopilotPauseReason!=null)return
             if(preparedSeen){
                 publishActionFinal(request,requestAuthorizedTools,CloudAgentFinals.PREPARED_PAUSE,true);return
             }
@@ -1674,12 +1886,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
         }finally{
             withContext(NonCancellable){
+                var released=false
                 try {
-                    runCatching {requestTools?.releaseProjectReadContext()}
-                    runCatching {requestTools?.releaseNoteReadContext()}
-                    runCatching {lease?.close()}
+                    val projectReleased=runCatching {requestTools?.releaseProjectReadContext()}.isSuccess
+                    val notesReleased=runCatching {requestTools?.releaseNoteReadContext()}.isSuccess
+                    val leaseReleased=runCatching {lease?.close()}.isSuccess
                     // Native teardown is completed while this exact request still owns its resource lease.
                     executionEngine.unload()
+                    released=projectReleased&&notesReleased&&leaseReleased
                 }finally{
                     updateLease?.close()
                     executionWorkspace=null;requestTools=null;requestImports=null;requestRepository=null;requestResearch=null
@@ -1695,6 +1909,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     approval.value?.decision?.complete(false);approval.value=null;busy.value=false
                     requestFeedbackGeneration=null
                     app.scheduleIdleUnload()
+                    requestCleanupSucceeded=released
                 }
             }
         }
@@ -2113,7 +2328,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val call=(decision as? AutonomousReviewPolicy.Decision.Next)?.call?:return null
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,"답변 검증: "+decision.summary,com.user.localagent.data.WorkSummarySource.MODEL_PLAN)
         val checked=try{ToolRegistry.validateForRequest(call,allowed)}catch(error:Exception){FailureLog.record(context,"verification_gate",error,"gate_call_invalid");return null}
-        val result=try{runTool(checked)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(checked.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
+        val result=try{runGoalBoundTool(checked,com.user.localagent.core.TaskGoal(request.text.take(6000),listOf("현재 모델이 선택한 검증 도구의 실제 결과를 확인한다."),requiredTools=setOf(checked.name)))}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(checked.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
         // A failed check verifies nothing: keep the draft as written instead of asking for a "검증:" note.
         if(!result.success||result.verification!=VerificationState.VERIFIED){
             FailureLog.record(context,"verification_gate",null,"gate_tool_${checked.name}_${result.verification.name}")
@@ -2235,6 +2450,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private suspend fun runTool(call:ToolCall):ToolResult {
         validateSemanticCall(call)
         val request=checkNotNull(activeRequest)
+        enforceGoalToolFence(request,call)
         request.goal?.let {snapshot->
             val current=goals.loadGuarded(app.repository.chat.accessScope(request.threadId))
             if(current==null||current.status!=com.user.localagent.core.GoalStatus.ACTIVE||!sameGoalWork(snapshot,current)||request.runId !in current.linkedRunIds)
@@ -2253,7 +2469,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return try {val target=resolveRecipient(call);performTool(target.first,target.second).also {if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}
         catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
-            val failure=com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
+            val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
+                else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))
             persistStepEvidence();failure
@@ -2262,8 +2479,62 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(pendingGoalStopRunId==request.runId){pendingGoalStopRunId=null;currentCoroutineContext()[Job]?.cancel(CancellationException("목표 상태 영수증을 저장한 뒤 현재 실행을 중지했습니다."))}
         }
     }
+    private suspend fun runGoalBoundTool(call:ToolCall,goal:com.user.localagent.core.TaskGoal):ToolResult {
+        requestTaskGoalForLedger=goal
+        return runTool(call)
+    }
+    private fun goalBudgetReason(request:QueuedChatRequest):GoalAutopilotPauseReason? {
+        val segment=request.goalSegment?:return null
+        val now=System.currentTimeMillis()
+        return when {
+            segment.consumedToolCalls+requestSteps.size>=GoalSegmentBinding.MAX_TOOL_CALLS->GoalAutopilotPauseReason.TOOL_BUDGET
+            now<segment.startedAtMs||now-segment.startedAtMs>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
+            else->requestAutopilotPauseReason
+        }
+    }
+    private suspend fun prepareGoalAutopilotHold(request:QueuedChatRequest):Boolean {
+        val segment=request.goalSegment?:return true
+        if(request.continuation!=null)return true
+        if(pauseGoalBudgetIfExhausted(request))return false
+        val remaining=(GoalSegmentBinding.MAX_DURATION_MS-(System.currentTimeMillis()-segment.startedAtMs)).coerceIn(1L,GoalSegmentBinding.MAX_DURATION_MS)
+        val deadline=Math.addExact(android.os.SystemClock.elapsedRealtime(),remaining)
+        goalCleanupHold=com.user.localagent.voice.AgentRunService.holdForCleanup(request.runId,deadline)
+        if(goalCleanupHold!=null)return true
+        requestAutopilotPauseReason=GoalAutopilotPauseReason.STOPPED
+        publishActionFinal(request,emptySet(),"백그라운드 실행 유지를 확인하지 못해 목표를 일시 정지했습니다. 기존 결과와 권한을 보존했습니다.",true)
+        return false
+    }
+    private suspend fun pauseGoalBudgetIfExhausted(request:QueuedChatRequest):Boolean {
+        val reason=goalBudgetReason(request)?:return false
+        requestAutopilotPauseReason=reason
+        if(app.repository.chat.run(request.runId)?.status=="running") {
+            persistStepEvidence();answer(reason.description)
+            app.repository.chat.updateRun(request.runId,"paused",errorCode=reason.code)
+            workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
+        }
+        return true
+    }
+    /** Rechecked after approvals and directly before effects; history does not grant a new action. */
+    private suspend fun enforceGoalToolFence(request:QueuedChatRequest,call:ToolCall) {
+        if(request.goal==null)return
+        ToolRegistry.validate(call)
+        currentCoroutineContext().ensureActive()
+        requireCapturedGoalAuthority(request)
+        val access=app.repository.chat.accessScope(request.threadId)
+        requireGoalSegmentScope(request,access)
+        val actual=goals.loadGuarded(access)
+        check(actual!=null&&actual.status==com.user.localagent.core.GoalStatus.ACTIVE&&sameGoalWork(request.goal,actual)&&request.runId in actual.linkedRunIds)
+        check((queueOwner.goalStopEpochs[request.threadId]?:0L)==admittedGoalStopEpoch&&pendingSteerRunId!=request.runId) {"중지·추가 지시 이후 이전 목표의 도구를 실행하지 않았습니다."}
+        check(executionWorkspace?.bindingFingerprint()==request.workspaceBinding)
+        goalBudgetReason(request)?.let {reason->requestAutopilotPauseReason=reason;throw GoalAutopilotPaused(reason)}
+        if(request.goalSegment!=null) {
+            val taskGoal=checkNotNull(requestTaskGoalForLedger){"현재 모델이 선택한 실행 목표가 없어 과거 목표로 권한을 만들지 않았습니다."}
+            requireGoalLedgerAllowsCall(request,taskGoal,call,requestSteps.toList())
+        }
+    }
     private suspend fun performTool(call:ToolCall,targetConfirmed:Boolean=false):ToolResult {
         ToolRegistry.validate(call)
+        enforceGoalToolFence(checkNotNull(activeRequest),call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
         val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
@@ -2286,6 +2557,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             check(app.repository.chat.run(action.runId)?.let {it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true){"실행 대상이 변경되어 이전 승인을 적용하지 않았습니다."}
             if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)tools.confirmCalendarOwner(call,targetReview)
             currentCoroutineContext().ensureActive()
+            enforceGoalToolFence(request,call)
             externalEffectGuard?.invoke() // Revoked requests cannot persist a remembered grant either.
             if(action.remember.value && CapabilityPolicy.canPreapprove(call.name))app.repository.addGrant(GrantRecord("builtin",codeHash,call.name,call.arguments["scope"]?.jsonPrimitive?.content?:"default"))
         }
@@ -2296,6 +2568,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(noteOwnerAccepted)tools.confirmNoteOwner(call)
         traceAttempt?.let{workTraceSession?.start(it)}
         currentCoroutineContext().ensureActive()
+        enforceGoalToolFence(checkNotNull(activeRequest),call)
         externalEffectGuard?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
         val intent=tools.prepareIntent(call)
         if(intent != null) {

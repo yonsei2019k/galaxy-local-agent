@@ -7,7 +7,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.user.localagent.LocalAgentApplication
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 

@@ -47,6 +47,6 @@ object PcBrowserToolCatalog:BrowserToolCatalog("open_pc_browser_page","read_pc_b
 
 /** Hidden browser inside the ZipHap app on this phone; the owner logs in to sites in the app's browser screen. */
 object AppBrowserToolCatalog:BrowserToolCatalog("open_app_browser_page","read_app_browser_page","app_browser_action",
-    "the ZipHap app's own browser on this phone (the owner's in-app logins; works anywhere)") {
+    "the ZipHap app's own offscreen browser on this phone (preferred for phone web tasks; the owner's in-app logins; works anywhere)") {
     const val OPEN="open_app_browser_page";const val READ="read_app_browser_page";const val ACTION="app_browser_action"
 }

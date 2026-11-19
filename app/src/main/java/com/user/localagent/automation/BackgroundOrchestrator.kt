@@ -13,7 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent

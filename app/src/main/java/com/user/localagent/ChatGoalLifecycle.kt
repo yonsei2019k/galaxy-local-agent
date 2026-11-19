@@ -40,7 +40,11 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
         when(req.action) {
             GoalLifecycleAction.START,GoalLifecycleAction.RESUME -> {
                 if(req.action==GoalLifecycleAction.RESUME)check(req.goal.status==GoalStatus.PAUSED){"일시 정지한 목표만 재개할 수 있습니다."}
-                queueBoundedGoalRun(req.scope,req.goal,caller.branchId,caller.modelId,caller.thinking,caller.workspaceBinding,callerJob,caller.runId,capturedPcRevision=caller.capturedPcRevision,allowCloudText=caller.allowCloudText)
+                queueBoundedGoalRun(req.scope,req.goal,caller.branchId,caller.modelId,caller.thinking,caller.workspaceBinding,callerJob,caller.runId,
+                    capturedAllowTools=caller.allowTools,capturedMode=caller.mode,capturedPcDataBinding=caller.pcDataBinding,
+                    capturedPcRevision=caller.capturedPcRevision,allowCloudText=caller.allowCloudText,
+                    capturedAllowExternalAgent=caller.allowExternalAgent,capturedExternalAgentRevision=caller.externalAgentRevision,
+                    capturedKakaoReadBinding=caller.kakaoReadBinding,capturedPcImageRecoveryAllowed=caller.pcImageRecoveryAllowed)
             }
             GoalLifecycleAction.PAUSE,GoalLifecycleAction.CLEAR,GoalLifecycleAction.UPDATE -> null
         }
@@ -52,7 +56,10 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
 internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessScope,goal:GoalDefinition,
     branchId:String,modelId:String,thinking:Boolean,expectedWorkspaceBinding:String?,callerJob:Job,parentGoalStartRunId:String?=null,
     ownerInstruction:String=goal.outcome,capturedAllowTools:Boolean=true,capturedMode:String=ConversationSubmissionPolicy.newRequestMode().wireName,
-    capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId),capturedPcRevision:Long?=null,allowCloudText:Boolean=false):GoalLifecycleReceipt {
+    capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId),capturedPcRevision:Long?=null,allowCloudText:Boolean=false,
+    capturedAllowExternalAgent:Boolean=false,capturedExternalAgentRevision:Long?=null,
+    capturedKakaoReadBinding:String?=null,capturedPcImageRecoveryAllowed:Boolean=false,
+    nextSegment:GoalSegmentDecision.Continue?=null):GoalLifecycleReceipt {
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
     val ownedContexts=linkedSetOf<String>()
@@ -68,27 +75,52 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             val sources=goal.linkedRunIds.map {id->
                 val run=checkNotNull(app.repository.chat.run(id)){"목표에 연결된 실행이 삭제되었습니다."}
                 requireGoalRunBinding(goal,run)
+                check(!goalSourceNativeEffectsUnresolved(run)){"이전 목표 실행의 공통 기록이 없거나 효과가 불확실해 새 실행으로 우회하지 않았습니다."}
+                check(run.threadRevision==access.threadRevision&&run.projectRevision==(access.projectId?.let {app.repository.chat.project(it)?.revision}?:0L)) {
+                    "원래 목표 실행 이후 대화·프로젝트 권한 버전이 변경되었습니다. 이전 승인을 확대하지 않았습니다."
+                }
                 check(run.status !in setOf("queued","running","waiting_approval")){"같은 목표의 작업이 아직 대기·진행 중입니다. 먼저 중지하거나 완료해주세요."}
                 GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson)
             }
             val queuedIds=app.repository.chat.queuedRuns().map {it.id}.toSet()
             check(goal.linkedRunIds.none {it in queuedIds}){"같은 목표의 이어쓰기 요청이 아직 대기 중입니다."}
-            val priorEvidence=inheritVerifiedGoalEvidence(goal,sources,binding)
-            val priorSteps=priorEvidence.steps
+            check(capturedAllowTools&&capturedMode in setOf("act","debug")){"읽기 전용·도구 미허용 요청에서 새 목표 실행 권한을 만들지 않았습니다."}
+            val entryBudget=if(nextSegment==null)goalEntryBudget(goal,sources,System.currentTimeMillis())else null
+            val parent=nextSegment?.let {next->
+                check(parentGoalStartRunId==null)
+                val row=checkNotNull(app.repository.chat.run(checkNotNull(next.binding.parentRunId)))
+                val decision=goalSegmentDecision(row,goal,access.scopeKey,System.currentTimeMillis(),unknownEffects=false)
+                check(decision is GoalSegmentDecision.Continue&&decision.binding==next.binding&&
+                    decision.ledger.map {it.json()}==next.ledger.map {it.json()}){"목표의 최종 체크포인트와 누적 실행 기록이 변경되었습니다."}
+                row
+            }
+            val priorLedger=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey)
+            if(priorLedger.size>=GoalSegmentBinding.MAX_TOOL_CALLS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
             val active=withContext(NonCancellable) {
                 goals.saveGuarded(access,goal.copy(status=GoalStatus.ACTIVE)).also {writtenGoal=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
-            val readbacks=priorEvidence.readbacks(com.user.localagent.core.RequiredReadbackObligations.Context(runId,access.threadId,access.projectId,access.scopeKey,binding))
+            val segment=nextSegment?.binding?:checkNotNull(entryBudget).let {budget->GoalSegmentBinding(goal.id,budget.originalGoalVersion,goalWorkDigest(goal),access.scopeKey,
+                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,priorLedger.size,budget.noProgressSegments,budget.totalSegments)}
+            check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding
             var captured:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
-                    allowTools=capturedAllowTools,mode=capturedMode,previousSteps=priorSteps,
+                    allowTools=capturedAllowTools,mode=capturedMode,previousSteps=emptyList(),
                     workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText,
-                    readbackObligations=readbacks).also {captured=it}.toJson().also {ownedContexts+=it}
+                    allowExternalAgent=capturedAllowExternalAgent,externalAgentRevision=capturedExternalAgentRevision,
+                    kakaoReadBinding=capturedKakaoReadBinding,pcImageRecoveryAllowed=capturedPcImageRecoveryAllowed,
+                    goalSegment=segment,goalLedger=priorLedger).also {request->
+                        parent?.let {requireSameGoalAuthority(QueuedChatRequest.fromJson(it.contextJson),request)}
+                        // Historical data cannot cross a changed cloud consent/model/branch boundary.
+                        sources.forEach {
+                            requireSameGoalAuthority(QueuedChatRequest.fromJson(it.contextJson),request)
+                        }
+                        captured=request
+                    }.toJson().also {ownedContexts+=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val linked=withContext(NonCancellable) {
@@ -102,6 +134,10 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             check(saved.status=="queued"&&saved.startedAt==null&&saved.contextJson==context&&
                 requireGoalRunBinding(linked,saved)==request&&goals.loadGuarded(access)==linked){"목표와 실제 대기 작업의 저장 결과를 확인하지 못했습니다."}
             check(app.repository.chat.accessScope(access.threadId)==access)
+            currentCoroutineContext().ensureActive();check(callerJob.isActive)
+            if(!com.user.localagent.voice.AgentRunService.track(this.context,runId,access.threadId,ownerInstruction)||
+                !com.user.localagent.voice.RunKeepAlive.await(runId).active)throw GoalAutopilotPaused(GoalAutopilotPauseReason.STOPPED)
+            check(app.repository.chat.accessScope(access.threadId)==access&&goals.loadGuarded(access)==linked)
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             // drain checks this original job before startRun, including cancellation after return.
             goalRunCallerJobs[runId]=callerJob
@@ -126,14 +162,37 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     writtenGoal?.let {written->
                         if(goals.loadGuarded(access)==written) {
                             val restored=goals.saveGuarded(access,goal.copy(updatedAt=written.updatedAt))
+                            writtenGoal=restored
                             if(selectedThreadId.value==access.threadId&&selectedProjectId.value==access.projectId.orEmpty())goalState.value=restored
                         }
                     }
                 }
             } catch(cleanup:Throwable) {error.addSuppressed(cleanup)}
         }
+        if(error is GoalAutopilotPaused)withContext(NonCancellable) {
+            // Re-entry cannot renew a spent budget. This is an intentional PAUSED CAS, not rollback.
+            val current=goals.loadGuarded(access)
+            if(app.repository.chat.accessScope(access.threadId)==access&&current!=null&&(current==goal||current==writtenGoal)) {
+                val paused=goals.saveGuarded(access,current.copy(status=GoalStatus.PAUSED))
+                check(goals.loadGuarded(access)==paused)
+                if(selectedThreadId.value==access.threadId&&selectedProjectId.value==access.projectId.orEmpty())goalState.value=paused
+            }
+        }
         throw error
     }
+}
+
+/** Root calls after parent cleanup, under goalMutation; queue CAS/readback remains the same path. */
+internal suspend fun ChatRunCoordinator.queueNextGoalSegment(access:ChatAccessScope,goal:GoalDefinition,
+    parent:ChatRunRecord,next:GoalSegmentDecision.Continue,callerJob:Job):GoalLifecycleReceipt {
+    check(app.repository.chat.run(parent.id)==parent){"목표의 부모 실행이 변경되었습니다."}
+    val request=requireGoalRunBinding(goal,parent)
+    check(next.binding.parentRunId==parent.id&&next.binding.parentCheckpointDigest==goalDigest(parent.contextJson))
+    return queueBoundedGoalRun(access,goal,request.branchId,request.modelId,request.thinking,request.workspaceBinding,callerJob,
+        ownerInstruction=request.text,capturedAllowTools=request.allowTools,capturedMode=request.mode,capturedPcDataBinding=request.pcDataBinding,
+        capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
+        capturedAllowExternalAgent=request.allowExternalAgent,capturedExternalAgentRevision=request.externalAgentRevision,
+        capturedKakaoReadBinding=request.kakaoReadBinding,capturedPcImageRecoveryAllowed=request.pcImageRecoveryAllowed,nextSegment=next)
 }
 
 /** Locks protect selection/CAS, but neither lock is held while waiting for a running job. */

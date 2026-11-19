@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "GalaxyLocalAgent"
-include(":app", ":core")
+include(":app", ":core", ":android-runtime", ":local-image")

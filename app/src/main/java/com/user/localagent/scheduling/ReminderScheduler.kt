@@ -10,7 +10,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.*
 import com.user.localagent.MainActivity
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 import com.user.localagent.data.LocalRepository
 import com.user.localagent.data.ReminderRecord
 import kotlinx.coroutines.*

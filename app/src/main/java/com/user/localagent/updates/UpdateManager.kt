@@ -14,8 +14,8 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.*
-import com.user.localagent.BuildConfig
-import com.user.localagent.R
+import com.user.localagent.runtime.RuntimePackageMetadata
+import com.user.localagent.runtime.R
 import com.user.localagent.core.UpdateManifest
 import com.user.localagent.core.UpdateVerifier
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +57,7 @@ private data class PendingUpdateApproval(
 }
 
 class UpdateManager(private val context:Context) {
+    private val packageMetadata=RuntimePackageMetadata(context)
     private val preferences=context.getSharedPreferences("updates",Context.MODE_PRIVATE)
     private val mutableState=MutableStateFlow(UpdateState(preferences.getString("status",null)?:"업데이트 확인 전"))
     val state:StateFlow<UpdateState> = mutableState
@@ -69,6 +70,7 @@ class UpdateManager(private val context:Context) {
     }
 
     fun schedule() {
+        if(packageMetadata.updateUrl.isBlank())return
         val request=PeriodicWorkRequestBuilder<UpdateWorker>(15,TimeUnit.MINUTES)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.MINUTES).build()
@@ -91,6 +93,10 @@ class UpdateManager(private val context:Context) {
 
     private suspend fun checkAndApplyInternal(install:Boolean,retryOnIoFailure:Boolean,approval:PendingUpdateApproval?):String = updateMutex.withLock { withContext(Dispatchers.IO) {
         try {
+            if(packageMetadata.updateUrl.isBlank()){
+                status("이 앱에는 자동 업데이트 채널이 설정되어 있지 않습니다.")
+                return@withContext mutableState.value.message
+            }
             if(install && (com.user.localagent.benchmark.RuntimeGate.inference.get()||com.user.localagent.benchmark.RuntimeGate.benchmark.get())){
                 status("현재 로컬 작업이 끝난 뒤 업데이트를 확인합니다.")
                 return@withContext mutableState.value.message
@@ -102,17 +108,17 @@ class UpdateManager(private val context:Context) {
             val capabilities=trust["approvedCapabilities"]?.jsonArray?.map {it.jsonPrimitive.content}?.toSet()?:emptySet()
             val verifier=UpdateVerifier(keys,cert,context.packageName,"https://github.com/yonsei2019k/galaxy-local-agent/releases/download/")
             status("GitHub 릴리스 확인 중")
-            val raw=readHttps(BuildConfig.UPDATE_URL,128*1024).toString(Charsets.UTF_8)
-            val verified=verifier.verify(raw,BuildConfig.VERSION_CODE.toLong()-1,capabilities)
+            val raw=readHttps(packageMetadata.updateUrl,128*1024,packageMetadata.versionName).toString(Charsets.UTF_8)
+            val verified=verifier.verify(raw,packageMetadata.versionCode-1,capabilities)
             val manifest=verified.manifest
-            if(manifest.versionCode==BuildConfig.VERSION_CODE.toLong()){status("최신 버전입니다.",manifest.versionCode);return@withContext mutableState.value.message}
+            if(manifest.versionCode==packageMetadata.versionCode){status("최신 버전입니다.",manifest.versionCode);return@withContext mutableState.value.message}
             if(manifest.minSdk>Build.VERSION.SDK_INT) error("현재 Android에서 지원하지 않는 업데이트입니다.")
             val manifestDigest=sha256(raw.toByteArray(Charsets.UTF_8))
             val output=File(context.cacheDir,"updates").apply {mkdirs()}.resolve("${manifest.versionCode}.apk")
             if(!output.exists() || sha256(output)!=manifest.apkSha256.lowercase()) {
                 status("업데이트 다운로드 중",manifest.versionCode)
                 val temporary=File(output.path+".part")
-                openHttps(manifest.apkUrl).let { connection ->
+                openHttps(manifest.apkUrl,packageMetadata.versionName).let { connection ->
                     try {connection.inputStream.use {input ->temporary.outputStream().use {out ->
                         val buffer=ByteArray(64*1024);var bytes=0L
                         while(true){val count=input.read(buffer);if(count<0)break;bytes+=count;check(bytes<=512L*1024*1024){"업데이트 파일이 제한보다 큽니다."};out.write(buffer,0,count)}
@@ -141,7 +147,7 @@ class UpdateManager(private val context:Context) {
                     status("서명된 업데이트가 바뀌었습니다. 새 변경 내용을 다시 검토해주세요.",manifest.versionCode,true,candidate)
                     return@withContext mutableState.value.message
                 }
-                val approvedVerifier=verifier.verify(raw,BuildConfig.VERSION_CODE.toLong(),capabilities+approval.capabilities)
+                val approvedVerifier=verifier.verify(raw,packageMetadata.versionCode,capabilities+approval.capabilities)
                 check(!approvedVerifier.requiresCapabilityApproval){"업데이트 기능 범위가 승인한 내용과 다릅니다."}
             }else if(approval!=null){
                 status("승인 대기 중인 업데이트가 변경되었습니다. 다시 확인해주세요.",manifest.versionCode,true)
@@ -194,19 +200,19 @@ class UpdateManager(private val context:Context) {
         }}
         private val updateMutex=Mutex()
         private val downloadHosts=setOf("github.com","objects.githubusercontent.com","release-assets.githubusercontent.com","raw.githubusercontent.com")
-        private fun openHttps(url:String):HttpURLConnection {
+        private fun openHttps(url:String,versionName:String):HttpURLConnection {
             var next=URI(url)
             repeat(6) {
                 require(next.isAbsolute && next.scheme=="https" && next.host in downloadHosts && next.rawUserInfo==null && (next.port==-1 || next.port==443) && next.rawFragment==null){"허용되지 않은 업데이트 주소입니다."}
                 val connection=next.toURL().openConnection() as HttpURLConnection
                 connection.instanceFollowRedirects=false;connection.connectTimeout=15_000;connection.readTimeout=30_000
-                connection.setRequestProperty("User-Agent","GalaxyLocalAgent/${BuildConfig.VERSION_NAME}")
+                connection.setRequestProperty("User-Agent","GalaxyLocalAgent/$versionName")
                 when(connection.responseCode){301,302,303,307,308->{val location=connection.getHeaderField("Location")?:error("리디렉션 주소가 없습니다.");connection.disconnect();next=next.resolve(location)};200->return connection;404->{connection.disconnect();error("아직 게시된 릴리스가 없습니다.")};429,500,502,503,504->{val code=connection.responseCode;connection.disconnect();throw IOException("일시적 다운로드 응답 $code")};else->{val code=connection.responseCode;connection.disconnect();error("다운로드 응답 $code")}}
             }
             error("업데이트 리디렉션이 너무 많습니다.")
         }
-        private fun readHttps(url:String,max:Int):ByteArray {
-            val connection=openHttps(url)
+        private fun readHttps(url:String,max:Int,versionName:String):ByteArray {
+            val connection=openHttps(url,versionName)
             try{return connection.inputStream.use {input->
                 val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
                 while(true){val count=input.read(buffer);if(count<0)break;check(output.size()+count<=max){"업데이트 정보가 너무 큽니다."};output.write(buffer,0,count)}

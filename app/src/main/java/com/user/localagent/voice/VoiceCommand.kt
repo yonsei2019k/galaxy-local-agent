@@ -28,7 +28,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.user.localagent.LocalAgentApplication
 import com.user.localagent.MainActivity
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.util.UUID
@@ -191,6 +191,7 @@ class VoiceCommandActivity:ComponentActivity() {
 class AgentRunService:Service() {
     companion object {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
+        private val cleanupHolds=RunCleanupHoldRegistry {android.os.SystemClock.elapsedRealtime()}
         /** Submission success is distinct from RunKeepAlive.await's actual startForeground receipt. */
         fun track(context:Context,runId:String,threadId:String,text:String):Boolean {
             val token=RunKeepAlive.begin(runId)?:return false
@@ -198,6 +199,17 @@ class AgentRunService:Service() {
                 ContextCompat.startForegroundService(context,Intent(context,AgentRunService::class.java)
                     .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",text.take(200)).putExtra("keepAliveToken",token))
             }.onFailure{RunKeepAlive.acknowledge(runId,token,false,"FOREGROUND_START_REJECTED")}.isSuccess
+        }
+        /**
+         * Terminal DB state may precede native teardown and durable next-segment registration.
+         * Callers retain this only through that handoff, using the original goal's fixed deadline.
+         * A receipt for another run, a failed service, or a fresh background start is never sufficient.
+         */
+        suspend fun holdForCleanup(runId:String,deadlineAtElapsedMillis:Long):java.io.Closeable? {
+            if(!RunKeepAlive.await(runId).active)return null
+            val hold=cleanupHolds.acquire(runId,deadlineAtElapsedMillis)?:return null
+            if(!RunKeepAlive.snapshot(runId).active){hold.close();return null}
+            return hold
         }
         internal fun appOnScreen():Boolean {
             val info=ActivityManager.RunningAppProcessInfo();ActivityManager.getMyMemoryState(info)
@@ -252,14 +264,17 @@ class AgentRunService:Service() {
                 val row=withContext(Dispatchers.IO){app.repository.chat.run(runId)}
                 val age=System.currentTimeMillis()-run.since
                 val done=if(row==null)age>60_000L else row.status !in setOf("queued","running","waiting_approval")
-                if(done||age>30*60_000L){
+                if(age>=RunCleanupHoldRegistry.MAX_HOLD_MILLIS||(done&&!cleanupHolds.isHeld(runId))){
                     runs.remove(runId)
+                    cleanupHolds.clear(runId)
                     run.token?.let{RunKeepAlive.acknowledge(runId,it,false,"FOREGROUND_TRACKING_ENDED")}
                     if(row!=null&&!appOnScreen()){
                         val answer=withContext(Dispatchers.IO){
                             app.repository.chat.messages(run.threadId).first().lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
                         }
-                        alert(manager,runId,run,if(row.status=="completed")"작업 완료" else "작업이 멈췄습니다",answer.ifBlank{row.status}.take(400))
+                        val goalBound=runCatching {com.user.localagent.QueuedChatRequest.fromJson(row.contextJson).goal!=null}.getOrNull()
+                        val title=if(row.status!="completed")"작업이 멈췄습니다" else when(goalBound){true->"실행 구간 종료";false->"작업 완료";null->"실행 종료"}
+                        alert(manager,runId,run,title,answer.ifBlank{row.status}.take(400))
                     }
                     runs.entries.lastOrNull()?.let{manager.notify(ID,ongoing(it.key,it.value))}
                 }
@@ -275,6 +290,7 @@ class AgentRunService:Service() {
     }
     override fun onDestroy(){
         runs.forEach{(id,run)->run.token?.let{RunKeepAlive.acknowledge(id,it,false,"FOREGROUND_SERVICE_STOPPED")}}
+        cleanupHolds.clear()
         scope.cancel();super.onDestroy()
     }
 }

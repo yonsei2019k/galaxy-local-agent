@@ -1,5 +1,11 @@
 # Device validation
 
+## 2026-11-19 goal-only phone scenarios and candidate2019 evidence boundary
+
+Installed2018 plus the existing subscription-PC bridge completed6 method-free goal requests without ADB: three synthetic shopping comparisons, one provided-availability meeting plan and two official-page research cases. Independent arithmetic/constraint/source review agrees. Infeasible targets were reported without arbitrary substitutions. These are bounded read/proposal successes, not purchases, calendar writes, bookings, service closure, multi-turn recovery or multi-segment goal completion. Remote v1 lacks full raw tool argument/result receipts. The first pending request required the owner to open the app; cold/background mailbox survival is unqualified. [Case records and timings](goal-only-autopilot-evaluation.ko.md).
+
+Candidate2019 is built/signed, NOT installed. Core962/runtime1021 JVM, React32, three-module release lint0errors, both release builds and instrumentation packaging pass; frozen854inputs unchanged. Main SHA256 `1c083817b0086244c55074c52d330e0ca75f141cd6a00be27f99bfd2ee10898c`; instrumentation `81b4a1550ecebaff222245ae46fe4979904dae333f2383e9241cf72dd07eda13`. Original certificate matches retained2018; main permissions unchanged;16KiB ZIP alignment and bounded Rust/React static audit pass. These checks are not installation, Android/native loading, visual/keyboard, cross-app model arbitration, image migration or autonomous multi-segment phone evidence. Local-image APK is unsigned/unqualified. Last independently verified phone version remains2018.
+
 ## 2026-11-19 installed2018 safe checkpoint
 
 Actual production base SHA256 `d3764cee8302cdd4639886a46d360b43f38a724a52cee9a2b19d8799d8e3d777` matches the newly signed APK; package/code2018/name0.1.18 readback PASS. This code was reused for local candidates, so bytes distinguish them. Existing approved developer-update preparation1 PASS; install/test install/launch succeed with original identity/data and no new Android permissions.

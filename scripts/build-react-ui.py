@@ -15,9 +15,9 @@ import unittest
 from urllib.parse import urlsplit
 
 
-ASSET_PATH = "app/build/generated/react-assets/react"
-STAGING_PATH = "app/build/generated/react-assets/react.staging"
-BACKUP_PATH = "app/build/generated/react-assets/react.previous"
+ASSET_PATH = "android-runtime/build/generated/react-assets/react"
+STAGING_PATH = "android-runtime/build/generated/react-assets/react.staging"
+BACKUP_PATH = "android-runtime/build/generated/react-assets/react.previous"
 REMOVABLE = frozenset((ASSET_PATH, STAGING_PATH, BACKUP_PATH))
 EXTENSIONS = frozenset((".html", ".js", ".css", ".svg", ".png", ".webp", ".jpg", ".jpeg", ".woff", ".woff2", ".ttf", ".json", ".ico"))
 MAX_FILES = 256

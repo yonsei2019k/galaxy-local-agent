@@ -8,7 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import com.user.localagent.LocalAgentApplication
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 import kotlinx.serialization.json.*
 
 class BriefingWidget:AppWidgetProvider() {

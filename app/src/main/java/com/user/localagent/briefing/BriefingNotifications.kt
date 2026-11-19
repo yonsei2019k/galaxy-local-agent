@@ -9,7 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 
 object BriefingNotifications {
     fun show(context:Context,registered:Int,review:Int) {

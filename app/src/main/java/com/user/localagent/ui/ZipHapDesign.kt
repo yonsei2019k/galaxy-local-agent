@@ -34,7 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.user.localagent.R
+import com.user.localagent.runtime.R
 
 /** Quiet charcoal surfaces; mint is reserved for small status indicators. */
 object ZipHapColors {

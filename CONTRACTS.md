@@ -1,5 +1,19 @@
 # Galaxy Local Agent implementation contracts
 
+## Bounded goal continuation candidate2019 (source; device qualification pending)
+
+An explicitly approved goal may queue its next segment only after the preceding worker and cleanup join, actual scope/goal/version/parent checkpoint checks, preserved permissions and ledger checks. The default whole-goal limits are8segments/144tool attempts/30minutes and3no-progress segments. Explicit resume does not silently renew exhausted budgets. Historical context and goal ledgers are work data, not new authority or completion proof. A segment finishing never marks the whole goal COMPLETE; independent criterion finalization remains a separate gap.
+
+Every source run, including explicit START/RESUME/steer history, must retain a matching captured scope and a closed, consistent native checkpoint without in-flight or unknown effects. Missing native history is unknown for every model provider. A clean visible step list, optional work trace or partial readback obligations cannot establish that no unrecorded mutation started. Current local execution without that journal is therefore not qualified for cross-segment continuation/resume; ordinary bounded local requests remain supported.
+
+Goal queue publication follows durable row/context/link readback and actual FGS ACTIVE acknowledgement. An already active parent service may be retained through teardown/child handoff by a fixed-deadline cleanup hold. Child durable queue and ACTIVE acknowledgement precede release of that hold. This is liveness support, not tool authority, battery-survival assurance or task completion. Goal terminal notifications identify an execution segment rather than whole-goal completion.
+
+## Shared Android runtime and separate image package candidate2019
+
+The main application ID/signing identity remains unchanged. android-runtime compiles the existing Kotlin/Compose/Room/JNI/Rust/React sources once; generated-source consumers explicitly depend on the Rust generator. The image companion uses application ID com.user.localagent.images, distinct private data and assistant-disabled startup/idle cleanup. Its models/results/pairing are not silently copied from the main app. Its helper UI prepares only verified allowlisted bundles after a button action and never loads a model by itself.
+
+Cross-app phone-model arbitration, legacy work migration, removal of the main legacy image route, cloud-image backend/UI wiring and actual cloud-image tool isolation remain unqualified. Building two APKs does not establish those capabilities. The new cloud-image component is unconnected; synchronous click protection is not durable job idempotency or verified generation.
+
 ## Signed deployment branch and next-request selection2006
 
 Pushes to the dedicated `codex/internal-release` branch run the trusted CI build/sign/latest-manifest pipeline. Only configured trusted release refs may publish; PRs cannot release. Existing signing keys, APK/capability/permission checks, source identity and busy/cancellation fences remain. CI code is2000+workflow run number in both jobs. Phone checks and Android-confirmation limits are specified in [automatic update operations](docs/automatic-updates.ko.md); publication, installer request and installed-byte evidence are separate states.

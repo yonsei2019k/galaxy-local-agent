@@ -20,7 +20,7 @@ def main():
     env = dict(os.environ)
     env.setdefault("CARGO_BUILD_JOBS", "2")
     cargo = shutil.which("cargo") or str(Path.home() / ".cargo/bin/cargo.exe")
-    generated = root / "app/build/generated/rust"
+    generated = root / "android-runtime/build/generated/rust"
     bindings = generated / "kotlin"
     bindings.mkdir(parents=True, exist_ok=True)
     run([cargo, "build", "--locked", "-p", "ziphap-android"], cwd=workspace, env=env)

@@ -3,11 +3,14 @@ package com.user.localagent
 import android.app.Application
 import kotlinx.coroutines.*
 
-class LocalAgentApplication : Application() {
-    val container: AppContainer by lazy { AppContainer(this) }
+open class LocalAgentApplication : Application() {
+    /** Image-only consumers reuse the runtime without starting assistant background work. */
+    protected open val startAssistantBackgroundWork: Boolean = true
+    val container: AppContainer by lazy { AppContainer(this,assistantWorkEnabled=startAssistantBackgroundWork) }
     private val maintenance=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     override fun onCreate() {
         super.onCreate()
+        if (!startAssistantBackgroundWork) return
         com.user.localagent.updates.UpdateManager(this).apply {setBusy(false);schedule()}
         container.callFollowUp.restore()
         container.remoteTests.start(maintenance)

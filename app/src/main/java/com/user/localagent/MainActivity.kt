@@ -569,7 +569,7 @@ class MainActivity : ComponentActivity() {
             item {ExtensionInspectionPanel{status.value=it}}
             item {val scope=rememberCoroutineScope();OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("반복 작업 허용 초기화")}}
             }
-            item {Text("버전 ${BuildConfig.VERSION_NAME} · ${Build.MODEL}",style=MaterialTheme.typography.bodySmall)}
+            item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName} · ${Build.MODEL}",style=MaterialTheme.typography.bodySmall)}
         }
     }
     @Composable private fun InfoCard(title:String,body:String) {ZipHapCard {Text(title,fontWeight=FontWeight.Bold);Spacer(Modifier.height(6.dp));Text(body,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodyMedium)}}

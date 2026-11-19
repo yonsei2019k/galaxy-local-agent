@@ -19,7 +19,7 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.*
 import com.user.localagent.benchmark.RuntimeGate
 
-class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
+class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,private val assistantWorkEnabled:Boolean=true) {
     private val appContext=context.applicationContext
     internal val applicationContext get()=appContext
     val hostCodeHash:String by lazy {
@@ -74,7 +74,10 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
     val chatAttachments by lazy {com.user.localagent.workspace.ChatAttachments(appContext,this)}
     val knowledgeIngestion by lazy {com.user.localagent.automation.KnowledgeIngestionController(appContext,repository)}
     val planningFeedback by lazy {com.user.localagent.automation.PlanningFeedbackStore(repository)}
-    val runs by lazy {ChatRunCoordinator(appContext,this)}
+    val runs by lazy {
+        check(assistantWorkEnabled){"이 앱에서는 일반 에이전트를 시작하지 않습니다."}
+        ChatRunCoordinator(appContext,this)
+    }
     val remoteTests by lazy {com.user.localagent.compute.PcRemoteTestInbox(appContext,this)}
     suspend fun validatePrivateDataOrigin(origin:com.user.localagent.audio.PrivateDataPickerOrigin) {
         val expected=origin.scope
@@ -213,7 +216,9 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null) {
         cancelIdleUnload()
         idleUnload=maintenanceScope.launch {
             delay(120_000)
-            if(!runs.busy.value&&runs.queued.value.isEmpty()&&RuntimeGate.inference.compareAndSet(false,true))
+            // Image-only cleanup must not initialize the assistant's lazy coordinator.
+            val mayUnload = !assistantWorkEnabled || (!runs.busy.value && runs.queued.value.isEmpty())
+            if(mayUnload&&RuntimeGate.inference.compareAndSet(false,true))
                 try{engine.unloadPhoneResidency()}finally{RuntimeGate.inference.set(false)}
         }
     }

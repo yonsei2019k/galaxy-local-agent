@@ -28,6 +28,9 @@ import uuid
 
 
 RESTART_POLICY = "RAM_ONLY_RESTART_REVOKES"
+# Fixed host contracts, never inferred from names, model prose or page contents.
+FAILED_PUBLIC_READS_HAVE_NO_EFFECT = frozenset({'read_webpage','search_web','search_shopping'})
+PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
 MAX_TTL_MS = 900_000
 PHONE_LEASE_MS = 30_000
@@ -498,6 +501,7 @@ class AgentBridge:
         _require(type(names) is list and len(names) <= 12 and
                  all(type(name) is str and name in s.tools for name in names), "PLAN_TOOLS")
         _require(len(set(names)) == len(names), "PLAN_TOOLS")
+        _require(not PRIVATE_PHONE_TOOLS.intersection(names), "PRIVATE_IMAGE_WORKROOM", 403)
         _require(type(constraints) is list and len(constraints) <= 6, "PLAN_CONSTRAINTS")
         for item in constraints:
             self._plan_text(item, 240)
@@ -629,6 +633,7 @@ class AgentBridge:
                     cid = _uuid(request["callId"])
                     tool, arguments = request["tool"], request["arguments"]
                     _require(type(tool) is str, "TOOL_NOT_OFFERED", 403)
+                    _require(tool not in PRIVATE_PHONE_TOOLS, "PRIVATE_IMAGE_WORKROOM", 403)
                     if s.require_plan:
                         _require(s.plan is not None and s.plan["state"] == "ACCEPTED", "PLAN_NOT_ACCEPTED", 409)
                         _require(tool in s.plan["requiredTools"], "PLAN_TOOL_NOT_SELECTED", 403)
@@ -724,7 +729,8 @@ class AgentBridge:
                 return 200, value
             _require(s.active == cid and c.state in ("CLAIMED", "UNKNOWN_EFFECT"), "RESULT_NOT_CLAIMED", 409)
             c.result, c.result_hash, c.source = copy.deepcopy(body["result"]), digest, "PHONE_EXECUTOR"
-            known = c.result["verification"] in ("VERIFIED", "PREPARED") or c.result["effectNotApplied"]
+            known = (c.result["verification"] in ("VERIFIED", "PREPARED") or c.result["effectNotApplied"] or
+                     c.tool in FAILED_PUBLIC_READS_HAVE_NO_EFFECT and c.result['verification']=='FAILED' and not c.result['success'])
             c.state = "COMPLETED" if known else "UNKNOWN_EFFECT"
             if known:
                 s.active = None

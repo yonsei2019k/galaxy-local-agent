@@ -139,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
    self.reply(value,status);return
   if path=='/v1/health' and self.headers.get_all('X-ZipHap-Agent-Capability',[]):
    self.reply({'error':'HEALTH_HOST_ONLY'},403);return
-  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id'],'deviceToolBridge':{'version':1,'restartPolicy':'RAM_ONLY_RESTART_REVOKES','bootstrapLoopbackOnly':True}|AGENT_PROVIDER.health()}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
+  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id'],'deviceToolBridge':{'version':1,'publicReadFailureRecovery':1,'restartPolicy':'RAM_ONLY_RESTART_REVOKES','bootstrapLoopbackOnly':True}|AGENT_PROVIDER.health()}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
   owners=self.headers.get_all('X-ZipHap-Compute-Owner',[])
   if len(owners)>1:raise ValueError('DUPLICATE_OWNER')
   owner=owner_value(owners[0] if owners else None)

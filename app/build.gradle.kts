@@ -2,7 +2,6 @@ plugins {
     id("com.android.application")
     kotlin("plugin.compose")
     kotlin("plugin.serialization")
-    id("com.google.devtools.ksp")
 }
 android {
     namespace = "com.user.localagent"
@@ -17,8 +16,7 @@ android {
         versionName = System.getenv("RELEASE_VERSION_NAME") ?: "0.1.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
-        buildConfigField("String", "UPDATE_URL", "\"https://github.com/yonsei2019k/galaxy-local-agent/releases/latest/download/update.json\"")
+        manifestPlaceholders["ziphapUpdateUrl"] = "https://github.com/yonsei2019k/galaxy-local-agent/releases/latest/download/update.json"
     }
     // Verification APK retains the production package/data and release native flags.
     // It is unsigned here; the release owner applies the existing private signing key.
@@ -33,20 +31,14 @@ android {
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
-    sourceSets["main"].assets.srcDir("../public")
-    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/react-assets").get().asFile)
-    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/rust/jniLibs").get().asFile)
-    sourceSets.named("main") { kotlin.directories += layout.buildDirectory.dir("generated/rust/kotlin").get().asFile.absolutePath }
-    // Share private QA-report helpers between JVM and instrumentation tests only.
-    sourceSets.named("test") { kotlin.directories += "src/sharedTest/java" }
+    // These source files stay here, but only android-runtime compiles them.
+    sourceSets.named("main") { java.setSrcDirs(emptyList<String>()); kotlin.directories.clear() }
+    sourceSets.named("test") { java.setSrcDirs(emptyList<String>()); kotlin.directories.clear() }
     sourceSets.named("androidTest") { kotlin.directories += "src/sharedTest/java" }
-    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
 }
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
-ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
-    implementation("net.java.dev.jna:jna:5.17.0@aar")
-    implementation(project(":core"))
+    implementation(project(":android-runtime"))
     implementation(platform("androidx.compose:compose-bom:2026.02.00"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")
@@ -61,7 +53,6 @@ dependencies {
     implementation("com.google.mlkit:genai-speech-recognition:1.0.0-alpha2")
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
-    ksp("androidx.room:room-compiler:2.8.4")
     implementation("net.zetetic:sqlcipher-android:4.20.0@aar")
     implementation("androidx.sqlite:sqlite:2.6.2")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
@@ -82,19 +73,28 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
 
-val buildRustEngine by tasks.registering(Exec::class) {
-    workingDir(rootProject.projectDir)
-    commandLine(providers.environmentVariable("ZIPHAP_PYTHON").orElse("python").get(), "scripts/build-rust-android.py")
-    inputs.files(fileTree("../rust") { include("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/**"); exclude("target/**") })
-    inputs.file("../scripts/build-rust-android.py")
-    outputs.dir(layout.buildDirectory.dir("generated/rust"))
+// Retain CI entry points while JVM tests become friends of the shared runtime.
+tasks.matching { it.name.startsWith("test") && it.name.endsWith("UnitTest") }.configureEach {
+    val runtimeTask = if (name == "testOfflineVerificationUnitTest") "testReleaseUnitTest" else name
+    dependsOn(":android-runtime:$runtimeTask")
 }
-val buildReactUi by tasks.registering(Exec::class) {
-    workingDir(rootProject.projectDir)
-    commandLine(providers.environmentVariable("ZIPHAP_PYTHON").orElse("python").get(), "scripts/build-react-ui.py")
-    inputs.files(fileTree("../web-ui") { exclude("node_modules/**", "dist/**") })
-    inputs.file("../scripts/build-react-ui.py")
-    outputs.dir(layout.buildDirectory.dir("generated/react-assets/react"))
+tasks.register("buildRustEngine") { dependsOn(":android-runtime:buildRustEngine") }
+tasks.register("buildReactUi") { dependsOn(":android-runtime:buildReactUi") }
+
+// Device tests retain their current target APK and may inspect internal runtime APIs.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    if (name.startsWith("compile") && name.endsWith("AndroidTestKotlin")) {
+        val variant = name.removePrefix("compile").removeSuffix("AndroidTestKotlin")
+        val runtimeVariant = if (variant == "OfflineVerification") "Release" else variant
+        val runtimeTask = "compile${runtimeVariant}Kotlin"
+        dependsOn(":android-runtime:$runtimeTask", ":android-runtime:bundleLibCompileToJar$runtimeVariant")
+        val runtimeClasses = project(":android-runtime").layout.buildDirectory.dir(
+            "intermediates/built_in_kotlinc/${runtimeVariant.replaceFirstChar { it.lowercase() }}/$runtimeTask/classes")
+        val runtimeJar = project(":android-runtime").layout.buildDirectory.file(
+            "intermediates/compile_library_classes_jar/${runtimeVariant.replaceFirstChar { it.lowercase() }}/bundleLibCompileToJar$runtimeVariant/classes.jar")
+        // Add to the task's friend collection: a free -Xfriend-paths argument is
+        // overwritten by KGP's own friend argument, and Android compiles against the jar.
+        friendPaths.from(runtimeClasses, runtimeJar)
+    }
 }
-tasks.named("preBuild").configure { dependsOn(buildRustEngine,buildReactUi) }
 

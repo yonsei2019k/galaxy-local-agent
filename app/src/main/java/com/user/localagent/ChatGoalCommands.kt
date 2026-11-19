@@ -4,6 +4,8 @@ import com.user.localagent.core.ConversationSubmissionPolicy
 import com.user.localagent.core.GoalDefinition
 import com.user.localagent.core.GoalStatus
 import com.user.localagent.data.ChatAccessScope
+import com.user.localagent.compute.PcComputeSettings
+import com.user.localagent.externalagent.ExternalAgentSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -55,11 +57,15 @@ fun ChatRunCoordinator.deleteGoal(threadId:String,expected:GoalDefinition?,onSuc
     }
 }
 
-/** An explicit UI button queues one bounded run; no periodic execution or automatic COMPLETE. */
+/** An explicit UI button captures a new grant; subsequent host segments preserve it unchanged. */
 fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
     val threadId=selectedThreadId.value
     if(goal.threadId!=threadId||goal.projectId.orEmpty()!=selectedProjectId.value){status.value="목표 추진을 연 대화·프로젝트가 바뀌었습니다. 원래 대화에서 다시 시작해주세요.";return}
-    val model=preferredModelId.value;val thinking=modelOptions.value.thinking
+    val selectedModel=preferredModelId.value;val thinking=modelOptions.value.thinking
+    val pcSettings=PcComputeSettings.get(context)
+    val pcAuthority=pcSettings.captureTextAuthority()
+    val externalAuthority=ExternalAgentSettings.get(context).capture()
+    val model=if(selectedModel=="auto"&&externalAuthority.enabled&&pcSettings.state.value.paired)ExternalAgentSettings.MODEL_ID else selectedModel
     scope.launch {
         try {
             val access=app.repository.chat.accessScope(threadId)
@@ -69,12 +75,15 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
             val binding=app.workspaceFor(access.projectId).bindingFingerprint()
             val prepared=saveUiGoalGuarded(access,goal)
             goalMutation.withLock {
-                queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]))
+                queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),
+                    capturedPcRevision=pcAuthority.revision,allowCloudText=pcAuthority.allowCloudText,
+                    capturedAllowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,
+                    capturedExternalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null)
                 if(selectedThreadId.value==threadId&&selectedProjectId.value==goal.projectId.orEmpty()){
                     runMode.value=ConversationSubmissionPolicy.newRequestMode().wireName
                 }
             }
-            status.value="목표에 연결된 실행 한 건을 대기열에 저장했습니다. 완료 기준은 자동 완료하지 않습니다."
+            status.value="목표 실행을 저장했습니다. 확인된 결과를 보존하며 승인된 범위와 누적 예산 안에서 이어갑니다."
             drain();onSuccess()
         }catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){status.value="목표 실행을 시작하지 못했습니다. 목표와 편집 내용은 유지됩니다 · ${error.message?:error.javaClass.simpleName}"}

@@ -21,6 +21,8 @@ data class QueuedChatRequest(
     val readbackObligations:RequiredReadbackObligations.State?=null,
     val allowExternalAgent:Boolean=false,
     val externalAgentRevision:Long?=null,
+    val goalSegment:GoalSegmentBinding?=null,
+    val goalLedger:List<GoalLedgerEntry> = emptyList(),
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -32,6 +34,17 @@ data class QueuedChatRequest(
         require(!allowCloudText||capturedPcRevision!=null){"클라우드 사용은 현재 요청에 캡처한 명시 권한이 필요합니다."}
         require(externalAgentRevision==null||externalAgentRevision>=0)
         require(!allowExternalAgent||(externalAgentRevision!=null&&capturedPcRevision!=null))
+        require(goalLedger.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
+        require(goalLedger.map {it.sourceRunId to it.stepIndex}.distinct().size==goalLedger.size)
+        goalSegment?.let { segment->
+            require(goal!=null&&segment.goalId==goal.id&&segment.workDigest==goalWorkDigest(goal))
+            require(mode in setOf("act","debug")) // Text-only answer checkpoints keep the chain without gaining tools.
+            require((segment.rootRunId==runId)==(segment.segmentIndex==1))
+            require(segment.parentRunId!=runId&&segment.consumedToolCalls==goalLedger.size)
+            require(goalLedger.all {it.sourceRunId!=runId})
+            require(goalLedger.all {it.sourceRunId in goal.linkedRunIds})
+        }
+        require(goalSegment!=null||goalLedger.isEmpty())
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
@@ -49,6 +62,7 @@ data class QueuedChatRequest(
         parentGoalStartRunId?.let {put("parentGoalStartRunId",it)}
         readbackObligations?.let {put("readbackObligations",ChatReadbackObligationCodec.encode(it))}
         put("allowExternalAgent",allowExternalAgent);put("externalAgentRevision",externalAgentRevision)
+        goalSegment?.let {put("goalSegment",it.json());put("goalLedger",buildJsonArray {goalLedger.forEach {entry->add(entry.json())}})}
     }.toString()
     companion object {
         fun fromJson(text:String):QueuedChatRequest {
@@ -70,7 +84,9 @@ data class QueuedChatRequest(
                 o["allowCloudText"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["readbackObligations"]?.let(ChatReadbackObligationCodec::decode),
                 o["allowExternalAgent"]?.let{require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
-                o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long})
+                o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long},
+                o["goalSegment"]?.let {GoalSegmentBinding.parse(it.jsonObject)},
+                o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList())
         }
     }
 }

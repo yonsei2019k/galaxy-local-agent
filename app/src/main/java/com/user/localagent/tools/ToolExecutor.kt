@@ -256,7 +256,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             val prepared=call.name=="reply_messenger_notification"
             ToolResult(call.id,true,result,if(prepared)VerificationState.PREPARED else VerificationState.VERIFIED,
                 if(prepared)"메신저 전송 요청 전달 확인 · 수신 완료는 확인되지 않음" else "기기 제공자 조회 또는 저장 후 재조회 확인")
-        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패",effectNotApplied=error is ToolPreconditionRejected)}
+        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패",effectNotApplied=error is ToolPreconditionRejected||ToolReadPolicy.isReadOnly(call.name))}
     }
     private fun ToolCall.optional(key:String)=arguments[key]?.jsonPrimitive?.content?.takeIf {it.isNotBlank()}
     private fun ToolCall.epoch(key:String)=optional(key)?.let {OffsetDateTime.parse(it).toInstant().toEpochMilli()}
