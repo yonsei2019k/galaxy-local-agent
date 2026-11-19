@@ -1,4 +1,10 @@
 # Device validation
+## Installed 2029 renderer recovery and public research boundary
+
+Wireless ADB confirmed versionCode 2029 (v0.1.29-local) and the installed test package matched its signed artifact. The focused device case terminated the live React WebView renderer, reopened the conversation, preserved the same synthetic draft and branch binding, and showed the fixed staff menu without remote QA or standalone project rows.
+
+The original read-only public travel prompt triggered local privacy routing. It read a skill and returned a draft with no source, yet the run was marked completed (177.263 s). A scoped public-only fixture without the privacy keyword reached the paired cloud path. search_web and read_webpage both succeeded, then the returned data triggered the egress check and the run paused with private_result_withheld (24.070 s). The matching content is unconfirmed. Neither run verified flight inventory or a fare. Raw test results stay outside Git.
+
 
 ## Installed v0.1.27 staff menu and remaining canaries
 

@@ -1,3 +1,7 @@
+## 2026-11-20 — Public research completion and private read handoff
+
+Public research with no observed source now pauses instead of treating a skill read or plan as a result. When the cloud egress check withholds a result during a plan constrained to public research tools, eligible same-run, verified read evidence is saved in the encrypted run and passed to the existing private local inference path. The handler continues by using the already-read observations. It cannot dispatch new tools, send the answer to the PC test mailbox, or replay an unknown effect. The host stops processing cloud calls and requests cancellation before local generation starts. Missing model readiness and insufficient evidence remain visible outcomes. Installed 2029 renderer and research evidence is recorded in device-validation.md.
+
 ## 2026-11-19 — 판단 중단 복구와 대화 모델 분리
 
 일반 대화와 개인 자료 처리 경로를 분리했다. 신규 일반 요청은 승인된 Codex 경로를 선택한다. 기존 로컬 전용 요청의 클라우드 권한은 늘리지 않는다. 이미지 입력, 명시적 개인정보 선택, 인식 가능한 계정·식별 정보는 휴대폰 또는 페어링 PC의 로컬 모델로 처리한다. 음성 전사는 기존 경로를 유지한다. 클라우드가 개인 자료 조회를 처음 제안하면 호출 수 0인 상태에서 계획 거부를 확인한 뒤 일반 대화의 동일 요청을 로컬로 전환한다. 반환 본문에서 민감 정보가 발견되면 실제 실행을 기기에 기록하고 전송을 중단한다. 자유문 개인정보의 완전한 자동 판별은 보장할 수 없어 개인정보 전용 선택을 제공한다.

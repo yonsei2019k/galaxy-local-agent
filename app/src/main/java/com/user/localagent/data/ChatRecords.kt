@@ -9,6 +9,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -535,14 +536,15 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         require(contextJson.length<=2_000_000);val r=validRun(runId);r.copy(contextJson=contextJson,updatedAt=now()).also {dao.run(it)}
     }
     suspend fun checkpointRun(runId:String,contextJson:String)=updateRunContext(runId,contextJson)
-    suspend fun switchRunToPrivateModel(runId:String,originalModel:String,contextJson:String)=database.withTransaction {
+    suspend fun switchRunToPrivateModel(runId:String,originalModel:String,contextJson:String,privateReadEvidence:JsonArray?=null)=database.withTransaction {
         require(contextJson.length<=2_000_000)
         val run=validRun(runId)
         check(run.status=="running" && run.modelId==originalModel)
         val before=Json.parseToJsonElement(run.contextJson).jsonObject
         val local=Json.parseToJsonElement(contextJson).jsonObject
         // Keep the closed cloud session's checkpoint alongside the new local request envelope.
-        val merged=JsonObject(before.filterKeys {it=="sharedEngineState"}+local).toString()
+        val evidence=privateReadEvidence?.let {mapOf("privateResearchReadEvidence" to it)}.orEmpty()
+        val merged=JsonObject(before.filterKeys {it=="sharedEngineState"}+local+evidence).toString()
         require(merged.length<=2_000_000)
         dao.run(run.copy(modelId=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION,contextJson=merged,updatedAt=now()))
     }

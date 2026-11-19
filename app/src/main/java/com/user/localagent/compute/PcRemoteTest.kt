@@ -151,7 +151,14 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
             report(config,id,"interrupted","",emptyList(),runId,"REMOTE_TEST_SCOPE_CHANGED",receipt(),epoch)
             return
         }
-        val finalCode=app.repository.chat.run(runId)?.errorCode
+        val finalRun=app.repository.chat.run(runId)
+        val finalCode=finalRun?.errorCode
+        val keepLocal=finalRun?.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION
+        if(keepLocal){
+            val notice=if(state=="completed")"공개 자료는 기기 대화에서 확인할 수 있습니다."else"기기에서 처리 상태를 확인해주세요."
+            report(config,id,state?:"timeout",notice,emptyList(),runId,finalCode?.take(96),receipt(),epoch)
+            return
+        }
         val canFollowUp=conversationSupported&&(state=="completed"||
             state=="paused"&&finalCode=="cloud_clarification_read_only")&&settings.epoch==epoch&&
             messages.lastOrNull()?.let{it.role=="assistant"&&it.runId==runId}==true
