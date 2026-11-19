@@ -21,6 +21,13 @@ class PcRemoteTestRequestTest {
         assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion","2")}))
         assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion",3)}))
     }
+    @Test fun publicResearchOnlyIsEnabledByATypedBoolean(){
+        assertFalse(PcRemoteTestRequest.parse(body("quote")).publicResearchOnly)
+        val restricted=buildJsonObject{body("quote").forEach{(key,value)->put(key,value)};put("publicResearchOnly",true)}
+        assertTrue(PcRemoteTestRequest.parse(restricted).publicResearchOnly)
+        val invalid=buildJsonObject{restricted.forEach{(key,value)->put(key,value)};put("publicResearchOnly","true")}
+        assertThrows(IllegalArgumentException::class.java){PcRemoteTestRequest.parse(invalid)}
+    }
     @Test fun followUpUsesOnlyCanonicalPreviousRequestId(){
         val previous="10000000-0000-4000-8000-000000000004"
         fun follow(value:String)=buildJsonObject{body("next").forEach{(key,item)->put(key,item)};put("afterRequestId",value)}

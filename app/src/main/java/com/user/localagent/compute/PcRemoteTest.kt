@@ -36,7 +36,7 @@ class PcRemoteTestSettings private constructor(context:Context) {
 }
 
 /** Validated shape of one PC test request; anything else is reported back as rejected without running. */
-internal data class PcRemoteTestRequest(val requestId:String,val text:String,val model:String,val afterRequestId:String?) {
+internal data class PcRemoteTestRequest(val requestId:String,val text:String,val model:String,val afterRequestId:String?,val publicResearchOnly:Boolean=false) {
     companion object {
         private val MODEL=Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,95}")
         fun supportsReceipt(response:JsonObject?)=
@@ -45,7 +45,7 @@ internal data class PcRemoteTestRequest(val requestId:String,val text:String,val
             (response?.get("conversationVersion") as? JsonPrimitive)?.let{!it.isString&&it.intOrNull==1}==true
         fun parse(value:JsonObject):PcRemoteTestRequest {
             val required=setOf("requestId","text","model")
-            require(value.keys.containsAll(required)&&value.keys.all{it in required||it=="afterRequestId"})
+            require(value.keys.containsAll(required)&&value.keys.all{it in required||it in setOf("afterRequestId","publicResearchOnly")})
             fun string(key:String)=value.getValue(key).jsonPrimitive.also{require(it.isString)}.content
             fun id(key:String)=string(key).also{require(UUID.fromString(it).toString()==it)}
             val id=id("requestId")
@@ -55,7 +55,8 @@ internal data class PcRemoteTestRequest(val requestId:String,val text:String,val
             require(MODEL.matches(model))
             val previous=if("afterRequestId" in value)id("afterRequestId") else null
             require(previous!=id)
-            return PcRemoteTestRequest(id,text,model,previous)
+            val publicOnly=value["publicResearchOnly"]?.jsonPrimitive?.also{require(!it.isString)}?.boolean?:false
+            return PcRemoteTestRequest(id,text,model,previous,publicOnly)
         }
     }
 }
@@ -65,7 +66,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
     private val pairing=PcComputeSettings.get(context.applicationContext)
     private val transport=PcTransport(context)
     private var job:Job?=null
-    private data class Continuation(val threadId:String,val branchId:String,val threadRevision:Long,val runId:String,val model:String,
+    private data class Continuation(val threadId:String,val branchId:String,val threadRevision:Long,val runId:String,val model:String,val publicResearchOnly:Boolean,
         val connection:PcConnection,val epoch:Long,val expiresAt:Long)
     private val continuations=linkedMapOf<String,Continuation>()
 
@@ -112,7 +113,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         continuations.entries.removeAll{it.value.expiresAt<=started||it.value.epoch!=epoch||!it.value.connection.samePair(config)}
         val previous=request.afterRequestId?.let{continuations.remove(it)}
         val thread=if(request.afterRequestId==null)app.repository.chat.createRemoteTestThread()
-        else previous?.takeIf{conversationSupported&&it.model==request.model}?.let { link ->
+        else previous?.takeIf{conversationSupported&&it.model==request.model&&it.publicResearchOnly==request.publicResearchOnly}?.let { link ->
             app.repository.chat.thread(link.threadId)?.takeIf { candidate ->
                 !candidate.archived&&candidate.projectId==null&&candidate.revision==link.threadRevision&&candidate.activeBranchId==link.branchId&&
                     app.repository.chat.messages(candidate.id,link.branchId).first().lastOrNull()?.runId==link.runId
@@ -122,7 +123,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         val runId=UUID.randomUUID().toString()
         val accepted=withContext(Dispatchers.Main){
             settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true&&
-                app.runs.submitRemoteTest(request.text,thread.id,request.model,runId,thread.activeBranchId,thread.revision,previous?.runId){
+                app.runs.submitRemoteTest(request.text,thread.id,request.model,runId,thread.activeBranchId,thread.revision,previous?.runId,request.publicResearchOnly){
                     settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true
                 }
         }
@@ -156,7 +157,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
             messages.lastOrNull()?.let{it.role=="assistant"&&it.runId==runId}==true
         if(canFollowUp){
             if(continuations.size>=16)continuations.remove(continuations.keys.first())
-            continuations[id]=Continuation(thread.id,thread.activeBranchId,thread.revision,runId,request.model,config,epoch,SystemClock.elapsedRealtime()+30*60_000L)
+            continuations[id]=Continuation(thread.id,thread.activeBranchId,thread.revision,runId,request.model,request.publicResearchOnly,config,epoch,SystemClock.elapsedRealtime()+30*60_000L)
         }
         report(config,id,state?:"timeout",answer.take(20_000),tools.takeLast(64).map{Triple(it.name.take(96),it.success,it.summary.take(400))},runId,
             finalCode?.take(96),receipt(),epoch,canFollowUp)

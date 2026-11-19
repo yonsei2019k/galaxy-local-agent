@@ -120,6 +120,9 @@ object ExternalAgentContract {
      * PREPARED hand-offs pause the run. The PC broker accepts at most 128 tools per session.
      */
     val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys
+    val PUBLIC_RESEARCH_PHONE_TOOLS = setOf("search_web", "read_webpage", "search_shopping",
+        "search_youtube_videos", "get_current_datetime", "calculate", "date_calculate") +
+        com.user.localagent.core.EvidenceToolCatalog.names
     val PC_TOOLS:Set<String> = setOf("pc_inspect_workspace","pc_read_file")
     fun uuid(value:String) { require(runCatching { UUID.fromString(value).toString()==value }.getOrDefault(false)){"BRIDGE_UUID"} }
     fun bounded(value:String,max:Int) { require(value.isNotBlank()&&value.length<=max&&value.none { it.code<32 }){"BRIDGE_TEXT"} }

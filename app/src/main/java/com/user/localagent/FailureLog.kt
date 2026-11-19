@@ -13,10 +13,12 @@ object FailureLog {
         append(context,stage,error,code,"")
     }
 
-    @Synchronized fun cloudStop(context:Context,code:String,phase:String,sessionState:String?,
-        pendingState:String?,sequence:Int,providerState:String,elapsedMs:Long) {
+    @Synchronized internal fun cloudStop(context:Context,code:String,
+        stop:com.user.localagent.externalagent.ExternalAgentController.StopMetadata,providerState:String,elapsedMs:Long) {
         append(context,"cloud_bridge_stop",null,code,
-            " phase=${token(phase)} session=${token(sessionState)} pending=${token(pendingState)} sequence=${sequence.coerceIn(0,18)} provider=${token(providerState)} elapsedMs=${elapsedMs.coerceAtLeast(0)}")
+            " phase=${stop.phase.name} session=${stop.state?.name.orEmpty()} pending=${stop.pending?.name.orEmpty()}"+
+                " sequence=${stop.sequence.coerceIn(0,18)} provider=${token(providerState)} elapsedMs=${elapsedMs.coerceAtLeast(0)}"+
+                " tool=${token(stop.pendingTool)} verification=${token(stop.verification)} success=${stop.resultSuccess} effectNotApplied=${stop.effectNotApplied}")
     }
 
     private fun append(context:Context,stage:String,error:Throwable?,code:String?,metadata:String){

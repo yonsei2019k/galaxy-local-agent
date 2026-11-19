@@ -65,9 +65,13 @@ class ExternalAgentController(
     private var session:AgentSessionSnapshot?=null
     private var startedAt=0L
     private var highestPhoneSequence=0
-    internal data class StopMetadata(val phase:Phase,val state:AgentSessionState?,val pending:AgentPhoneCallState?,val sequence:Int)
+    internal data class StopMetadata(val phase:Phase,val state:AgentSessionState?,val pending:AgentPhoneCallState?,val sequence:Int,
+        val pendingTool:String?,val verification:String?,val resultSuccess:Boolean?,val effectNotApplied:Boolean?)
     internal suspend fun stopMetadata():StopMetadata=gate.withLock {
-        StopMetadata(phase,session?.state,session?.pending?.state,session?.lastSequence?:0)
+        val call=session?.pending
+        val result=call?.let{entries[it.callId]?.result}
+        StopMetadata(phase,session?.state,call?.state,session?.lastSequence?:0,call?.tool,result?.verification?.name,
+            result?.success,result?.effectNotApplied)
     }
     private class Entry(val proposal:ExternalAgentProposal,val fingerprint:String) {
         var result:ToolResult?=null

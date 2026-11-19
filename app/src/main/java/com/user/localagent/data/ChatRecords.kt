@@ -71,6 +71,11 @@ class ChatConverters {
     @Query("SELECT value FROM knowledge_meta WHERE `key`=:key") suspend fun metaValue(key:String):Long?
     @Query("SELECT * FROM chat_projects ORDER BY archived,updatedAt DESC,id") fun projects():Flow<List<ProjectRecord>>
     @Query("SELECT * FROM chat_threads WHERE deletedAt IS NULL ORDER BY pinned DESC,updatedAt DESC,id") fun threads():Flow<List<ChatThreadRecord>>
+    @Query("""SELECT t.* FROM chat_threads t WHERE t.deletedAt IS NULL
+        AND NOT EXISTS (SELECT 1 FROM knowledge_meta m WHERE m.`key`='chat.remoteQa.' || t.id AND m.value=1)
+        AND trim(t.title) NOT LIKE 'PC 원격 시험%' AND trim(t.title) NOT LIKE 'PC 원격 정리%'
+        ORDER BY t.pinned DESC,t.updatedAt DESC,t.id""")
+    fun menuThreads():Flow<List<ChatThreadRecord>>
     @Query("SELECT * FROM chat_runs ORDER BY createdAt DESC LIMIT 500") fun runs():Flow<List<ChatRunRecord>>
     @Query("SELECT * FROM chat_projects WHERE id=:id") suspend fun project(id:String):ProjectRecord?
     @Query("SELECT * FROM chat_threads WHERE projectId=:projectId AND deletedAt IS NULL") suspend fun liveProjectThreads(projectId:String):List<ChatThreadRecord>
@@ -181,6 +186,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     private val local=database.dao()
     private val queueStore=ChatQueueStore(database)
     val projects=dao.projects();val threads=dao.threads();val runs=dao.runs()
+    val menuThreads=dao.menuThreads()
     suspend fun ensureLegacyThread():ChatThreadRecord=database.withTransaction {
         dao.thread(LEGACY_THREAD_ID)?.takeIf {it.deletedAt==null}?.let {return@withTransaction it}
         if(dao.thread(LEGACY_THREAD_ID)!=null)return@withTransaction createThread(title="새 대화")
@@ -349,12 +355,12 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     suspend fun openFixedOfficeRooms():ChatThreadRecord=database.withTransaction {
         val rooms=com.user.localagent.core.office.ZipHapRoom.entries.associateWith { room ->
-            val id=UUID.nameUUIDFromBytes("ziphap.fixed-office.v1.${room.name}".toByteArray(Charsets.UTF_8)).toString()
+            val id=room.threadId
             val marker="chat.fixedOffice.${room.name}"
             val prior=dao.thread(id)
             if(prior!=null){
                 check(dao.metaValue(marker)==1L&&prior.deletedAt==null){"사무실 대화의 저장 상태를 확인해주세요."}
-                prior
+                if(prior.archived)prior.copy(archived=false).also{dao.thread(it)}else prior
             }else{
                 check(dao.metaValue(marker)==null){"삭제된 사무실 대화는 자동으로 다시 만들지 않습니다."}
                 val label=if(room==com.user.localagent.core.office.ZipHapRoom.MAIN)

@@ -125,10 +125,26 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a', action: 'selectThread', payload: { id: 'thread-b' } })
     snapshot({ ...base, threadId: 'thread-b', branchId: 'branch-b', draft: 'B 전용 초안', threads: base.threads.map(thread => ({ ...thread, selected: thread.id === 'thread-b' })) })
     expect(input().value).toBe('B 전용 초안')
-    click('프로젝트')
-    expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'navigate', payload: { panel: 'projects' } })
+    click('파일 작업')
+    expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'navigate', payload: { panel: 'tools' } })
     click('파일 첨부')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'attach', payload: {} })
+  })
+
+  it('keeps fixed staff order and only marks the active room while omitting other rooms from the menu', () => {
+    mount()
+    const staffRooms = ['회장 이수빈', '본부장 김호영', '대리 김규민', '대리 김서율']
+      .map((title, index) => ({ id: `seat-${index}`, title, selected: false, working: index === 2 }))
+    const threads = [...base.threads, ...staffRooms, { id: 'synthetic-qa', title: 'PC 원격 시험', selected: false }]
+    snapshot({ ...base, threads, staffRooms })
+    const menu = host.querySelector('.desktop-sidebar [aria-label="직원 채팅방"]')!
+    const items = Array.from(menu.querySelectorAll('button'))
+    expect(items.map(row => row.textContent?.trim())).toEqual(staffRooms.map(room => room.title))
+    expect(items.map(row => Boolean(row.querySelector('[aria-label="작업 중"]')))).toEqual([false, false, true, false])
+    expect(host.querySelector('.desktop-sidebar')?.textContent).not.toContain('PC 원격 시험')
+    expect(host.querySelector('.desktop-sidebar')?.textContent).not.toContain('프로젝트')
+    items[2].click()
+    expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'seat-2' } })
   })
 
   it('renders assistant output and evidence as text and copies the selected answer by native identity', () => {

@@ -8,7 +8,6 @@ import { runControls } from './composer'
 
 const panels: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'collab', label: '협업방', icon: 'group' },
-  { panel: 'projects', label: '프로젝트', icon: 'folder' },
   { panel: 'images', label: '이미지 만들기', icon: 'image' },
   { panel: 'tools', label: '파일 작업', icon: 'tools' },
   { panel: 'history', label: '대화 기록', icon: 'history' },
@@ -26,21 +25,23 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
   onChatMenu(): void
   onClose?(): void
 }) {
-  const threads = snapshot?.threads ?? []
+  const staff = snapshot?.staffRooms
+  const threads = staff ?? snapshot?.threads ?? []
   return (
-    <div className="sidebar-content">
+    <div className={`sidebar-content${staff ? ' sidebar-content--staff' : ''}`}>
       <div className="sidebar-brand">
         <span className="wordmark"><BrandMark /> ZipHap<span>.Agent</span></span>
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
       </div>
       <button type="button" className="new-thread" disabled={!enabled} onClick={onNew}><Icon name="plus" /> 새 대화</button>
-      <nav className="thread-nav" aria-label="대화 목록">
-        <h2>대화</h2>
+      <nav className={`thread-nav${staff ? ' staff-rooms' : ''}`} aria-label={staff ? '직원 채팅방' : '대화 목록'}>
+        <h2>{staff ? '직원 채팅방' : '대화'}</h2>
         {threads.length > 0 ? <ul>{threads.map(thread => (
           <li key={thread.id}>
             <button type="button" className="sidebar-row" aria-current={thread.selected && !collaborationOpen ? 'page' : undefined}
               disabled={!enabled} onClick={() => onSelect(thread.id)}>
               <Icon name="chat" /><span>{thread.title || '새 대화'}</span>
+              {thread.working && <span className="room-working" role="status" aria-label="작업 중" title="작업 중" />}
             </button>
           </li>
         ))}</ul> : snapshot?.ready && <p className="no-threads">대화가 없습니다.</p>}

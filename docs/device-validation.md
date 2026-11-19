@@ -1,5 +1,21 @@
 # Device validation
 
+## Installed v0.1.27 staff menu and remaining canaries
+
+Installed signed versionCode 2027 over 2026 through wireless ADB. The independently retrieved base APK matched SHA-256 `e10a11b9e82ac2184bcd78726039b815c061e06bbad0a87559a8a0c460bc5a30` and MainActivity opened. Signature matched the established update cert, permissions matched 2026, 16 KiB ZIP alignment and the static Rust/React APK verifier passed. The 14-case core extension security test passed.
+
+On the phone, the opened app menu exposed 회장 이수빈, 본부장 김호영, 대리 김규민, 대리 김서율 in order. No PC 원격 시험, PC 원격 정리 or standalone 프로젝트 menu item was present. React tests cover the per-room work indicator with active and idle fixtures. The physical menu check used an idle phone. The new image layout is in the installed APK. No live image job was started.
+
+The renderer test stopped at initial WebView/composer readiness before testing renderer termination, and is retained as a failure. Manual app navigation subsequently worked. The public-research canary returned `paused / execution_not_verified` on 2027 after 3063 ms with zero tools. Source shows the cloud admission check rejected research mode before registering the phone catalog. The follow-up candidate adds research admission with only scoped public search/read and bounded calculations, forwards no prior conversation context in this mode, and keeps the existing cloud permission checks.
+
+Follow-up v0.1.28 / versionCode 2028 built and signed as SHA-256 `f753c7582835f72f44eec3b7aa29819c772d3f39c6addfa520aceb4147afd466`. The public research catalog/wire test, update signer, permissions, alignment and static APK audit passed. It also includes the compact phone title and model controls from Claude, checked in a 393 px browser harness. This package initially waited to install because the phone reported active image generation and the paired worker was busy. The build and browser checks do not certify renderer recovery or the public-research scenario.
+
+## Installed v0.1.26 and repeated Jeju public-research failure
+
+Installed signed versionCode2026 over published2025 with wireless ADB. Independent base APK readback matched SHA256 `305d29acc4f4d78c44dc2f5a1af40913375591959bab111d621300eb2c5e3194`. Foreground services and PC compute/provider activity were idle before install. MainActivity resumed and retained the existing notification permission.
+
+A new actual paired-phone Jeju public-read request on 2026 paused after 91190ms with `SESSION_UNKNOWN`. The receipt lists 11 tool rows, including in-app browser open/action calls outside the requested public search/read workflow. At the stop the phone logged a live broker session (`ACTIVE`), a running provider and `UNKNOWN_EFFECT` at sequence 12. This is evidence of unresolved tool result, with the exact twelfth tool and cause unconfirmed. There was no verified quote, available inventory, checkout, booking or payment. The source candidate adds scoped public-research requests and bounded diagnostics of the unresolved tool/result classification. These changes require a new device build and another focused canary.
+
 ## Published v0.1.25 rollout check
 
 After the owner reported upgrading, the phone returned versionCode2025 twice through the paired mailbox. In a synthetic family travel quote, the first turn paused after 18067ms with `cloud_clarification_read_only`, asked for the missing budget and issued no tools. The second turn was accepted in that same conversation and completed after 27064ms. Two successful calculation calls supported the correct 100000 total and 10000 remaining from the supplied 110000 budget. No booking, external search, payment or storage action was observed. Network timeout diagnostics and live travel checkout remain unqualified.

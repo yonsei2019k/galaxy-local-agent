@@ -16,6 +16,18 @@ class Clock:
 
 
 class RemoteTestQueueTests(unittest.TestCase):
+    def test_public_research_scope_is_typed_and_a_successor_cannot_widen_it(self):
+        queue = remote.RemoteTestQueue(Clock())
+        with self.assertRaises(remote.RemoteTestError):
+            queue.enqueue({'text': 'public quote', 'publicResearchOnly': 'true'})
+        root = queue.enqueue({'text': 'public quote', 'publicResearchOnly': True})['requestId']
+        self.assertIs(queue.claim()['request']['publicResearchOnly'], True)
+        queue.report(root, {'state': 'paused', 'errorCode': remote.CLARIFICATION_CODE, 'canFollowUp': True})
+        with self.assertRaises(remote.RemoteTestError):
+            queue.enqueue({'text': 'continue', 'afterRequestId': root})
+        queue.enqueue({'text': 'continue', 'afterRequestId': root, 'publicResearchOnly': True})
+        self.assertIs(queue.claim()['request']['publicResearchOnly'], True)
+
     def test_only_typed_read_only_clarification_can_be_followed_when_paused(self):
         queue = remote.RemoteTestQueue(Clock())
         parent = queue.enqueue({'text': 'travel test'})['requestId']

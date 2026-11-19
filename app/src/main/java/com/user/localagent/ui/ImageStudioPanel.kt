@@ -178,48 +178,40 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     }
     Column(Modifier.fillMaxSize().imePadding()){
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(14.dp),contentPadding=PaddingValues(bottom=16.dp)){
-            item {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Text("Image Studio",style=MaterialTheme.typography.headlineMedium)
-                Text("장면을 적고, 스마트폰에서 결과를 확인하고 저장하세요.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            item {Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(ZipHapColors.CobaltSoft).padding(4.dp),horizontalArrangement=Arrangement.spacedBy(4.dp)){
+                listOf(false to "새 이미지 만들기",true to "사진 편집").forEach {(edit,label)->
+                    if(transform==edit)Button(onClick={transform=edit},enabled=!state.running,modifier=Modifier.weight(1f).heightIn(min=48.dp),shape=RoundedCornerShape(12.dp)){Text(label)}
+                    else TextButton(onClick={transform=edit},enabled=!state.running,modifier=Modifier.weight(1f).heightIn(min=48.dp),shape=RoundedCornerShape(12.dp)){Text(label)}
+                }
             }}
-            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Text(if(usePc)"PC · $pcModelTitle"else if(model.qualityModel)"휴대폰 · SDXL"else if(model.available)"휴대폰 · 설치 모델"else"휴대폰 · 모델 준비 필요",style=MaterialTheme.typography.titleSmall)
-                TextButton(onClick={computeSettings=!computeSettings}){Text(if(computeSettings)"연결·모델 설정 접기"else"연결·모델 변경")}
-                if(computeSettings)PcComputePanel(state.running,onStatus=onStatus)
+            if(model.downloading||(!usePc&&(!model.available||advanced&&!model.qualityModel)))item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
+                Text(if(model.downloading)"이미지 만들기 준비 중" else "휴대폰에서 만들기",style=MaterialTheme.typography.titleMedium)
+                Text("약 2.8GB를 한 번 받으면 휴대폰에서 이미지를 만들 수 있어요.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(model.downloading){
+                    val fraction=if(model.totalBytes>0)(model.downloadedBytes.toDouble()/model.totalBytes).toFloat().coerceIn(0f,1f)else 0f
+                    LinearProgressIndicator(progress={fraction},modifier=Modifier.fillMaxWidth())
+                    Text("${model.downloadedBytes/1_000_000} / ${model.totalBytes/1_000_000} MB",style=MaterialTheme.typography.labelMedium)
+                    if(downloadJob?.isActive==true)TextButton(onClick={downloadJob?.cancel()},modifier=Modifier.heightIn(min=48.dp)){Text("다운로드 중단")}
+                }else Button(enabled=!state.running&&!importing,modifier=Modifier.heightIn(min=48.dp),onClick={downloadJob=scope.launch {
+                    try {app.imageStudio.models.downloadDefault();onStatus("이미지 모델 다운로드와 무결성 확인을 마쳤습니다.")}
+                    catch(cancel:CancellationException){onStatus("다운로드를 중단했습니다. 다시 받기를 눌러 이어받을 수 있습니다.");throw cancel}
+                    catch(_:Exception){onStatus("이미지 모델을 받지 못했습니다. 연결과 저장 공간을 확인한 뒤 다시 시도해주세요.")}
+                }}){Text(if(model.available)"고품질 모델로 교체"else"고품질 모델 다운로드")}
+                Text(model.status,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }}}
-            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-                    Text("이미지 시리즈",style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
-                    Switch(checked=series,onCheckedChange={series=it;if(it&&seedText.isBlank())seedText="42"},enabled=!state.running&&!importing)
-                }
-                Text("기준 사진은 그대로 두고 장면을 바꿔 이어 만드세요.",style=MaterialTheme.typography.bodySmall)
-                if(series){
-                    OutlinedTextField(value=seriesTitle,onValueChange={if(it.length<=80)seriesTitle=it},label={Text("시리즈 이름")},enabled=!state.running,modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(value=preserve,onValueChange={if(it.length<=700)preserve=it},label={Text("계속 유지할 특징")},placeholder={Text("예: 같은 빨간 머그잔, 흰색 로고, 손잡이 모양, 따뜻한 색감")},minLines=2,enabled=!state.running,modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(value=seedText,onValueChange={if(it.length<=19)seedText=it},label={Text("시리즈 고정 시드")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,enabled=!state.running,modifier=Modifier.fillMaxWidth())
-                    Text("아래 이미지 설명에는 이번에 바꿀 배경·포즈·조명만 적으세요. 특징은 생성 설명에 함께 전달됩니다. 같은 시드도 동일 인물이나 제품을 보장하지 않습니다.",style=MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        OutlinedButton(enabled=!state.running&&!importing&&seriesTitle.isNotBlank(),onClick={
-                            val snapshot=recipe()
-                            scope.launch {importing=true;try{withContext(Dispatchers.IO){consistencyStore.save(snapshot)};onStatus("기준 사진·특징·시드·모델·단계 조건을 저장했습니다.")}
-                            catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("조건을 저장하지 못했습니다. 최대 12개 제한·입력 길이·기준 사진을 확인해주세요.")}
-                            finally{importing=false}}
-                        }){Text("시리즈 조건 저장")}
-                        TextButton(enabled=!state.running&&!importing,onClick={showSeries()}){Text("저장한 시리즈 선택")}
-                    }
-                    Text("이름별 최대 12개를 보관하며 같은 이름으로 저장하면 조건을 갱신합니다. 가득 차도 기존 시리즈를 자동 삭제하지 않습니다. 채팅이나 대기 요청에는 자동 적용되지 않습니다.",style=MaterialTheme.typography.labelSmall)
-                }
-            }}}
-            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    FilterChip(selected=!transform,onClick={transform=false},enabled=!state.running,label={Text("새 이미지")})
-                    FilterChip(selected=transform,onClick={transform=true},enabled=!state.running,label={Text("사진 변환")})
-                }
+
+            // ① 입력
+            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
+                Text(if(transform)"어떻게 바꿀까요?" else "어떤 장면을 만들까요?",style=MaterialTheme.typography.titleMedium)
+                OutlinedTextField(value=prompt,onValueChange={if(it.length<=2000)prompt=it},label={Text("이미지 설명")},placeholder={Text("예: a cinematic photo of a quiet forest at sunrise, soft golden light")},modifier=Modifier.fillMaxWidth(),minLines=3,maxLines=7,enabled=!state.running)
+                Text("짧은 설명으로 시작해도 됩니다. 세부 표현은 결과를 보며 바꿀 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 if(transform){
+                    HorizontalDivider(color=ZipHapColors.OutlineSoft)
+                    Text("참고 사진",style=MaterialTheme.typography.titleSmall)
                     Text("참고 사진을 직접 입력으로 사용해 장면과 스타일을 바꿉니다. 원본 파일은 수정하지 않습니다.",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        OutlinedButton(enabled=!state.running&&!importing,onClick={referencePicker.launch(arrayOf("image/*"))}){Text(if(importing)"사진 보관 중"else if(referenceUri==null)"참고 사진 선택"else"다른 사진 선택")}
-                        if(referenceUri!=null)TextButton(enabled=!state.running&&!importing,onClick={referenceUri=null;referenceName=null;referenceSha=null}){Text("사진 제외")}
+                        OutlinedButton(modifier=Modifier.heightIn(min=48.dp),enabled=!state.running&&!importing,onClick={referencePicker.launch(arrayOf("image/*"))}){Text(if(importing)"사진 보관 중"else if(referenceUri==null)"참고 사진 선택"else"다른 사진 선택")}
+                        if(referenceUri!=null)TextButton(modifier=Modifier.heightIn(min=48.dp),enabled=!state.running&&!importing,onClick={referenceUri=null;referenceName=null;referenceSha=null}){Text("사진 제외")}
                     }
                     referencePreview?.let {preview->Image(preview,"사용자가 선택한 참고 사진",Modifier.fillMaxWidth().height(150.dp),contentScale=ContentScale.Fit)}
                     if(referenceUri!=null&&referencePreview==null)Text("선택한 참고 사진 1장",style=MaterialTheme.typography.labelSmall)
@@ -232,6 +224,38 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                     }
                 }
             }}}
+
+            // ② 진행 상태
+            item {Text("진행 상태",style=MaterialTheme.typography.titleMedium)}
+            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                if(state.running){
+                    Text(state.phase,style=MaterialTheme.typography.labelMedium,color=ZipHapColors.Cobalt)
+                    if(state.step<=0&&(!state.progress.isFinite()||state.progress<=0f))LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
+                    else LinearProgressIndicator(progress={state.progress.takeIf{it.isFinite()}?.coerceIn(0f,1f)?:0f},modifier=Modifier.fillMaxWidth())
+                    if(state.totalSteps>0)Text("${state.step} / ${state.totalSteps}단계",style=MaterialTheme.typography.labelSmall)
+                    OutlinedButton(onClick={app.imageStudio.cancel()},modifier=Modifier.heightIn(min=48.dp)){Text("생성 중지")}
+                }else{
+                    Text(state.phase,style=MaterialTheme.typography.bodyMedium,color=ZipHapColors.TextSecondary)
+                }
+                state.error?.takeIf{it.isNotBlank()}?.let {error->Text(error.take(700),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)}
+            }}}
+            if(!state.running&&(state.canResumePc||state.archivedPcCount>0))item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                Text("보관된 이전 작업",style=MaterialTheme.typography.titleMedium)
+                if(state.canResumePc){
+                    Text("원래 작업의 모델·참고 사진·시드는 유지됩니다. ‘보관하고 새 작업’을 선택하면 원래 작업을 보관한 채 다른 모델로 새 작업을 준비할 수 있습니다.",style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        Button(modifier=Modifier.heightIn(min=48.dp),onClick={runCatching{app.imageStudio.resumePc()}.onFailure{onStatus(it.message?:"복구 작업을 확인하지 못했습니다.")}}){Text("PC 작업 이어받기")}
+                        TextButton(modifier=Modifier.heightIn(min=48.dp),onClick={deletePcRecovery=true}){Text("복구 정보 삭제")}
+                    }
+                    OutlinedButton(modifier=Modifier.heightIn(min=48.dp),onClick={app.imageStudio.archivePcRecovery()}){Text("보관하고 새 작업")}
+                }else{
+                    Text("보관한 PC 작업 ${state.archivedPcCount}개 · 최근 작업의 원래 모델과 입력 조건을 불러옵니다. 복구 정보는 최대 24시간 유효합니다.",style=MaterialTheme.typography.bodySmall)
+                    OutlinedButton(modifier=Modifier.heightIn(min=48.dp),onClick={app.imageStudio.restoreArchivedPcRecovery()}){Text("보관한 작업 불러오기")}
+                }
+            }}}
+
+            // ③ 결과·저장
+            item {Text("결과",style=MaterialTheme.typography.titleMedium)}
             item {Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceContainer),contentAlignment=Alignment.Center){
                 if(compareReference&&referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256)Image(bitmap=referencePreview!!,contentDescription="고정 기준 사진",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
                 else if(visibleOutput!=null){
@@ -242,47 +266,12 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 }
                 else Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)){
                     StudioPlaceholder(Modifier.size(70.dp),MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else if(state.outputPath!=null)"완성 이미지 미리보기 준비 중"else "새로운 장면을 만들어 보세요.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else if(state.outputPath!=null)"결과 이미지를 불러오는 중"else "아직 결과가 없습니다.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }}
-            if(!model.available||!model.qualityModel||model.downloading)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
-                Text(if(model.downloading)"고품질 이미지 모델 준비 중" else "휴대폰 고품질 모델",style=MaterialTheme.typography.titleMedium)
-                Text("SDXL 1.0 Q4_K · 약 2.80GB\n1024px 정밀 생성 · 한 번 받은 뒤 PC나 API 키 없이 휴대폰에서 계산합니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                if(model.downloading){
-                    val fraction=if(model.totalBytes>0)(model.downloadedBytes.toDouble()/model.totalBytes).toFloat().coerceIn(0f,1f)else 0f
-                    LinearProgressIndicator(progress={fraction},modifier=Modifier.fillMaxWidth())
-                    Text("${model.downloadedBytes/1_000_000} / ${model.totalBytes/1_000_000} MB",style=MaterialTheme.typography.labelMedium)
-                    if(downloadJob?.isActive==true)TextButton(onClick={downloadJob?.cancel()}){Text("다운로드 중단")}
-                }else Button(enabled=!state.running&&!importing,onClick={downloadJob=scope.launch {
-                    try {app.imageStudio.models.downloadDefault();onStatus("이미지 모델 다운로드와 무결성 확인을 마쳤습니다.")}
-                    catch(cancel:CancellationException){onStatus("다운로드를 중단했습니다. 다시 받기를 눌러 이어받을 수 있습니다.");throw cancel}
-                    catch(_:Exception){onStatus("이미지 모델을 받지 못했습니다. 연결과 저장 공간을 확인한 뒤 다시 시도해주세요.")}
-                }}){Text(if(model.available)"고품질 모델로 교체"else"고품질 모델 다운로드")}
-                Text(model.status,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            }}}
-            item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
-                Text("어떤 장면을 만들까요?",style=MaterialTheme.typography.titleMedium)
-                OutlinedTextField(value=prompt,onValueChange={if(it.length<=2000)prompt=it},label={Text("이미지 설명")},placeholder={Text("예: a cinematic photo of a quiet forest at sunrise, soft golden light")},modifier=Modifier.fillMaxWidth(),minLines=3,maxLines=7,enabled=!state.running)
-                Text("짧은 설명으로 시작해도 됩니다. 세부 표현은 결과를 보며 바꿀 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    (if(usePc)if(fastPc)listOf(4,8)else listOf(20,32,50)else if(model.qualityModel||!model.available)listOf(30,40,50)else listOf(2,4,8)).forEach {value->FilterChip(selected=(if(usePc)if(fastPc)fastPcSteps else pcSteps else if(model.qualityModel||!model.available)qualitySteps else steps)==value,onClick={if(usePc){if(fastPc)fastPcSteps=value else pcSteps=value}else if(model.qualityModel||!model.available)qualitySteps=value else steps=value},enabled=!state.running,label={Text("${value}단계")})}
-                }
-                Text((if(pc.paired&&pc.preferPcImages)"PC 1024×1024 · 연결이 끊기면 중단하고 복구를 기다립니다. 휴대폰 계산은 직접 선택해야 합니다."else if(model.qualityModel||!model.available)"휴대폰 SDXL 1024×1024 · 기본40단계 · 계산이 오래 걸릴 수 있습니다. 전화·다른 앱 사용 중에는 품질을 유지하며 속도를 낮춰 계속합니다."else"기존 휴대폰 LCM 512×512 · 고품질 모델로 교체할 수 있습니다.")+if(transform&&!(pc.paired&&pc.preferPcImages))" 사진 변환의 실제 샘플링 횟수는 기준 단계와 변환 강도에 따라 달라집니다."else"",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick={advanced=!advanced}){Text(if(advanced)"상세 설정 접기" else "시드·제외할 표현·모델 파일")}
-                if(advanced){
-                    OutlinedTextField(value=seedText,onValueChange={if(it.length<=19)seedText=it},label={Text("시드 · 비우면 매번 새롭게")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!state.running)
-                    OutlinedTextField(value=negative,onValueChange={if(it.length<=1000)negative=it},label={Text("제외할 표현 · 선택 사항")},modifier=Modifier.fillMaxWidth(),maxLines=3,enabled=!state.running)
-                    if(usePc&&fastPc)Text("빠른 모델은 제외 문장을 지원하지 않습니다. 비우거나 Qwen을 선택해주세요.",style=MaterialTheme.typography.bodySmall)
-                    HorizontalDivider()
-                    Text("다른 호환 모델 가져오기",style=MaterialTheme.typography.titleSmall)
-                    Text("배포자의 SHA-256을 확인한 호환 safetensors·GGUF 파일을 가져올 수 있습니다. 모델 구성과 생성 엔진이 맞아야 실행할 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(value=sourceHash,onValueChange={if(it.length<=64)sourceHash=it.trim()},label={Text("배포자 SHA-256 · 64자리")},modifier=Modifier.fillMaxWidth(),singleLine=true)
-                    OutlinedButton(enabled=!state.running&&!model.downloading&&!importing&&sourceHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={importPicker.launch(arrayOf("application/octet-stream","*/*"))}){Text(if(importing)"모델 확인 중" else "모델 파일 선택")}
-                    if(model.available)TextButton(enabled=!state.running&&!model.downloading&&!importing,onClick={deleteModel=true}){Text("이미지 모델 파일 삭제")}
-                }
-            }}}
-            state.error?.takeIf{it.isNotBlank()}?.let {error->item {ZipHapCard {Text(error.take(700),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)}}}
+            if(previewFailed&&!state.running&&state.outputPath!=null)item {ZipHapCard {Text("작업이 끝났다고 표시됐지만 결과 이미지를 확인하지 못했습니다. 완료로 보지 않습니다.",style=MaterialTheme.typography.bodyMedium,color=ZipHapColors.TextSecondary)}}
             if(state.outputPath!=null)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                if(visibleOutput!=null)Surface(shape=RoundedCornerShape(8.dp),color=ZipHapColors.MintSoft){Text("결과 이미지 준비됨",modifier=Modifier.padding(horizontal=10.dp,vertical=4.dp),style=MaterialTheme.typography.labelMedium,color=ZipHapColors.Mint)}
                 Text(state.outputTitle,style=MaterialTheme.typography.titleMedium)
                 if(referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256){
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
@@ -295,7 +284,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 displayedOutput?.seed?.let {seed->Text("이 이미지의 시드 $seed",style=MaterialTheme.typography.labelMedium)}
                 Text(if(displayedOutput?.computeLocation=="pc")"PC에서 계산 · 스마트폰에 저장"else"휴대폰에서 생성·저장",style=MaterialTheme.typography.labelMedium)
                 displayedOutput?.takeIf{it.mode=="img2img"&&it.referenceWidth!=null&&it.referenceHeight!=null}?.let {details->Text("사진 변환 · 원본 ${details.referenceWidth}×${details.referenceHeight}"+(details.strength?.let{" · 강도 ${(it*100).roundToInt()}%"}?:" · 지시문에 따라 변환"),style=MaterialTheme.typography.labelMedium)}
-                Button(enabled=!state.running&&!saving,onClick={scope.launch {
+                Button(enabled=!state.running&&!saving&&visibleOutput!=null,modifier=Modifier.heightIn(min=48.dp),onClick={scope.launch {
                     saving=true
                     try{app.imageStudio.exportToGallery();onStatus("생성한 이미지를 갤러리에 저장했습니다.")}
                     catch(cancel:CancellationException){throw cancel}
@@ -303,34 +292,60 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                     finally{saving=false}
                 }}){Text(if(saving)"저장 중" else if(state.outputOrigin==com.user.localagent.images.ImageOutputOrigin.PREVIOUS)"이전 결과를 갤러리에 저장"else "갤러리에 저장")}
             }}}
-            item {Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
+
+            // 세부 설정 (collapsed by default)
+            item {TextButton(onClick={advanced=!advanced},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)){Text(if(advanced)"세부 설정 접기" else "세부 설정 · 모델·단계·시드·시리즈")}}
+            if(advanced)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
+                Text(if(usePc)"PC · $pcModelTitle"else if(model.qualityModel)"휴대폰 · SDXL"else if(model.available)"휴대폰 · 설치 모델"else"휴대폰 · 모델 준비 필요",style=MaterialTheme.typography.titleSmall)
+                TextButton(modifier=Modifier.heightIn(min=48.dp),onClick={computeSettings=!computeSettings}){Text(if(computeSettings)"연결·모델 설정 접기"else"연결·모델 변경")}
+                if(computeSettings)PcComputePanel(state.running,onStatus=onStatus)
+                HorizontalDivider(color=ZipHapColors.OutlineSoft)
+                Text("생성 단계",style=MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    (if(usePc)if(fastPc)listOf(4,8)else listOf(20,32,50)else if(model.qualityModel||!model.available)listOf(30,40,50)else listOf(2,4,8)).forEach {value->FilterChip(selected=(if(usePc)if(fastPc)fastPcSteps else pcSteps else if(model.qualityModel||!model.available)qualitySteps else steps)==value,onClick={if(usePc){if(fastPc)fastPcSteps=value else pcSteps=value}else if(model.qualityModel||!model.available)qualitySteps=value else steps=value},enabled=!state.running,label={Text("${value}단계")})}
+                }
+                Text((if(pc.paired&&pc.preferPcImages)"PC 1024×1024 · 연결이 끊기면 중단하고 복구를 기다립니다. 휴대폰 계산은 직접 선택해야 합니다."else if(model.qualityModel||!model.available)"휴대폰 SDXL 1024×1024 · 기본40단계 · 계산이 오래 걸릴 수 있습니다. 전화·다른 앱 사용 중에는 품질을 유지하며 속도를 낮춰 계속합니다."else"기존 휴대폰 LCM 512×512 · 고품질 모델로 교체할 수 있습니다.")+if(transform&&!(pc.paired&&pc.preferPcImages))" 사진 변환의 실제 샘플링 횟수는 기준 단계와 변환 강도에 따라 달라집니다."else"",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(!series)OutlinedTextField(value=seedText,onValueChange={if(it.length<=19)seedText=it},label={Text("시드 · 비우면 매번 새롭게")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!state.running)
+                OutlinedTextField(value=negative,onValueChange={if(it.length<=1000)negative=it},label={Text("제외할 표현 · 선택 사항")},modifier=Modifier.fillMaxWidth(),maxLines=3,enabled=!state.running)
+                if(usePc&&fastPc)Text("빠른 모델은 제외 문장을 지원하지 않습니다. 비우거나 Qwen을 선택해주세요.",style=MaterialTheme.typography.bodySmall)
+                HorizontalDivider(color=ZipHapColors.OutlineSoft)
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    Text("이미지 시리즈",style=MaterialTheme.typography.titleSmall,modifier=Modifier.weight(1f))
+                    Switch(checked=series,onCheckedChange={series=it;if(it&&seedText.isBlank())seedText="42"},enabled=!state.running&&!importing)
+                }
+                Text("기준 사진은 그대로 두고 장면을 바꿔 이어 만드세요.",style=MaterialTheme.typography.bodySmall)
+                if(series){
+                    OutlinedTextField(value=seriesTitle,onValueChange={if(it.length<=80)seriesTitle=it},label={Text("시리즈 이름")},enabled=!state.running,modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(value=preserve,onValueChange={if(it.length<=700)preserve=it},label={Text("계속 유지할 특징")},placeholder={Text("예: 같은 빨간 머그잔, 흰색 로고, 손잡이 모양, 따뜻한 색감")},minLines=2,enabled=!state.running,modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(value=seedText,onValueChange={if(it.length<=19)seedText=it},label={Text("시리즈 고정 시드")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,enabled=!state.running,modifier=Modifier.fillMaxWidth())
+                    Text("위 이미지 설명에는 이번에 바꿀 배경·포즈·조명만 적으세요. 특징은 생성 설명에 함께 전달됩니다. 같은 시드도 동일 인물이나 제품을 보장하지 않습니다.",style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        OutlinedButton(modifier=Modifier.heightIn(min=48.dp),enabled=!state.running&&!importing&&seriesTitle.isNotBlank(),onClick={
+                            val snapshot=recipe()
+                            scope.launch {importing=true;try{withContext(Dispatchers.IO){consistencyStore.save(snapshot)};onStatus("기준 사진·특징·시드·모델·단계 조건을 저장했습니다.")}
+                            catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("조건을 저장하지 못했습니다. 최대 12개 제한·입력 길이·기준 사진을 확인해주세요.")}
+                            finally{importing=false}}
+                        }){Text("시리즈 조건 저장")}
+                        TextButton(modifier=Modifier.heightIn(min=48.dp),enabled=!state.running&&!importing,onClick={showSeries()}){Text("저장한 시리즈 선택")}
+                    }
+                    Text("이름별 최대 12개를 보관하며 같은 이름으로 저장하면 조건을 갱신합니다. 가득 차도 기존 시리즈를 자동 삭제하지 않습니다. 채팅이나 대기 요청에는 자동 적용되지 않습니다.",style=MaterialTheme.typography.labelSmall)
+                }
+                HorizontalDivider(color=ZipHapColors.OutlineSoft)
+                Text("다른 호환 모델 가져오기",style=MaterialTheme.typography.titleSmall)
+                Text("배포자의 SHA-256을 확인한 호환 safetensors·GGUF 파일을 가져올 수 있습니다. 모델 구성과 생성 엔진이 맞아야 실행할 수 있습니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value=sourceHash,onValueChange={if(it.length<=64)sourceHash=it.trim()},label={Text("배포자 SHA-256 · 64자리")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+                OutlinedButton(modifier=Modifier.heightIn(min=48.dp),enabled=!state.running&&!model.downloading&&!importing&&sourceHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={importPicker.launch(arrayOf("application/octet-stream","*/*"))}){Text(if(importing)"모델 확인 중" else "모델 파일 선택")}
+                if(model.available)TextButton(modifier=Modifier.heightIn(min=48.dp),enabled=!state.running&&!model.downloading&&!importing,onClick={deleteModel=true}){Text("이미지 모델 파일 삭제")}
+                if(pc.paired&&pc.preferPcImages)Text("복구 지원 PC에서는 중간 계산과 미수신 결과를 사용자 계정으로 암호화해 최대 24시간 보관합니다. 휴대폰 저장 확인·명시 취소 시 정리합니다.",style=MaterialTheme.typography.bodySmall)
+                HorizontalDivider(color=ZipHapColors.OutlineSoft)
                 Text(if(pc.paired&&pc.preferPcImages)if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: $pcModelTitle\n라이선스: Apache 2.0"else if(model.qualityModel||!model.available)"선택 모델: SDXL 1.0 · Q4_K\n라이선스: CreativeML Open RAIL++-M"else"선택 모델: 기존 DreamShaper 8 LCM\n라이선스: CreativeML OpenRAIL-M",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick={runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(modelSourceUrl)))}.onFailure{onStatus("모델 출처 페이지를 열 앱을 찾지 못했습니다.")}}){Text("모델 출처·라이선스 보기")}
-            }}
+                TextButton(modifier=Modifier.heightIn(min=48.dp),onClick={runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(modelSourceUrl)))}.onFailure{onStatus("모델 출처 페이지를 열 앱을 찾지 못했습니다.")}}){Text("모델 출처·라이선스 보기")}
+            }}}
         }
         Surface(color=MaterialTheme.colorScheme.background,shadowElevation=0.dp){Column(Modifier.fillMaxWidth().padding(vertical=10.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
-            if(state.running){
-                Text(state.phase,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                if(state.step<=0&&(!state.progress.isFinite()||state.progress<=0f))LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
-                else LinearProgressIndicator(progress={state.progress.takeIf{it.isFinite()}?.coerceIn(0f,1f)?:0f},modifier=Modifier.fillMaxWidth())
-                if(state.totalSteps>0)Text("${state.step} / ${state.totalSteps}단계",style=MaterialTheme.typography.labelSmall)
-            }
             Button(onClick={if(state.running)app.imageStudio.cancel()else generate()},enabled=state.running||((model.available||pc.paired&&pc.preferPcImages)&&!model.downloading&&!importing&&prompt.isNotBlank()&&(!transform||referenceUri!=null)),modifier=Modifier.fillMaxWidth().height(52.dp),shape=RoundedCornerShape(16.dp)){
                 Text(if(state.running)"생성 중지" else if(transform)"참고 사진 변환하기"else"이미지 만들기",style=MaterialTheme.typography.titleMedium)
             }
-            if(state.canResumePc&&!state.running){
-                Text("원래 작업의 모델·참고 사진·시드는 유지됩니다. ‘보관하고 새 작업’을 선택하면 원래 작업을 보관한 채 다른 모델로 새 작업을 준비할 수 있습니다.",style=MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    Button(onClick={runCatching{app.imageStudio.resumePc()}.onFailure{onStatus(it.message?:"복구 작업을 확인하지 못했습니다.")}}){Text("PC 작업 이어받기")}
-                    TextButton(onClick={deletePcRecovery=true}){Text("복구 정보 삭제")}
-                }
-                OutlinedButton(onClick={app.imageStudio.archivePcRecovery()}){Text("보관하고 새 작업")}
-            }
-            if(!state.canResumePc&&state.archivedPcCount>0&&!state.running){
-                Text("보관한 PC 작업 ${state.archivedPcCount}개 · 최근 작업의 원래 모델과 입력 조건을 불러옵니다. 복구 정보는 최대 24시간 유효합니다.",style=MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick={app.imageStudio.restoreArchivedPcRecovery()}){Text("보관한 작업 불러오기")}
-            }
-            if(pc.paired&&pc.preferPcImages)Text("복구 지원 PC에서는 중간 계산과 미수신 결과를 사용자 계정으로 암호화해 최대 24시간 보관합니다. 휴대폰 저장 확인·명시 취소 시 정리합니다.",style=MaterialTheme.typography.bodySmall)
         }}
     }
     savedSeries?.let {items->ImageSeriesPicker(items,!state.running&&!importing,onDismiss={savedSeries=null},onLoad={restoreRecipe(it)},onDelete={recipe->scope.launch {

@@ -8,6 +8,7 @@ interface Thread {
   id: string
   title: string
   selected: boolean
+  working?: boolean
 }
 
 interface Evidence {
@@ -46,6 +47,7 @@ export interface Snapshot {
   modelLabel: string
   messages: ConversationMessage[]
   threads: Thread[]
+  staffRooms?: Thread[]
   tasks: Task[]
   models: Model[]
   activeModelLabel?: string
@@ -140,7 +142,8 @@ function message(value: unknown): value is ConversationMessage {
 }
 
 function thread(value: unknown): value is Thread {
-  return record(value) && strings(value, 'id', 'title') && typeof value.selected === 'boolean'
+  return record(value) && strings(value, 'id', 'title') && typeof value.selected === 'boolean' &&
+    (value.working === undefined || typeof value.working === 'boolean')
 }
 
 function evidence(value: unknown): value is Evidence {
@@ -192,7 +195,10 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (typeof value.ready !== 'boolean' || typeof value.busy !== 'boolean') return null
   if (value.ready && (!value.threadId || !value.branchId)) return null
   if (!list(value.messages, message) || !list(value.threads, thread) || !list(value.tasks, task) || !list(value.models, model)) return null
-  if (value.threads.some(item => item.selected && item.id !== value.threadId)) return null
+  const threads = value.threads
+  if (threads.some(item => item.selected && item.id !== value.threadId)) return null
+  if (value.staffRooms !== undefined && (!list(value.staffRooms, thread) || value.staffRooms.length > 4 ||
+    value.staffRooms.some(room => !threads.some(item => item.id === room.id && item.selected === room.selected)))) return null
   if (value.activeModelLabel !== undefined && typeof value.activeModelLabel !== 'string') return null
   if (value.activeRunId !== undefined && value.activeRunId !== null && typeof value.activeRunId !== 'string') return null
   if (value.actionEpoch !== undefined && !epoch(value.actionEpoch)) return null

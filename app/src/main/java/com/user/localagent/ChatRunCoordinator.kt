@@ -496,13 +496,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return submit(text,threadId,modelId,emptyList(),runId)
     }
     internal fun submitRemoteTest(text:String,threadId:String,modelId:String,runId:String,expectedBranchId:String,
-        threadRevision:Long,previousRunId:String?,stillAuthorized:()->Boolean):Boolean {
+        threadRevision:Long,previousRunId:String?,publicResearchOnly:Boolean=false,stillAuthorized:()->Boolean):Boolean {
         require(!text.trimStart().startsWith("/"))
-        return submit(text,threadId,modelId,emptyList(),runId,expectedBranchId,previousRunId,stillAuthorized,threadRevision)
+        return submit(text,threadId,modelId,emptyList(),runId,expectedBranchId,previousRunId,stillAuthorized,threadRevision,publicResearchOnly)
     }
 
     private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String,expectedBranchId:String?=null,
-        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null):Boolean {
+        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null,publicResearchOnly:Boolean=false):Boolean {
         val submission=com.user.localagent.core.ConversationSubmissionPolicy.parse(inputText)
         val routedInput=if(submission.explicitModeCommand!=null) {
             if(submission.commandOnly&&submission.explicitModeCommand!="/goal"&&snapshot.isEmpty()) {
@@ -516,7 +516,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val text=routedInput.ifBlank {if(snapshot.isNotEmpty())"첨부한 자료를 분석하고 핵심 내용을 정리해줘."else""}
         if(text.isBlank())return false
         if(text.length>12000){status.value="12,000자를 넘는 요청은 파일로 첨부해주세요. 입력 내용은 유지됩니다.";return false}
-        val thinking=modelOptions.value.thinking;val mode=submission.mode.wireName
+        val thinking=modelOptions.value.thinking
+        val mode=if(publicResearchOnly)AgentWorkMode.RESEARCH.wireName else submission.mode.wireName
         // Keep the process unfrozen for the whole run, including while screen control puts another app in front.
         com.user.localagent.voice.AgentRunService.track(context,reservedRunId,threadId,text)
         scope.launch {
@@ -1300,9 +1301,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
 
     /** Cloud owns interpretation/next actions; this parent retains scope, approval and evidence. */
     private suspend fun executeCloudPhoneRequest(request:QueuedChatRequest) {
+        val mode=AgentWorkMode.parse(request.mode)
+        val publicResearch=mode==AgentWorkMode.RESEARCH
         if(!request.allowExternalAgent||request.externalAgentRevision==null||request.capturedPcRevision==null||
             !request.allowTools||request.continuation!=null||request.previousSteps.isNotEmpty()||(request.goal!=null&&request.goalSegment==null)||
-            request.readbackObligations!=null||request.attachments.isNotEmpty()||request.mode !in setOf("act","debug")){
+            request.readbackObligations!=null||request.attachments.isNotEmpty()||
+            mode !in setOf(AgentWorkMode.ACT,AgentWorkMode.DEBUG,AgentWorkMode.RESEARCH)||(publicResearch&&request.goal!=null)){
             publishActionFinal(request,emptySet(),"이 요청에는 새 클라우드 도구 권한이 없거나 아직 지원하지 않는 첨부·이어가기 조건이 있습니다. 원문을 보존했습니다. 모델과 권한을 확인한 뒤 새 요청으로 보내주세요.",true);return
         }
         if(request.goal!=null) {
@@ -1321,7 +1325,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         val pcSettings=com.user.localagent.compute.PcComputeSettings.get(context)
         val disabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
-        val tools=ExternalAgentContract.NORMAL_PHONE_TOOLS.filterTo(linkedSetOf()) {it !in disabled&&AgentWorkModePolicy.allows(AgentWorkMode.parse(request.mode),it)}
+        val catalog=if(publicResearch)ExternalAgentContract.PUBLIC_RESEARCH_PHONE_TOOLS else ExternalAgentContract.NORMAL_PHONE_TOOLS
+        val tools=AgentWorkModePolicy.filterTools(mode,catalog-disabled)
         check(tools.isNotEmpty()){"현재 프로젝트에서 사용할 클라우드 휴대폰 도구가 없습니다."}
         val scope=app.repository.chat.accessScope(request.threadId)
         val binding=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scope.scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
@@ -1427,7 +1432,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             controller.start().also{bridgeSessionId=it.sessionId}
             status.value="클라우드 모델이 요청을 해석하고 있습니다."
             check(authority().permits(capture))
-            val conversationContext=captureCloudContext(request)
+            val conversationContext=if(publicResearch)null else captureCloudContext(request)
             check(authority().permits(capture))
             val storedContext=checkNotNull(app.repository.chat.run(request.runId))
             val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
@@ -1467,9 +1472,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val code=(provider["errorCode"] as? JsonPrimitive)?.contentOrNull?.takeIf{Regex("[A-Z_]{1,64}").matches(it)}
                 val why=code?:"SESSION_${controller.phase.name}"
                 val stop=controller.stopMetadata()
-                FailureLog.cloudStop(context,why,stop.phase.name,stop.state?.name,stop.pending?.name,stop.sequence,
-                    lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
-                publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다($why). 실제 확인한 결과만 보존했습니다.",true,why);return
+                FailureLog.cloudStop(context,why,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
+                val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
+                    "마지막 작업의 결과를 확인하지 못했어요. 앞서 확인한 내용은 남겨뒀어요. 다시 시도하기 전에 마지막 결과를 확인해 주세요."
+                    else "연결이 끊겼거나 작업이 아직 끝나지 않았어요. 앞서 확인한 내용은 남겨뒀어요."
+                publishActionFinal(request,requestAuthorizedTools,message,true,why);return
             }
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
@@ -1529,8 +1536,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
         } catch(error:com.user.localagent.externalagent.PcAgentBridgeTimeout){
             val stop=controller.stopMetadata()
-            FailureLog.cloudStop(context,error.stageCode,stop.phase.name,stop.state?.name,stop.pending?.name,stop.sequence,
-                lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
+            FailureLog.cloudStop(context,error.stageCode,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
             throw error
         } finally {
             externalEffectGuard=null

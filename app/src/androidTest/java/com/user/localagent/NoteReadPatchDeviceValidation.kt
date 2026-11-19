@@ -185,6 +185,54 @@ class NoteReadPatchDeviceValidation {
         assertEquals(f.seed.title,actual.title);assertEquals(f.seed.collection,actual.collection)
         assertTrue(actual.updatedAt>f.seed.updatedAt)
     }}
+
+    @Test fun duplicateNameAndStaleReadCannotVerifyTheConfirmedTarget()=runBlocking(Dispatchers.IO){fixture{f,reopen->
+        val target=f.seed
+        val other=f.scoped.saveNote(target.title,target.body+"\r\nOnly the other record",target.collection)
+        val idsBefore=f.scoped.notes.first().map{it.id}.toSet()
+        assertNotEquals(target.id,other.id)
+        val tools=f.tools(f.host())
+        val patch=f.patch(note=target)
+        f.deliver(tools,f.read(other).copy(id="qa-other-before"))
+        assertTrue("Reading the similarly named note must not authorize this edit",runCatching{tools.reviewForAction(patch)}.isFailure)
+        f.approve(tools,patch)
+        val written=tools.execute(patch)
+        assertTrue(written.success)
+        val latest=checkNotNull(f.scoped.getNote(target.id))
+        val observations=mutableListOf(ObservedToolOutcome(patch,written))
+        val proof=RequiredReadbackPolicy.Binding(f.run.id,f.binding.scopeKey,null)
+        fun verified():Boolean {
+            val steps=observations.map{HarnessStep(it.call,StepEvidence(it.call.name,it.result.verification,"Synthetic isolated readback"))}
+            return ChatReadbackEvidence.assess(proof,setOf("patch_note","read_note"),setOf("patch_note","read_note"),steps,observations,3,
+                deliveredNoteReadKeys=tools.deliveredNoteReadKeys()).readbackSatisfied
+        }
+        suspend fun readAfter(call:ToolCall):ToolResult {
+            val observed=tools.execute(call)
+            observations+=ObservedToolOutcome(call,observed)
+            return observed
+        }
+        assertTrue(readAfter(f.read(other).copy(id="qa-other-after")).success)
+        assertFalse(readAfter(f.read(target).copy(id="qa-stale-after")).success)
+        assertFalse(verified())
+        var offset=0
+        while(true){
+            val response=readAfter(f.read(latest,offset).copy(id="qa-target-after-$offset"))
+            assertTrue(response.success)
+            val entry=buildJsonObject{put("tool","read_note");put("success",true);put("verification","VERIFIED");put("result",Json.parseToJsonElement(NoteReadModelDelivery.modelResult(response.content)))}
+            val batch=checkNotNull(tools.acceptNoteReadContext(listOf(entry),JsonArray(listOf(entry)).toString()))
+            tools.acknowledgeNoteReadContext(batch)
+            val page=Json.parseToJsonElement(response.content).jsonObject
+            if(!page.getValue("hasMore").jsonPrimitive.boolean)break
+            assertFalse(verified());offset=page.getValue("nextOffset").jsonPrimitive.int
+        }
+        assertTrue(verified())
+        val reopened=reopen().forThread(f.thread.id)
+        assertEquals(target.body.replaceFirst("needle","changed"),reopened.getNote(target.id)?.body)
+        assertEquals(other,reopened.getNote(other.id))
+        assertEquals(idsBefore,reopened.notes.first().map{it.id}.toSet())
+        val recovered=NoteReadPatchHost(f.binding,NotePatchStore(f.binding,reopened.notePatchTransactions(f.binding))){}
+        assertEquals(written.content,checkNotNull(recovered.recover(patch)).content)
+    }}
     @Test fun actualEmptySearchScopeMatchesOmittedWithinCapturedProjectWithoutProtectedNotes()=runBlocking(Dispatchers.IO){fixture{f,_->
         val query="QA scoped lookup ${UUID.randomUUID()}"
         val first=f.scoped.saveNote("$query first","QA first body","qa-search-first")

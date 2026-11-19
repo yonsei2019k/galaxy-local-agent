@@ -1,5 +1,7 @@
 package com.user.localagent.core.office
 
+import java.util.UUID
+
 enum class OfficeSeat(val displayName:String,val jobTitle:String) {
     CHAIR("이수빈","회장"),
     DIRECTOR("김호영","본부장"),
@@ -15,7 +17,9 @@ enum class ZipHapRoom(val label:String,val agent:OfficeSeat?) {
     OFFICE("사무실",null),
     DIRECTOR(OfficeSeat.DIRECTOR.label,OfficeSeat.DIRECTOR),
     ASSOCIATE_GYUMIN(OfficeSeat.ASSOCIATE_GYUMIN.label,OfficeSeat.ASSOCIATE_GYUMIN),
-    ASSOCIATE_SEOYUL(OfficeSeat.ASSOCIATE_SEOYUL.label,OfficeSeat.ASSOCIATE_SEOYUL)
+    ASSOCIATE_SEOYUL(OfficeSeat.ASSOCIATE_SEOYUL.label,OfficeSeat.ASSOCIATE_SEOYUL);
+
+    val threadId:String=UUID.nameUUIDFromBytes("ziphap.fixed-office.v1.$name".toByteArray(Charsets.UTF_8)).toString()
 }
 
 /** Routing metadata only. The host must authenticate the seat and authorize each execution separately. */

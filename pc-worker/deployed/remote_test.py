@@ -51,7 +51,7 @@ class RemoteTestQueue:
                 item['state'] = 'timeout'
 
     def enqueue(self, request):
-        if not isinstance(request, dict) or set(request) - {'text', 'model', 'afterRequestId'} or 'text' not in request:
+        if not isinstance(request, dict) or set(request) - {'text', 'model', 'afterRequestId', 'publicResearchOnly'} or 'text' not in request:
             raise RemoteTestError('SHAPE')
         text = _text(request['text'], MAX_TEXT).strip()
         if not text or text.startswith('/'):
@@ -59,6 +59,9 @@ class RemoteTestQueue:
         model = request.get('model', 'auto')
         if not isinstance(model, str) or not MODEL.fullmatch(model):
             raise RemoteTestError('MODEL')
+        public_only = request.get('publicResearchOnly', False)
+        if type(public_only) is not bool:
+            raise RemoteTestError('PUBLIC_RESEARCH_ONLY')
         with self.lock:
             self._prune()
             previous = None
@@ -67,7 +70,7 @@ class RemoteTestQueue:
                 result = previous.get('result') if previous else None
                 if (not result or not _followable(result['state'], result.get('errorCode')) or not result.get('canFollowUp')
                         or self.clock() - result['reportedAt'] >= CLAIM_TTL_S
-                        or previous['model'] != model or previous.get('followed')):
+                        or previous['model'] != model or previous.get('publicResearchOnly', False) != public_only or previous.get('followed')):
                     raise RemoteTestError('FOLLOW_UP_UNAVAILABLE', 409)
             if sum(1 for item in self.items.values() if item['state'] == 'pending') >= MAX_PENDING:
                 raise RemoteTestError('QUEUE_FULL', 429)
@@ -80,6 +83,8 @@ class RemoteTestQueue:
             request_id = str(uuid.uuid4())
             self.items[request_id] = {'requestId': request_id, 'text': text, 'model': model, 'state': 'pending',
                                       'createdAt': self.clock(), 'claimedAt': None, 'result': None}
+            if public_only:
+                self.items[request_id]['publicResearchOnly'] = True
             if previous is not None:
                 self.items[request_id]['afterRequestId'] = previous['requestId']
                 previous['followed'] = True
@@ -94,7 +99,7 @@ class RemoteTestQueue:
             item = pending[0]
             item['state'] = 'claimed'
             item['claimedAt'] = self.clock()
-            fields = ('requestId', 'text', 'model', 'afterRequestId')
+            fields = ('requestId', 'text', 'model', 'afterRequestId', 'publicResearchOnly')
             return {'request': {key: item[key] for key in fields if key in item},
                     'receiptVersion': 2, 'conversationVersion': 1}
 

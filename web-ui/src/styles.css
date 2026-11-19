@@ -239,6 +239,15 @@ svg { width: 20px; height: 20px; flex: none; }
 .thread-nav { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-nav h2 { margin: 0 10px 8px; color: var(--muted); font-size: var(--fs-caption); font-weight: 700; letter-spacing: .04em; }
 .thread-nav ul { overflow: auto; min-height: 0; margin: 0 -5px; padding: 3px 5px; list-style: none; }
+.sidebar-content--staff { grid-template-rows: auto auto auto 1fr; overflow-y: auto; }
+.staff-rooms ul { overflow: visible; }
+.room-working {
+  width: 15px; height: 15px; flex: 0 0 15px; margin-inline-start: auto;
+  border: 2px solid var(--accent); border-inline-end-color: transparent; border-radius: 50%;
+  animation: room-work-turn .9s linear infinite;
+}
+@keyframes room-work-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .room-working { animation: none; } }
 .thread-nav li + li { margin-top: 2px; }
 .no-threads { margin: 6px 10px; font-size: var(--fs-small); color: var(--muted); }
 .sidebar-row {
@@ -512,9 +521,8 @@ svg { width: 20px; height: 20px; flex: none; }
 }
 
 /* Point color accents ("Sunlit Porcelain") ----------------------------------------------------------- */
-/* App menu: each destination gets its own soft colored icon tile (order follows Workspace.tsx: office, collab,
-   projects, images, tools, history, settings). Color is decoration here; the label carries the meaning. */
-.utility-nav .sidebar-row svg {
+/* Shared icon tiles for the fixed staff rooms and app menu. */
+.utility-nav .sidebar-row > svg, .staff-rooms .sidebar-row > svg {
   box-sizing: content-box;
   width: 16px;
   height: 16px;
@@ -530,7 +538,11 @@ svg { width: 20px; height: 20px; flex: none; }
 .utility-nav .sidebar-row:nth-child(5) { --tile-bg: var(--mint-soft);   --tile-fg: var(--mint-text); }
 .utility-nav .sidebar-row:nth-child(6) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
 .utility-nav .sidebar-row:nth-child(7) { --tile-bg: var(--surface-soft); --tile-fg: var(--secondary); }
-.utility-nav .sidebar-row[aria-current="page"] svg { background: var(--tile-fg); color: var(--surface); }
+.staff-rooms li:nth-child(1) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
+.staff-rooms li:nth-child(2) { --tile-bg: var(--lilac-soft); --tile-fg: var(--lilac-text); }
+.staff-rooms li:nth-child(3) { --tile-bg: var(--mint-soft); --tile-fg: var(--mint-text); }
+.staff-rooms li:nth-child(4) { --tile-bg: var(--coral-soft); --tile-fg: var(--coral-text); }
+.utility-nav .sidebar-row[aria-current="page"] > svg, .staff-rooms .sidebar-row[aria-current="page"] > svg { background: var(--tile-fg); color: var(--surface); }
 
 /* Selected conversation: a bright cobalt tint instead of a grey slab. */
 .thread-nav .sidebar-row[aria-current="page"] { background: var(--cobalt-soft); color: var(--cobalt-text); box-shadow: none; }
@@ -556,3 +568,30 @@ svg { width: 20px; height: 20px; flex: none; }
 /* Waiting tasks read as "on hold" in sunshine yellow rather than grey. */
 .task-card--neutral { --phase-color: var(--sun-text); --phase-bg: var(--sun-soft); }
 .task-card--neutral .task-icon { background: var(--sun-soft); box-shadow: inset 0 0 0 1.5px var(--sun); }
+
+/* Top bar on phones: the conversation name gets the room (owner report 2026-11-19: title cut to "사…").
+   Rename becomes a compact pencil button (its text stays for screen readers); the model picker shrinks. */
+.topbar-context { flex: 1 1 auto; }
+.topbar-title { flex: 0 1 auto; min-width: 2.5em; }
+.rename-thread {
+  display: inline-grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+}
+.rename-thread:not(:disabled):hover { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 620px) {
+  .model-group { flex: 0 0 auto; max-width: 38%; }
+  .model-control select { min-height: 40px; max-width: min(34vw, 140px); padding: 4px 24px 4px 30px; font-size: 12px; }
+  .model-control > svg { left: 10px; width: 14px; height: 14px; }
+  .model-control > .model-chevron { right: 9px; width: 11px; }
+  .active-model { font-size: 10.5px; }
+  .rename-thread { position: relative; width: 36px; padding: 0; font-size: 0; }
+  .rename-thread::before { content: "✎"; font-size: 17px; line-height: 1; color: currentColor; }
+  .rename-thread::after { content: ""; position: absolute; inset: -4px; }  /* 44px hit area */
+}

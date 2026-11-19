@@ -43,6 +43,7 @@ import com.user.localagent.core.CapabilityGrant
 import com.user.localagent.core.CapabilityPolicy
 import com.user.localagent.core.ToolResult
 import com.user.localagent.core.VerificationState
+import com.user.localagent.core.office.ZipHapRoom
 import com.user.localagent.core.StepEvidence
 import com.user.localagent.core.HarnessStep
 import com.user.localagent.core.TaskHarness
@@ -243,6 +244,12 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(selectedThreadId){if(goalEditorThreadId!=selectedThreadId)goalEditorThreadId=null}
         val roomThreads by app.repository.chat.threads.collectAsState(initial=emptyList())
+        val menuThreads by app.repository.chat.menuThreads.collectAsState(initial=emptyList())
+        LaunchedEffect(Unit){
+            try{app.repository.chat.openFixedOfficeRooms()}
+            catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){FailureLog.record(this@MainActivity,"office_room_setup",error)}
+        }
         val currentBranchId=roomThreads.firstOrNull{it.id==selectedThreadId}?.activeBranchId.orEmpty()
         var messageMenuId by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
         var messageEdit by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
@@ -274,6 +281,13 @@ class MainActivity : ComponentActivity() {
                 val roomAuxiliary=auxiliaryExecution?.takeIf{it.threadId==composerThreadId}
                 val approvalThread=activeExecutions.firstOrNull{it.threadId!=composerThreadId&&it.waitingForApproval}?.threadId
                 val epoch=(runForRoom.orEmpty()+currentBranchId).hashCode().toLong().and(0x7fffffff)
+                val menuById=menuThreads.associateBy{it.id}
+                val staffRooms=ZipHapRoom.entries.filter{it.agent!=null}.sortedBy{checkNotNull(it.agent).ordinal}
+                    .mapNotNull{seat->menuById[seat.threadId]?.takeUnless{it.archived}?.let{it to checkNotNull(seat.agent).label}}
+                fun threadJson(id:String,title:String)=buildJsonObject{
+                    put("id",id);put("title",title);put("selected",id==composerThreadId)
+                    put("working",activeExecutions.any{it.threadId==id&&!it.waitingForApproval&&it.waitingForResource==null})
+                }
                 val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex")+
                     installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{it.id to it.title}
                 val snapshot=buildJsonObject{
@@ -287,9 +301,11 @@ class MainActivity : ComponentActivity() {
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
                         put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
                     })}})
-                    put("threads",buildJsonArray{roomThreads.filter{!it.archived&&it.deletedAt==null}.take(100).forEach{thread->add(buildJsonObject{
-                        put("id",thread.id);put("title",thread.title);put("selected",thread.id==composerThreadId)
-                    })}})
+                    put("staffRooms",buildJsonArray{staffRooms.forEach{(thread,label)->add(threadJson(thread.id,label))}})
+                    put("threads",buildJsonArray{
+                        staffRooms.forEach{(thread,_)->add(threadJson(thread.id,thread.title))}
+                        menuById[composerThreadId]?.takeUnless{thread->staffRooms.any{it.first.id==thread.id}}?.let{add(threadJson(it.id,it.title))}
+                    })
                     put("models",buildJsonArray{modelChoices.forEach{(id,label)->add(buildJsonObject{put("id",id);put("label",label)})}})
                     put("attachments",buildJsonArray{attachments.forEach{add(buildJsonObject{put("id",it.id);put("name",it.name)})}})
                     put("collab",collaborationState)
@@ -398,7 +414,7 @@ class MainActivity : ComponentActivity() {
                         useOwnerMemory=settings.useOwnerMemory,learnOwnerFacts=settings.learnOwnerFacts,
                         revision=project.revision,disabledTools=settings.disabledTools)
                 },
-                threads=roomThreads.map{room->UiThread(room.id,room.projectId.orEmpty(),room.title,room.pinned,
+                threads=menuThreads.filterNot{room->ZipHapRoom.entries.any{it.threadId==room.id}}.map{room->UiThread(room.id,room.projectId.orEmpty(),room.title,room.pinned,
                     room.archived,room.deletedAt!=null,room.updatedAt)},
                 selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
                 modelChoices=installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{UiModelChoice(it.id,it.title)},
@@ -587,7 +603,7 @@ class MainActivity : ComponentActivity() {
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("일반","자동 작업","앱 연결","업데이트").forEachIndexed {index,label->FilterChip(section==index,onClick={section=index},label={Text(label)})}}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(section==0){
-                items(listOf("프로젝트" to 10,"답변 방식" to 1,"기억과 할 일" to 2,"파일 작업" to 3,"대화 기록" to 6,"연결된 자료" to 5,"문자와 일정" to 8,"검색 기록" to 9)){(label,destination)->OutlinedButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}}
+                items(listOf("답변 방식" to 1,"기억과 할 일" to 2,"파일 작업" to 3,"대화 기록" to 6,"연결된 자료" to 5,"문자와 일정" to 8,"검색 기록" to 9)){(label,destination)->OutlinedButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}}
             }
             if(section==1)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
             if(section==1)item {CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}}
