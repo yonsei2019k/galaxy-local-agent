@@ -89,7 +89,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             val parent=nextSegment?.let {next->
                 check(parentGoalStartRunId==null)
                 val row=checkNotNull(app.repository.chat.run(checkNotNull(next.binding.parentRunId)))
-                val decision=goalSegmentDecision(row,goal,access.scopeKey,System.currentTimeMillis(),unknownEffects=false)
+                val decision=goalSegmentDecision(row,goal,access.scopeKey,System.currentTimeMillis(),unknownEffects=false,useNativeBudget=true)
                 check(decision is GoalSegmentDecision.Continue&&decision.binding==next.binding&&
                     decision.ledger.map {it.json()}==next.ledger.map {it.json()}){"목표의 최종 체크포인트와 누적 실행 기록이 변경되었습니다."}
                 row

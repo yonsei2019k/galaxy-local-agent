@@ -718,7 +718,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val thread=checkNotNull(app.repository.chat.thread(request.threadId))
                     check(thread.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
                         app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
-                    goalSegmentDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),goalNativeEffectsUnresolved(parent,access.scopeKey,true))
+                    goalSegmentDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),
+                        goalNativeEffectsUnresolved(parent,access.scopeKey,true),useNativeBudget=true)
                 }
                 check(goals.loadGuarded(access)==goal&&app.repository.chat.run(parent.id)==parent)
                 when(decision) {

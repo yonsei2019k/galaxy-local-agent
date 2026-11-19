@@ -24,10 +24,10 @@ class GoalOnlySimulationTest(unittest.TestCase):
         report = simulation.run_catalog(self.catalog)
         self.assertEqual(100, len(report["attempts"]))
         self.assertEqual(0, report["summary"]["failedSimulations"])
-        self.assertGreaterEqual(report["summary"]["executedSimulations"], 34)
+        self.assertEqual(100, report["summary"]["executedSimulations"])
         self.assertEqual(100, report["summary"]["executedSimulations"] + report["summary"]["notRun"])
         self.assertFalse(report["summary"]["countsAsModelOrDeviceQualification"])
-        self.assertEqual("not_run", next(r for r in report["attempts"] if r["attemptId"] == "G06-a5")["status"])
+        self.assertEqual("passed", next(r for r in report["attempts"] if r["attemptId"] == "G06-a5")["status"])
         self.assertTrue(all(not r["usesActualModel"] and not r["usesActualPhone"] and not r["usesExternalService"] for r in report["attempts"]))
         self.assertTrue(all(a["status"] == "not_run" and a["result"] is None for a in self.catalog["attempts"]))
 

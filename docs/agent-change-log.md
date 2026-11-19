@@ -1,3 +1,11 @@
+## Batched Rust continuation and fixture expansion
+
+Android goal continuation and launch revalidation now call Rust via UniFFI for the segment, tool, wall-clock and no-progress budgets. The JVM reference policy remains for offline tests; the Android parity test covers 108 boundary combinations. Authority, verified readbacks and whole-goal finalization remain host responsibilities. The PC Rust health surface now returns a redacted isolation blocker without relaxing the launch gate. The pinned local CLI returned `MCP_DISABLED_UNCONFIRMED` with no inference invoked. Existing production routing is unchanged.
+
+Rust workspace 52 tests pass. Android runtime JVM 1025 pass and the Android device test sources compile; the new parity test has not run on hardware. The already published v0.1.24 phone returned versionCode2024 for both Tailscale canary turns (9054ms and 12047ms) and recalled the unique alias on turn two. This is same-conversation device evidence for the published APK, not device evidence for the new NativeGoalBudgetStop build.
+
+One additional Rust PC blocker-precedence regression passes. Offline eval101 tests and all100 deterministic fixture simulations pass, with51 completions,33 preparations and16 safety results. Zero model, phone and external service calls in the simulation. CI now checks the complete catalog and fails on missing or failed attempts. Prior catalog expectations and original39 execution evidence remain available.
+
 ## Batched remote recovery preflight
 
 The published 0.1.24 build and signed manifest were confirmed. The same-conversation canary stopped after the phone reported versionCode2021 instead of2024. The owner also confirmed 0.1.21. No second turn or multi-segment behavior was credited. The canary now reports observed and expected versions. Continue with grouped source changes and offline tests before generating the next release.

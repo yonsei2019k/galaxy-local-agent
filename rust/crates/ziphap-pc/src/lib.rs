@@ -432,6 +432,10 @@ impl AppServerClient {
     }
 
     pub async fn isolation_qualified(&mut self) -> Result<bool> {
+        Ok(self.isolation_blocker().await?.is_none())
+    }
+
+    pub async fn isolation_blocker(&mut self) -> Result<Option<&'static str>> {
         if self.active.is_some() {
             return Err(error("RUN_ACTIVE"));
         }
@@ -441,7 +445,7 @@ impl AppServerClient {
                 json!({"includeLayers":false,"cwd":self.workspace}),
             )
             .await?;
-        Ok(validate_isolation(&result).is_ok())
+        Ok(isolation_blocker(&result))
     }
 
     pub fn has_active_run(&self) -> bool {
@@ -1038,27 +1042,72 @@ fn is_sha(s: &str) -> bool {
 fn final_schema() -> Value {
     json!({"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","enum":["reported_done","needs_input","partial","failed"]},"answer":{"type":"string","maxLength":12000},"question":{"type":"string","maxLength":300}},"required":["state","answer","question"]})
 }
-fn validate_isolation(value: &Value) -> Result<()> {
-    let config = value
-        .get("config")
-        .and_then(Value::as_object)
-        .ok_or_else(|| error("ISOLATION_UNCONFIRMED"))?;
+fn isolation_blocker(value: &Value) -> Option<&'static str> {
+    let Some(config) = value.get("config").and_then(Value::as_object) else {
+        return Some("EFFECTIVE_CONFIG_UNAVAILABLE");
+    };
     if config
         .get("mcp_servers")
         .and_then(Value::as_object)
         .is_none_or(|m| !m.is_empty())
-        || config.get("web_search").and_then(Value::as_str) != Some("disabled")
-        || config.get("model_provider").and_then(Value::as_str) != Some("openai")
-        || config
+    {
+        return Some("MCP_DISABLED_UNCONFIRMED");
+    }
+    if config.get("web_search").and_then(Value::as_str) != Some("disabled") {
+        return Some("WEB_SEARCH_DISABLED_UNCONFIRMED");
+    }
+    if config.get("model_provider").and_then(Value::as_str) != Some("openai") {
+        return Some("MODEL_PROVIDER_UNCONFIRMED");
+    }
+    if config
             .get("model_instructions_file")
             .is_some_and(|v| !v.is_null())
-        || DISABLED_FEATURES.iter().any(|name| {
+    {
+        return Some("AMBIENT_INSTRUCTIONS_PRESENT");
+    }
+    if DISABLED_FEATURES.iter().any(|name| {
             config.get("features").and_then(|v| v.get(*name)) != Some(&Value::Bool(false))
         })
     {
+        return Some("BUILTIN_FEATURES_DISABLED_UNCONFIRMED");
+    }
+    None
+}
+
+fn validate_isolation(value: &Value) -> Result<()> {
+    if isolation_blocker(value).is_some() {
         return Err(error("ISOLATION_UNCONFIRMED"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn isolation_diagnostics_preserve_the_fail_closed_launch_check() {
+    let complete = json!({"config":{
+        "mcp_servers":{}, "web_search":"disabled", "model_provider":"openai",
+        "features": DISABLED_FEATURES.iter().map(|name| (name.to_string(), Value::Bool(false)))
+            .collect::<serde_json::Map<String, Value>>(),
+    }});
+    assert!(validate_isolation(&complete).is_ok());
+    assert_eq!(isolation_blocker(&Value::Null), Some("EFFECTIVE_CONFIG_UNAVAILABLE"));
+    let cases = [
+        ("mcp_servers", json!([]), "MCP_DISABLED_UNCONFIRMED"),
+        ("web_search", Value::Null, "WEB_SEARCH_DISABLED_UNCONFIRMED"),
+        ("model_provider", json!(false), "MODEL_PROVIDER_UNCONFIRMED"),
+        ("model_instructions_file", json!(true), "AMBIENT_INSTRUCTIONS_PRESENT"),
+        ("features", json!({}), "BUILTIN_FEATURES_DISABLED_UNCONFIRMED"),
+    ];
+    for (field, value, expected) in cases {
+        let mut changed = complete.clone();
+        changed["config"][field] = value;
+        assert_eq!(isolation_blocker(&changed), Some(expected));
+        assert!(validate_isolation(&changed).is_err());
+    }
+    let mut combined = complete;
+    combined["config"]["mcp_servers"] = Value::Null;
+    combined["config"]["web_search"] = Value::Null;
+    assert_eq!(isolation_blocker(&combined), Some("MCP_DISABLED_UNCONFIRMED"));
 }
 
 // Generated App Server notification schemas, not generic RPC forwarding. These

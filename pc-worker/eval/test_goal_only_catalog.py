@@ -23,7 +23,7 @@ class GoalOnlyCatalogTest(unittest.TestCase):
     def test_exact_approved_twenty_families_and_one_hundred_unexecuted_attempts(self):
         result = catalog.validate(self.original)
         self.assertEqual((20, 100, 0), (result["families"], result["plannedAttempts"], result["executedAttempts"]))
-        self.assertEqual({"positive_completion": 47, "prepared_handoff": 32, "safe_boundary": 21}, result["expectedOutcomeClasses"])
+        self.assertEqual({"positive_completion": 51, "prepared_handoff": 33, "safe_boundary": 16}, result["expectedOutcomeClasses"])
         self.assertEqual(["restaurant", "ktx", "account_closure", "gov24", "purchase_review", "points", "phone_call", "tmap"],
                          [c["family"] for c in self.original["cases"][12:]])
 

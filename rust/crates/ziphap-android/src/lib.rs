@@ -5,6 +5,31 @@ use ziphap_core::{CoreError, EffectState, EventKind, ExecutionProfile, RunBindin
 use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
+
+#[derive(uniffi::Enum)]
+pub enum NativeGoalBudgetStop {
+    Segments,
+    Tools,
+    Time,
+    NoProgress,
+}
+
+#[uniffi::export]
+pub fn native_goal_budget_stop(
+    segments: u32,
+    tool_calls: u32,
+    started_ms: u64,
+    now_ms: u64,
+    no_progress: u32,
+) -> Option<NativeGoalBudgetStop> {
+    use ziphap_core::GoalBudgetStop::*;
+    ziphap_core::goal_budget_stop(segments, tool_calls, started_ms, now_ms, no_progress).map(|stop| match stop {
+        Segments => NativeGoalBudgetStop::Segments,
+        Tools => NativeGoalBudgetStop::Tools,
+        Time => NativeGoalBudgetStop::Time,
+        NoProgress => NativeGoalBudgetStop::NoProgress,
+    })
+}
 const EVENT_CAPACITY:usize=512; // Created/Started + 128 call pairs + a final uncertain marker.
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]

@@ -66,7 +66,8 @@ async fn execute() -> Result<(), &'static str> {
         return Ok(());
     }
     if args[2] == "--health" {
-        output(json!({"type":"health","account":client.account().await.map_err(|e|e.code)?,"isolationQualified":client.isolation_qualified().await.map_err(|e|e.code)?,"transport":"owned_stdio","inferenceInvoked":false})).await.map_err(|_|"IPC_OUTPUT")?;
+        let blocker = client.isolation_blocker().await.map_err(|e| e.code)?;
+        output(json!({"type":"health","account":client.account().await.map_err(|e|e.code)?,"isolationQualified":blocker.is_none(),"isolationBlocker":blocker,"transport":"owned_stdio","inferenceInvoked":false})).await.map_err(|_|"IPC_OUTPUT")?;
         client.shutdown().await;
         return Ok(());
     }
@@ -115,7 +116,8 @@ async fn execute() -> Result<(), &'static str> {
                 let request: Input = serde_json::from_value(value).map_err(|_| "IPC_OPERATION")?;
                 match request {
                     Input::Health {} => {
-                        output(json!({"type":"health","account":client.account().await.map_err(|e|e.code)?,"isolationQualified":client.isolation_qualified().await.map_err(|e|e.code)?,"transport":"owned_stdio","inferenceInvoked":false})).await.map_err(|_|"IPC_OUTPUT")?;
+                        let blocker = client.isolation_blocker().await.map_err(|e| e.code)?;
+                        output(json!({"type":"health","account":client.account().await.map_err(|e|e.code)?,"isolationQualified":blocker.is_none(),"isolationBlocker":blocker,"transport":"owned_stdio","inferenceInvoked":false})).await.map_err(|_|"IPC_OUTPUT")?;
                     }
                     Input::Models {} => {
                         output(json!({"type":"models","catalog":client.models().await.map_err(|e|e.code)?})).await.map_err(|_|"IPC_OUTPUT")?;

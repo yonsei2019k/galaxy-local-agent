@@ -7,12 +7,14 @@
 //! trusted clock and preserve unknown-effect state durably across process restarts.
 
 mod grant;
+mod goal_budget;
 mod journal;
 mod run;
 mod scheduler;
 mod types;
 
 pub use grant::*;
+pub use goal_budget::*;
 pub use journal::*;
 pub use run::*;
 pub use scheduler::*;

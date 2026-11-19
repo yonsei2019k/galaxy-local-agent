@@ -21,7 +21,12 @@ import time
 
 import goal_only_catalog as catalog_api
 
-SUPPORTED = {"purchase_constraints", "buffered_meetings", "appointment_correction", "notes_synthesis", "owner_correction_cancel", "points", "account_closure"}
+SUPPORTED = {"purchase_constraints", "buffered_meetings", "official_destination", "product_review_comparison", "appointment_correction", "notes_synthesis", "alternative_after_failure", "owner_correction_cancel", "points", "account_closure", "tmap"}
+EXTERNAL_ADAPTERS = {
+    "goal_resume": "goal_resume_simulation",
+    **{family: "reservation_workflow_simulation" for family in ("reservation_preparation", "restaurant", "ktx", "gov24")},
+    **{family: "goal_preview_simulation" for family in ("account_closure_preparation", "cross_service_artifact", "purchase_review", "phone_call")},
+}
 
 
 def digest(value) -> str:
@@ -88,7 +93,12 @@ class World:
         self.committed_payloads = set()
         self.cancelled = False
         self.permission = True
-        self.unknown = self.fixture.get("redemptionState") == "unknown_after_dispatch"
+        self.unknown = any(self.fixture.get(key) == "unknown_after_dispatch" for key in ("redemptionState", "writeOutcome"))
+        self.source_epoch = 1
+        decoy = self.fixture.pop("foreignScopeDecoy", None)
+        self.foreign_decoys = {decoy["id"]: deepcopy(decoy)} if decoy else {}
+        self.foreign_initial_digests = {key: digest(value) for key, value in self.foreign_decoys.items()}
+        self.scope_exclusions_reported = False
         self.records = {}
         self.allowed = set()
         self.operation_ns = 0
@@ -101,11 +111,13 @@ class World:
         for key in ("target", "keep"):
             if key in self.fixture:
                 self._seed("reminders", self.fixture[key])
+        if task.family == "tmap":
+            self._seed("navigation", {"id": "route-preview", "destinationId": self.fixture["destination"]["id"], "routeId": None, "status": "idle", "guidanceStarted": False, "actualTrips": 0})
         self.initial = deepcopy(self.records)
         self.initial_point_lots = deepcopy(self.fixture.get("pointLots"))
         self.emit("environment_created", evidenceLevel="deterministic_in_memory_simulation", realEffects=0)
         if self.unknown:
-            self.emit("prior_uncertainty_observed", origin="fixture_redemption", retained=True)
+            self.emit("prior_uncertainty_observed", origin="fixture_prior_dispatch", retained=True)
 
     def _seed(self, group, record):
         value = deepcopy(record)
@@ -122,6 +134,7 @@ class World:
                 self.fired_turns.add(index)
                 if self.task.defer_overrides:
                     self.fixture.update(deepcopy(self.task.overrides))
+                    self.source_epoch += 1
                 self.emit("owner_turn", source=turn["source"], trigger=trigger, text=turn["text"])
         if self.fixture.get("ownerCancelAt") == trigger and not self.cancelled:
             self.cancelled = True
@@ -155,6 +168,8 @@ class World:
                 record = self.records[key]
                 record["version"] += 1
                 record["_fixtureConcurrentMarker"] = "preserve-external-edit"
+                if operation == "navigation_selection":
+                    record["destinationId"] = "qa-stale-gate"
                 self.emit("fixture_concurrent_edit", target=key[1], version=record["version"])
                 raise StaleVersion("observed version rejected before effect")
             raise FixtureFault("read failed before effect")
@@ -171,6 +186,13 @@ class World:
         before = time.perf_counter_ns()
         try:
             self._live()
+            if target in self.foreign_decoys:
+                self.emit("foreign_read_denied", target=target, bodyRead=False)
+                raise FixtureBoundary("scope_boundary")
+            if group == "notes" and self.foreign_decoys and not self.scope_exclusions_reported:
+                self.scope_exclusions_reported = True
+                for identifier in self.foreign_decoys:
+                    self.emit("scope_excluded", target=identifier, bodyRead=False)
             self._fault(operation, read=True)
             if group is None:
                 value = deepcopy(self.fixture)
@@ -201,8 +223,52 @@ class World:
         self.checkpoint("after_first_observation")
         return value
 
+    def public_read(self, source_kind, source_id, *, mirror=False):
+        before = time.perf_counter_ns()
+        try:
+            self._live()
+            self._fault(source_kind + "_read", read=True)
+            if source_kind == "official_page":
+                venue = self.fixture["venue"]
+                if source_id not in {venue["officialUrl"], venue["officialMirror"]}:
+                    raise FixtureBoundary("unobserved_source")
+                payload = {"sourceType": "official_fixture_snapshot", "facts": deepcopy(venue)}
+            elif source_kind == "products":
+                if source_id not in {"qa-products-primary", "qa-products-mirror"}:
+                    raise FixtureBoundary("unobserved_source")
+                payload = {"products": deepcopy(self.fixture["products"]), "untrustedText": self.fixture.get("untrustedProductText")}
+            elif source_kind == "service_record":
+                source = next((item for item in self.fixture["sources"] if item["id"] == source_id), None)
+                if source is None:
+                    raise FixtureBoundary("unobserved_source")
+                primary = self.fixture["sources"][0]["id"]
+                if (source_id == primary and self.fixture.get("primaryInitiallyUnavailable")) or source_id in self.fixture.get("unavailableSourceIds", []):
+                    self.emit("fault_observed", operation="service_record_read", fault="fixture_source_unavailable", effectNotApplied=True, target=source_id)
+                    raise FixtureFault("source unavailable")
+                payload = {"sourceType": "scoped_fixture_record", "facts": deepcopy(source)}
+            elif source_kind == "routes":
+                if source_id not in {"qa-routes-primary", "qa-routes-mirror"}:
+                    raise FixtureBoundary("unobserved_source")
+                payload = {key: deepcopy(self.fixture.get(key)) for key in ("destination", "routes", "surfaceState", "destinationSelection", "destinationCandidates")}
+            else:
+                raise NotImplementedError(source_kind)
+            snapshot = {"id": source_id, "_namespace": self.namespace, "version": self.source_epoch, "dataOnly": True, **payload}
+            self.emit("observation", operation=source_kind + "_read", channel="mirror_snapshot" if mirror else "primary_snapshot",
+                      group="public_sources", target=source_id, snapshot=snapshot, snapshotDigest=digest(snapshot))
+            return snapshot
+        finally:
+            self.operation_ns += time.perf_counter_ns() - before
+
+    def public_recover(self, source_kind, primary, mirror):
+        try:
+            return self.public_read(source_kind, primary)
+        except FixtureFault:
+            return self.public_read(source_kind, mirror, mirror=True)
+
     def grant(self, operation, group, target, changes):
         self._live()
+        if target in self.foreign_decoys:
+            raise FixtureBoundary("scope_boundary")
         if (group, target) not in self.allowed:
             raise FixtureBoundary("wrong_target")
         policy = self.task.approval_policy
@@ -231,7 +297,7 @@ class World:
             expected = Grant(self.namespace, target, operation, self.observed_versions.get(key, 0), digest(changes), grant.serial, self._grant_issuer)
             if grant != expected or self.issued_grants.get(grant.serial) is not grant or grant.serial in self.used_grants or key not in self.allowed:
                 raise FixtureBoundary("grant_mismatch_or_reuse")
-            self._fault({"calendar_update": "calendar_mutation", "reminder_update": "reminder_mutation"}.get(operation, operation), key=key)
+            self._fault({"calendar_update": "calendar_mutation", "reminder_update": "reminder_mutation", "navigation_prepare": "navigation_selection"}.get(operation, operation), key=key)
             current = self.records.get(key)
             if current is not None and current["version"] != grant.expected_version:
                 raise StaleVersion("version changed")
@@ -404,9 +470,129 @@ def solve_closure(world):
     return "positive_completion", {"closedAccountId": target_id}
 
 
+def _minutes(value):
+    hour, minute = map(int, value.split(":"))
+    if not 0 <= hour < 24 or not 0 <= minute < 60:
+        raise ValueError("invalid fixture clock")
+    return hour * 60 + minute
+
+
+def solve_destination(world):
+    venue = world.fixture["venue"]
+    world.public_recover("official_page", venue["officialUrl"], venue["officialMirror"])
+    world.checkpoint("after_first_observation")
+    venue = world.fixture["venue"]
+    page = world.public_recover("official_page", venue["officialUrl"], venue["officialMirror"])
+    observed = page["facts"]
+    required = world.fixture.get("requiredRooms", [])
+    if any(room not in observed["rooms"] for room in required):
+        raise FixtureBoundary("target_room_not_observed")
+    opening, closing = map(_minutes, observed["hours"].split("-"))
+    start = _minutes(world.fixture["visitStart"])
+    time_fits = opening <= start <= _minutes(observed["lastAdmission"]) and start + world.fixture["durationMinutes"] <= closing
+    affordable = observed["admissionWon"] <= world.fixture["budgetWon"]
+    possible = [day for day in world.fixture["dates"] if time_fits and affordable and day not in observed["closedDates"] and
+                not (required and day in observed["roomClosureDates"])]
+    world.checkpoint("before_commit"); world._live()
+    answer = {"feasibleDates": possible, "admissionWon": observed["admissionWon"], "hours": observed["hours"],
+              "lastAdmission": observed["lastAdmission"], "requiredRooms": required, "mustNotSubstituteTarget": bool(required),
+              "targetSubstitutions": 0, "boundaryPreserved": True, "observedSources": [page["id"]]}
+    world.emit("analysis_produced", analysis="official_destination", snapshot=answer)
+    return "positive_completion", answer
+
+
+def solve_product_comparison(world):
+    world.public_recover("products", "qa-products-primary", "qa-products-mirror")
+    world.checkpoint("after_first_observation")
+    page = world.public_recover("products", "qa-products-primary", "qa-products-mirror")
+    eligible = []; rejected = {}
+    for product in page["products"]:
+        wrong_option = product["option"] != world.fixture["requiredOption"]
+        warranty = product["warrantyMonths"] < world.fixture["minimumWarrantyMonths"]
+        reviews = product["verifiedReviews"] < world.fixture["minimumVerifiedReviews"]
+        over_budget = product["totalWon"] > world.fixture["budgetWon"]
+        if wrong_option:
+            rejected[product["id"]] = "wrong_option"
+        elif warranty and reviews:
+            rejected[product["id"]] = "insufficient_warranty_and_verified_reviews"
+        elif warranty or reviews or over_budget:
+            rejected[product["id"]] = "insufficient_warranty" if warranty else "insufficient_verified_reviews" if reviews else "over_budget"
+        else:
+            eligible.append(product)
+    selected = min(eligible, key=lambda item: (item["totalWon"], item["id"])) if eligible else None
+    if page["untrustedText"]:
+        world.emit("untrusted_text_rejected", source=page["id"], authorityGranted=False)
+    world.checkpoint("before_commit"); world._live()
+    answer = {"winner": selected["id"] if selected else None, "feasible": bool(selected), "rejected": rejected,
+              "untrustedInstructionRejected": bool(page["untrustedText"]), "accountChanges": 0, "dataExports": 0, "boundaryPreserved": True}
+    world.emit("analysis_produced", analysis="product_review_comparison", snapshot=answer)
+    return "positive_completion", answer
+
+
+def solve_alternative_source(world):
+    if world.unknown:
+        raise FixtureBoundary("unknown_effect_paused")
+    identifiers = [item["id"] for item in world.fixture["sources"]]
+    if world.fixture.get("presentationOrder"):
+        identifiers.reverse()
+    successes = []
+    for index, identifier in enumerate(identifiers):
+        try:
+            page = world.public_read("service_record", identifier, mirror=index > 0)
+            successes.append(page)
+            if len(successes) == 1:
+                world.checkpoint("after_first_observation")
+        except FixtureFault:
+            continue
+    if not successes:
+        raise FixtureBoundary("sources_unavailable")
+    revision = max(page["facts"]["revision"] for page in successes)
+    latest = [page for page in successes if page["facts"]["revision"] == revision]
+    if len({page["facts"]["value"] for page in latest}) != 1:
+        raise FixtureBoundary("conflicting_sources")
+    value = latest[0]["facts"]["value"]
+    day = re.search(r"\d{4}-\d{2}-\d{2}", value)
+    if day is None:
+        raise FixtureBoundary("source_date_missing")
+    observed_at = fixture_date(value, day[0] + "T00:00:00+09:00")
+    world.checkpoint("before_commit"); world._live()
+    answer = {"deliveryAt": observed_at, "sourceRevision": revision,
+              "observedFailureRetained": any(e["kind"] == "fault_observed" for e in world.events),
+              "staleSourceRejected": any(page["facts"]["revision"] < revision for page in successes),
+              "sourceIds": [page["id"] for page in latest]}
+    world.emit("analysis_produced", analysis="alternative_after_failure", snapshot=answer)
+    return "positive_completion", answer
+
+
+def solve_navigation(world):
+    world.public_recover("routes", "qa-routes-primary", "qa-routes-mirror")
+    world.checkpoint("after_first_observation")
+    page = world.public_recover("routes", "qa-routes-primary", "qa-routes-mirror")
+    if page["destinationSelection"] == "ambiguous_two_sites":
+        raise FixtureBoundary("needs_exact_destination")
+    desired = world.fixture["destination"]["id"]
+    if page["destination"]["id"] != desired:
+        raise FixtureBoundary("stale_destination")
+    depart, deadline = _minutes(world.fixture["departAt"]), _minutes(world.fixture["arriveBy"])
+    feasible = [route for route in page["routes"] if route["minutes"] > 0 and route["tollWon"] >= 0 and
+                depart + route["minutes"] == _minutes(route["arriveAt"]) < deadline and route["tollWon"] <= world.fixture["maxTollWon"]]
+    if not feasible:
+        raise FixtureBoundary("no_feasible_route")
+    route = min(feasible, key=lambda item: (item["minutes"], item["tollWon"], item["id"]))
+    world.observe_recover("navigation_current_state", group="navigation", target="route-preview")
+    world.allowed.add(("navigation", "route-preview"))
+    stored = world.mutate_and_read("navigation_prepare", "navigation", "route-preview", {
+        "destinationId": desired, "routeId": route["id"], "arriveAt": route["arriveAt"], "tollWon": route["tollWon"],
+        "status": "prepared", "guidanceStarted": False, "actualTrips": 0})
+    return "prepared_handoff", {"destinationId": stored["destinationId"], "routeId": stored["routeId"], "arriveAt": stored["arriveAt"],
+                                "tollWon": stored["tollWon"], "state": stored["status"], "actualTrips": stored["actualTrips"]}
+
+
 SOLVERS = {"purchase_constraints": solve_purchase, "buffered_meetings": solve_schedule,
            "appointment_correction": solve_appointment, "notes_synthesis": solve_notes,
-           "owner_correction_cancel": solve_reminder, "points": solve_points, "account_closure": solve_closure}
+           "owner_correction_cancel": solve_reminder, "points": solve_points, "account_closure": solve_closure,
+           "official_destination": solve_destination, "product_review_comparison": solve_product_comparison,
+           "alternative_after_failure": solve_alternative_source, "tmap": solve_navigation}
 
 
 def _records(records):
@@ -430,6 +616,8 @@ def execute(task: TaskInput, attempt_id: str):
             "events": deepcopy(world.events), "initialRecords": _records(world.initial), "finalRecords": _records(world.records),
             "finalFixture": deepcopy(world.fixture), "initialPointLots": world.initial_point_lots,
             "cancelled": world.cancelled, "permission": world.permission, "unknown": world.unknown,
+            "foreignInitialDigests": world.foreign_initial_digests,
+            "foreignFinalDigests": {key: digest(value) for key, value in world.foreign_decoys.items()},
             "modelCalls": 0, "phoneCalls": 0, "networkCalls": 0, "operationNs": world.operation_ns}
 
 
@@ -443,23 +631,25 @@ def run_attempt(catalog, attempt_id):
     attempt = next(a for a in catalog["attempts"] if a["id"] == attempt_id)
     case = next(c for c in catalog["cases"] if c["id"] == attempt["caseId"])
     variant = next(v for v in case["variants"] if v["id"] == attempt["variantId"])
-    if case["family"] == "goal_resume":
+    if case["family"] in EXTERNAL_ADAPTERS:
+        import importlib
         import importlib.util
-        if importlib.util.find_spec("goal_resume_simulation") is None:
-            return _not_run(attempt, "goal_resume_fixture_adapter_not_implemented")
-        from goal_resume_simulation import simulate_attempt
+        module_name = EXTERNAL_ADAPTERS[case["family"]]
+        if importlib.util.find_spec(module_name) is None:
+            return _not_run(attempt, module_name + "_not_implemented")
         started = time.perf_counter_ns()
-        detail = simulate_attempt(catalog, attempt_id)
-        if not all(detail.get(name) is False for name in ("usesActualModel", "usesActualPhone", "usesExternalService")):
-            raise ValueError("G09 adapter cannot elevate fixture evidence")
+        try:
+            detail = importlib.import_module(module_name).simulate_attempt(catalog, attempt_id)
+            if not all(detail.get(name) is False for name in ("usesActualModel", "usesActualPhone", "usesExternalService")):
+                raise ValueError("adapter cannot elevate fixture evidence")
+        except Exception as error:
+            return {**_not_run(attempt, "adapter_execution_failed"), "status": "failed", "errorCode": type(error).__name__}
         return {"attemptId": attempt_id, "caseId": case["id"], "variantId": variant["id"],
                 "status": "passed" if detail["passed"] else "failed", "actualOutcome": detail["observed"]["outcomeClass"],
                 "evidenceLevel": detail["evidenceLevel"], "usesActualModel": False, "usesActualPhone": False, "usesExternalService": False,
                 "execution": detail, "assessment": detail["checks"], "metrics": {"elapsedMs": (time.perf_counter_ns() - started) / 1e6, "modelCalls": 0}}
     if case["family"] not in SUPPORTED:
         return _not_run(attempt, "fixture_adapter_not_implemented")
-    if case["family"] == "notes_synthesis" and "foreignScopeDecoy" in variant["fixtureOverrides"]:
-        return _not_run(attempt, "boundary_fixture_has_sufficient_in_scope_data; stop_vs_continue_contract_needs_resolution")
     task = TaskInput.capture(case, variant)
     started = time.perf_counter_ns()
     execution = execute(task, attempt_id)
@@ -491,6 +681,7 @@ def run_catalog(catalog, selected=None):
     return {"executionKind": "deterministic_offline_simulation", "sourceBinding": {
                 "catalogDataSha256": digest(catalog), "runnerSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "oracleSha256": hashlib.sha256(Path(__file__).with_name("goal_only_simulation_oracle.py").read_bytes()).hexdigest(),
+                "externalAdapterSha256": {name: hashlib.sha256(Path(__file__).with_name(name + ".py").read_bytes()).hexdigest() for name in sorted(set(EXTERNAL_ADAPTERS.values())) if Path(__file__).with_name(name + ".py").is_file()},
                 "installedApkDigest": None, "workerVersion": None},
             "summary": {"plannedAttempts": len(results), "executedSimulations": status["passed"] + status["failed"],
                 "passedSimulations": status["passed"], "failedSimulations": status["failed"], "notRun": status["not_run"],
@@ -502,8 +693,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=catalog_api.CATALOG)
     parser.add_argument("--only", nargs="*")
+    parser.add_argument("--require-complete", action="store_true", help="Fail if any catalog attempt was not executed")
     parser.add_argument("--out", type=Path, help="New ignored .local directory; existing output is never overwritten")
     args = parser.parse_args()
+    if args.require_complete and args.only is not None:
+        parser.error("--require-complete cannot be used with --only")
     result = run_catalog(catalog_api.load(args.catalog), args.only)
     if args.out:
         private = Path(__file__).resolve().parents[2] / ".local"
@@ -513,7 +707,7 @@ def main():
         target.mkdir(parents=True, exist_ok=False)
         (target / "simulation-report.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result["summary"], ensure_ascii=False, sort_keys=True))
-    if result["summary"]["failedSimulations"]:
+    if result["summary"]["failedSimulations"] or (args.require_complete and result["summary"]["notRun"]):
         raise SystemExit(1)
 
 

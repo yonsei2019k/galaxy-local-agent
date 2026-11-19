@@ -1,5 +1,11 @@
 # Device validation
 
+## Published v0.1.24 paired same-conversation canary
+
+Tailscale returned two completed synthetic text turns with phone versionCode2024 and elapsed times 9054ms and 12047ms. The second turn used the first request as its predecessor and recalled the unique alias without tool calls. This tests the already published build. The current Rust budget changes and multi-segment goal behavior were not exercised.
+
+The installed2024 also repeated G01-v2 via the paired subscription provider in 63896ms. Four calculate calls succeeded. A at 87000 was correctly selected; B at 85000 misses the deadline and C at 91000 costs more. The independent fixture oracle agrees. This is one actual read/proposal baseline and is not a speed trend, purchase or new-build result.
+
 ## 2026-11-19 v0.1.21 phone version receipt
 
 G03-v2 then completed with versionCode2021 and elapsedMs115890. Six searches and two page reads succeeded; one additional search failed. The final answer and exact target match the official closure notice. Old socket timeout cause remains unresolved. Private receipts are excluded from Git.

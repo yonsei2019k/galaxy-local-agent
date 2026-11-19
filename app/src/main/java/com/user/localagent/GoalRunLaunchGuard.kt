@@ -108,7 +108,8 @@ private fun goalNoProgressCount(request:QueuedChatRequest,goal:GoalDefinition):I
 }
 
 /** Pure host decision. unknownEffects must come from the real runtime journal, never model prose. */
-internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean):GoalSegmentDecision {
+internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
+    useNativeBudget:Boolean=false):GoalSegmentDecision {
     val request=try {QueuedChatRequest.fromJson(parent.contextJson)}catch(_:Exception) {
         return GoalSegmentDecision.Pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
     }
@@ -131,14 +132,31 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         request.previousSteps.size,ToolRegistry.definitions.keys,1,1)
     if(assessment.pending.isNotEmpty()||assessment.blockers.isNotEmpty())return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
     if(goal.completionReady)return pause(GoalAutopilotPauseReason.CRITERIA_READY) // Host goal finalization remains separate.
-    if(segment.totalSegments>=GoalSegmentBinding.MAX_SEGMENTS)return pause(GoalAutopilotPauseReason.SEGMENT_BUDGET)
-    if(ledger.size>=GoalSegmentBinding.MAX_TOOL_CALLS)return pause(GoalAutopilotPauseReason.TOOL_BUDGET)
-    if(nowMs<segment.startedAtMs||nowMs-segment.startedAtMs>=GoalSegmentBinding.MAX_DURATION_MS)return pause(GoalAutopilotPauseReason.TIME_BUDGET)
-    if(segment.noProgressSegments>=GoalSegmentBinding.MAX_NO_PROGRESS)return pause(GoalAutopilotPauseReason.NO_PROGRESS)
     val noProgress=goalNoProgressCount(request,goal)
-    if(noProgress>=GoalSegmentBinding.MAX_NO_PROGRESS)return pause(GoalAutopilotPauseReason.NO_PROGRESS)
+    goalBudgetStop(segment,ledger.size,nowMs,noProgress,useNativeBudget)?.let{return pause(it)}
     return GoalSegmentDecision.Continue(segment.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
         segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress),ledger)
+}
+
+internal fun goalBudgetStop(segment:GoalSegmentBinding,toolCount:Int,nowMs:Long,noProgress:Int,useNative:Boolean):GoalAutopilotPauseReason? {
+    if(useNative){
+        return when(uniffi.ziphap_android.nativeGoalBudgetStop(segment.totalSegments.toUInt(),toolCount.toUInt(),
+            segment.startedAtMs.toULong(),nowMs.toULong(),noProgress.toUInt())){
+            uniffi.ziphap_android.NativeGoalBudgetStop.SEGMENTS->GoalAutopilotPauseReason.SEGMENT_BUDGET
+            uniffi.ziphap_android.NativeGoalBudgetStop.TOOLS->GoalAutopilotPauseReason.TOOL_BUDGET
+            uniffi.ziphap_android.NativeGoalBudgetStop.TIME->GoalAutopilotPauseReason.TIME_BUDGET
+            uniffi.ziphap_android.NativeGoalBudgetStop.NO_PROGRESS->GoalAutopilotPauseReason.NO_PROGRESS
+            null->null
+        }
+    }
+    // Reference policy for JVM tests without the Android native library.
+    return when {
+        segment.totalSegments>=GoalSegmentBinding.MAX_SEGMENTS->GoalAutopilotPauseReason.SEGMENT_BUDGET
+        toolCount>=GoalSegmentBinding.MAX_TOOL_CALLS->GoalAutopilotPauseReason.TOOL_BUDGET
+        nowMs<segment.startedAtMs||nowMs-segment.startedAtMs>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
+        noProgress>=GoalSegmentBinding.MAX_NO_PROGRESS->GoalAutopilotPauseReason.NO_PROGRESS
+        else->null
+    }
 }
 
 private fun requireGoalParentRow(request:QueuedChatRequest,row:ChatRunRecord) {
@@ -183,9 +201,10 @@ internal fun goalToolStepEvidence(call:ToolCall,result:ToolResult):StepEvidence 
 
 /** Pure launch fence. Caller loads the live guarded goal and actual parent row before invoking it. */
 internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefinition?,parent:ChatRunRecord?,callerCancelled:Boolean) =
-    requireGoalLaunchBinding(request,current,parent,callerCancelled,System.currentTimeMillis())
+    requireGoalLaunchBinding(request,current,parent,callerCancelled,System.currentTimeMillis(),useNativeBudget=true)
 
-internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefinition?,parent:ChatRunRecord?,callerCancelled:Boolean,nowMs:Long) {
+internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefinition?,parent:ChatRunRecord?,callerCancelled:Boolean,nowMs:Long,
+    useNativeBudget:Boolean=false) {
     val captured=request.goal?:return
     check(!callerCancelled){"목표 시작을 요청한 작업이 취소되어 새 실행을 시작하지 않았습니다."}
     val goal=checkNotNull(current){"연결된 목표가 삭제되어 실행을 시작하지 않았습니다."}
@@ -196,7 +215,7 @@ internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefi
         check(row.id==segment.parentRunId&&goalDigest(row.contextJson)==segment.parentCheckpointDigest){"부모 목표 실행의 최종 체크포인트가 변경되었습니다."}
         val original=QueuedChatRequest.fromJson(row.contextJson)
         requireSameGoalAuthority(original,request)
-        val decision=goalSegmentDecision(row,goal,segment.scopeKey,nowMs,unknownEffects=false)
+        val decision=goalSegmentDecision(row,goal,segment.scopeKey,nowMs,unknownEffects=false,useNativeBudget=useNativeBudget)
         check(decision is GoalSegmentDecision.Continue&&decision.binding==segment&&
             decision.ledger.map {it.json()}==request.goalLedger.map {it.json()}) {"실제 부모 체크포인트에서 이 다음 구간을 재검증하지 못했습니다."}
         return

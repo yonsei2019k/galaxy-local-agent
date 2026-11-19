@@ -2,6 +2,10 @@
 
 Updated 2026-11-19. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
+## Rust goal budget candidate and v0.1.24 phone evidence
+
+The paired phone reported versionCode2024 and remembered a unique alias in a same-conversation Tailscale follow-up. A separate G01-v2 real phone read/proposal baseline matched its arithmetic and constraint oracle. The current candidate moves cumulative goal continuation budget decisions into Rust through UniFFI. Whole-goal evidence mapping/finalization remains with the Android host and the multi-segment device qualification is pending. The pinned Rust PC probe reported MCP_DISABLED_UNCONFIRMED; no inference ran and Python remains the production provider. Offline simulation100/100 passed with no model, phone or service calls. See the device validation and change log for the separate evidence levels.
+
 ## Published2019: bounded goal continuation and image-app extraction; owner reports upgrade complete
 
 GitHub Actions `44450051017` attempt2 built and signed source `e99054d`; v0.1.19 is the latest release. Downloaded CI APK SHA256 `f89ec388df28a22f5d1f02e80237e19d74f46e386f6ae0edd3926806c0ff7872`. Independent pinned Ed25519 manifest verification, APK SHA, original signer, package/version and bounded Rust/React static checks pass. The local signed candidate described below was produced separately. The remote-test v1 reply does not identify the installed version or expose a multi-segment goal chain.
