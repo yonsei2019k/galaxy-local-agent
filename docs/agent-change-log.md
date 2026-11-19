@@ -6,6 +6,8 @@ Rust workspace 52 tests pass. Android runtime JVM 1025 pass and the Android devi
 
 One additional Rust PC blocker-precedence regression passes. Offline eval101 tests and all100 deterministic fixture simulations pass, with51 completions,33 preparations and16 safety results. Zero model, phone and external service calls in the simulation. CI now checks the complete catalog and fails on missing or failed attempts. Prior catalog expectations and original39 execution evidence remain available.
 
+The single local main release assembly passed in17m34 including vital lint. Candidate2025/0.1.25 was signed with the pinned certificate, APK permissions match the retained baseline, and the bounded Rust/React static audit passed. SHA256 `5aea2ca3c525cfa754f5022d22194ae6caae8c95bccc9cc54068ba722bf04afd`. Build inputs include the app/native changes committed in914ec9e; the build started before that commit. The signed APK is retained privately. No push, installation, whole-goal device run, production Rust PC inference, or team rollout.
+
 ## Batched remote recovery preflight
 
 The published 0.1.24 build and signed manifest were confirmed. The same-conversation canary stopped after the phone reported versionCode2021 instead of2024. The owner also confirmed 0.1.21. No second turn or multi-segment behavior was credited. The canary now reports observed and expected versions. Continue with grouped source changes and offline tests before generating the next release.
