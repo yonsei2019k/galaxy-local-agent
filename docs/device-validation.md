@@ -1,4 +1,11 @@
 # Device validation
+
+## Away from Wi-Fi: paired connection and signed 2032
+
+On 2026-11-20 the owner reported using mobile data. The Android Tailscale peer answered in 34 ms. An actual paired request returned from installed 2030 with correct sum 462, one successful calculate tool row and 21097 ms elapsed. The paired worker was running the settled-read follow-up modules. This request completed in the ordinary path and does not qualify the new recovery branch.
+
+VersionCode 2032 packaged and signed with the existing certificate. Independent permissions and 16 KiB alignment checks and the static Rust/React APK audit passed. Artifact SHA-256: 21b1e85c0cc22852d88b2ff0d1915e358a25e5774fdfe2de8c0ab272768c3b22. The three focused suites passed ten JVM cases. A real image was parked via the existing worker suspend operation and its 1/50 encrypted checkpoint remained available after the worker restarted. This verifies the pre-existing suspend service. The new Android pause control and the local read handoff still require a post-install device case. Taildrop did not return a receiver acknowledgement. A temporary tailnet-only path exposes the exact signed file on the owner's network. A 32-byte HTTP range read through that route returned status 206. The phone continues to report 2030, and Android installation and image resume are pending.
+
 ## Installed 2029 renderer recovery and public research boundary
 
 Wireless ADB confirmed versionCode 2029 (v0.1.29-local) and the installed test package matched its signed artifact. The focused device case terminated the live React WebView renderer, reopened the conversation, preserved the same synthetic draft and branch binding, and showed the fixed staff menu without remote QA or standalone project rows.
