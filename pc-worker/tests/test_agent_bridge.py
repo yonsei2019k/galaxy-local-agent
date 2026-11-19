@@ -376,6 +376,29 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.assertEqual(409, self.phone_request("POST", "/plan-ack",
             {"planDigest": state["plan"]["planDigest"], "accepted": True})[0])
 
+    def test_failed_screen_read_releases_call_but_failed_screen_action_remains_uncertain(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        for name in ("read_screen", "screen_action"):
+            self.grant["phoneTools"].append(clock_tool() | {"name": name})
+        self._register()
+        self.accept(self.plan(["read_screen", "screen_action"]))
+        failure = {"success": False, "verification": "FAILED", "effectNotApplied": False, "content": "fixture"}
+        read, _ = self.propose("read_screen")
+        _, ack = self.claim(read)
+        _, (status, snapshot) = self.post_result(read, ack, failure)
+        self.assertEqual(200, status)
+        self.assertIsNone(snapshot["pendingCall"])
+        self.assertEqual([{"tool": "read_screen", "arguments": {}}],
+                         self.broker.read_recovery_context(self.owner, self.sid, self.phone)["failedReads"])
+        action, response = self.propose("screen_action")
+        self.assertEqual(202, response[0])
+        _, ack = self.claim(action)
+        _, (_, snapshot) = self.post_result(action, ack, failure)
+        self.assertEqual("UNKNOWN_EFFECT", snapshot["pendingCall"]["state"])
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+        self.assertEqual(409, self.propose("screen_action")[1][0])
+
     def test_recovery_context_requires_phone_accepted_reads_and_proven_absence_of_effect(self):
         context = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone)
         self.assertIsNone(context())

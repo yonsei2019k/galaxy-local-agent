@@ -29,7 +29,7 @@ import uuid
 
 RESTART_POLICY = "RAM_ONLY_RESTART_REVOKES"
 # Fixed host contracts, never inferred from names, model prose or page contents.
-FAILED_PUBLIC_READS_HAVE_NO_EFFECT = frozenset({'read_webpage','search_web','search_shopping'})
+FAILED_READS_HAVE_NO_EFFECT = frozenset({'read_webpage','search_web','search_shopping','read_screen'})
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
 MAX_TTL_MS = 900_000
@@ -559,9 +559,9 @@ class AgentBridge:
             plan = session.plan
             if before_plan and session.require_plan and session.profile == "phone-only" and plan is None and not session.calls:
                 return {"planAccepted": False, "acceptedTools": [], "failedReads": [], "observedReads": []}
-            reads = FAILED_PUBLIC_READS_HAVE_NO_EFFECT | {"calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
+            reads = FAILED_READS_HAVE_NO_EFFECT | {"calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
             if (not session.require_plan or not plan or plan["state"] != "ACCEPTED"
-                    or not plan["requiredTools"] or not set(plan["requiredTools"]) <= reads | {"patch_note"}
+                    or not plan["requiredTools"] or not set(plan["requiredTools"]) <= reads | {"patch_note", "screen_action"}
                     or session.active or len(session.calls) >= MAX_CALLS):
                 return None
             failed, observed, verified_tools = [], [], set()
@@ -574,7 +574,7 @@ class AgentBridge:
                     observed.append(entry | {"result": call.result["content"]})
                     verified_tools.add(call.tool)
                 elif (not call.result["success"] and call.result["verification"] == "FAILED" and
-                      (call.result["effectNotApplied"] or call.tool in FAILED_PUBLIC_READS_HAVE_NO_EFFECT)):
+                      (call.result["effectNotApplied"] or call.tool in FAILED_READS_HAVE_NO_EFFECT)):
                     failed.append(entry)
                 else:
                     return None
@@ -763,7 +763,7 @@ class AgentBridge:
             _require(s.active == cid and c.state in ("CLAIMED", "UNKNOWN_EFFECT"), "RESULT_NOT_CLAIMED", 409)
             c.result, c.result_hash, c.source = copy.deepcopy(body["result"]), digest, "PHONE_EXECUTOR"
             known = (c.result["verification"] in ("VERIFIED", "PREPARED") or c.result["effectNotApplied"] or
-                     c.tool in FAILED_PUBLIC_READS_HAVE_NO_EFFECT and c.result['verification']=='FAILED' and not c.result['success'])
+                     c.tool in FAILED_READS_HAVE_NO_EFFECT and c.result['verification']=='FAILED' and not c.result['success'])
             c.state = "COMPLETED" if known else "UNKNOWN_EFFECT"
             if known:
                 s.active = None
