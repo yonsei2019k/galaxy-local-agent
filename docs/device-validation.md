@@ -1,5 +1,11 @@
 # Device validation
 
+## 2032 installed over mobile Tailscale
+
+The paired phone reported versionCode 2032 twice. A deliberately source-free public-research test paused with research_evidence_unavailable and zero tool rows. A separate public-site test completed in 108184 ms and returned only the fixed local-only notice, no tool rows, and no remote follow-up authority. For this explicit cloud/public-only fixture the local completion notice verifies that the phone switched to the private path. The exact answer text and answer quality were not checked over the PC mailbox.
+
+The temporary APK route was removed after the installed-version confirmation. The original encrypted image checkpoint remained paused at 1/50 with resume available. The owner did not run the pause/resume controls during these remote checks.
+
 ## Away from Wi-Fi: paired connection and signed 2032
 
 On 2026-11-20 the owner reported using mobile data. The Android Tailscale peer answered in 34 ms. An actual paired request returned from installed 2030 with correct sum 462, one successful calculate tool row and 21097 ms elapsed. The paired worker was running the settled-read follow-up modules. This request completed in the ordinary path and does not qualify the new recovery branch.
