@@ -21,8 +21,9 @@ def run_turn(text, version, previous=None):
         result = item.get('result')
         if result is not None:
             receipt = result.get('receipt') or {}
-            if receipt.get('versionCode') != version:
-                raise RuntimeError('Unexpected installed app version')
+            actual = receipt.get('versionCode')
+            if actual != version:
+                raise RuntimeError(f'Installed versionCode {actual!r}; expected {version}')
             if result.get('state') != 'completed' or result.get('tools'):
                 raise RuntimeError('Canary did not complete without tools')
             return key, result

@@ -1,6 +1,7 @@
 package com.user.localagent.externalagent
 
 import com.user.localagent.core.ToolResult
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.*
 
 /** Actual v1 HTTPS client. Only the authenticated phone role can claim/report; no agent result import. */
@@ -51,8 +52,18 @@ class PcExternalAgentClient(
         return AgentSessionSnapshot(id,revision,state,expiry,sequence.toInt(),pending,captured.requirePlan,plan)
     }
     private fun path(suffix:String="")="/v1/agent/sessions/"+checkNotNull(sessionId)+suffix
-    private suspend fun call(method:String,suffix:String="",body:JsonObject?=null):JsonObject =
-        ExternalAgentContract.parseObject(transport.exchange(path(suffix),method,body,checkNotNull(phoneCapability)))
+    private suspend fun call(method:String,suffix:String="",body:JsonObject?=null):JsonObject {
+        val route=path(suffix)
+        val capability=checkNotNull(phoneCapability)
+        val response=try {
+            transport.exchange(route,method,body,capability)
+        }catch(error:PcAgentBridgeTimeout){
+            if(method!="GET")throw error
+            delay(200)
+            transport.exchange(route,method,body,capability)
+        }
+        return ExternalAgentContract.parseObject(response)
+    }
 
     override suspend fun register(capture:ExternalAgentCapture):AgentSessionRegistration {
         check(sessionId==null&&phoneCapability==null&&capture===captured)

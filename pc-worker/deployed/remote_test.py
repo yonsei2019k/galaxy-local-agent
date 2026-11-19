@@ -104,7 +104,7 @@ class RemoteTestQueue:
                     or type(receipt['elapsedMs']) is not int or not 0 <= receipt['elapsedMs'] <= 2**63 - 1):
                 raise RemoteTestError('RECEIPT')
         state = body.get('state')
-        if state not in STATES:
+        if not isinstance(state, str) or state not in STATES:
             raise RemoteTestError('STATE')
         if 'canFollowUp' in body and (body['canFollowUp'] is not True or state != 'completed'):
             raise RemoteTestError('FOLLOW_UP')
@@ -114,9 +114,9 @@ class RemoteTestQueue:
             raise RemoteTestError('TOOLS')
         clean = []
         for tool in tools:
-            if not isinstance(tool, dict) or set(tool) - {'name', 'success', 'summary'}:
+            if not isinstance(tool, dict) or set(tool) - {'name', 'success', 'summary'} or type(tool.get('success')) is not bool:
                 raise RemoteTestError('TOOLS')
-            clean.append({'name': _text(tool.get('name', ''), 96), 'success': bool(tool.get('success')),
+            clean.append({'name': _text(tool.get('name', ''), 96), 'success': tool['success'],
                           'summary': _text(tool.get('summary', ''), 400)})
         run_id = body.get('runId')
         if run_id is not None:
@@ -124,17 +124,21 @@ class RemoteTestQueue:
         error = body.get('errorCode')
         if error is not None:
             error = _text(error, 96)
+        result = {'state': state, 'answer': answer, 'tools': clean, 'runId': run_id, 'errorCode': error}
+        if receipt is not None:
+            result['receipt'] = dict(receipt)
+        if body.get('canFollowUp'):
+            result['canFollowUp'] = True
         with self.lock:
             item = self.items.get(request_id)
+            if item is not None and item['state'] == 'reported':
+                prior = {key: value for key, value in item['result'].items() if key != 'reportedAt'}
+                if prior == result:
+                    return {'ok': True}
             if item is None or item['state'] not in ('claimed', 'timeout'):
                 raise RemoteTestError('NOT_CLAIMED', 409)
             item['state'] = 'reported'
-            item['result'] = {'state': state, 'answer': answer, 'tools': clean, 'runId': run_id, 'errorCode': error,
-                              'reportedAt': self.clock()}
-            if receipt is not None:
-                item['result']['receipt'] = dict(receipt)
-            if body.get('canFollowUp'):
-                item['result']['canFollowUp'] = True
+            item['result'] = dict(result, reportedAt=self.clock())
             return {'ok': True}
 
     def status(self, request_id):

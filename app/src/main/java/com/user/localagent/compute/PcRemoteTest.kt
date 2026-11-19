@@ -74,6 +74,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         job=scope.launch(Dispatchers.IO){
             while(isActive){
                 if(!settings.enabled()){delay(15_000);continue}
+                val epoch=settings.epoch
                 val config=runCatching{transport.available()}.getOrNull()
                 if(config==null){delay(20_000);continue}
                 val next=runCatching{transport.json(config,"/v1/remote/next","POST",buildJsonObject{},timeout=10_000)}.getOrNull()
@@ -81,15 +82,15 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
                 if(request==null){delay(8_000);continue}
                 val receiptSupported=PcRemoteTestRequest.supportsReceipt(next)
                 val conversationSupported=PcRemoteTestRequest.supportsConversation(next)
-                runCatching{handle(config,request,receiptSupported,conversationSupported)}.onFailure{if(it is CancellationException)throw it}
+                runCatching{handle(config,request,receiptSupported,conversationSupported,epoch)}.onFailure{if(it is CancellationException)throw it}
             }
         }
     }
 
-    private suspend fun handle(config:PcConnection,raw:JsonObject,receiptSupported:Boolean,conversationSupported:Boolean){
+    private suspend fun handle(config:PcConnection,raw:JsonObject,receiptSupported:Boolean,conversationSupported:Boolean,epoch:Long){
         val id=raw["requestId"]?.jsonPrimitive?.contentOrNull?:return
         val started=SystemClock.elapsedRealtime()
-        val epoch=settings.epoch
+        if(!settings.enabled()||settings.epoch!=epoch||pairing.snapshot()?.samePair(config)!=true)return
         val version=if(receiptSupported)context.packageManager.getPackageInfo(context.packageName,0).longVersionCode else null
         fun receipt()=version?.let{buildJsonObject {
             put("versionCode",it)
@@ -124,12 +125,21 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
             if(run.status=="waiting_approval"&&!reportedApproval){reportedApproval=true;continue}
             if(run.status !in setOf("queued","running","waiting_approval")){state=run.status;break}
         }
+        suspend fun scopeUnchanged():Boolean=app.repository.chat.thread(thread.id)?.let{
+            it.projectId==null&&it.revision==thread.revision&&it.activeBranchId==thread.activeBranchId
+        }==true
+        if(!scopeUnchanged()){
+            report(config,id,"interrupted","",emptyList(),runId,"REMOTE_TEST_SCOPE_CHANGED",receipt(),epoch)
+            return
+        }
         val messages=app.repository.chat.messages(thread.id,thread.activeBranchId).first()
         val answer=messages.lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
         val tools=app.repository.chat.toolRunsForThread(thread.id,runId).first()
-        val finalThread=app.repository.chat.thread(thread.id)
+        if(!scopeUnchanged()){
+            report(config,id,"interrupted","",emptyList(),runId,"REMOTE_TEST_SCOPE_CHANGED",receipt(),epoch)
+            return
+        }
         val canFollowUp=conversationSupported&&state=="completed"&&settings.epoch==epoch&&
-            finalThread?.projectId==null&&finalThread?.revision==thread.revision&&
             messages.lastOrNull()?.let{it.role=="assistant"&&it.runId==runId}==true
         if(canFollowUp){
             if(continuations.size>=16)continuations.remove(continuations.keys.first())

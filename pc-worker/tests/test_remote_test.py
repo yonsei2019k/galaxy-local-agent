@@ -92,6 +92,25 @@ class RemoteTestQueueTests(unittest.TestCase):
         with self.assertRaises(remote.RemoteTestError):
             self.queue.enqueue({'text': 'late', 'afterRequestId': child})
 
+    def test_identical_result_retries_keep_the_original_receipt(self):
+        request_id = self.queue.enqueue({'text': 'hi'})['requestId']
+        self.queue.claim()
+        body = {'state': 'completed', 'answer': 'first', 'canFollowUp': True}
+        self.queue.report(request_id, body)
+        self.clock.now += 1
+        self.assertEqual(self.queue.report(request_id, body), {'ok': True})
+        self.assertEqual(self.queue.status(request_id)['result']['reportedAt'], 1000)
+        with self.assertRaises(remote.RemoteTestError):
+            self.queue.report(request_id, body | {'answer': 'different'})
+
+    def test_malformed_status_and_tool_success_do_not_report_completion(self):
+        request_id = self.queue.enqueue({'text': 'hi'})['requestId']
+        self.queue.claim()
+        for body in ({'state': []}, {'state': 'completed', 'tools': [{'name': 'read', 'success': 'false'}]}):
+            with self.assertRaises(remote.RemoteTestError):
+                self.queue.report(request_id, body)
+        self.assertEqual(self.queue.status(request_id)['state'], 'claimed')
+
 
 if __name__ == '__main__':
     unittest.main()

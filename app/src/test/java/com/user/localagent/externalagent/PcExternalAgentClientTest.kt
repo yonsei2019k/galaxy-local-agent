@@ -31,6 +31,7 @@ class PcExternalAgentClientTest {
         var corruptDigest=false
         var extra:Pair<String,JsonElement>?=null
         var lastResult:JsonObject?=null
+        var timeoutPath:String?=null
         fun snapshot(add:Map<String,JsonElement> = emptyMap()):String=buildJsonObject {
             put("sessionId",session);put("revision",revision);put("state","ACTIVE")
             put("expiresAtEpochMs",100_000);put("lastSequence",lastSequence)
@@ -50,6 +51,10 @@ class PcExternalAgentClientTest {
         }
         override suspend fun exchange(path:String,method:String,body:JsonObject?,phoneCapability:String?):String {
             calls+=Triple(path,body,phoneCapability)
+            if(path==timeoutPath){
+                timeoutPath=null
+                throw PcAgentBridgeTimeout("SYNTHETIC_TIMEOUT",java.net.SocketTimeoutException())
+            }
             if(path=="/v1/agent/sessions"){
                 check(method=="POST"&&phoneCapability==null&&body==capture.registration())
                 return snapshot(mapOf("phoneCapability" to JsonPrimitive(capability)))
@@ -77,6 +82,25 @@ class PcExternalAgentClientTest {
         }
         override fun cancelNetwork(){}
     }
+    @Test fun retriesAReadTimeoutOnceWithoutReplayingAClaim()=runBlocking {
+        val wire=Wire()
+        val client=PcExternalAgentClient(capture,wire)
+        client.register(capture)
+        val route="/v1/agent/sessions/$session"
+        wire.timeoutPath=route
+        client.poll()
+        assertEquals(2,wire.calls.count{it.first==route})
+        wire.offer()
+        val snapshot=client.poll()
+        wire.timeoutPath="$route/claim"
+        try {
+            client.claim(checkNotNull(snapshot.pending),snapshot.revision)
+            fail("Claim timeout was swallowed")
+        }catch(_:PcAgentBridgeTimeout){
+            assertEquals(1,wire.calls.count{it.first=="$route/claim"})
+        }
+    }
+
     @Test fun wholeRegistryCatalogSurvivesTheSnapshotCheck()=runBlocking {
         val all=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,"a".repeat(64),ToolRegistry.definitions.keys,allowExternalAgent=true)
         val wire=Wire(all);val client=PcExternalAgentClient(all,wire)
