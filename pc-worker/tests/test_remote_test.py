@@ -72,6 +72,26 @@ class RemoteTestQueueTests(unittest.TestCase):
         self.queue.report(request_id, {'state': 'failed', 'receipt': receipt})
         self.assertEqual(self.queue.status(request_id)['result']['receipt'], receipt)
 
+    def test_follow_up_requires_completed_capable_parent_and_consumes_it_once(self):
+        parent = self.queue.enqueue({'text': 'first'})['requestId']
+        follow = {'text': 'next', 'afterRequestId': parent}
+        with self.assertRaises(remote.RemoteTestError):
+            self.queue.enqueue(follow)
+        self.queue.claim()
+        with self.assertRaises(remote.RemoteTestError):
+            self.queue.report(parent, {'state': 'failed', 'canFollowUp': True})
+        self.queue.report(parent, {'state': 'completed', 'canFollowUp': True})
+        with self.assertRaises(remote.RemoteTestError):
+            self.queue.enqueue(follow | {'model': 'different'})
+        child = self.queue.enqueue(follow)['requestId']
+        self.assertEqual(self.queue.claim()['request']['afterRequestId'], parent)
+        with self.assertRaises(remote.RemoteTestError):
+            self.queue.enqueue(follow)
+        self.queue.report(child, {'state': 'completed', 'canFollowUp': True})
+        self.clock.now += remote.CLAIM_TTL_S
+        with self.assertRaises(remote.RemoteTestError):
+            self.queue.enqueue({'text': 'late', 'afterRequestId': child})
+
 
 if __name__ == '__main__':
     unittest.main()

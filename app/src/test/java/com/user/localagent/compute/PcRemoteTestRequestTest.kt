@@ -21,6 +21,12 @@ class PcRemoteTestRequestTest {
         assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion","2")}))
         assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion",3)}))
     }
+    @Test fun followUpUsesOnlyCanonicalPreviousRequestId(){
+        val previous="10000000-0000-4000-8000-000000000004"
+        fun follow(value:String)=buildJsonObject{body("next").forEach{(key,item)->put(key,item)};put("afterRequestId",value)}
+        assertEquals(previous,PcRemoteTestRequest.parse(follow(previous)).afterRequestId)
+        listOf(id,"not-a-uuid").forEach{assertThrows(IllegalArgumentException::class.java){PcRemoteTestRequest.parse(follow(it))}}
+    }
     @Test fun commandsExtraFieldsAndBadModelsAreRejected(){
         listOf(body("/new"),body(""),body("x".repeat(2001)),body("hi","../x"),body("hi",extra=true)).forEach{
             assertThrows(IllegalArgumentException::class.java){PcRemoteTestRequest.parse(it)}

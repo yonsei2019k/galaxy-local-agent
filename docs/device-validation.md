@@ -1,5 +1,11 @@
 # Device validation
 
+## 2026-11-19 v0.1.21 phone version receipt
+
+G03-v2 then completed with versionCode2021 and elapsedMs115890. Six searches and two page reads succeeded; one additional search failed. The final answer and exact target match the official closure notice. Old socket timeout cause remains unresolved. Private receipts are excluded from Git.
+
+The owner confirmed installation of GitHub v0.1.21. Deployed only the PC remote-test module after idle checks, obtained graceful worker exit and observed supervisor restart with healthy bridge metadata. The paired phone then completed a synthetic calculation through the remote mailbox with the correct answer 75 and reported Android package versionCode2021 and elapsedMs21075. This reads package metadata from the phone, rather than pulling the installed APK bytes. No ADB was used. The receipt does not establish multi-turn or multi-segment goal execution.
+
 ## 2026-11-19 after owner-reported v0.1.19 upgrade
 
 After the owner confirmed the GitHub update, two Tailscale remote repeats of G03-v2 were received and returned terminal failure. First: SocketTimeoutException, zero tools. Second: one verified search_web, then SocketTimeoutException. Both answers clearly reported failure. The independent official notice confirmed both specified rooms were closed for both requested dates, but neither phone attempt returned that result. The PC loopback health endpoint responded with bridge metadata after the first failure. The timeout stage and cause remain unconfirmed. Private receipts are under `.local/github-v019/`; remote v1 includes no independent package-version readback or goal-chain evidence.

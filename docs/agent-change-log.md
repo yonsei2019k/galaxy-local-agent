@@ -1,3 +1,7 @@
+## Remote test follow-up conversation
+
+The paired mailbox accepts an optional `afterRequestId` on loopback enqueue. It requires a recent completed request with a phone-issued follow-up marker, the same model selection, and an unused predecessor. Android retains up to sixteen process-local continuations for thirty minutes. It validates original pairing, owner switch epoch, thread, branch and prior assistant run. Room rechecks the last message and authority before enqueue. Older clients still handle ordinary requests. Follow-ups can reuse only a test thread created by the phone. General conversation targeting, goal chaining, remote cancellation and cleanup remain outside this increment. Seven PC queue tests passed, including rejection of stale, duplicate, wrong-model and unfinished predecessors.
+
 ## 2026-11-19 — Remote test receipt negotiation (source)
 
 The worker advertises optional receipt version 2 next to the existing request payload. A supported Android client includes its installed package version code and monotonic elapsed milliseconds in the terminal report. Older clients can still report to the new worker and new clients omit the receipt for old workers. Before submission and result delivery the phone checks that the owner switch and captured pairing are still valid. Receipt metadata does not authorize actions or prove a tool effect, a goal chain or the APK digest. No worker restart or phone deployment is implied by this source change.

@@ -46,7 +46,7 @@ class RemoteTestQueue:
                 item['state'] = 'timeout'
 
     def enqueue(self, request):
-        if not isinstance(request, dict) or set(request) - {'text', 'model'} or 'text' not in request:
+        if not isinstance(request, dict) or set(request) - {'text', 'model', 'afterRequestId'} or 'text' not in request:
             raise RemoteTestError('SHAPE')
         text = _text(request['text'], MAX_TEXT).strip()
         if not text or text.startswith('/'):
@@ -56,6 +56,14 @@ class RemoteTestQueue:
             raise RemoteTestError('MODEL')
         with self.lock:
             self._prune()
+            previous = None
+            if 'afterRequestId' in request:
+                previous = self.items.get(_text(request['afterRequestId'], 36))
+                result = previous.get('result') if previous else None
+                if (not result or result['state'] != 'completed' or not result.get('canFollowUp')
+                        or self.clock() - result['reportedAt'] >= CLAIM_TTL_S
+                        or previous['model'] != model or previous.get('followed')):
+                    raise RemoteTestError('FOLLOW_UP_UNAVAILABLE', 409)
             if sum(1 for item in self.items.values() if item['state'] == 'pending') >= MAX_PENDING:
                 raise RemoteTestError('QUEUE_FULL', 429)
             if len(self.items) >= MAX_KEPT:
@@ -67,6 +75,9 @@ class RemoteTestQueue:
             request_id = str(uuid.uuid4())
             self.items[request_id] = {'requestId': request_id, 'text': text, 'model': model, 'state': 'pending',
                                       'createdAt': self.clock(), 'claimedAt': None, 'result': None}
+            if previous is not None:
+                self.items[request_id]['afterRequestId'] = previous['requestId']
+                previous['followed'] = True
             return {'requestId': request_id, 'state': 'pending'}
 
     def claim(self):
@@ -74,16 +85,17 @@ class RemoteTestQueue:
             self._prune()
             pending = sorted((i for i in self.items.values() if i['state'] == 'pending'), key=lambda i: i['createdAt'])
             if not pending:
-                return {'request': None, 'receiptVersion': 2}
+                return {'request': None, 'receiptVersion': 2, 'conversationVersion': 1}
             item = pending[0]
             item['state'] = 'claimed'
             item['claimedAt'] = self.clock()
-            return {'request': {'requestId': item['requestId'], 'text': item['text'], 'model': item['model']},
-                    'receiptVersion': 2}
+            fields = ('requestId', 'text', 'model', 'afterRequestId')
+            return {'request': {key: item[key] for key in fields if key in item},
+                    'receiptVersion': 2, 'conversationVersion': 1}
 
     def report(self, request_id, body):
         request_id = str(uuid.UUID(request_id))
-        if not isinstance(body, dict) or set(body) - {'state', 'answer', 'tools', 'runId', 'errorCode', 'receipt'}:
+        if not isinstance(body, dict) or set(body) - {'state', 'answer', 'tools', 'runId', 'errorCode', 'receipt', 'canFollowUp'}:
             raise RemoteTestError('SHAPE')
         receipt = body.get('receipt')
         if 'receipt' in body:
@@ -94,6 +106,8 @@ class RemoteTestQueue:
         state = body.get('state')
         if state not in STATES:
             raise RemoteTestError('STATE')
+        if 'canFollowUp' in body and (body['canFollowUp'] is not True or state != 'completed'):
+            raise RemoteTestError('FOLLOW_UP')
         answer = _text(body.get('answer', ''), 20000)
         tools = body.get('tools', [])
         if not isinstance(tools, list) or len(tools) > 64:
@@ -119,6 +133,8 @@ class RemoteTestQueue:
                               'reportedAt': self.clock()}
             if receipt is not None:
                 item['result']['receipt'] = dict(receipt)
+            if body.get('canFollowUp'):
+                item['result']['canFollowUp'] = True
             return {'ok': True}
 
     def status(self, request_id):
