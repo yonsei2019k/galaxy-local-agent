@@ -2,7 +2,9 @@
 
 ## Published v0.1.25 rollout check
 
-After the PC mailbox module update, installed2024 completed a same-conversation alias canary (two turns, 12058ms and 9042ms, no tools). An independent peer ping confirmed a direct Tailscale path at 27ms. Two later requests sent after v0.1.25 publication still returned versionCode2024 and were stopped by the version assertion. The v0.1.25 APK is independently verified, but read-only clarification continuation and timeout diagnostics on installed2025 require a fresh receipt from that version.
+After the owner reported upgrading, the phone returned versionCode2025 twice through the paired mailbox. In a synthetic family travel quote, the first turn paused after 18067ms with `cloud_clarification_read_only`, asked for the missing budget and issued no tools. The second turn was accepted in that same conversation and completed after 27064ms. Two successful calculation calls supported the correct 100000 total and 10000 remaining from the supplied 110000 budget. No booking, external search, payment or storage action was observed. Network timeout diagnostics and live travel checkout remain unqualified.
+
+A separate two-turn canary on installed2025 recalled the exact synthetic alias from the same conversation without tool calls (15063ms and 9042ms). The earlier two post-publication probes returned installed2024 and were rejected by the version assertion. Before that upgrade, installed2024 had passed the alias case (12058ms and 9042ms). Independent Android-peer Tailscale ping was 43ms after the owner reported updating. The ping and the app mailbox receipts establish separate outcomes.
 
 ## 2027-01-01 Jeju travel pre-payment canary on phone v0.1.24
 
