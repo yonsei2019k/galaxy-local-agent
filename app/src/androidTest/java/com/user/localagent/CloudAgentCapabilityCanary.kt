@@ -27,7 +27,9 @@ class CloudAgentCapabilityCanary {
     @Test fun realCloudRequests()=runBlocking {
         val args=InstrumentationRegistry.getArguments()
         assumeTrue(args.getString("cloudCapabilityCanaryApproved")=="true")
-        val selected=(args.getString("cases")?:cases.keys.joinToString(",")).split(',').map{it.trim()}.filter{it in cases}
+        val browserCase = "앱 브라우저에서 https://example.com/을 열고 실제 페이지의 큰 제목과 첫 본문 문장의 요지를 확인해줘. 이미 연 페이지를 읽고, 링크 클릭이나 입력은 하지 마."
+        val availableCases=cases + ("browser" to browserCase)
+        val selected=(args.getString("cases")?:cases.keys.joinToString(",")).split(',').map{it.trim()}.filter{it in availableCases}
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val app=(context.applicationContext as LocalAgentApplication).container
         val coordinator=app.runs;val store=app.repository.chat
@@ -60,7 +62,7 @@ class CloudAgentCapabilityCanary {
                     waitFor(20_000){coordinator.selectionReady.value&&coordinator.selectedThreadId.value==t.id}
                     withContext(Dispatchers.Main.immediate){coordinator.chooseModel(ExternalAgentSettings.MODEL_ID,t.id)}
                     waitFor(15_000){store.readDraft(t.id)?.modelId==ExternalAgentSettings.MODEL_ID}
-                    check(withContext(Dispatchers.Main.immediate){coordinator.send(cases.getValue(key),t.id)})
+                    check(withContext(Dispatchers.Main.immediate){coordinator.send(availableCases.getValue(key),t.id)})
                     waitFor(20_000){store.runsForThread(t.id).isNotEmpty()}
                     val runId=store.runsForThread(t.id).single().id
                     var waitedForOwner=false

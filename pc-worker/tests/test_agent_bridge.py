@@ -399,6 +399,29 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
         self.assertEqual(409, self.propose("screen_action")[1][0])
 
+    def test_browser_recovery_observes_the_page_and_prevents_a_second_navigation(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        open_tool, read_tool = "open_app_browser_page", "read_app_browser_page"
+        for name in (open_tool, read_tool):
+            self.grant["phoneTools"].append(clock_tool() | {"name": name})
+        self._register()
+        self.accept(self.plan([open_tool, read_tool]))
+        opened, _ = self.propose(open_tool)
+        _, ack = self.claim(opened)
+        self.post_result(opened, ack)
+        recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertTrue(recovery["browserOpened"])
+        self.assertEqual([read_tool], recovery["acceptedTools"])
+        self.assertEqual([], recovery["observedReads"])
+        self.assertEqual(200, self.propose(open_tool, cid=opened["callId"])[1][0])
+        self.assertEqual(403, self.propose(open_tool)[1][0])
+        observation, response = self.propose(read_tool)
+        self.assertEqual(202, response[0])
+        _, ack = self.claim(observation)
+        self.post_result(observation, ack)
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+
     def test_recovery_context_requires_phone_accepted_reads_and_proven_absence_of_effect(self):
         context = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone)
         self.assertIsNone(context())
