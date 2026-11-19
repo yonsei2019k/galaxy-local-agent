@@ -71,6 +71,16 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
     }
     @Volatile private var jobId:String?=null
     @Volatile private var currentConfig:PcConnection?=null
+    @Volatile private var pauseTarget:Pair<PcConnection,String>?=null
+    val canPauseActive:Boolean get()=pauseTarget!=null
+    suspend fun pauseActive():Boolean=withContext(Dispatchers.IO){
+        val target=pauseTarget?:return@withContext false
+        val (config,id)=target
+        requireOwnerAccess(config)
+        if(pauseTarget!=target||jobId!=id)return@withContext false
+        PcTransport(context).json(config,"/v1/images/$id/suspend","POST",buildJsonObject{},15_000,computeOwner=computeOwner)
+        true
+    }
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val cancelRevision=AtomicLong()
     private fun requireOwnerAccess(config:PcConnection?=null) {
@@ -129,6 +139,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
             PcImageRecoveryTicket.pair(config,settings.authorizationRevision),selectedId,actualSeed,steps,System.currentTimeMillis(),
             JsonObject(recoveryContext+mapOf("connectionPin" to JsonPrimitive(PcImageRecoveryTicket.pair(config,0)),"requestDigest" to JsonPrimitive(requestDigest)))))
         var delivered=false
+        var pauseConfirmed=false
         var discard=false
         var route=config
         cleanupTarget=config to id
@@ -168,9 +179,18 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                     val step=report.getValue("step").jsonPrimitive.int
                     val total=report.getValue("steps").jsonPrimitive.int
                     require(step in 0..total&&total==steps)
+                    val saved=report["checkpointStep"]?.jsonPrimitive?.intOrNull?:0
+                    val explicitlyPaused=report["paused"]?.jsonPrimitive?.booleanOrNull==true
+                    val pauseAllowed=PcImageSuspended.canPause(recoverable,phase,explicitlyPaused,saved,steps)
+                    pauseTarget=if(pauseAllowed)route to id else null
+                    if(explicitlyPaused){
+                        val confirmed=PcImageSuspended.fromReport(phase,true,saved,steps,report["cleanup_complete"]?.jsonPrimitive?.booleanOrNull)
+                        if(confirmed!=null){pauseConfirmed=true;cleanupTarget=null;throw confirmed}
+                        onProgress(ImageGenerationProgress("계산 지점 보관 확인 중",step,total,step.toFloat()/total))
+                        delay(1000)
+                        continue
+                    }
                     if(phase in setOf("resumable","suspended")){
-                        val saved=report["checkpointStep"]?.jsonPrimitive?.intOrNull?:0
-                        PcImageSuspended.fromReport(phase,report["paused"]?.jsonPrimitive?.boolean,saved,steps)?.let{throw it}
                         check(recoverable&&resumeAttempts++<2){"PC 복구 정보를 보관했습니다. 자원 상태를 확인한 뒤 ‘PC 작업 이어받기’를 눌러주세요."}
                         check(saved in 1..steps){"저장된 계산 지점이 없습니다. PC 상태를 확인한 뒤 새로 시작해야 합니다."}
                         onProgress(ImageGenerationProgress("PC ${saved}단계 저장 확인 · 원래 설정으로 이어서 계산 준비",saved,total,saved.toFloat()/total))
@@ -182,7 +202,7 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                         if(latestPhase !in setOf("resumable","suspended"))continue
                         val latestSaved=latest["checkpointStep"]?.jsonPrimitive?.intOrNull?:0
                         require(latest.getValue("steps").jsonPrimitive.int==steps)
-                        PcImageSuspended.fromReport(latestPhase,latest["paused"]?.jsonPrimitive?.boolean,latestSaved,steps)?.let{throw it}
+                        if(latest["paused"]?.jsonPrimitive?.booleanOrNull==true)continue
                         require(latestSaved in 1..steps)
                         try {
                             transport.json(route,"/v1/images/$id/resume","POST",buildJsonObject{if(health["image_resume_guard"]?.jsonPrimitive?.intOrNull==1)put("automatic",true)},15_000,computeOwner=computeOwner)
@@ -191,10 +211,9 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
                                 val current=transport.json(route,"/v1/images/$id",timeout=10_000,computeOwner=computeOwner)
                                 requireOwnerAccess(config)
                                 require(current.getValue("steps").jsonPrimitive.int==steps)
-                                PcImageSuspended.fromReport(current.getValue("phase").jsonPrimitive.content,current["paused"]?.jsonPrimitive?.boolean,
-                                    current["checkpointStep"]?.jsonPrimitive?.intOrNull?:0,steps)
-                            }catch(cancel:CancellationException){throw cancel}catch(_:Exception){null}
-                            if(stopped!=null)throw stopped
+                                current["paused"]?.jsonPrimitive?.booleanOrNull==true
+                            }catch(cancel:CancellationException){throw cancel}catch(_:Exception){false}
+                            if(stopped)continue
                             throw error
                         }
                         continue
@@ -230,13 +249,13 @@ class RemoteImageClient(context:Context,private val computeOwner:String?=null,pr
         }catch(error:Exception){discard=error is CancellationException&&error !is TimeoutCancellationException;if(discard)discardId=id;checkCancellation();throw error}finally{
             withContext(NonCancellable+Dispatchers.IO){
                 // Cleanup is allowed against this exact original target even after local permission revocation.
-                if(!delivered)runCatching{
+                if(!delivered&&!pauseConfirmed)runCatching{
                     val retain=recoverable&&!discard&&cancelRevision.get()==revision
                     val result=transport.json(route,"/v1/images/$id"+if(retain)"/suspend"else"",if(retain)"POST"else"DELETE",if(retain)buildJsonObject{}else null,10_000,computeOwner=computeOwner)
                     if(result["cleanup_complete"]?.jsonPrimitive?.boolean==true){cleanupTarget=null;if(!retain)recovery?.clear(id)}
                 }
             }
-            jobId=null;currentConfig=null
+            pauseTarget=null;jobId=null;currentConfig=null
         }
     }
     fun cancel(){

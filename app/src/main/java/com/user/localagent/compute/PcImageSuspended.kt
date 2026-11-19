@@ -7,8 +7,12 @@ class PcImageSuspended(val savedStep:Int):IllegalStateException(
 ) {
     init{require(savedStep in 0..50)}
     companion object {
-        fun fromReport(phase:String,paused:Boolean?,checkpointStep:Int,totalSteps:Int):PcImageSuspended? {
-            if(paused!=true||phase !in setOf("resumable","suspended"))return null
+        fun canPause(recoverable:Boolean,phase:String,paused:Boolean,checkpointStep:Int,totalSteps:Int):Boolean =
+            recoverable&&!paused&&phase in setOf("queued","loading","sampling","decoding","waiting_resources")&&
+                totalSteps in 1..50&&checkpointStep in 1..totalSteps
+
+        fun fromReport(phase:String,paused:Boolean?,checkpointStep:Int,totalSteps:Int,cleanupComplete:Boolean?):PcImageSuspended? {
+            if(paused!=true||cleanupComplete!=true||phase !in setOf("resumable","suspended"))return null
             require(totalSteps in 1..50&&checkpointStep in 0..totalSteps)
             return PcImageSuspended(checkpointStep)
         }

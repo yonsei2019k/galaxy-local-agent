@@ -156,7 +156,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
             catch(error:Exception){com.user.localagent.FailureLog.record(this@ImageStudioController.context,"image_generate",error);mutableState.update {it.copy(phase="이미지를 만들지 못했습니다",error=error.message?.take(400))}}
             finally {
                 withContext(NonCancellable){runCatching{standaloneEngine?.unload();standaloneEngine=null}.onFailure{error->mutableState.update{it.copy(error=error.message?.take(400))}}}
-                activeJob=null;operation.set(false);mutableState.update{it.copy(running=false,canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))};app.scheduleIdleUnload()
+                activeJob=null;operation.set(false);mutableState.update{it.copy(running=false,canPausePc=false,pauseRequested=false,canResumePc=runCatching{pcRecovery.read()!=null}.getOrDefault(false))};app.scheduleIdleUnload()
             }
         }
         return true
@@ -220,7 +220,8 @@ class ImageStudioController(context:Context,private val app:AppContainer,
             executionEngine.unload()
             currentCoroutineContext().ensureActive()
             val progress:(com.user.localagent.inference.ImageGenerationProgress)->Unit={value->
-                mutableState.update {it.copy(phase=value.phase,progress=value.fraction,step=value.step,totalSteps=value.totalSteps)}
+                mutableState.update {it.copy(phase=value.phase,progress=value.fraction,step=value.step,totalSteps=value.totalSteps,
+                    canPausePc=ownerRunId==null&&remote!=null&&remoteSession.canPauseActive)}
             }
             val result=if(remote!=null){
                 try{if(resourceAware)ownedCompute().withPcResource(cleanup={remoteSession.releaseCompute()}) {
@@ -399,6 +400,22 @@ class ImageStudioController(context:Context,private val app:AppContainer,
         withTimeout(90_000){executionEngine.generateChat(prompt,com.user.localagent.core.ClinicalImagePrompt.translationInstruction(prompt)).collect {text.append(it);require(text.length<=3000)}}
         return com.user.localagent.core.ClinicalImagePrompt.validateTranslation(prompt,text.toString())
     }
+    fun pausePc(){
+        val current=mutableState.value
+        if(!current.running||!current.canPausePc||current.pauseRequested)return
+        val session=pcImages
+        val job=activeJob?:return
+        if(!mutableState.compareAndSet(current,current.copy(pauseRequested=true,error=null)))return
+        scope.launch {
+            try{
+                if(!session.pauseActive()&&activeJob===job)mutableState.update{it.copy(pauseRequested=false)}
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){
+                if(activeJob===job)mutableState.update{it.copy(pauseRequested=false,error="일시정지 요청을 확인하지 못했습니다. 진행 상태를 확인 후 다시 시도해주세요.")}
+            }
+        }
+    }
+
     fun cancel(){pcImages.cancel();engine.cancel();executionEngine.cancel();activeJob?.cancel()}
     suspend fun exportToGallery():Uri=withContext(Dispatchers.IO){
         val file=outputFile()?:error("먼저 이미지를 생성해주세요.")

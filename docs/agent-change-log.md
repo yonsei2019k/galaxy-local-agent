@@ -1,3 +1,9 @@
+## 2026-11-20 — Explicit image pause in the studio
+
+The studio offers 일시정지 for a running paired-PC image job after its owner-bound report exposes a saved native checkpoint. Current generation and deletion still use their existing controls. The pause request uses the same owner, route and active job ID, and the UI waits for a paused recovery phase and confirmed resource cleanup. 이어가기 uses the existing encrypted ticket and original reference, seed and model settings.
+
+Using the existing authenticated worker operation, a unique real image job was parked at its already-saved step 1/50 before this build. The owner/request binding survived and the worker released compute. This result does not verify the new Android control. The OpenClaw-derived PC follow-up was deployed after the image release, verified by exact module readback and authenticated idle supervisor restart. Full PC tests against the available worker fixture ran 250 cases (240 pass, 10 skip, including the unavailable legacy-worker patch fixture). No model/device claim is inferred from the PC tests.
+
 ## 2026-11-20 — Continue from verified reads when the answer is interrupted
 
 Adapted OpenClaw's settled-tool continuation to the paired provider supervisor. It uses the same request and accepted phone plan, verified receipts for every selected read, and the existing time budget. If the model omitted or returned an invalid final response, it gets one response-only attempt, using the retained read results. The broker enforces the no-new-calls boundary and retains idempotent receipts. Pending calls, ambiguous results, failed reads, writes, revoked authority, and exhausted recovery time keep their existing controls. The phone continues to verify the final task outcome.

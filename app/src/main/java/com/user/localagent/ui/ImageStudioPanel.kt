@@ -233,7 +233,14 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                     if(state.step<=0&&(!state.progress.isFinite()||state.progress<=0f))LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
                     else LinearProgressIndicator(progress={state.progress.takeIf{it.isFinite()}?.coerceIn(0f,1f)?:0f},modifier=Modifier.fillMaxWidth())
                     if(state.totalSteps>0)Text("${state.step} / ${state.totalSteps}단계",style=MaterialTheme.typography.labelSmall)
-                    OutlinedButton(onClick={app.imageStudio.cancel()},modifier=Modifier.heightIn(min=48.dp)){Text("생성 중지")}
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        if(state.canPausePc||state.pauseRequested)Button(enabled=state.canPausePc&&!state.pauseRequested,
+                            onClick={app.imageStudio.pausePc()},modifier=Modifier.heightIn(min=48.dp)){
+                            Text(if(state.pauseRequested)"일시정지 확인 중"else"일시정지")
+                        }
+                        OutlinedButton(enabled=!state.pauseRequested,onClick={app.imageStudio.cancel()},
+                            modifier=Modifier.heightIn(min=48.dp)){Text("생성 중지")}
+                    }
                 }else{
                     Text(state.phase,style=MaterialTheme.typography.bodyMedium,color=ZipHapColors.TextSecondary)
                 }
@@ -244,7 +251,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 if(state.canResumePc){
                     Text("원래 작업의 모델·참고 사진·시드는 유지됩니다. ‘보관하고 새 작업’을 선택하면 원래 작업을 보관한 채 다른 모델로 새 작업을 준비할 수 있습니다.",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        Button(modifier=Modifier.heightIn(min=48.dp),onClick={runCatching{app.imageStudio.resumePc()}.onFailure{onStatus(it.message?:"복구 작업을 확인하지 못했습니다.")}}){Text("PC 작업 이어받기")}
+                        Button(modifier=Modifier.heightIn(min=48.dp),onClick={runCatching{app.imageStudio.resumePc()}.onFailure{onStatus(it.message?:"복구 작업을 확인하지 못했습니다.")}}){Text("이어가기")}
                         TextButton(modifier=Modifier.heightIn(min=48.dp),onClick={deletePcRecovery=true}){Text("복구 정보 삭제")}
                     }
                     OutlinedButton(modifier=Modifier.heightIn(min=48.dp),onClick={app.imageStudio.archivePcRecovery()}){Text("보관하고 새 작업")}
