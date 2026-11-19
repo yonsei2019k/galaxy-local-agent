@@ -1559,7 +1559,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(app.repository.chat.assistantForRun(request.runId)?.text.isNullOrBlank())
                 answer(if(planningDeferred)requireNotNull(planning).message.orEmpty() else "작업을 끝내지 못했습니다: ${error.message ?: error.javaClass.simpleName}")
             withContext(NonCancellable){runCatching {persistStepEvidence()}}
-            app.repository.chat.updateRun(request.runId,if(planningDeferred)"paused"else"failed",planning?.reasonCode?:error.javaClass.simpleName)
+            val errorCode=planning?.reasonCode
+                ?:(error as? com.user.localagent.externalagent.PcAgentBridgeTimeout)?.stageCode
+                ?:error.javaClass.simpleName
+            app.repository.chat.updateRun(request.runId,if(planningDeferred)"paused"else"failed",errorCode)
         }
         status.value=if(planningDeferred)"계산 대기 · 요청과 제한 보존됨"else"오류 · 실행 상태 확인 필요"
     }

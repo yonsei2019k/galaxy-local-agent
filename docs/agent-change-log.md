@@ -1,3 +1,19 @@
+## 2026-11-19 — Phone-to-PC bridge timeout diagnostics
+
+Bridge socket timeouts surfaced by the cloud coordinator now store a method/operation code, for example `PC_BRIDGE_TIMEOUT_GET_PROVIDER` or `PC_BRIDGE_TIMEOUT_POST_RESULT`, without embedding session IDs, endpoints, prompts or credentials. Cancellation is rechecked before recording a network timeout. No replay, timeout-duration or authority change. The first two 2019 phone receipts contained only the exception class, so their exact operations remain unknown. This change diagnoses subsequent failures and does not establish recovery.
+
+## 2026-11-19 — Candidate2019 dispatched via the established update channel
+
+Owner reiterated GitHub signed updates and Tailscale remote validation. Pushed exact candidate source `e99054d` to `codex/internal-release`; Actions run `44450051017` started. Tailscale direct ping to the online Android peer passed. This checks overlay reachability, while publication, installed-version readback and application-level scenario results require independent evidence. Remote-test v1 creates a separate conversation for each request and returns no installed-version or child-goal-chain receipt.
+
+Attempt1 failed during resolution of the pinned Kotlin JVM plugin and skipped signing. Maven Central responded HTTP200 for the exact marker from this PC. Reran the same Actions run without changing dependency versions. Before publication, the phone reported one failed synthetic calculation request with zero tool calls. A separate retry returned the correct sum through the paired remote mailbox. This proves a working phone request/result route on the current installation. It does not verify a new installation or goal chaining.
+
+Attempt2 completed both build and sign-and-release. GitHub latest is v0.1.19/code2019. Downloaded the published APK and update.json, independently verified the pinned Ed25519 signature, exact source commit e99054d, APK SHA256 `f89ec388df28a22f5d1f02e80237e19d74f46e386f6ae0edd3926806c0ff7872`, package/version, original APK signer and bounded Rust/React static checks. This CI artifact differs from the locally signed candidate. Phone installation and multi-segment qualification are pending.
+
+After publication, a paired-phone remote request completed a synthetic shipping/budget comparison. Independent arithmetic confirms A at 79,000 KRW with 1,000 KRW remaining, B misses the deadline and C exceeds the budget. Zero tool calls were reported. This confirms the request/result path after publication. The receipt has no version or goal-chain evidence. Private receipt under `.local/github-v019/`.
+
+Owner then confirmed upgrade complete. Two phone Tailscale repeats of G03-v2 both reported SocketTimeoutException: first zero tools, second one verified search_web. Neither claimed completion. Official notice independently agreed with the existing oracle. Loopback worker health responded with bridge metadata; timed-out substage/root cause remain unknown. See device-validation.md for the evidence boundary. No code/worker changes or ADB actions for these attempts.
+
 ## 2026-11-19 — Candidate2019 final validation and ownership returned to root
 
 All feature/review agents have returned source ownership to root. No other agent may mutate frozen official source for this candidate. Six actual installed2018 goal-only phone cases now match independent answer/constraint/source review; bounded read/proposal scope only, not full autonomous service qualification. Method-specified failures remain recorded separately. New candidate is NOT installed/pushed/published; installed safe2018 remains unchanged.

@@ -2,11 +2,15 @@
 
 Updated 2026-11-19. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
-## Candidate2019: bounded goal continuation and image-app extraction; NOT installed
+## Published2019: bounded goal continuation and image-app extraction; owner reports upgrade complete
+
+GitHub Actions `44450051017` attempt2 built and signed source `e99054d`; v0.1.19 is the latest release. Downloaded CI APK SHA256 `f89ec388df28a22f5d1f02e80237e19d74f46e386f6ae0edd3926806c0ff7872`. Independent pinned Ed25519 manifest verification, APK SHA, original signer, package/version and bounded Rust/React static checks pass. The local signed candidate described below was produced separately. The remote-test v1 reply does not identify the installed version or expose a multi-segment goal chain.
+
+The owner reported the upgrade complete after publication. This is owner confirmation; independent installed APK byte readback remains at2018. ADB was not used for the GitHub/Tailscale workflow.
 
 2026-11-19 source review/integration and local release validation completed. Core962 + shared Android runtime1021 JVM tests pass with0failures/errors/skips; React32 tests and tsc/Vite build pass. Explicit runtime/main/companion release lint passes with0errors (158warnings/1hint,23warnings,2warnings respectively). Both release APKs and the instrumentation APK assemble. Final incremental validation4m33 follows retained earlier build/lint failures; it is not a clean-build speed benchmark. Frozen854 source/build inputs have0changes after verification.
 
-Main candidate2019/0.1.19 is signed with the independently compared original2018 certificate; SHA256 `1c083817b0086244c55074c52d330e0ca75f141cd6a00be27f99bfd2ee10898c`,126661832bytes. Signed instrumentation SHA256 `81b4a1550ecebaff222245ae46fe4979904dae333f2383e9241cf72dd07eda13`. Main permission set is unchanged from safe2018. Signature,16KiB ZIP alignment and bounded Rust/React APK static audit pass. These artifacts were built on base8ab27bf with candidate source modifications; no clean-commit provenance is asserted. No new install, GitHub publication or device qualification of this candidate occurred. Last verified installed APK remains2018 below.
+Local main candidate2019/0.1.19 is signed with the independently compared original2018 certificate; SHA256 `1c083817b0086244c55074c52d330e0ca75f141cd6a00be27f99bfd2ee10898c`,126661832bytes. Signed instrumentation SHA256 `81b4a1550ecebaff222245ae46fe4979904dae333f2383e9241cf72dd07eda13`. Main permission set is unchanged from safe2018. Signature,16KiB ZIP alignment and bounded Rust/React APK static audit pass. These local artifacts were built on base8ab27bf with candidate source modifications. Last independently verified installed APK remains2018 below.
 
 Approved goal continuation now checks actual native source journals, captured authority and budget; waits for worker cleanup; and binds next-segment publication to an actual ACTIVE foreground-service receipt. Missing native journals remain unknown for every provider, including local models; visible read-only steps cannot prove no unrecorded mutation. One-off local requests remain available, but local goal continuation without journal evidence is blocked. Segment termination is not whole-goal completion. The whole-goal COMPLETE criterion gate and actual multi-segment phone qualification remain pending.
 

@@ -1,5 +1,9 @@
 # Device validation
 
+## 2026-11-19 after owner-reported v0.1.19 upgrade
+
+After the owner confirmed the GitHub update, two Tailscale remote repeats of G03-v2 were received and returned terminal failure. First: SocketTimeoutException, zero tools. Second: one verified search_web, then SocketTimeoutException. Both answers clearly reported failure. The independent official notice confirmed both specified rooms were closed for both requested dates, but neither phone attempt returned that result. The PC loopback health endpoint responded with bridge metadata after the first failure. The timeout stage and cause remain unconfirmed. Private receipts are under `.local/github-v019/`; remote v1 includes no independent package-version readback or goal-chain evidence.
+
 ## 2026-11-19 goal-only phone scenarios and candidate2019 evidence boundary
 
 Installed2018 plus the existing subscription-PC bridge completed6 method-free goal requests without ADB: three synthetic shopping comparisons, one provided-availability meeting plan and two official-page research cases. Independent arithmetic/constraint/source review agrees. Infeasible targets were reported without arbitrary substitutions. These are bounded read/proposal successes, not purchases, calendar writes, bookings, service closure, multi-turn recovery or multi-segment goal completion. Remote v1 lacks full raw tool argument/result receipts. The first pending request required the owner to open the app; cold/background mailbox survival is unqualified. [Case records and timings](goal-only-autopilot-evaluation.ko.md).

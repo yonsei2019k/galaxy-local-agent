@@ -5,10 +5,14 @@ import com.user.localagent.compute.PcComputeSettings
 import com.user.localagent.compute.PcConnection
 import com.user.localagent.compute.PcTransport
 import com.user.localagent.compute.PcUnavailable
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.JsonObject
+
+internal class PcAgentBridgeTimeout(val stageCode:String,cause:SocketTimeoutException):
+    java.io.IOException("PC 연결 응답 시간 초과 ($stageCode)",cause)
 
 /** Injection seam for source-only tests; it conveys raw JSON so duplicate keys stay detectable. */
 interface AgentBridgeTransport {
@@ -21,6 +25,14 @@ class PcAgentBridgeTransport(context:Context,private val parentRunId:String,priv
     companion object {
         const val PHONE_CAPABILITY_HEADER="X-ZipHap-Phone-Capability"
         internal fun acceptsPath(path:String)=path.matches(Regex("/v1/agent/sessions(?:/[a-f0-9-]{36}(?:/(?:claim|result|cancel|close|plan-ack|launch|provider|provider-cancel|evidence|context-capabilities))?)?"))
+        internal fun timeoutStage(path:String,method:String):String {
+            val operation=when {
+                path=="/v1/agent/sessions" -> "REGISTER"
+                path.substringAfterLast('/').length==36 -> "SESSION_STATUS"
+                else -> path.substringAfterLast('/').replace('-','_').uppercase(java.util.Locale.ROOT)
+            }
+            return "PC_BRIDGE_TIMEOUT_${method}_$operation"
+        }
     }
     private val settings=PcComputeSettings.get(context.applicationContext)
     private val transport=PcTransport(context.applicationContext)
@@ -55,6 +67,9 @@ class PcAgentBridgeTransport(context:Context,private val parentRunId:String,priv
                 Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(raw)).toString()
             }.also { currentCoroutineContext().ensureActive() }
+        }catch(error:SocketTimeoutException){
+            currentCoroutineContext().ensureActive()
+            throw PcAgentBridgeTimeout(timeoutStage(path,method),error)
         }finally { connection.disconnect() }
     }
     override fun cancelNetwork(){ transport.cancel() }

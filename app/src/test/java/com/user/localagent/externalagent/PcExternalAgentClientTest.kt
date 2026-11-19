@@ -10,6 +10,13 @@ import org.junit.Test
 class PcExternalAgentClientTest {
     private val owner="00000000-0000-4000-8000-000000000011"
     private val session="00000000-0000-4000-8000-000000000012"
+    @Test fun timeoutCodesIdentifyBridgeOperationWithoutLeakingSessionId() {
+        val root="/v1/agent/sessions"
+        assertEquals("PC_BRIDGE_TIMEOUT_POST_REGISTER",PcAgentBridgeTransport.timeoutStage(root,"POST"))
+        assertEquals("PC_BRIDGE_TIMEOUT_GET_SESSION_STATUS",PcAgentBridgeTransport.timeoutStage("$root/$session","GET"))
+        assertEquals("PC_BRIDGE_TIMEOUT_GET_PROVIDER",PcAgentBridgeTransport.timeoutStage("$root/$session/provider","GET"))
+        assertEquals("PC_BRIDGE_TIMEOUT_POST_RESULT",PcAgentBridgeTransport.timeoutStage("$root/$session/result","POST"))
+    }
     private val call="00000000-0000-4000-8000-000000000013"
     private val capture=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,"a".repeat(64),
         setOf("get_current_datetime"),allowExternalAgent=true)
