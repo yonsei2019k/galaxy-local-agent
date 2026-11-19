@@ -1,5 +1,7 @@
 ## Fixed Office seats and remote QA retention
 
+OfficeWork now binds an assignment to its work ID and named recipients. Exact duplicate reports are idempotent; conflicting reports and a run reused by another employee are rejected. Chair collection is gated on all assigned reports and retains failures. Core regression passes. This policy is not yet wired to the Android agent scheduler or a durable work store.
+
 The product layout defines one main room for chair 이수빈, one shared 사무실 room, and individual rooms for 본부장 김호영, 대리 김규민 and 대리 김서율. The owner-facing 사무실 menu provisions those five conversation records in one transaction with durable IDs. Reopening does not duplicate rooms. The core metadata permits only the chair to assign work and publish the main summary, and directs employee results to the chair. It grants no execution authority. Actual identity-bound agent dispatch and result collection are still pending.
 
 New remote QA rooms have a durable origin marker and opt out of owner-memory learning from synthetic prompts. The inbox sweeps only marked, inactive, unpinned personal QA rooms with terminal runs after thirty minutes, and archives instead of deleting. Pending and paused runs remain visible. Existing unmarked rooms are not selected by title. Archive does not remove messages or previously learned facts. Promotion of verified lessons into a separate reusable knowledge store is not connected.
