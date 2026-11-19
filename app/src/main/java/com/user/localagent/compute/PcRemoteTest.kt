@@ -89,14 +89,14 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
     private suspend fun handle(config:PcConnection,raw:JsonObject,receiptSupported:Boolean,conversationSupported:Boolean){
         val id=raw["requestId"]?.jsonPrimitive?.contentOrNull?:return
         val started=SystemClock.elapsedRealtime()
+        val epoch=settings.epoch
         val version=if(receiptSupported)context.packageManager.getPackageInfo(context.packageName,0).longVersionCode else null
         fun receipt()=version?.let{buildJsonObject {
             put("versionCode",it)
             put("elapsedMs",SystemClock.elapsedRealtime()-started)
         }}
         val request=runCatching{PcRemoteTestRequest.parse(raw)}.getOrNull()
-        if(request==null||!settings.enabled()||!settings.markHandled(id)){report(config,id,"rejected","",emptyList(),null,"REQUEST_REFUSED",receipt());return}
-        val epoch=settings.epoch
+        if(request==null||!settings.enabled()||!settings.markHandled(id)){report(config,id,"rejected","",emptyList(),null,"REQUEST_REFUSED",receipt(),epoch);return}
         continuations.entries.removeAll{it.value.expiresAt<=started||it.value.epoch!=epoch||!it.value.connection.samePair(config)}
         val previous=request.afterRequestId?.let{continuations.remove(it)}
         val thread=if(request.afterRequestId==null)app.repository.chat.createThread(null,PcRemoteTestSettings.THREAD_TITLE)
@@ -106,7 +106,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
                     app.repository.chat.messages(candidate.id,link.branchId).first().lastOrNull()?.runId==link.runId
             }
         }
-        if(thread==null){report(config,id,"rejected","",emptyList(),null,"FOLLOW_UP_UNAVAILABLE",receipt());return}
+        if(thread==null){report(config,id,"rejected","",emptyList(),null,"FOLLOW_UP_UNAVAILABLE",receipt(),epoch);return}
         val runId=UUID.randomUUID().toString()
         val accepted=withContext(Dispatchers.Main){
             settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true&&
@@ -114,7 +114,7 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
                     settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true
                 }
         }
-        if(!accepted){report(config,id,"rejected","",emptyList(),runId,"SUBMIT_REFUSED",receipt());return}
+        if(!accepted){report(config,id,"rejected","",emptyList(),runId,"SUBMIT_REFUSED",receipt(),epoch);return}
         var state:String?=null
         var reportedApproval=false
         while(SystemClock.elapsedRealtime()-started<25*60_000L){
@@ -136,10 +136,10 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
             continuations[id]=Continuation(thread.id,thread.activeBranchId,thread.revision,runId,request.model,config,epoch,SystemClock.elapsedRealtime()+30*60_000L)
         }
         report(config,id,state?:"timeout",answer.take(20_000),tools.takeLast(64).map{Triple(it.name.take(96),it.success,it.summary.take(400))},runId,
-            app.repository.chat.run(runId)?.errorCode?.take(96),receipt(),canFollowUp)
+            app.repository.chat.run(runId)?.errorCode?.take(96),receipt(),epoch,canFollowUp)
     }
 
-    private suspend fun report(config:PcConnection,id:String,state:String,answer:String,tools:List<Triple<String,Boolean,String>>,runId:String?,error:String?,receipt:JsonObject?,canFollowUp:Boolean=false){
+    private suspend fun report(config:PcConnection,id:String,state:String,answer:String,tools:List<Triple<String,Boolean,String>>,runId:String?,error:String?,receipt:JsonObject?,epoch:Long,canFollowUp:Boolean=false){
         val body=buildJsonObject{
             put("state",state);put("answer",answer)
             put("tools",buildJsonArray{tools.forEach{(name,ok,summary)->add(buildJsonObject{put("name",name);put("success",ok);put("summary",summary)})}})
@@ -147,10 +147,11 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
             receipt?.let{put("receipt",it)}
             if(canFollowUp)put("canFollowUp",true)
         }
+        fun authorized()=settings.enabled()&&settings.epoch==epoch&&pairing.snapshot()?.samePair(config)==true
         repeat(3){attempt->
-            if(!settings.enabled()||pairing.snapshot()?.samePair(config)!=true)return
+            if(!authorized())return
             val target=if(attempt==0)config else transport.available()?.takeIf{it.samePair(config)}?:config
-            if(!settings.enabled()||pairing.snapshot()?.samePair(config)!=true)return
+            if(!authorized())return
             try {
                 transport.json(target,"/v1/remote/requests/$id/result","POST",body,timeout=15_000)
                 return
