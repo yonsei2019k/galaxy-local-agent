@@ -10,6 +10,8 @@ The renderer test stopped at initial WebView/composer readiness before testing r
 
 Follow-up v0.1.28 / versionCode 2028 built and signed as SHA-256 `f753c7582835f72f44eec3b7aa29819c772d3f39c6addfa520aceb4147afd466`. The public research catalog/wire test, update signer, permissions, alignment and static APK audit passed. It also includes the compact phone title and model controls from Claude, checked in a 393 px browser harness. This package initially waited to install because the phone reported active image generation and the paired worker was busy. The build and browser checks do not certify renderer recovery or the public-research scenario.
 
+The install window expired with image generation still active. The phone readback remained v0.1.27 / 2027, and the 2028 renderer and public-research canaries were not started.
+
 ## Installed v0.1.26 and repeated Jeju public-research failure
 
 Installed signed versionCode2026 over published2025 with wireless ADB. Independent base APK readback matched SHA256 `305d29acc4f4d78c44dc2f5a1af40913375591959bab111d621300eb2c5e3194`. Foreground services and PC compute/provider activity were idle before install. MainActivity resumed and retained the existing notification permission.
