@@ -84,7 +84,8 @@ class PcExternalAgentClientTest {
     }
     @Test fun retriesAReadTimeoutOnceWithoutReplayingAClaim()=runBlocking {
         val wire=Wire()
-        val client=PcExternalAgentClient(capture,wire)
+        val retries=mutableListOf<Pair<String,Int>>()
+        val client=PcExternalAgentClient(capture,wire,onRetry={operation,attempt->retries.add(operation to attempt)})
         client.register(capture)
         val route="/v1/agent/sessions/$session"
         wire.timeoutPath=route
@@ -99,6 +100,7 @@ class PcExternalAgentClientTest {
         }catch(_:PcAgentBridgeTimeout){
             assertEquals(1,wire.calls.count{it.first=="$route/claim"})
         }
+        assertEquals(listOf("SYNTHETIC_TIMEOUT" to 2),retries)
     }
 
     @Test fun wholeRegistryCatalogSurvivesTheSnapshotCheck()=runBlocking {

@@ -42,6 +42,25 @@ class GoalOnlySimulationTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertFalse(assess(case, wrong, second)["passed"])
 
+    def test_unexpected_attempt_exception_is_retained_and_other_attempts_still_run(self):
+        run_attempt = simulation.run_attempt
+
+        def fail_first(catalog, attempt_id):
+            if attempt_id == "G01-a1":
+                raise RuntimeError("synthetic payload that must stay out of the report")
+            return run_attempt(catalog, attempt_id)
+
+        with patch.object(simulation, "run_attempt", fail_first):
+            report = simulation.run_catalog(self.catalog)
+
+        self.assertEqual(1, report["summary"]["failedSimulations"])
+        self.assertEqual(99, report["summary"]["passedSimulations"])
+        failure = next(row for row in report["attempts"] if row["attemptId"] == "G01-a1")
+        self.assertEqual("scenario_runner_exception", failure["reason"])
+        self.assertEqual("RuntimeError", failure["errorCode"])
+        self.assertIsNone(failure["execution"])
+        self.assertNotIn("synthetic payload", str(failure))
+
     def test_purchase_policy_accounts_for_shipping_cap_deadline_and_no_feasible_offer(self):
         base = self.run_case("G01")
         self.assertEqual({"totalsWon": {"C": 91000, "A": 87000, "B": 85000}, "winner": "A"}, base["execution"]["answer"])

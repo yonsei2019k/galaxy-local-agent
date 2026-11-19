@@ -7,6 +7,7 @@ import kotlinx.serialization.json.*
 /** Actual v1 HTTPS client. Only the authenticated phone role can claim/report; no agent result import. */
 class PcExternalAgentClient(
     private val captured:ExternalAgentCapture,private val transport:AgentBridgeTransport,
+    private val onRetry:(operation:String,attempt:Int)->Unit={_,_->},
 ):ExternalAgentClient {
     private var sessionId:String?=null
     private var phoneCapability:String?=null
@@ -59,6 +60,7 @@ class PcExternalAgentClient(
             transport.exchange(route,method,body,capability)
         }catch(error:PcAgentBridgeTimeout){
             if(method!="GET")throw error
+            onRetry(error.stageCode,2)
             delay(200)
             transport.exchange(route,method,body,capability)
         }
@@ -163,6 +165,7 @@ class PcExternalAgentClient(
                 return provider(call("POST","/launch",request))
             }catch(error:PcAgentProviderBusy){
                 if(attempt==2)throw error
+                onRetry("PROVIDER_BUSY",attempt+2)
                 delay(1_000L*(attempt+1))
             }
         }

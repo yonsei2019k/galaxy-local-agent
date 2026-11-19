@@ -675,7 +675,16 @@ def run_catalog(catalog, selected=None):
     valid = {a["id"] for a in catalog["attempts"]} | {c["id"] for c in catalog["cases"]}
     if selected - valid:
         raise ValueError("unknown attempt/family selection")
-    results = [run_attempt(catalog, a["id"]) if not selected or a["id"] in selected or a["caseId"] in selected else _not_run(a, "not_selected") for a in catalog["attempts"]]
+    results = []
+    for attempt in catalog["attempts"]:
+        if selected and attempt["id"] not in selected and attempt["caseId"] not in selected:
+            results.append(_not_run(attempt, "not_selected"))
+            continue
+        try:
+            results.append(run_attempt(catalog, attempt["id"]))
+        except Exception as error:
+            results.append({**_not_run(attempt, "scenario_runner_exception"), "status": "failed",
+                            "errorCode": type(error).__name__})
     status = Counter(r["status"] for r in results)
     outcomes = Counter(r["actualOutcome"] for r in results if r["status"] == "passed")
     return {"executionKind": "deterministic_offline_simulation", "sourceBinding": {

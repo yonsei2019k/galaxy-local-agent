@@ -1372,7 +1372,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         val client=PcExternalAgentClient(capture,PcAgentBridgeTransport(context,request.runId,beforeLaunchUpload={
             runBlocking { check(authority().permits(capture)){"클라우드 전송 권한이나 실행 대상이 변경되었습니다."} }
-        }))
+        }),onRetry={operation,attempt->FailureLog.record(context,"cloud_bridge_retry",null,"${operation}_ATTEMPT_$attempt")})
         val controller=ExternalAgentController(capture,client,::authority,
             execute={call->
                 enforceGoalToolFence(request,call)
@@ -1420,6 +1420,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             })
         var closed=false
         var bridgeSessionId:String?=null
+        val bridgeStarted=android.os.SystemClock.elapsedRealtime()
+        var lastProviderState="NOT_OBSERVED"
         externalEffectGuard={check(authority().permits(capture)){"클라우드 도구 권한이나 실행 대상이 변경되었습니다."}}
         try {
             controller.start().also{bridgeSessionId=it.sessionId}
@@ -1431,13 +1433,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
             app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
                 "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
-            client.launchProvider(request.text,conversationContext,beforeLaunch={check(authority().permits(capture))})
-            val providerStarted=android.os.SystemClock.elapsedRealtime()
+            val launch=client.launchProvider(request.text,conversationContext,beforeLaunch={check(authority().permits(capture))})
+            lastProviderState=launch.getValue("state").jsonPrimitive.content
             val provider=withTimeout(330_000) {
                 var lastStage:String?=null
                 while(true){
                     check(authority().permits(capture)){"클라우드 도구 권한이나 실행 대상이 변경되었습니다."}
                     val value=client.providerStatus()
+                    lastProviderState=value.getValue("state").jsonPrimitive.content
                     client.latestProviderProgress?.let{progress->
                         status.value=progress.label
                         if(progress.stage!=lastStage){
@@ -1445,7 +1448,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.INFERENCE_STARTED,progress.label)
                         }
                     }
-                    if(value.getValue("state").jsonPrimitive.content=="FINISHED")return@withTimeout value
+                    if(lastProviderState=="FINISHED")return@withTimeout value
                     controller.pumpOnce()
                     if(pauseGoalBudgetIfExhausted(request))return@withTimeout value
                     if(preparedSeen)return@withTimeout value
@@ -1465,7 +1468,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val why=code?:"SESSION_${controller.phase.name}"
                 val stop=controller.stopMetadata()
                 FailureLog.cloudStop(context,why,stop.phase.name,stop.state?.name,stop.pending?.name,stop.sequence,
-                    provider.getValue("state").jsonPrimitive.content,android.os.SystemClock.elapsedRealtime()-providerStarted)
+                    lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
                 publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다($why). 실제 확인한 결과만 보존했습니다.",true,why);return
             }
             val resultState=report.getValue("state").jsonPrimitive.content
@@ -1524,6 +1527,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             app.repository.chat.updateRun(request.runId,"completed")
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
             status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
+        } catch(error:com.user.localagent.externalagent.PcAgentBridgeTimeout){
+            val stop=controller.stopMetadata()
+            FailureLog.cloudStop(context,error.stageCode,stop.phase.name,stop.state?.name,stop.pending?.name,stop.sequence,
+                lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
+            throw error
         } finally {
             externalEffectGuard=null
             withContext(NonCancellable){

@@ -15,7 +15,7 @@ object FailureLog {
 
     @Synchronized fun cloudStop(context:Context,code:String,phase:String,sessionState:String?,
         pendingState:String?,sequence:Int,providerState:String,elapsedMs:Long) {
-        append(context,"cloud_without_report",null,code,
+        append(context,"cloud_bridge_stop",null,code,
             " phase=${token(phase)} session=${token(sessionState)} pending=${token(pendingState)} sequence=${sequence.coerceIn(0,18)} provider=${token(providerState)} elapsedMs=${elapsedMs.coerceAtLeast(0)}")
     }
 

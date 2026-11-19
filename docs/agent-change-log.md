@@ -1,3 +1,11 @@
+## Bridge retry evidence and isolated simulation exceptions
+
+The Android client records when an existing safe retry is scheduled, with operation and next attempt number. A propagated socket timeout captures the controller phase, broker status, pending call state, sequence, last observed provider state and elapsed time before cleanup. Retry limits, pairing, authority and mutation behavior are unchanged. Kotlin regressions confirmed a recovered GET, no retry of an uncertain claim, and the authenticated provider-busy recovery path.
+
+The synthetic runner now marks an unexpected per-attempt exception as failed with the attempt ID and exception class. Other attempts continue and the CLI saves the full report before returning failure. Local injection of an oracle rejection and an unexpected runner exception each retained 100 rows with one failure. The normal suite passed 100/100; Python evaluation 102 and PC mailbox 10 passed. Core cached 994 and Android runtime 1029 fresh JVM tests have zero failures, errors or skips.
+
+One local 2026/0.1.26 release assembly passed, including vital lint. The signed candidate matches the retained 2025 certificate and permission list, and passed package metadata, 16 KiB alignment and Rust/React static checks. SHA256 `9c5c08cd48769b989845e989a640787890febf1d9db72422dc415c45e7291bc3`. No device was listed in ADB; no push, install, device run, external MCP integration or automatic QA lesson promotion was performed.
+
 ## Failure triage metadata
 
 Cloud termination without a provider report records controller phase, broker session state, pending effect state, last sequence, provider state and elapsed time, and retains the actual pause code in the run. Remote terminal failures, inbox handler exceptions and failed mailbox result deliveries log bounded codes. Diagnostic tokens are restricted and storage failure emits a code-free system warning. No raw prompts, answers, credentials or device locations are collected. Android CI retains only the synthetic scenario report on pass or fail when the runner produces it, and invokes the Android runtime JVM suite. The incident-review and tool-selection procedure is documented in qa-failure-learning.ko.md. Automated lesson promotion and external QA tool integration are pending.

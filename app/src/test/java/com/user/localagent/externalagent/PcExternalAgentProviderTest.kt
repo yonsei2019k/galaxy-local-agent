@@ -108,13 +108,16 @@ class PcExternalAgentProviderTest {
     }
 
     @Test fun launchRetriesOnlyExplicitBusyAndRechecksAuthority()=runBlocking {
-        val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)
+        val c=capture();val wire=Wire(c)
+        val retries=mutableListOf<Pair<String,Int>>()
+        val client=PcExternalAgentClient(c,wire,onRetry={operation,attempt->retries.add(operation to attempt)})
         client.register(c)
         wire.busyLaunches=1
         var checks=0
         client.launchProvider(request,beforeLaunch={checks++})
         assertEquals(2,wire.calls.count{it.first.endsWith("/launch")})
         assertTrue(checks>=2)
+        assertEquals(listOf("PROVIDER_BUSY" to 2),retries)
     }
     @Test fun launchRequiresExactCapturedOwnerTextAndAReportCannotBecomePhoneExecutionEvidence()=runBlocking {
         val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)
