@@ -90,7 +90,10 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
                 if(request==null){delay(8_000);continue}
                 val receiptSupported=PcRemoteTestRequest.supportsReceipt(next)
                 val conversationSupported=PcRemoteTestRequest.supportsConversation(next)
-                runCatching{handle(config,request,receiptSupported,conversationSupported,epoch)}.onFailure{if(it is CancellationException)throw it}
+                runCatching{handle(config,request,receiptSupported,conversationSupported,epoch)}.onFailure{
+                    if(it is CancellationException)throw it
+                    com.user.localagent.FailureLog.record(context,"remote_qa_handler",it)
+                }
             }
         }
     }
@@ -160,6 +163,9 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
     }
 
     private suspend fun report(config:PcConnection,id:String,state:String,answer:String,tools:List<Triple<String,Boolean,String>>,runId:String?,error:String?,receipt:JsonObject?,epoch:Long,canFollowUp:Boolean=false){
+        if(state in setOf("failed","rejected","interrupted","timeout")){
+            com.user.localagent.FailureLog.record(context,"remote_qa_terminal",null,error?:state)
+        }
         val body=buildJsonObject{
             put("state",state);put("answer",answer)
             put("tools",buildJsonArray{tools.forEach{(name,ok,summary)->add(buildJsonObject{put("name",name);put("success",ok);put("summary",summary)})}})
@@ -176,7 +182,10 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
                 transport.json(target,"/v1/remote/requests/$id/result","POST",body,timeout=15_000)
                 return
             }catch(error:CancellationException){throw error}
-            catch(_:Exception){/* Retry only a report to the original pairing. */}
+            catch(error:Exception){
+                val code=if(attempt==2)"retry_exhausted" else "retry_${attempt+1}"
+                com.user.localagent.FailureLog.record(context,"remote_qa_result_delivery",error,code)
+            }
             delay(10_000)
         }
     }

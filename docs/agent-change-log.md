@@ -1,3 +1,9 @@
+## Failure triage metadata
+
+Cloud termination without a provider report records controller phase, broker session state, pending effect state, last sequence, provider state and elapsed time, and retains the actual pause code in the run. Remote terminal failures, inbox handler exceptions and failed mailbox result deliveries log bounded codes. Diagnostic tokens are restricted and storage failure emits a code-free system warning. No raw prompts, answers, credentials or device locations are collected. Android CI retains only the synthetic scenario report on pass or fail when the runner produces it, and invokes the Android runtime JVM suite. The incident-review and tool-selection procedure is documented in qa-failure-learning.ko.md. Automated lesson promotion and external QA tool integration are pending.
+
+Local checks passed: Android runtime JVM suite, core cached results, React asset build, workflow YAML/report path checks, and 100/100 synthetic scenarios with a saved report. The first full JVM attempt failed to locate Python for Gradle; the retry passed with ZIPHAP_PYTHON set. No new release APK, GitHub run or device evidence for this increment.
+
 ## Fixed Office seats and remote QA retention
 
 Archiving a marked QA thread now records encrypted local counts for exact host-observed status timeout and provider busy codes. The recording marker and archive commit together; repeated archive does not count the same room twice. PC settings can show fixed recovery guidance and counts. This reads no prompts or results and does not add facts to model memory. Core/Android JVM checks and instrumentation compilation passed; the database reopen test was compiled but not run on hardware. Offline simulation100/100 still passes. No packaged APK or push for this increment.

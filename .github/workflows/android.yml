@@ -57,8 +57,19 @@ jobs:
           python -m unittest discover -s pc-worker/tests -p 'test_remote_test.py'
           ZIPHAP_COLLAB_BIN="$GITHUB_WORKSPACE/rust/target/debug/ziphap-collab" python -m unittest discover -s pc-worker/tests -p 'test_collab_bridge.py'
           python -m unittest discover -s pc-worker/eval -p 'test_*.py'
-          python pc-worker/eval/goal_only_simulation.py --require-complete
           python -m unittest discover -s scripts/tests -p 'test_agent_scenario_attestation.py'
+      - name: Run full synthetic scenarios
+        id: synthetic-scenarios
+        if: ${{ !cancelled() }}
+        run: python pc-worker/eval/goal_only_simulation.py --require-complete --out .local/ci-goal-simulation
+      - name: Retain synthetic scenario report
+        if: ${{ !cancelled() && steps.synthetic-scenarios.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: synthetic-scenario-report
+          path: .local/ci-goal-simulation/simulation-report.json
+          include-hidden-files: true
+          retention-days: 7
       - name: Test and bundle pinned offline React UI
         shell: bash
         run: |
@@ -73,7 +84,7 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :app:testDebugUnitTest :android-runtime:lintRelease :app:lintRelease :local-image:lintRelease :app:assembleRelease :local-image:assembleRelease :app:assembleDebugAndroidTest -Pkotlin.compiler.execution.strategy=in-process -x ':android-runtime:buildCMakeDebug[arm64-v8a]' --max-workers=2 --no-daemon --console=plain
+          ./gradlew :core:test :android-runtime:testDebugUnitTest :app:testDebugUnitTest :android-runtime:lintRelease :app:lintRelease :local-image:lintRelease :app:assembleRelease :local-image:assembleRelease :app:assembleDebugAndroidTest -Pkotlin.compiler.execution.strategy=in-process -x ':android-runtime:buildCMakeDebug[arm64-v8a]' --max-workers=2 --no-daemon --console=plain
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

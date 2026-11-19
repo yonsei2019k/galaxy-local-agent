@@ -1432,6 +1432,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
                 "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
             client.launchProvider(request.text,conversationContext,beforeLaunch={check(authority().permits(capture))})
+            val providerStarted=android.os.SystemClock.elapsedRealtime()
             val provider=withTimeout(330_000) {
                 var lastStage:String?=null
                 while(true){
@@ -1462,7 +1463,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 // Name why it stopped (PC provider code or phone session phase) so a pause is diagnosable from the run.
                 val code=(provider["errorCode"] as? JsonPrimitive)?.contentOrNull?.takeIf{Regex("[A-Z_]{1,64}").matches(it)}
                 val why=code?:"SESSION_${controller.phase.name}"
-                publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다($why). 실제 확인한 결과만 보존했습니다.",true);return
+                val stop=controller.stopMetadata()
+                FailureLog.cloudStop(context,why,stop.phase.name,stop.state?.name,stop.pending?.name,stop.sequence,
+                    provider.getValue("state").jsonPrimitive.content,android.os.SystemClock.elapsedRealtime()-providerStarted)
+                publishActionFinal(request,requestAuthorizedTools,"클라우드 실행이 끝나지 않았거나 연결이 중단됐습니다($why). 실제 확인한 결과만 보존했습니다.",true,why);return
             }
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
