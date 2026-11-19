@@ -222,7 +222,25 @@ class AgentProviderSupervisor:
                 kwargs["conversation_context"] = conversation_context
             total_calls = total_ms = 0
             for attempt in range(2):
-                result = self.runner(self.config, bootstrap, request, **kwargs)
+                started = time.monotonic()
+                try:
+                    result = self.runner(self.config, bootstrap, request, **kwargs)
+                except ProviderError as error:
+                    # The runner has unwound its process tree. Only a terminal response failure
+                    # with settled observations can earn the existing single recovery attempt.
+                    if (attempt or error.code not in {"PROVIDER_RUN_FAILED", "PROVIDER_FINAL_FORMAT"}
+                            or not self._supports_keyword("read_recovery", variadic=False) or revoked()):
+                        raise
+                    remaining = int(300 - (time.monotonic() - child.started))
+                    if remaining <= 0:
+                        raise
+                    recovery = self.bridge.read_recovery_context(owner, sid, capability, settled_only=True)
+                    if recovery is None:
+                        raise
+                    total_ms += round((time.monotonic() - started) * 1000)
+                    kwargs.update(read_recovery=recovery, timeout=remaining)
+                    _event("FINALIZE_SETTLED_READS", total_calls, total_ms)
+                    continue
                 if (result.state not in {"reported_done","needs_input","partial","failed"} or
                         type(result.answer) is not str or len(result.answer)>12000 or
                         type(result.question) is not str or len(result.question)>300 or

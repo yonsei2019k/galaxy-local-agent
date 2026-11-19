@@ -1,3 +1,9 @@
+## 2026-11-20 — Continue from verified reads when the answer is interrupted
+
+Adapted OpenClaw's settled-tool continuation to the paired provider supervisor. It uses the same request and accepted phone plan, verified receipts for every selected read, and the existing time budget. If the model omitted or returned an invalid final response, it gets one response-only attempt, using the retained read results. The broker enforces the no-new-calls boundary and retains idempotent receipts. Pending calls, ambiguous results, failed reads, writes, revoked authority, and exhausted recovery time keep their existing controls. The phone continues to verify the final task outcome.
+
+Upstream reference: [OpenClaw incomplete-turn recovery at 7af6c4fc31b6](https://github.com/openclaw/openclaw/blob/7af6c4fc31b6/src/agents/embedded-agent-runner/run/incomplete-turn-recovery.ts) and [MIT license](https://github.com/openclaw/openclaw/blob/7af6c4fc31b6/LICENSE). Focused broker/provider tests: 77 passed, 1 skipped. This PC worker change is built from the current installed release baseline. Its deployed/device status is recorded separately.
+
 ## 2026-11-20 — Public research completion and private read handoff
 
 Public research with no observed source now pauses instead of treating a skill read or plan as a result. When the cloud egress check withholds a result during a plan constrained to public research tools, eligible same-run, verified read evidence is saved in the encrypted run and passed to the existing private local inference path. The handler continues by using the already-read observations. It cannot dispatch new tools, send the answer to the PC test mailbox, or replay an unknown effect. The host stops processing cloud calls and requests cancellation before local generation starts. Missing model readiness and insufficient evidence remain visible outcomes. Installed 2029 renderer and research evidence is recorded in device-validation.md.

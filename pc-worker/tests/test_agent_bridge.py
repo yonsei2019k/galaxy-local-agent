@@ -444,6 +444,24 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.post_result(proposed, ack)
         self.assertIsNone(context())
 
+    def test_settled_read_finalization_reuses_the_receipt_and_blocks_new_calls(self):
+        recovery = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone, settled_only=True)
+        self.assertIsNone(recovery())
+        self.accept()
+        proposed, _ = self.propose()
+        _, ack = self.claim(proposed)
+        self.assertIsNone(recovery())
+        self.post_result(proposed, ack)
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+        context = recovery()
+        self.assertTrue(context["readObservationsComplete"])
+        self.assertEqual([], context["acceptedTools"])
+        self.assertEqual(verified()["content"], context["observedReads"][0]["result"])
+        self.assertEqual(200, self.propose(cid=proposed["callId"])[1][0])
+        status, failure = self.propose()[1]
+        self.assertEqual(403, status)
+        self.assertEqual("RECOVERY_FINAL_ANSWER_ONLY", failure["error"])
+
     def test_write_scope_cannot_restart_a_provider_for_a_read(self):
         self.accept(self.plan(["get_current_datetime", "save_note"]))
         self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))

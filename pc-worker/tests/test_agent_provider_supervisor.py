@@ -78,6 +78,33 @@ class ProviderSupervisorTests(unittest.TestCase):
         self.assertEqual(("needs_input", 6, 2), (report["state"], report["elapsedMs"], report["mcpCalls"]))
         bridge.bootstrap_agent.assert_called_once()
 
+    def test_provider_terminal_error_can_finish_once_from_settled_reads(self):
+        attempts = []
+        def runner(config, bootstrap, request, *, read_recovery=None, timeout, **kwargs):
+            attempts.append((bootstrap, request, read_recovery, timeout))
+            if read_recovery is None:
+                raise ProviderError("PROVIDER_FINAL_FORMAT")
+            return AgentReport("reported_done", "verified fixture", "", 2, 0)
+        bridge, manager = self.fixture(runner)
+        bridge.read_recovery_context.return_value = {"readObservationsComplete": True, "acceptedTools": []}
+        manager.launch(OWNER, SID, "phone", "fixture request")
+        self.assertEqual("reported_done", self.finished(manager)["report"]["state"])
+        self.assertEqual(2, len(attempts))
+        self.assertEqual(attempts[0][:2], attempts[1][:2])
+        self.assertLessEqual(attempts[1][3], attempts[0][3])
+        bridge.read_recovery_context.assert_called_once_with(OWNER, SID, "phone", settled_only=True)
+        bridge.bootstrap_agent.assert_called_once()
+
+    def test_provider_terminal_error_with_unsettled_work_is_not_retried(self):
+        def runner(config, bootstrap, request, *, read_recovery=None, **kwargs):
+            self.assertIsNone(read_recovery)
+            raise ProviderError("PROVIDER_RUN_FAILED")
+        bridge, manager = self.fixture(runner)
+        bridge.read_recovery_context.return_value = None
+        manager.launch(OWNER, SID, "phone", "fixture request")
+        self.assertEqual("PROVIDER_RUN_FAILED", self.finished(manager)["errorCode"])
+        bridge.read_recovery_context.assert_called_once_with(OWNER, SID, "phone", settled_only=True)
+
     def test_history_reaches_explicitly_supported_runner_without_changing_owner_request_binding(self):
         seen = []
         def runner(config, bootstrap, request, *, conversation_context=None, **kwargs):
