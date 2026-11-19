@@ -74,16 +74,23 @@ class RemoteTestQueue:
             self._prune()
             pending = sorted((i for i in self.items.values() if i['state'] == 'pending'), key=lambda i: i['createdAt'])
             if not pending:
-                return {'request': None}
+                return {'request': None, 'receiptVersion': 2}
             item = pending[0]
             item['state'] = 'claimed'
             item['claimedAt'] = self.clock()
-            return {'request': {'requestId': item['requestId'], 'text': item['text'], 'model': item['model']}}
+            return {'request': {'requestId': item['requestId'], 'text': item['text'], 'model': item['model']},
+                    'receiptVersion': 2}
 
     def report(self, request_id, body):
         request_id = str(uuid.UUID(request_id))
-        if not isinstance(body, dict) or set(body) - {'state', 'answer', 'tools', 'runId', 'errorCode'}:
+        if not isinstance(body, dict) or set(body) - {'state', 'answer', 'tools', 'runId', 'errorCode', 'receipt'}:
             raise RemoteTestError('SHAPE')
+        receipt = body.get('receipt')
+        if 'receipt' in body:
+            if (not isinstance(receipt, dict) or set(receipt) != {'versionCode', 'elapsedMs'}
+                    or type(receipt['versionCode']) is not int or not 0 < receipt['versionCode'] <= 2**63 - 1
+                    or type(receipt['elapsedMs']) is not int or not 0 <= receipt['elapsedMs'] <= 2**63 - 1):
+                raise RemoteTestError('RECEIPT')
         state = body.get('state')
         if state not in STATES:
             raise RemoteTestError('STATE')
@@ -110,6 +117,8 @@ class RemoteTestQueue:
             item['state'] = 'reported'
             item['result'] = {'state': state, 'answer': answer, 'tools': clean, 'runId': run_id, 'errorCode': error,
                               'reportedAt': self.clock()}
+            if receipt is not None:
+                item['result']['receipt'] = dict(receipt)
             return {'ok': True}
 
     def status(self, request_id):

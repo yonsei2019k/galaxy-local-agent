@@ -61,6 +61,17 @@ class RemoteTestQueueTests(unittest.TestCase):
         with self.assertRaises(remote.RemoteTestError):
             self.queue.enqueue({'text': 'hi'})
 
+    def test_optional_receipt_is_bounded_and_legacy_reports_still_work(self):
+        request_id = self.queue.enqueue({'text': 'hi'})['requestId']
+        self.assertEqual(self.queue.claim()['receiptVersion'], 2)
+        for invalid in ({'versionCode': True, 'elapsedMs': 0}, {'versionCode': 2020, 'elapsedMs': -1}, None):
+            with self.assertRaises(remote.RemoteTestError):
+                self.queue.report(request_id, {'state': 'failed', 'receipt': invalid})
+        # Android monotonic elapsed time includes sleep, even past the claim timeout.
+        receipt = {'versionCode': 2020, 'elapsedMs': 31 * 60 * 1000}
+        self.queue.report(request_id, {'state': 'failed', 'receipt': receipt})
+        self.assertEqual(self.queue.status(request_id)['result']['receipt'], receipt)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -15,6 +15,12 @@ class PcRemoteTestRequestTest {
         assertEquals("오늘 일정 알려줘",parsed.text)
         assertEquals("paired-pc-cloud-agent-v1",parsed.model)
     }
+    @Test fun receiptRequiresAnExplicitSupportedVersion(){
+        assertTrue(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion",2)}))
+        assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{}))
+        assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion","2")}))
+        assertFalse(PcRemoteTestRequest.supportsReceipt(buildJsonObject{put("receiptVersion",3)}))
+    }
     @Test fun commandsExtraFieldsAndBadModelsAreRejected(){
         listOf(body("/new"),body(""),body("x".repeat(2001)),body("hi","../x"),body("hi",extra=true)).forEach{
             assertThrows(IllegalArgumentException::class.java){PcRemoteTestRequest.parse(it)}

@@ -54,6 +54,7 @@ jobs:
           python -m unittest discover -s pc-worker/tests -p 'test_server_agent_adapter.py'
           python -m unittest discover -s pc-worker/tests -p 'test_private_image_workspace.py'
           python -m unittest discover -s pc-worker/tests -p 'test_public_read_recovery.py'
+          python -m unittest discover -s pc-worker/tests -p 'test_remote_test.py'
           ZIPHAP_COLLAB_BIN="$GITHUB_WORKSPACE/rust/target/debug/ziphap-collab" python -m unittest discover -s pc-worker/tests -p 'test_collab_bridge.py'
           python -m unittest discover -s pc-worker/eval -p 'test_*scenario*.py'
           python -m unittest discover -s pc-worker/eval -p 'test_problem_solving_eval.py'

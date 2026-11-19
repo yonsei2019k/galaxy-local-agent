@@ -1,4 +1,10 @@
+## 2026-11-19 — Remote test receipt negotiation (source)
+
+The worker advertises optional receipt version 2 next to the existing request payload. A supported Android client includes its installed package version code and monotonic elapsed milliseconds in the terminal report. Older clients can still report to the new worker and new clients omit the receipt for old workers. Before submission and result delivery the phone checks that the owner switch and captured pairing are still valid. Receipt metadata does not authorize actions or prove a tool effect, a goal chain or the APK digest. No worker restart or phone deployment is implied by this source change.
+
 ## 2026-11-19 — Phone-to-PC bridge timeout diagnostics
+
+GitHub Actions `44456020352` published v0.1.20/code2020 from `be5d056`. Independent manifest signature, exact commit, APK digest `633e1ef4fbc9fb228ab659e3975c36f08d6a30beeb838dcdb4af3e968a7e92ed`, pinned APK certificate, package/version and static Rust/React checks passed. After publication a Tailscale G03-v2 repeat completed after the first polling window, with four search_web and two read_webpage receipts and the correct official closure answer. The remote response identifies neither the installed version nor a goal chain. Prior timeouts remain unresolved, and this successful attempt produced no timeout code. Private receipt retained under `.local/timeout-v020/`.
 
 Bridge socket timeouts surfaced by the cloud coordinator now store a method/operation code, for example `PC_BRIDGE_TIMEOUT_GET_PROVIDER` or `PC_BRIDGE_TIMEOUT_POST_RESULT`, without embedding session IDs, endpoints, prompts or credentials. Cancellation is rechecked before recording a network timeout. No replay, timeout-duration or authority change. The first two 2019 phone receipts contained only the exception class, so their exact operations remain unknown. This change diagnoses subsequent failures and does not establish recovery.
 

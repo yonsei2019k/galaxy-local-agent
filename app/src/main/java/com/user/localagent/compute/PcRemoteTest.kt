@@ -1,6 +1,7 @@
 package com.user.localagent.compute
 
 import android.content.Context
+import android.os.SystemClock
 import com.user.localagent.AppContainer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -25,8 +26,7 @@ class PcRemoteTestSettings private constructor(context:Context) {
     @Synchronized fun markHandled(requestId:String):Boolean {
         val seen=prefs.getString("handled","").orEmpty().split(',').filter{it.isNotBlank()}
         if(requestId in seen)return false
-        prefs.edit().putString("handled",(seen+requestId).takeLast(40).joinToString(",")).commit()
-        return true
+        return prefs.edit().putString("handled",(seen+requestId).takeLast(40).joinToString(",")).commit()
     }
 }
 
@@ -34,6 +34,8 @@ class PcRemoteTestSettings private constructor(context:Context) {
 internal data class PcRemoteTestRequest(val requestId:String,val text:String,val model:String) {
     companion object {
         private val MODEL=Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,95}")
+        fun supportsReceipt(response:JsonObject?)=
+            (response?.get("receiptVersion") as? JsonPrimitive)?.let{!it.isString&&it.intOrNull==2}==true
         fun parse(value:JsonObject):PcRemoteTestRequest {
             require(value.keys=="requestId text model".split(' ').toSet())
             val id=value.getValue("requestId").jsonPrimitive.content
@@ -49,6 +51,7 @@ internal data class PcRemoteTestRequest(val requestId:String,val text:String,val
 
 class PcRemoteTestInbox(private val context:Context,private val app:AppContainer) {
     private val settings=PcRemoteTestSettings.get(context)
+    private val pairing=PcComputeSettings.get(context.applicationContext)
     private val transport=PcTransport(context)
     private var job:Job?=null
 
@@ -62,26 +65,35 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
                 val next=runCatching{transport.json(config,"/v1/remote/next","POST",buildJsonObject{},timeout=10_000)}.getOrNull()
                 val request=next?.get("request") as? JsonObject
                 if(request==null){delay(8_000);continue}
-                runCatching{handle(config,request)}.onFailure{if(it is CancellationException)throw it}
+                val receiptSupported=PcRemoteTestRequest.supportsReceipt(next)
+                runCatching{handle(config,request,receiptSupported)}.onFailure{if(it is CancellationException)throw it}
             }
         }
     }
 
-    private suspend fun handle(config:PcConnection,raw:JsonObject){
+    private suspend fun handle(config:PcConnection,raw:JsonObject,receiptSupported:Boolean){
         val id=raw["requestId"]?.jsonPrimitive?.contentOrNull?:return
+        val started=SystemClock.elapsedRealtime()
+        val version=if(receiptSupported)context.packageManager.getPackageInfo(context.packageName,0).longVersionCode else null
+        fun receipt()=version?.let{buildJsonObject {
+            put("versionCode",it)
+            put("elapsedMs",SystemClock.elapsedRealtime()-started)
+        }}
         val request=runCatching{PcRemoteTestRequest.parse(raw)}.getOrNull()
-        if(request==null||!settings.markHandled(id)){report(config,id,"rejected","",emptyList(),null,"REQUEST_SHAPE");return}
+        if(request==null||!settings.enabled()||!settings.markHandled(id)){report(config,id,"rejected","",emptyList(),null,"REQUEST_REFUSED",receipt());return}
         val thread=app.repository.chat.createThread(null,PcRemoteTestSettings.THREAD_TITLE)
         val runId=UUID.randomUUID().toString()
-        val accepted=withContext(Dispatchers.Main){app.runs.submitRemoteTest(request.text,thread.id,request.model,runId)}
-        if(!accepted){report(config,id,"rejected","",emptyList(),runId,"SUBMIT_REFUSED");return}
-        val started=System.currentTimeMillis()
+        val accepted=withContext(Dispatchers.Main){
+            settings.enabled()&&pairing.snapshot()?.samePair(config)==true&&
+                app.runs.submitRemoteTest(request.text,thread.id,request.model,runId)
+        }
+        if(!accepted){report(config,id,"rejected","",emptyList(),runId,"SUBMIT_REFUSED",receipt());return}
         var state:String?=null
         var reportedApproval=false
-        while(System.currentTimeMillis()-started<25*60_000L){
+        while(SystemClock.elapsedRealtime()-started<25*60_000L){
             delay(3_000)
             val run=app.repository.chat.run(runId)
-            if(run==null){if(System.currentTimeMillis()-started>60_000L){state="rejected";break};continue}
+            if(run==null){if(SystemClock.elapsedRealtime()-started>60_000L){state="rejected";break};continue}
             if(run.status=="waiting_approval"&&!reportedApproval){reportedApproval=true;continue}
             if(run.status !in setOf("queued","running","waiting_approval")){state=run.status;break}
         }
@@ -89,18 +101,25 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
         val answer=messages.lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
         val tools=app.repository.chat.toolRunsForThread(thread.id,runId).first()
         report(config,id,state?:"timeout",answer.take(20_000),tools.takeLast(64).map{Triple(it.name.take(96),it.success,it.summary.take(400))},runId,
-            app.repository.chat.run(runId)?.errorCode?.take(96))
+            app.repository.chat.run(runId)?.errorCode?.take(96),receipt())
     }
 
-    private suspend fun report(config:PcConnection,id:String,state:String,answer:String,tools:List<Triple<String,Boolean,String>>,runId:String?,error:String?){
+    private suspend fun report(config:PcConnection,id:String,state:String,answer:String,tools:List<Triple<String,Boolean,String>>,runId:String?,error:String?,receipt:JsonObject?){
         val body=buildJsonObject{
             put("state",state);put("answer",answer)
             put("tools",buildJsonArray{tools.forEach{(name,ok,summary)->add(buildJsonObject{put("name",name);put("success",ok);put("summary",summary)})}})
             runId?.let{put("runId",it)};error?.let{put("errorCode",it)}
+            receipt?.let{put("receipt",it)}
         }
         repeat(3){attempt->
-            val target=if(attempt==0)config else transport.available()?:config
-            if(runCatching{transport.json(target,"/v1/remote/requests/$id/result","POST",body,timeout=15_000)}.isSuccess)return
+            if(!settings.enabled()||pairing.snapshot()?.samePair(config)!=true)return
+            val target=if(attempt==0)config else transport.available()?.takeIf{it.samePair(config)}?:config
+            if(!settings.enabled()||pairing.snapshot()?.samePair(config)!=true)return
+            try {
+                transport.json(target,"/v1/remote/requests/$id/result","POST",body,timeout=15_000)
+                return
+            }catch(error:CancellationException){throw error}
+            catch(_:Exception){/* Retry only a report to the original pairing. */}
             delay(10_000)
         }
     }
