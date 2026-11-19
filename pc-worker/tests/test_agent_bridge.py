@@ -376,6 +376,45 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.assertEqual(409, self.phone_request("POST", "/plan-ack",
             {"planDigest": state["plan"]["planDigest"], "accepted": True})[0])
 
+    def test_recovery_context_requires_phone_accepted_reads_and_proven_absence_of_effect(self):
+        context = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertIsNone(context())
+        self.assertFalse(self.broker.read_recovery_context(self.owner, self.sid, self.phone, before_plan=True)["planAccepted"])
+        self.accept()
+        self.assertEqual([], context()["failedReads"])
+        proposed, _ = self.propose()
+        self.assertIsNone(context())
+        _, ack = self.claim(proposed)
+        self.assertIsNone(context())
+        self.post_result(proposed, ack, {"success": False, "verification": "FAILED", "effectNotApplied": True, "content": "fixture"})
+        self.assertEqual([{"tool": "get_current_datetime", "arguments": {}}], context()["failedReads"])
+        proposed, _ = self.propose()
+        _, ack = self.claim(proposed)
+        self.post_result(proposed, ack)
+        self.assertIsNone(context())
+
+    def test_write_scope_cannot_restart_a_provider_for_a_read(self):
+        self.accept(self.plan(["get_current_datetime", "save_note"]))
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+
+    def test_note_lookup_is_available_for_reconsideration_only_before_patch(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        read, patch = clock_tool(), note_tool()
+        read["name"], patch["name"] = "search_notes", "patch_note"
+        self.grant["phoneTools"] = [read, patch]
+        self._register()
+        self.accept(self.plan(["search_notes", "patch_note"]))
+        proposed, _ = self.propose("search_notes")
+        _, ack = self.claim(proposed)
+        self.post_result(proposed, ack)
+        recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertEqual(verified()["content"], recovery["observedReads"][0]["result"])
+        patch_call, _ = self.propose("patch_note", {"content": "synthetic"})
+        _, ack = self.claim(patch_call)
+        self.post_result(patch_call, ack)
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+
     def test_plan_shapes_unoffered_tools_utf16_bounds_and_nonascii_ack_fail_closed(self):
         invalid = [self.plan(["shell"]), self.plan(["get_current_datetime"] * 2),
                    self.plan(["pc_read_file"]), self.plan(["plan_task"]),

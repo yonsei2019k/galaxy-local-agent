@@ -173,13 +173,12 @@ class MainActivity : ComponentActivity() {
         if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId){
             status.value="선택한 대화를 불러온 뒤 모델을 바꿔주세요.";return
         }
-        val pairedText=com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(id)!=null&&com.user.localagent.compute.PcComputeSettings.get(this).state.value.let{it.paired&&!it.claudeText}
         if(id==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID){
             if(!com.user.localagent.compute.PcComputeSettings.get(this).state.value.paired){status.value="설정에서 개인 PC를 먼저 연결해주세요.";return}
             if(!com.user.localagent.externalagent.ExternalAgentSettings.get(this).capture().enabled){externalAgentConsentThread.value=threadId;return}
             app.runs.chooseModel(id,threadId);status.value="다음 요청에서 클라우드 모델이 승인된 휴대폰 도구를 사용합니다.";return
         }
-        if(id!="auto"&&!pairedText&&app.models.models.value.none{it.id==id&&it.verified&&it.runtime in setOf("litertlm","gguf")}){status.value="설치된 로컬 모델 또는 등록한 PC 텍스트 모델을 선택해주세요.";return}
+        if(id!="auto" && id!=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION){status.value="일반 업무는 Codex, 개인 자료는 개인정보 · 로컬을 선택해주세요.";return}
         // A preference change is synchronous. The next serialized request owns runtime loading.
         app.runs.chooseModel(id,threadId)
         status.value="이 대화의 다음 요청에 선택한 모델을 사용합니다."
@@ -288,8 +287,8 @@ class MainActivity : ComponentActivity() {
                     put("id",id);put("title",title);put("selected",id==composerThreadId)
                     put("working",activeExecutions.any{it.threadId==id&&!it.waitingForApproval&&it.waitingForResource==null})
                 }
-                val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex")+
-                    installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{it.id to it.title}
+                val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex",
+                    com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION to com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
@@ -417,7 +416,8 @@ class MainActivity : ComponentActivity() {
                 threads=menuThreads.filterNot{room->ZipHapRoom.entries.any{it.threadId==room.id}}.map{room->UiThread(room.id,room.projectId.orEmpty(),room.title,room.pinned,
                     room.archived,room.deletedAt!=null,room.updatedAt)},
                 selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
-                modelChoices=installed.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{UiModelChoice(it.id,it.title)},
+                modelChoices=listOf(UiModelChoice("auto","자동"),UiModelChoice(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID,"Codex"),
+                    UiModelChoice(com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION,com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)),
                 actions=ChatNavigationActions(onSelectThread=chat::selectThread,onNewThread=chat::newThread,
                     onSelectProject=chat::selectProject,onSaveProject=chat::saveProject,onDeleteProject=chat::deleteProject,
                     onChooseProjectFolder={id->folderProjectId=id;projectFolder.launch(null)},onRenameThread=chat::renameThread,

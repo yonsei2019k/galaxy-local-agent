@@ -29,13 +29,13 @@ class ToolUsePolicyTest {
         assertFalse("save_note" in ToolUsePolicy.withVerification(emptySet(),SemanticAction.ANSWER,offered))
         assertEquals(setOf("calculate"),ToolUsePolicy.withVerification(emptySet(),SemanticAction.ANSWER,setOf("calculate")))
     }
-    @Test fun policyIsToolFirstAndNamesOnlyOfferedTools(){
+    @Test fun policyAllowsDirectAnswersAndOffersRelevantGuidance(){
         val prompt=AssistantPolicy.build(setOf("calculate","read_skill"),"2026-11-14T08:30:00+09:00")
-        assertTrue(prompt.contains("도구를 먼저 사용"))
+        assertTrue(prompt.contains("주어진 내용으로 답할 수 있으면 직접 답한다"))
         assertTrue(prompt.contains("calculate"));assertFalse(prompt.contains("date_calculate"))
-        assertTrue(prompt.contains("read_skill로 읽고"))
+        assertTrue(prompt.contains("read_skill로 읽을 수 있다"))
         assertFalse(prompt.contains("꼭 필요할 때만"))
-        assertTrue(SemanticPlannerInstructions.build(setOf("calculate")).contains("Prefer tools"))
+        assertTrue(SemanticPlannerInstructions.build(setOf("calculate")).contains("Answer self-contained questions directly"))
     }
     @Test fun gateOnlyConsidersDraftsWithNumbers(){
         assertTrue(ToolUsePolicy.worthVerifying("1,200 + 50 = 1,250원"))

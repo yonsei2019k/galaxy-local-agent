@@ -550,6 +550,39 @@ class AgentBridge:
         except (BridgeError, UnicodeError, ValueError):
             return False
 
+    def read_recovery_context(self, owner, session_id, capability, *, before_plan=False):
+        """Reconsider before any write, using only receipts already visible to this agent."""
+        with self._lock:
+            session, _ = self._session(owner, session_id)
+            _require(self._role(session, capability) == "phone", "CAPABILITY_ROLE", 403)
+            self._active(session)
+            plan = session.plan
+            if before_plan and session.require_plan and session.profile == "phone-only" and plan is None and not session.calls:
+                return {"planAccepted": False, "acceptedTools": [], "failedReads": [], "observedReads": []}
+            reads = FAILED_PUBLIC_READS_HAVE_NO_EFFECT | {"calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
+            if (not session.require_plan or not plan or plan["state"] != "ACCEPTED"
+                    or not plan["requiredTools"] or not set(plan["requiredTools"]) <= reads | {"patch_note"}
+                    or session.active or len(session.calls) >= MAX_CALLS):
+                return None
+            failed, observed, verified_tools = [], [], set()
+            for call in session.calls.values():
+                if (call.state != "COMPLETED" or call.source != "PHONE_EXECUTOR" or not call.result
+                        or call.tool not in reads):
+                    return None
+                entry = {"tool": call.tool, "arguments": call.arguments}
+                if call.result["success"] and call.result["verification"] == "VERIFIED" and not call.result["effectNotApplied"]:
+                    observed.append(entry | {"result": call.result["content"]})
+                    verified_tools.add(call.tool)
+                elif (not call.result["success"] and call.result["verification"] == "FAILED" and
+                      (call.result["effectNotApplied"] or call.tool in FAILED_PUBLIC_READS_HAVE_NO_EFFECT)):
+                    failed.append(entry)
+                else:
+                    return None
+            if set(plan["requiredTools"]) <= verified_tools:
+                return None
+            context = {"planAccepted": True, "acceptedTools": plan["requiredTools"], "failedReads": failed, "observedReads": observed}
+            return copy.deepcopy(context) if len(canonical(context)) <= 16384 else None
+
     def task_evidence(self, owner, session_id, capability):
         """Phone-authenticated metadata/PC evidence only, not AgentReport completion.
 

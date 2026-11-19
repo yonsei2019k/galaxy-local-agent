@@ -1,3 +1,11 @@
+## 2026-11-19 — 판단 중단 복구와 대화 모델 분리
+
+일반 대화와 개인 자료 처리 경로를 분리했다. 신규 일반 요청은 승인된 Codex 경로를 선택한다. 기존 로컬 전용 요청의 클라우드 권한은 늘리지 않는다. 이미지 입력, 명시적 개인정보 선택, 인식 가능한 계정·식별 정보는 휴대폰 또는 페어링 PC의 로컬 모델로 처리한다. 음성 전사는 기존 경로를 유지한다. 클라우드가 개인 자료 조회를 처음 제안하면 호출 수 0인 상태에서 계획 거부를 확인한 뒤 일반 대화의 동일 요청을 로컬로 전환한다. 반환 본문에서 민감 정보가 발견되면 실제 실행을 기기에 기록하고 전송을 중단한다. 자유문 개인정보의 완전한 자동 판별은 보장할 수 없어 개인정보 전용 선택을 제공한다.
+
+기존 로컬 계획의 일괄 대상 분류와 스킬 선조회 요구를 완화했다. 첫 질문이 나오면 기존 판단 예산 내에서 원문·조회 가능성을 다시 검토한다. 조회 결과가 없을 때는 공개 조사자가 다른 검색어를 선택할 수 있다. 순수 조회 실패와 결과가 불명인 변경을 구분하며, 필수가 아닌 조회의 무효과 실패가 뒤의 실제 필수 결과를 무효화하지 않는다. 첫 도구 제안 전 또는 확인된 조회만 있는 제한된 경우에 PC 감독기가 같은 요청·권한·잔여 시간으로 모델의 조기 종료를 한 번 재검토한다.
+
+PC 회귀는 설치 전 원본 워커 fixture를 지정해 245건 중 236건 통과, 9건 건너뜀을 확인했다. 코어 1,003건과 안드로이드 JVM 1,036건이 통과했다. 독립 JVM 체크아웃의 카탈로그 내보내기에서 상위 디렉터리 누락으로 1건이 실패해 시험이 출력 경로를 생성하도록 고쳤다. 이미지 작업 종료를 확인한 후 페어링 PC 워커 3개 파일을 반영하고 재시작, 기존 모델 지문, 활성 작업 0을 확인했다. 2029 release와 androidTest APK를 기존 인증서로 서명하고 16KiB 정렬, release 정적 검사를 확인했다. release SHA-256은 f4ec19ebb0c82bc84fc519025432253419d861604eefbb5d11a8ea6d1a92a2fa이다. 2029 휴대폰 설치·실기기 검증은 새 이미지 작업이 끝나기를 기다리고 있다. 이전 1082 기본 9B 메모 수정·독립 재조회 실기기 성공과 이번 변경의 검증은 별개다.
+
 ## Phone 2026 focused evidence and next batch
 
 Wireless ADB installed the exact signed 2026 candidate. On that build, the production notification builder posted the robot small icon. The new encrypted Room case confirmed duplicate-name and stale-version reads cannot verify a mutation, exact post-write pages eventually satisfy readback, and the cold independent query shows only the intended note changed. The renderer recovery case timed out and is retained as a failure. The revised test prints the timeout boundary and also checks the fixed menu after recovery. Neither succeeding device case is repeated in the next run.

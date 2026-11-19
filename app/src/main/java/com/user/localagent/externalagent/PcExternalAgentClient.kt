@@ -143,6 +143,8 @@ class PcExternalAgentClient(
     suspend fun launchProvider(ownerRequest:String,conversationContext:JsonObject?=null,beforeLaunch:suspend ()->Unit={}):JsonObject {
         require(captured.allowExternalAgent&&ownerRequest.isNotBlank()&&ownerRequest.toByteArray(Charsets.UTF_8).size<=65_536&&
             ExternalAgentContract.sha(ownerRequest)==captured.requestDigest){"BRIDGE_OWNER_REQUEST_CHANGED"}
+        require(!com.user.localagent.core.ConversationPrivacy.sensitiveText(ownerRequest) &&
+            (conversationContext==null || !com.user.localagent.core.ConversationPrivacy.sensitiveText(conversationContext.toString()))){"PRIVATE_CLOUD_INPUT"}
         beforeLaunch()
         if(conversationContext!=null){
             val support=call("GET","/context-capabilities")

@@ -46,14 +46,13 @@ class ModelDecisionContractTest {
         }
     }
 
-    @Test fun everyActionRejectsMissingTargetTypeInsteadOfAssumingGeneral() {
+    @Test fun generalActionsCanOmitTargetClassification() {
         val candidates = listOf(decision("ANSWER"), decision("CANCEL"), publicDecision(),
             decision("CLARIFY", "question" to JsonPrimitive("필수 조건은 무엇인가요?")),
             decision("CONNECTION_STATUS", "target" to JsonPrimitive("연결 대상")))
         for (candidate in candidates) {
-            val error = failure(JsonObject(candidate.filterKeys { it != "targetType" }).toString())
-            assertEquals("missing_target_type", error.code)
-            assertTrue(error.hint.all { it.code < 128 })
+            val plan = parse(JsonObject(candidate.filterKeys { it != "targetType" }))
+            assertEquals(SemanticTargetType.GENERAL, plan.targetType)
         }
     }
 
@@ -152,9 +151,9 @@ class ModelDecisionContractTest {
         fun branch(action: String) = branches.map { it.jsonObject }.single {
             it.getValue("properties").jsonObject.getValue("action").jsonObject.getValue("enum").jsonArray.single().jsonPrimitive.content == action
         }
-        assertEquals(setOf("action", "goal", "targetType"), branch("ANSWER").getValue("required").jsonArray.map { it.jsonPrimitive.content }.toSet())
-        assertEquals(setOf("action", "goal", "targetType", "publicQuery", "requiredTools"), branch("PUBLIC_RESEARCH").getValue("required").jsonArray.map { it.jsonPrimitive.content }.toSet())
-        assertTrue(branches.all { it.jsonObject.getValue("required").jsonArray.any { field -> field.jsonPrimitive.content == "targetType" } })
+        assertEquals(setOf("action", "goal"), branch("ANSWER").getValue("required").jsonArray.map { it.jsonPrimitive.content }.toSet())
+        assertEquals(setOf("action", "goal", "publicQuery", "requiredTools"), branch("PUBLIC_RESEARCH").getValue("required").jsonArray.map { it.jsonPrimitive.content }.toSet())
+        assertEquals("shopping_target_mismatch", failure(JsonObject(publicDecision("requiredTools" to array("search_shopping")).filterKeys { it != "targetType" }).toString()).code)
         assertFalse(branch("PUBLIC_RESEARCH").getValue("properties").jsonObject.containsKey("usesPrivateData"))
         assertFalse(branch("ANSWER").getValue("properties").jsonObject.containsKey("requiredTools"))
         assertTrue(branch("CONNECT_APP").getValue("required").jsonArray.any { it.jsonPrimitive.content == "target" })

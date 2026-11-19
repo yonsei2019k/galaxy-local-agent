@@ -23,6 +23,7 @@ data class QueuedChatRequest(
     val externalAgentRevision:Long?=null,
     val goalSegment:GoalSegmentBinding?=null,
     val goalLedger:List<GoalLedgerEntry> = emptyList(),
+    val cloudReadOnlyModes:Boolean=false,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -32,6 +33,7 @@ data class QueuedChatRequest(
         kakaoReadBinding?.let {require(runCatching{java.util.UUID.fromString(it).toString()==it}.getOrDefault(false))}
         require(capturedPcRevision==null||capturedPcRevision>=0)
         require(!allowCloudText||capturedPcRevision!=null){"클라우드 사용은 현재 요청에 캡처한 명시 권한이 필요합니다."}
+        require(!cloudReadOnlyModes || allowExternalAgent && modelId==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)
         require(externalAgentRevision==null||externalAgentRevision>=0)
         require(!allowExternalAgent||(externalAgentRevision!=null&&capturedPcRevision!=null))
         require(goalLedger.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
@@ -50,6 +52,7 @@ data class QueuedChatRequest(
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
         put("projectId",projectId);put("text",text);put("modelId",modelId);put("thinking",thinking);put("userMessageId",userMessageId);put("allowTools",allowTools)
         put("mode",mode);put("queueOrder",queueOrder)
+        if(cloudReadOnlyModes)put("cloudReadOnlyModes",true)
         put("workspaceBinding",workspaceBinding)
         put("pcDataBinding",pcDataBinding)
         put("kakaoReadBinding",kakaoReadBinding)
@@ -86,7 +89,8 @@ data class QueuedChatRequest(
                 o["allowExternalAgent"]?.let{require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long},
                 o["goalSegment"]?.let {GoalSegmentBinding.parse(it.jsonObject)},
-                o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList())
+                o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList(),
+                o["cloudReadOnlyModes"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false)
         }
     }
 }

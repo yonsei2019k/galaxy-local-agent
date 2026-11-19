@@ -103,10 +103,13 @@ class LocalSemanticPlanner internal constructor(
                     return false
                 }
                 var failureCode: String? = null
+                var proposedQuestion: SemanticRequestPlan? = null
                 for (attempt in 1..MAX_ATTEMPTS) {
                     activeAttempt=attempt;visibleChars=0
                     currentCoroutineContext().ensureActive()
-                    val system = instruction(failureCode, availableTools)
+                    val system = instruction(failureCode, availableTools) + if (proposedQuestion == null) "" else
+                        "\nReview the proposed question against the current request, recent corrections and scoped tools. " +
+                        "Choose a useful authorized lookup if the missing fact is observable. Keep CLARIFY if an essential owner choice remains."
                     var input = envelope(ownerRequest, retainedHistory, retainedContext)
                     while (true) {
                         engineStage="tokenizing"
@@ -164,6 +167,13 @@ class LocalSemanticPlanner internal constructor(
                         } catch (_: IllegalArgumentException) {
                             throw InvalidOutput("invalid_plan")
                         }
+                        if (parsed.action == com.user.localagent.core.SemanticAction.CLARIFY &&
+                            attempt < MAX_ATTEMPTS && availableTools.any(com.user.localagent.core.ToolReadPolicy::isReadOnly)) {
+                            proposedQuestion = parsed
+                            retainedContext = JsonObject(retainedContext + ("proposedQuestion" to kotlinx.serialization.json.JsonPrimitive(parsed.question)))
+                            emit("reviewing_question")
+                            continue
+                        }
                         emit("planned")
                         return@withTimeout SemanticPlanningResult(
                             parsed, chosen.model.id, attempt,
@@ -187,6 +197,10 @@ class LocalSemanticPlanner internal constructor(
                         // One new semantic generation repairs format/termination failures.
                         // Rejected output is not promoted into user authority or execution.
                         if (attempt == MAX_ATTEMPTS) {
+                            proposedQuestion?.let {
+                                return@withTimeout SemanticPlanningResult(it, chosen.model.id, attempt,
+                                    (System.nanoTime() - started) / 1_000_000L, constrained)
+                            }
                             fail(
                                 "plan_rejected_${invalid.code}",
                                 "기기 내 작업 계획이 두 번의 형식·완결성 검증을 통과하지 못했습니다. 이전 고정 응답으로 대체하거나 도구를 실행하지 않았습니다.",

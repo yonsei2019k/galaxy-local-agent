@@ -31,7 +31,7 @@ object ModelDecisionContract {
         return buildJsonObject {
             put("type", "object"); put("additionalProperties", false)
             put("properties", JsonObject(properties))
-            put("required", JsonArray(listOf("action", "goal", "targetType").map(::JsonPrimitive)))
+            put("required", JsonArray(listOf("action", "goal").map(::JsonPrimitive)))
         }.toString()
     }
 
@@ -44,7 +44,7 @@ object ModelDecisionContract {
             put("items", enumeration(names.sorted()))
         }
         fun branch(action: SemanticAction): JsonObject {
-            val required = mutableListOf("action", "goal", "targetType")
+            val required = mutableListOf("action", "goal")
             return buildJsonObject {
                 put("type", "object"); put("additionalProperties", false)
                 put("properties", buildJsonObject {
@@ -101,7 +101,6 @@ object ModelDecisionContract {
         }
         if ("action" !in objectValue) fail("missing_action", "Provide action and goal for the current request.")
         if ("goal" !in objectValue) fail("missing_goal", "Provide action and a concise nonempty goal.")
-        if ("targetType" !in objectValue) fail("missing_target_type", "Provide targetType for the original target: GENERAL, PHYSICAL_PRODUCT, SERVICE, PERSONAL_RECORD, DEVICE or CONTENT.")
         val action = SemanticAction.entries.firstOrNull { it.name == text("action") }
             ?: fail("invalid_action", "Use an action from the decision contract.")
         val goal = text("goal"); val target = text("target"); val query = text("publicQuery"); val question = text("question")
@@ -111,7 +110,7 @@ object ModelDecisionContract {
             constraints.size > 6 || constraints.any { it.isBlank() || it.length > 240 }) {
             fail("invalid_field_length", "Keep goal within 1000 characters, target within 200, query within 500, question and each of at most six constraints within 240.")
         }
-        val targetType = SemanticTargetType.entries.firstOrNull { it.name == text("targetType") }
+        val targetType = SemanticTargetType.entries.firstOrNull { it.name == text("targetType", SemanticTargetType.GENERAL.name) }
             ?: fail("invalid_target_type", "Use a targetType from the decision contract.")
         val sourceText = text("sourceKind", "none")
         val source = if (action in setOf(SemanticAction.ANSWER, SemanticAction.CANCEL, SemanticAction.CLARIFY, SemanticAction.CONNECTION_STATUS, SemanticAction.CONNECT_APP)) SemanticSourceKind.NONE

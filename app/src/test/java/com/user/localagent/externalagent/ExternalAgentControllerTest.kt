@@ -63,6 +63,16 @@ class ExternalAgentControllerTest {
         assertFalse(request.contains("currentOwnerRequest"));assertFalse(request.contains("recentConversation"))
         assertFalse(request.contains("token"));assertFalse(request.contains("allowCloudText"))
     }
+    @Test fun privateDataInAToolResultIsRecordedLocallyBeforeAnyCloudReport()=runBlocking {
+        val c=capture();val b=Broker();val receipts=mutableListOf<PhoneAgentExecution>()
+        val result=ToolResult(callId,true,"연락처 fixture@example.invalid",VerificationState.VERIFIED)
+        val controller=ExternalAgentController(c,b,{live(c)},{result},{receipts+=it},{1})
+        controller.start();b.offer(proposal(c))
+        assertTrue(runCatching {controller.pumpOnce()}.exceptionOrNull() is PrivateResultWithheld)
+        assertSame(result,receipts.single().result)
+        assertEquals(0,b.reports)
+    }
+
     @Test fun claimedPhoneCallbackIsTheOnlyReceiptSourceAndDuplicatePollNeverExecutesAgain()=runBlocking {
         val c=capture();val b=Broker();val receipts=mutableListOf<PhoneAgentExecution>();var executions=0
         val result=ToolResult(callId,true,"actual synthetic clock",VerificationState.VERIFIED)

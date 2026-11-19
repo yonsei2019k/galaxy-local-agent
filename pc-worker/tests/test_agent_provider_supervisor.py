@@ -61,6 +61,23 @@ class ProviderSupervisorTests(unittest.TestCase):
             manager.launch(OWNER, SID, "phone", "second")
         bridge.bootstrap_agent.assert_called_once()
 
+    def test_early_question_reconsiders_once_in_same_session_with_remaining_budget(self):
+        attempts = []
+        def runner(config, bootstrap, request, *, read_recovery=None, timeout, **kwargs):
+            attempts.append((bootstrap, request, read_recovery, timeout))
+            return AgentReport("needs_input", "", "필수 선택", 3, 1)
+        bridge, manager = self.fixture(runner)
+        bridge.read_recovery_context.return_value = {"acceptedTools": ["search_web"], "failedReads": []}
+        manager.launch(OWNER, SID, "phone", "합성 조사")
+        report = self.finished(manager)["report"]
+        self.assertEqual(2, len(attempts))
+        self.assertEqual(attempts[0][:2], attempts[1][:2])
+        self.assertIsNone(attempts[0][2])
+        self.assertEqual(bridge.read_recovery_context.return_value, attempts[1][2])
+        self.assertLessEqual(attempts[1][3], attempts[0][3])
+        self.assertEqual(("needs_input", 6, 2), (report["state"], report["elapsedMs"], report["mcpCalls"]))
+        bridge.bootstrap_agent.assert_called_once()
+
     def test_history_reaches_explicitly_supported_runner_without_changing_owner_request_binding(self):
         seen = []
         def runner(config, bootstrap, request, *, conversation_context=None, **kwargs):

@@ -10,8 +10,8 @@ class AssistantPolicyTest {
         val prompt=AssistantPolicy.buildToolSelection(notes,"2026-11-15T12:00:00+09:00")
         assertTrue(prompt.contains("\"type\":\"tool_call\""))
         assertTrue(prompt.contains("\"type\":\"clarification\""))
-        assertFalse(prompt.contains("Read a relevant skill first"))
-        assertTrue(AssistantPolicy.buildToolSelection(notes+"read_skill","now").contains("Read a relevant skill first"))
+        assertFalse(prompt.contains("Consult a skill when useful"))
+        assertTrue(AssistantPolicy.buildToolSelection(notes+"read_skill","now").contains("Consult a skill when useful"))
     }
     @Test fun structuredSelectionKeepsAuthorityRulesInAShorterPrompt(){
         val selected=setOf("calculate","list_skills","read_skill")

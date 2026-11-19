@@ -304,7 +304,7 @@ fun ChatWorkspace(
             }
             Text(navigation?.threads?.find{it.id==navigation.selectedThreadId}?.title?.takeIf{it.isNotBlank()}?:"ZipHap.Agent", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                 color = ZipHapColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            WorkspaceModelSelector(models, selectedModelId, onModelChange,composerReady,pairedPcTextAvailable)
+            WorkspaceModelSelector(selectedModelId, onModelChange,composerReady)
         }
         HorizontalDivider(color = ZipHapColors.OutlineSoft, thickness = 1.dp)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
@@ -531,15 +531,13 @@ private fun WorkspaceBranchSelector(branches:List<UiChatBranch>,selectedId:Strin
 }
 
 @Composable
-private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: String, onModelChange: (String) -> Unit,enabled:Boolean=true,pairedPcTextAvailable:Boolean=false) {
+private fun WorkspaceModelSelector(selectedId: String, onModelChange: (String) -> Unit,enabled:Boolean=true) {
     var expanded by remember { mutableStateOf(false) }
-    val usable = models.filter { it.verified && it.runtime in setOf("litertlm","gguf") }
     val label = when(selectedId){
-        com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID->com.user.localagent.externalagent.ExternalAgentSettings.TITLE
-        com.user.localagent.models.PairedPcTextProfile.SELECTION_ID->com.user.localagent.models.PairedPcTextProfile.TITLE
-        com.user.localagent.models.PairedPcFast4BProfile.SELECTION_ID->com.user.localagent.models.PairedPcFast4BProfile.TITLE
-        "auto"->if(pairedPcTextAvailable)"PC · 자동"else"자동"
-        else->usable.find { it.id == selectedId }?.let(::shortModelLabel) ?: "모델 선택"
+        com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID -> "Codex"
+        com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION -> com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL
+        "auto" -> "자동"
+        else -> "모델 선택"
     }
     Box {
         TextButton(
@@ -569,24 +567,11 @@ private fun WorkspaceModelSelector(models: List<InstalledModel>, selectedId: Str
             if(selectedId==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)DropdownMenuItem(
                 text={Text("클라우드 도구 연결 해제")},
                 onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.DISABLE_ID)})
-            if(pairedPcTextAvailable)DropdownMenuItem(
-                text={Text(com.user.localagent.models.PairedPcTextProfile.TITLE)},
-                onClick={expanded=false;onModelChange(com.user.localagent.models.PairedPcTextProfile.SELECTION_ID)},
-                modifier=Modifier.testTag("model_option_paired_pc_text"),
+            DropdownMenuItem(
+                text={Text(com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)},
+                onClick={expanded=false;onModelChange(com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION)},
+                modifier=Modifier.testTag("model_option_private_local"),
             )
-            if(pairedPcTextAvailable)DropdownMenuItem(
-                text={Text(com.user.localagent.models.PairedPcFast4BProfile.TITLE)},
-                onClick={expanded=false;onModelChange(com.user.localagent.models.PairedPcFast4BProfile.SELECTION_ID)},
-                modifier=Modifier.testTag("model_option_paired_pc_text_fast4b"),
-            )
-            usable.forEach { model ->
-                DropdownMenuItem(
-                    text = { Text(shortModelLabel(model)) },
-                    onClick = { expanded = false; onModelChange(model.id) },
-                    modifier = Modifier.testTag("model_option_${model.id}"),
-                    trailingIcon = { if (selectedId == model.id) Text("✓", color = ZipHapColors.TextSecondary) },
-                )
-            }
         }
     }
 }

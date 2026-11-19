@@ -26,6 +26,12 @@ class ChatRunModeGoalStateTest {
         val decoded=QueuedChatRequest.fromJson(request("plan",allowTools=false).toJson())
         assertFalse(decoded.allowTools);assertEquals("plan",decoded.mode)
     }
+
+    @Test fun readOnlyCloudModesRequireFreshExternalAuthority(){
+        val old=request("plan",allowTools=false)
+        assertFalse(QueuedChatRequest.fromJson(old.toJson()).cloudReadOnlyModes)
+        assertThrows(IllegalArgumentException::class.java){old.copy(cloudReadOnlyModes=true)}
+    }
     @Test fun ordinaryChatDoesNotAcquireTheRoomStoredGoal(){
         val decoded=QueuedChatRequest.fromJson(request().toJson())
         assertNull(decoded.goal);assertFalse(Json.parseToJsonElement(decoded.toJson()).jsonObject.containsKey("goal"))

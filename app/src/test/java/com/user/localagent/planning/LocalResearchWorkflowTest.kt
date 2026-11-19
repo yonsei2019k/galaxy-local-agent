@@ -43,6 +43,25 @@ class LocalResearchWorkflowTest {
     private fun workflow(client: PublicWebClient, decide: suspend (String, Boolean) -> String) =
         LocalResearchWorkflow(client, ResearchActionDecider { input, _, _, repair -> decide(input, repair) }) { timestamp }
 
+    @Test fun emptySearchThenPrematureStopCanRecoverWithADifferentSearch() = runBlocking {
+        val calls = mutableListOf<String>()
+        val web = client(calls) { url ->
+            if (calls.size <= 3) reply(url, "", 503) else reply(url, searchHtml(second))
+        }
+        var decisions = 0
+        val packet = workflow(web) { input, _ ->
+            val context = Json.parseToJsonElement(input).jsonObject
+            assertTrue(context.getValue("observedLimitations").jsonArray.isNotEmpty())
+            if (++decisions == 1) decision() else {
+                assertTrue(context.containsKey("hostFeedback"))
+                decision(query = "카카오톡 공식 연동 범위")
+            }
+        }.gather(plan(), chosen)
+        assertEquals(2, decisions)
+        assertEquals(listOf(false, true), packet.steps.map { it.verified })
+        assertTrue(second in packet.observedUrls)
+    }
+
     @Test fun sourceEvidenceChangesTheNextModelSelectedSearchAndRead() = runBlocking {
         val calls = mutableListOf<String>()
         var searches = 0

@@ -220,21 +220,35 @@ class AgentProviderSupervisor:
                 kwargs["progress"] = lambda value: self._progress(child, value)
             if conversation_context is not None and self._supports_keyword("conversation_context", variadic=False):
                 kwargs["conversation_context"] = conversation_context
-            result = self.runner(self.config, bootstrap, request, **kwargs)
-            if (result.state not in {"reported_done","needs_input","partial","failed"} or
-                    type(result.answer) is not str or len(result.answer)>12000 or
-                    type(result.question) is not str or len(result.question)>300 or
-                    type(result.elapsed_ms) is not int or not 0<=result.elapsed_ms<=600000 or
-                    type(result.mcp_calls) is not int or not 0<=result.mcp_calls<=128):
-                raise ProviderError("PROVIDER_FINAL_FORMAT")
+            total_calls = total_ms = 0
+            for attempt in range(2):
+                result = self.runner(self.config, bootstrap, request, **kwargs)
+                if (result.state not in {"reported_done","needs_input","partial","failed"} or
+                        type(result.answer) is not str or len(result.answer)>12000 or
+                        type(result.question) is not str or len(result.question)>300 or
+                        type(result.elapsed_ms) is not int or not 0<=result.elapsed_ms<=600000 or
+                        type(result.mcp_calls) is not int or not 0<=result.mcp_calls<=128):
+                    raise ProviderError("PROVIDER_FINAL_FORMAT")
+                total_calls += result.mcp_calls
+                total_ms += result.elapsed_ms
+                if attempt or not self._supports_keyword("read_recovery", variadic=False) or revoked():
+                    break
+                remaining = int(300 - (time.monotonic() - child.started))
+                if remaining <= 0:
+                    break
+                recovery = self.bridge.read_recovery_context(owner, sid, capability, before_plan=result.state != "reported_done")
+                if recovery is None:
+                    break
+                kwargs.update(read_recovery=recovery, timeout=remaining)
+                _event("RECONSIDER_READ", total_calls, total_ms)
             with self.lock:
                 # Cancellation ACK and publication share this gate. Recheck the broker's
                 # exact current request too; a pre-lock check leaves a revocation race.
                 if revoked():
                     raise ProviderError("PROVIDER_CANCELLED")
                 child.report = {"state": result.state, "answer": result.answer, "question": result.question,
-                                "elapsedMs": result.elapsed_ms, "mcpCalls": result.mcp_calls}
-            _event("REPORT_" + str(result.state).upper()[:24], result.mcp_calls, result.elapsed_ms)
+                                "elapsedMs": total_ms, "mcpCalls": total_calls}
+            _event("REPORT_" + str(result.state).upper()[:24], total_calls, total_ms)
         except ProviderError as error:
             child.cancel.set()
             revoked = True

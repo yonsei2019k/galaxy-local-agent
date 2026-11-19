@@ -23,6 +23,7 @@ class LocalSemanticPlannerTest {
         var counts=0;var plainCalls=0;var attempts=0;var cancels=0
         var loadDelay=0L;var tokenDelay=0L;var alwaysStall=false;var firstStall=false
         var invalid=false
+        var proposedPlans=listOf<String>()
         var loadFailure:Exception?=null;var tokenFailure:Exception?=null;var generationFailure:Exception?=null
         val inputs=mutableListOf<JsonObject>()
         override suspend fun load(path:String,options:InferenceOptions){delay(loadDelay);loadFailure?.let{throw it}}
@@ -39,7 +40,8 @@ class LocalSemanticPlannerTest {
             attempts++;inputs+=Json.parseToJsonElement(input).jsonObject
             generationFailure?.let{throw it}
             if(alwaysStall||(firstStall&&attempts==1)){emit(GenerationEvent.Delta("{\"action\":"));delay(5_000)}
-            emit(GenerationEvent.Delta(if(invalid)"{\"action\":\"TOOL_TASK\",\"goal\":\"확인\",\"targetType\":\"GENERAL\",\"requiredTools\":[\"unknown_tool\"]}" else "{\"action\":\"ANSWER\",\"goal\":\"확인\",\"targetType\":\"GENERAL\"}"))
+            val raw=proposedPlans.getOrNull(attempts-1) ?: if(invalid)"{\"action\":\"TOOL_TASK\",\"goal\":\"확인\",\"targetType\":\"GENERAL\",\"requiredTools\":[\"unknown_tool\"]}" else "{\"action\":\"ANSWER\",\"goal\":\"확인\",\"targetType\":\"GENERAL\"}"
+            emit(GenerationEvent.Delta(raw))
             emit(GenerationEvent.Finished(GenerationSummary("fixture",GenerationStopReason.EOG,GenerationEvidence.NATIVE,false,384)))
         }
         override fun cancel(){cancels++}
@@ -90,6 +92,18 @@ class LocalSemanticPlannerTest {
         val engine=Engine().apply{invalid=true}
         val error=runCatching{LocalSemanticPlanner(engine,{},budget).plan("request",emptyList(),chosen,setOf("calculate"))}.exceptionOrNull()
         assertTrue((error as SemanticPlanningException).reasonCode.startsWith("plan_rejected_"));assertEquals(2,engine.attempts)
+    }
+
+    @Test fun firstQuestionCanBecomeALookupOrRemainAnOwnerChoice()=runBlocking {
+        val question="""{"action":"CLARIFY","goal":"메모 찾기","question":"대상 메모는 무엇인가요?"}"""
+        val lookup="""{"action":"TOOL_TASK","goal":"메모 찾기","requiredTools":["search_notes"]}"""
+        for(second in listOf(lookup,question,"{}")){
+            val engine=Engine().apply{proposedPlans=listOf(question,second)}
+            val result=LocalSemanticPlanner(engine,{},budget).plan("지정한 제목의 메모를 찾아줘",emptyList(),chosen,setOf("search_notes"))
+            assertEquals(2,result.attempts)
+            assertEquals("대상 메모는 무엇인가요?",engine.inputs[1].getValue("localContextData").jsonObject.getValue("proposedQuestion").jsonPrimitive.content)
+            assertEquals(if(second==lookup)"TOOL_TASK" else "CLARIFY",result.plan.action.name)
+        }
     }
     private fun Engine.failAt(stage:String,failure:Exception){
         when(stage){"loading"->loadFailure=failure;"tokenizing"->tokenFailure=failure;"generating"->generationFailure=failure;else->error("invalid fixture stage")}

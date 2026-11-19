@@ -22,7 +22,8 @@ class CloudPhoneToolScopeTest {
         val catalogBytes=registration.getValue("phoneTools").toString().toByteArray().size
         assertTrue("catalog $catalogBytes",catalogBytes<200_000) // agent_bridge.py catalog bound
         // pc-worker/tests reads this file to run the broker and MCP schema validators on the real catalog.
-        File("build/cloud-phone-catalog.json").writeText(registration.getValue("phoneTools").toString())
+        val catalog=File(File("build").apply {mkdirs()},"cloud-phone-catalog.json")
+        catalog.writeText(registration.getValue("phoneTools").toString())
     }
 
     @Test fun publicResearchOffersOnlyPublicReadsAndLocalCalculation() {

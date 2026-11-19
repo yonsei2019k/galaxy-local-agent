@@ -171,7 +171,9 @@ object TaskHarness {
             return HarnessDecision.Advance(if(steps.lastOrNull()?.evidence?.state==VerificationState.FAILED)"실패한 결과를 보완하는 안전한 다른 단계가 필요합니다." else "다음 필요한 실행 또는 결과 검증을 진행합니다.")
         }
         val unresolvedFailure=steps.withIndex().any {(index,step)->
-            step.evidence.state==VerificationState.FAILED&&steps.drop(index+1).none {later->
+            val optionalReadFailedWithoutEffect = step.tool !in goal.requiredTools &&
+                step.evidence.effectNotApplied && ToolInterruptionPolicy.hasNoMutation(step.tool)
+            step.evidence.state==VerificationState.FAILED&&!optionalReadFailedWithoutEffect&&steps.drop(index+1).none {later->
                 later.evidence.state==VerificationState.VERIFIED&&later.tool==step.tool&&
                     (readOnly(step.tool)||(rejectedBeforeEffect(step)&&!later.evidence.effectNotApplied&&recoveryTarget(later)==recoveryTarget(step)))
             }
@@ -230,7 +232,11 @@ object TaskHarness {
         }
     }
     private fun loopReason(steps:List<HarnessStep>):String? {
-        if(steps.zipWithNext().any {(a,b)->a.repeatFingerprint==b.repeatFingerprint})return "같은 도구와 인자의 연속 실행을 중단했습니다."
+        if(steps.zipWithNext().any {(a,b)->
+            val timedOutRead = a.evidence.state==VerificationState.FAILED && a.evidence.effectNotApplied &&
+                a.evidence.summary=="read_timeout_no_mutation" && ToolInterruptionPolicy.hasNoMutation(a.tool)
+            a.repeatFingerprint==b.repeatFingerprint && !timedOutRead
+        })return "같은 도구와 인자의 연속 실행을 중단했습니다."
         fun refreshedRejectedFile(step:HarnessStep):Boolean = rejectedBeforeEffect(step)&&step.tool=="write_project_file"&&
             steps.drop(steps.indexOf(step)+1).any{it.tool=="read_project_file"&&it.evidence.state==VerificationState.VERIFIED&&it.arguments["path"]==step.arguments["path"]}
         for(group in steps.groupBy {it.repeatFingerprint}.values){

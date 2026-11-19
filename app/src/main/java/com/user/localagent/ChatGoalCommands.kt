@@ -65,7 +65,7 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
     val pcSettings=PcComputeSettings.get(context)
     val pcAuthority=pcSettings.captureTextAuthority()
     val externalAuthority=ExternalAgentSettings.get(context).capture()
-    val model=if(selectedModel=="auto"&&externalAuthority.enabled&&pcSettings.state.value.paired)ExternalAgentSettings.MODEL_ID else selectedModel
+    val model=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(selectedModel,ExternalAgentSettings.MODEL_ID,goal.toJson().toString(),false)
     scope.launch {
         try {
             val access=app.repository.chat.accessScope(threadId)
@@ -76,7 +76,7 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
             val prepared=saveUiGoalGuarded(access,goal)
             goalMutation.withLock {
                 queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),
-                    capturedPcRevision=pcAuthority.revision,allowCloudText=pcAuthority.allowCloudText,
+                    capturedPcRevision=pcAuthority.revision,allowCloudText=false,
                     capturedAllowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,
                     capturedExternalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null)
                 if(selectedThreadId.value==threadId&&selectedProjectId.value==goal.projectId.orEmpty()){

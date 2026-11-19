@@ -23,6 +23,21 @@ import java.util.UUID
 /** Explicitly gated isolated synthetic databases; never opens local-agent.db. */
 @RunWith(AndroidJUnit4::class)
 class ChatDataValidation {
+    @Test fun shortReplyToAPrivateQuestionStaysInItsBranch()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val chat=repo.chat
+        val thread=chat.createThread()
+        val other=chat.createThread()
+        val branch=thread.activeBranchId
+        val run=chat.createRun(thread.id,branch,modelId=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION)
+        chat.startRun(run.id)
+        assertFalse(chat.awaitingPrivateReply(thread.id,branch))
+        chat.updateRun(run.id,"paused",errorCode=com.user.localagent.core.NextActionQuestion.PAUSE_CODE)
+        assertTrue(chat.awaitingPrivateReply(thread.id,branch))
+        assertFalse(chat.awaitingPrivateReply(other.id,other.activeBranchId))
+        chat.createRun(thread.id,branch)
+        assertFalse(chat.awaitingPrivateReply(thread.id,branch))
+    }}
+
     @Test fun scopedHistoryUsesCurrentBranchAndFullLiveChunksWithoutCrossProjectLeakage()=runBlocking(Dispatchers.IO){fixture{repo,db,_->
         val a=repo.chat.createProject("Synthetic history A");val b=repo.chat.createProject("Synthetic history B")
         val ta=repo.chat.createThread(a.id);val tb=repo.chat.createThread(b.id)

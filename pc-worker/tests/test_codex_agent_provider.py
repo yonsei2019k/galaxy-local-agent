@@ -87,6 +87,19 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("private synthetic answer",repr(report))
         self.assertEqual({self.exe,self.script},set(self.root.iterdir()))
 
+    def test_recovery_observations_stay_in_stdin_separate_from_owner_authority(self):
+        process = Process(self.events())
+        process.stdin = RecordedStdin()
+        recovery = {"planAccepted": True, "acceptedTools": ["search_notes", "patch_note"],
+                    "failedReads": [], "observedReads": [{"tool": "search_notes", "result": "quoted fixture only"}]}
+        with mock.patch.object(p.subprocess, "Popen", return_value=process) as spawned:
+            p.run(self.config, self.bootstrap, "메모 확인", external_allowed=True, read_recovery=recovery)
+        payload = json.loads(process.stdin.written)
+        self.assertEqual("메모 확인", payload["currentOwnerRequest"])
+        self.assertEqual(recovery, payload["readRecovery"])
+        self.assertNotIn("quoted fixture only", repr(spawned.call_args))
+        self.assertEqual({self.exe,self.script}, set(self.root.iterdir()))
+
     def test_context_stdin_is_separate_from_current_request_and_never_written_to_disk_or_args(self):
         process = Process(self.events()); process.stdin = RecordedStdin()
         context = context_fixture()

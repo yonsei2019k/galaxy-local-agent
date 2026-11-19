@@ -6,6 +6,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+internal class PrivateResultWithheld : IllegalStateException("PRIVATE_RESULT_WITHHELD")
+
 enum class AgentSessionState { ACTIVE,CANCELLING,REVOKED,CLOSED,EXPIRED }
 data class AgentSessionSnapshot(
     val sessionId:String,val revision:Long,val state:AgentSessionState,val expiresAtEpochMs:Long,
@@ -160,6 +162,7 @@ class ExternalAgentController(
         }
         fence()
         require(result.id==entry.proposal.callId&&result.content.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES){"BRIDGE_RESULT_BOUND"}
+        if(com.user.localagent.core.ConversationPrivacy.sensitiveText(result.content))throw PrivateResultWithheld()
         val ack=client.report(entry.proposal,result,checkNotNull(session).revision)
         require(ack.callId==entry.proposal.callId&&ack.sequence==entry.proposal.sequence){"BRIDGE_RESULT_ACK"}
         accept(ack.snapshot)

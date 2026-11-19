@@ -172,7 +172,8 @@ class LocalResearchWorkflow internal constructor(
             currentCoroutineContext().ensureActive()
             if (remaining() <= 0) break
             rounds = round
-            val input = decisionInput(plan, sources.values.toList(), observed, readAttempts, queries, remaining(), availableTools)
+            val input = decisionInput(plan, sources.values.toList(), observed, readAttempts, queries, remaining(), availableTools,
+                limitations, round > 1 && steps.none { it.verified })
             var decision: Decision? = null
             for (attempt in 0..1) {
                 try {
@@ -192,6 +193,7 @@ class LocalResearchWorkflow internal constructor(
                 break
             }
             if (selected.readUrls.isEmpty() && selected.nextQuery.isEmpty()) {
+                if (sources.isEmpty() && round < MAX_ROUNDS) continue
                 stoppedByModel = true
                 break
             }
@@ -244,13 +246,16 @@ class LocalResearchWorkflow internal constructor(
     }
 
     private fun decisionInput(plan: SemanticRequestPlan, sources: List<Source>, observed: Set<String>,
-        attempts: Set<String>, queries: Set<String>, remaining: Int, availableTools: Set<String>): String = buildJsonObject {
+        attempts: Set<String>, queries: Set<String>, remaining: Int, availableTools: Set<String>,
+        limitations: Set<String>, reconsider: Boolean): String = buildJsonObject {
         put("type", "public_research_next_action")
         put("goal", plan.goal); put("target", plan.target); put("initialPublicQuery", plan.publicQuery)
         put("constraints", JsonArray(plan.constraints.map(::JsonPrimitive)))
         put("availableTools", JsonArray(availableTools.intersect(setOf("search_web", "read_webpage")).sorted().map(::JsonPrimitive)))
         put("remainingNetworkRequests", remaining)
         put("previousQueries", JsonArray(queries.map(::JsonPrimitive)))
+        put("observedLimitations", JsonArray(limitations.map(::JsonPrimitive)))
+        if (reconsider) put("hostFeedback", "No source was verified. Consider a different public query within the original goal. Stop if no useful alternative remains.")
         put("sources", buildJsonArray { sources.take(MAX_SOURCES).forEach { source -> add(buildJsonObject {
             put("url", source.url); put("title", source.title); put("snippet", source.snippet.takeSafe(260))
             put("originalPageFetched", source.pageFetched)

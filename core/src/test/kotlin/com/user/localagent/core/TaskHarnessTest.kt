@@ -12,6 +12,23 @@ class TaskHarnessTest {
     private fun call(tool:String,args:String="{}")=ToolCall("test",tool,arguments(args))
     private fun finish(goal:TaskGoal,vararg steps:HarnessStep)=TaskHarness.decide(goal,steps.toList(),requestedFinish=true)
 
+    @Test fun anOptionalTimedOutLookupCanBeSupersededByEvidenceForTheActualGoal(){
+        val goal=TaskGoal("지정한 메모 조회",listOf("메모 조회"),requiredTools=setOf("read_note"))
+        fun failed(tool:String)=HarnessStep(tool,arguments(),StepEvidence(tool,VerificationState.FAILED,"실패",effectNotApplied=true))
+        assertTrue(finish(goal,failed("search_notes"),step("read_note")) is HarnessDecision.Finish)
+        assertTrue(finish(goal,failed("read_note"),step("search_notes")) is HarnessDecision.Stop)
+        assertTrue(finish(goal,failed("patch_note"),step("read_note")) is HarnessDecision.Stop)
+    }
+    @Test fun aReadThatReturnedNothingBeforeItsDeadlineGetsOneRetry(){
+        val goal=TaskGoal("현재 시각 조회",listOf("실제 시각 조회"),requiredTools=setOf("get_current_datetime"))
+        val call=call("get_current_datetime")
+        val failure=ToolInterruptionPolicy.timedOut(call)
+        val timedOut=HarnessStep(call,AnalysisCompletionEvidence.fromResult(call,failure))
+        assertTrue(TaskHarness.beforeStep(goal,listOf(timedOut),call) is HarnessDecision.Advance)
+        assertTrue(finish(goal,timedOut,step(call.name)) is HarnessDecision.Finish)
+        assertTrue(TaskHarness.beforeStep(goal,listOf(timedOut,timedOut),call) is HarnessDecision.Stop)
+    }
+
     @Test fun unrelatedVerifiedReadCannotCompleteNoteWrite(){
         val goal=TaskHarness.inferGoal("내일 우유 사기 메모 저장해줘")
         assertEquals(setOf("save_note"),goal.requiredTools)

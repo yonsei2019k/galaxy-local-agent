@@ -98,6 +98,8 @@ class ChatConverters {
     @Query("UPDATE chat_threads SET allowOwnerLearning=:enabled WHERE projectId=:projectId AND deletedAt IS NULL") suspend fun updateProjectLearningFlags(projectId:String,enabled:Boolean):Int
     @Query("SELECT * FROM messages WHERE runId=:runId AND role='assistant' ORDER BY createdAt,id LIMIT 1") suspend fun assistantForRun(runId:String):MessageRecord?
     @Query("SELECT * FROM chat_runs WHERE threadId=:threadId ORDER BY createdAt,id") suspend fun runsForThread(threadId:String):List<ChatRunRecord>
+    @Query("SELECT * FROM chat_runs WHERE threadId=:threadId AND branchId=:branchId ORDER BY createdAt DESC,id DESC LIMIT 1")
+    suspend fun latestBranchRun(threadId:String,branchId:String):ChatRunRecord?
     @Query("SELECT * FROM chat_runs WHERE status='queued' ORDER BY createdAt,id") suspend fun queuedRuns():List<ChatRunRecord>
     @Query("SELECT * FROM chat_runs WHERE status IN ('queued','paused','interrupted','cancelled','failed') ORDER BY createdAt,id") suspend fun queueCandidates():List<ChatRunRecord>
     @Query("SELECT * FROM (SELECT * FROM tool_runs WHERE name NOT IN ('work_trace_v1','work_receipt_v1') AND threadId=:threadId AND (:runId IS NULL OR runId=:runId) ORDER BY at DESC,id DESC LIMIT 1000) ORDER BY at,id") fun toolRunsForThread(threadId:String,runId:String?):Flow<List<ToolRunRecord>>
@@ -238,6 +240,11 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun runForUserMessage(messageId:String)=dao.runsForUserMessage(messageId).singleOrNull()
     suspend fun assistantForRun(runId:String):MessageRecord? = dao.assistantForRun(runId)
     suspend fun runsForThread(threadId:String)=dao.runsForThread(threadId)
+    suspend fun awaitingPrivateReply(threadId:String,branchId:String):Boolean {
+        val last=dao.latestBranchRun(threadId,branchId)?:return false
+        return last.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION && last.status=="paused" &&
+            last.errorCode==com.user.localagent.core.NextActionQuestion.PAUSE_CODE
+    }
     suspend fun segmentsForMessage(messageId:String)=dao.segmentsForMessage(messageId)
     suspend fun queuedRuns():List<ChatRunRecord> = queueStore.queuedRuns()
     suspend fun editQueuedRun(runId:String,text:String,contextJson:String):ChatRunRecord = queueStore.editQueuedRun(runId,text,contextJson)
@@ -528,6 +535,17 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         require(contextJson.length<=2_000_000);val r=validRun(runId);r.copy(contextJson=contextJson,updatedAt=now()).also {dao.run(it)}
     }
     suspend fun checkpointRun(runId:String,contextJson:String)=updateRunContext(runId,contextJson)
+    suspend fun switchRunToPrivateModel(runId:String,originalModel:String,contextJson:String)=database.withTransaction {
+        require(contextJson.length<=2_000_000)
+        val run=validRun(runId)
+        check(run.status=="running" && run.modelId==originalModel)
+        val before=Json.parseToJsonElement(run.contextJson).jsonObject
+        val local=Json.parseToJsonElement(contextJson).jsonObject
+        // Keep the closed cloud session's checkpoint alongside the new local request envelope.
+        val merged=JsonObject(before.filterKeys {it=="sharedEngineState"}+local).toString()
+        require(merged.length<=2_000_000)
+        dao.run(run.copy(modelId=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION,contextJson=merged,updatedAt=now()))
+    }
     suspend fun beginAssistant(runId:String,messageId:String?=null):MessageRecord=database.withTransaction {
         val r=validRun(runId);val primary=dao.assistantForRun(runId)
         if(primary!=null){

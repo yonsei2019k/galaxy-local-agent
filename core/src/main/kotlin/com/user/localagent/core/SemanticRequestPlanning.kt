@@ -38,6 +38,8 @@ object SemanticRequestPlanning {
 
     // Mutations can intrinsically read existing private content; this is not read-only permission.
     private val intrinsicPrivateDataTools=setOf("patch_note")
+    internal fun accessesPrivateRecords(tool:String):Boolean =
+        tool in intrinsicPrivateDataTools || (tool in privateReads && tool!="get_agent_capabilities")
     private val capabilityPrerequisites=mapOf("patch_note" to setOf("search_notes","read_note"))
     /** Privacy metadata shared with sparse normalization, including intrinsic reads of mutations. */
     internal fun isPrivateRead(tool:String):Boolean = tool in intrinsicPrivateDataTools || tool in privateReads ||
@@ -83,7 +85,7 @@ object SemanticRequestPlanning {
         val value = try { Json.parseToJsonElement(raw) } catch (error: Exception) { throw IllegalArgumentException("올바른 의미 계획 JSON 객체가 필요합니다.", error) }
         require(value is JsonObject) { "의미 계획은 JSON 객체여야 합니다." }
         rejectDuplicateKeys(raw)
-        // Stored nine-field plans remain readable; new model decoding always requires targetType.
+        // Unclassified targets default to GENERAL; product-specific tools require an explicit product type.
         require(value.keys == fields || value.keys == legacyFields) { "의미 계획에 누락되거나 알 수 없는 필드가 있습니다." }
         fun text(key: String): String {
             val item = value.getValue(key)
