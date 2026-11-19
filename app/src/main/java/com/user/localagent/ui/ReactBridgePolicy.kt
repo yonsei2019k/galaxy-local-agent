@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","newThread","selectModel","stop","steer","attach","navigate","copy","nativeDetails","collabRefresh","collabSend")
+    private val actions=setOf("ready","send","draft","selectThread","newThread","renameThread","selectModel","stop","steer","attach","navigate","copy","nativeDetails","collabRefresh","collabSend")
     fun parse(raw:String):ReactUiCommand?=runCatching {
         require(raw.toByteArray(Charsets.UTF_8).size<=64*1024)
         val o=Json.parseToJsonElement(raw).jsonObject
@@ -21,6 +21,7 @@ internal object ReactBridgePolicy {
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
             "copy"->setOf("messageId")
+            "renameThread"->setOf("title")
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
             "collabRefresh"->setOf("bindingEpoch")
             "selectThread","selectModel"->setOf("id")
@@ -36,6 +37,7 @@ internal object ReactBridgePolicy {
             else {require(p.isString);require(p.content.length<=if(key=="text")when(action){"steer"->4000;"collabSend"->8000;else->12000}else 128);require(!p.content.contains('\u0000'))}
         }
         if(action in setOf("steer","collabSend"))require(payload.getValue("text").jsonPrimitive.content.isNotBlank())
+        if(action=="renameThread")require(payload.getValue("title").jsonPrimitive.content.let{it.isNotBlank()&&it.none{c->c.isISOControl()}})
         if(action=="collabSend"){
             val id=payload.getValue("clientMessageId").jsonPrimitive.content
             require(java.util.UUID.fromString(id).toString()==id)

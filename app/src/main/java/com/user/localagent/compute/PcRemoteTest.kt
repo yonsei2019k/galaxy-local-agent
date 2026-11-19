@@ -139,14 +139,16 @@ class PcRemoteTestInbox(private val context:Context,private val app:AppContainer
             report(config,id,"interrupted","",emptyList(),runId,"REMOTE_TEST_SCOPE_CHANGED",receipt(),epoch)
             return
         }
-        val canFollowUp=conversationSupported&&state=="completed"&&settings.epoch==epoch&&
+        val finalCode=app.repository.chat.run(runId)?.errorCode
+        val canFollowUp=conversationSupported&&(state=="completed"||
+            state=="paused"&&finalCode=="cloud_clarification_read_only")&&settings.epoch==epoch&&
             messages.lastOrNull()?.let{it.role=="assistant"&&it.runId==runId}==true
         if(canFollowUp){
             if(continuations.size>=16)continuations.remove(continuations.keys.first())
             continuations[id]=Continuation(thread.id,thread.activeBranchId,thread.revision,runId,request.model,config,epoch,SystemClock.elapsedRealtime()+30*60_000L)
         }
         report(config,id,state?:"timeout",answer.take(20_000),tools.takeLast(64).map{Triple(it.name.take(96),it.success,it.summary.take(400))},runId,
-            app.repository.chat.run(runId)?.errorCode?.take(96),receipt(),epoch,canFollowUp)
+            finalCode?.take(96),receipt(),epoch,canFollowUp)
     }
 
     private suspend fun report(config:PcConnection,id:String,state:String,answer:String,tools:List<Triple<String,Boolean,String>>,runId:String?,error:String?,receipt:JsonObject?,epoch:Long,canFollowUp:Boolean=false){

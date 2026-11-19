@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
@@ -72,22 +72,36 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onSelectModel }: {
+export function Header({ snapshot, enabled, onMenu, onSelectModel, onRename }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
   onSelectModel(id: string): void
+  onRename(title: string): boolean
 }) {
   const nextModel = snapshot?.models.find(model => model.id === snapshot.modelId)
   const selectedLabel = snapshot?.modelLabel || nextModel?.label || '모델 선택'
   const activeLabel = runControls(snapshot).active ? snapshot?.activeModelLabel : undefined
   const currentThread = snapshot?.threads.find(thread => thread.selected)
+  const [titleDraft, setTitleDraft] = useState<string | null>(null)
 
   return (
     <header className="topbar">
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
         <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || 'ZipHap.Agent'}</span>
+        {currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
+          onClick={() => setTitleDraft(currentThread.title)}>이름 변경</button>}
+        {titleDraft !== null && <form className="rename-thread-form" onSubmit={event => {
+          event.preventDefault()
+          const title = titleDraft.trim()
+          if (enabled && title && onRename(title)) setTitleDraft(null)
+        }}>
+          <input aria-label="대화 이름" autoFocus value={titleDraft} maxLength={128}
+            onChange={event => setTitleDraft(event.target.value)} />
+          <button type="submit" disabled={!enabled || !titleDraft.trim()}>저장</button>
+          <button type="button" onClick={() => setTitleDraft(null)}>취소</button>
+        </form>}
       </div>
       <div className="model-group">
         {activeLabel && <span className="active-model" title={`실행 중인 모델 ${activeLabel}`}><span />{activeLabel}</span>}

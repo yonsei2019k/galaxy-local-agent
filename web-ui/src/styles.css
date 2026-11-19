@@ -198,6 +198,10 @@ svg { width: 20px; height: 20px; flex: none; }
   background: var(--canvas);
 }
 .topbar-context { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rename-thread { flex: none; white-space: nowrap; font-size: 12px; }
+.rename-thread-form { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.rename-thread-form input { min-width: 4em; width: min(27vw, 14em); }
+.rename-thread-form button { flex: none; white-space: nowrap; }
 .menu-button { color: var(--ink); }
 .topbar-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-title); font-weight: 700; letter-spacing: -.02em; }
 

@@ -28,6 +28,7 @@ class PcExternalAgentProviderTest {
         var forgedPhoneResult=false
         var expectedContext:JsonObject?=null
         var supportsContext=true
+        var busyLaunches=0
         var beforeSupportReply:suspend ()->Unit={}
         val calls=mutableListOf<Triple<String,JsonObject?,String?>>()
         fun offer(){
@@ -85,7 +86,7 @@ class PcExternalAgentProviderTest {
                 }.toString()}
                 path.endsWith("/launch")->{check(method=="POST"&&body==buildJsonObject{
                     put("ownerRequest",request);expectedContext?.let{put("conversationContext",it)}
-                });provider()}
+                });if(busyLaunches>0){busyLaunches--;throw PcAgentProviderBusy()};provider()}
                 path.endsWith("/provider-cancel")->{check(method=="POST"&&body==buildJsonObject{});provider()}
                 path.endsWith("/provider")->{check(method=="GET"&&body==null);provider()}
                 path.endsWith("/evidence")->{check(method=="GET"&&body==null);evidence()}
@@ -104,6 +105,16 @@ class PcExternalAgentProviderTest {
         assertEquals(0,accepted.lastSequence)
         assertTrue(wire.calls.drop(1).all{it.third==wire.capability})
         assertTrue(wire.calls.mapNotNull{it.second}.none{it.containsKey("phoneCapability")||it.containsKey("agentCapability")})
+    }
+
+    @Test fun launchRetriesOnlyExplicitBusyAndRechecksAuthority()=runBlocking {
+        val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)
+        client.register(c)
+        wire.busyLaunches=1
+        var checks=0
+        client.launchProvider(request,beforeLaunch={checks++})
+        assertEquals(2,wire.calls.count{it.first.endsWith("/launch")})
+        assertTrue(checks>=2)
     }
     @Test fun launchRequiresExactCapturedOwnerTextAndAReportCannotBecomePhoneExecutionEvidence()=runBlocking {
         val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)

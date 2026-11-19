@@ -103,6 +103,7 @@ type Intent =
   | { action: 'collabSend'; payload: { bindingEpoch: number; clientMessageId: string; text: string; recipient: Recipient } }
   | { action: 'collabRefresh'; payload: { bindingEpoch: number } }
   | { action: 'selectThread' | 'selectModel'; payload: { id: string } }
+  | { action: 'renameThread'; payload: { title: string } }
   | { action: 'navigate'; payload: { panel: Panel } }
   | { action: 'newThread' | 'attach' | 'nativeDetails' | 'ready' }
 

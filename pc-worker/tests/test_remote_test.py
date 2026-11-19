@@ -16,6 +16,16 @@ class Clock:
 
 
 class RemoteTestQueueTests(unittest.TestCase):
+    def test_only_typed_read_only_clarification_can_be_followed_when_paused(self):
+        queue = remote.RemoteTestQueue(Clock())
+        parent = queue.enqueue({'text': 'travel test'})['requestId']
+        queue.claim()
+        with self.assertRaises(remote.RemoteTestError):
+            queue.report(parent, {'state': 'paused', 'errorCode': 'execution_not_verified', 'canFollowUp': True})
+        queue.report(parent, {'state': 'paused', 'errorCode': remote.CLARIFICATION_CODE, 'canFollowUp': True})
+        queue.enqueue({'text': 'the departure airport', 'afterRequestId': parent})
+        self.assertEqual(queue.claim()['request']['afterRequestId'], parent)
+
     def setUp(self):
         self.clock = Clock()
         self.queue = remote.RemoteTestQueue(self.clock)

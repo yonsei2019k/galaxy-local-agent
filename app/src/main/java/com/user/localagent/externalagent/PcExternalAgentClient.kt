@@ -150,14 +150,23 @@ class PcExternalAgentClient(
                 "PC가 대화 맥락 전달을 지원하지 않습니다. PC 작업기를 업데이트한 뒤 다시 요청해주세요."
             }
         }
-        beforeLaunch()
-        return provider(call("POST","/launch",buildJsonObject{
+        val request=buildJsonObject{
             put("ownerRequest",ownerRequest)
             conversationContext?.let {
                 require(it.toString().toByteArray(Charsets.UTF_8).size<=CloudConversationContext.MAX_UTF8_BYTES)
                 put("conversationContext",it)
             }
-        }))
+        }
+        repeat(3){attempt->
+            beforeLaunch()
+            try {
+                return provider(call("POST","/launch",request))
+            }catch(error:PcAgentProviderBusy){
+                if(attempt==2)throw error
+                delay(1_000L*(attempt+1))
+            }
+        }
+        error("Unreachable launch retry")
     }
     suspend fun providerStatus():JsonObject=provider(call("GET","/provider"))
     suspend fun cancelProvider():JsonObject=provider(call("POST","/provider-cancel",buildJsonObject {}))

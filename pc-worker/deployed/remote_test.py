@@ -16,6 +16,11 @@ CLAIM_TTL_S = 30 * 60
 KEEP_S = 6 * 3600
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,95}')
 STATES = {'completed', 'failed', 'cancelled', 'interrupted', 'paused', 'waiting_approval', 'rejected', 'timeout'}
+CLARIFICATION_CODE = 'cloud_clarification_read_only'
+
+
+def _followable(state, error_code):
+    return state == 'completed' or state == 'paused' and error_code == CLARIFICATION_CODE
 
 
 class RemoteTestError(Exception):
@@ -60,7 +65,7 @@ class RemoteTestQueue:
             if 'afterRequestId' in request:
                 previous = self.items.get(_text(request['afterRequestId'], 36))
                 result = previous.get('result') if previous else None
-                if (not result or result['state'] != 'completed' or not result.get('canFollowUp')
+                if (not result or not _followable(result['state'], result.get('errorCode')) or not result.get('canFollowUp')
                         or self.clock() - result['reportedAt'] >= CLAIM_TTL_S
                         or previous['model'] != model or previous.get('followed')):
                     raise RemoteTestError('FOLLOW_UP_UNAVAILABLE', 409)
@@ -106,7 +111,7 @@ class RemoteTestQueue:
         state = body.get('state')
         if not isinstance(state, str) or state not in STATES:
             raise RemoteTestError('STATE')
-        if 'canFollowUp' in body and (body['canFollowUp'] is not True or state != 'completed'):
+        if 'canFollowUp' in body and (body['canFollowUp'] is not True or not _followable(state, body.get('errorCode'))):
             raise RemoteTestError('FOLLOW_UP')
         answer = _text(body.get('answer', ''), 20000)
         tools = body.get('tools', [])

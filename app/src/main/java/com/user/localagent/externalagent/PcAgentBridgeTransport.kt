@@ -14,6 +14,8 @@ import kotlinx.serialization.json.JsonObject
 internal class PcAgentBridgeTimeout(val stageCode:String,cause:SocketTimeoutException):
     java.io.IOException("PC 연결 응답 시간 초과 ($stageCode)",cause)
 
+internal class PcAgentProviderBusy:PcUnavailable("PC가 다른 요청을 정리하고 있습니다. 잠시 뒤 다시 시도해 주세요.")
+
 /** Injection seam for source-only tests; it conveys raw JSON so duplicate keys stay detectable. */
 interface AgentBridgeTransport {
     suspend fun exchange(path:String,method:String,body:JsonObject?=null,phoneCapability:String?=null):String
@@ -62,7 +64,25 @@ class PcAgentBridgeTransport(context:Context,private val parentRunId:String,priv
                     if(path.endsWith("/launch"))beforeLaunchUpload()
                     it.write(bytes)
                 }
-                if(connection.responseCode !in 200..299)throw PcUnavailable("외부 에이전트 세션이 만료되었거나 현재 요청과 맞지 않습니다.")
+                val status=connection.responseCode
+                if(status==409&&path.endsWith("/launch")){
+                    val payload=connection.errorStream?.buffered()?.use{stream->
+                        val bytes=ByteArray(129)
+                        var size=0
+                        while(size<bytes.size){
+                            val count=stream.read(bytes,size,bytes.size-size)
+                            if(count<=0)break
+                            size+=count
+                        }
+                        bytes.copyOf(size)
+                    }
+                    if(payload!=null&&payload.size<=128&&
+                        runCatching{ExternalAgentContract.parseObject(payload.toString(Charsets.UTF_8))==
+                            JsonObject(mapOf("error" to kotlinx.serialization.json.JsonPrimitive("PROVIDER_BUSY")))}.getOrDefault(false)){
+                        throw PcAgentProviderBusy()
+                    }
+                }
+                if(status !in 200..299)throw PcUnavailable("외부 에이전트 세션이 만료되었거나 현재 요청과 맞지 않습니다.")
                 val raw=transport.read(connection,ExternalAgentContract.MAX_WIRE_BYTES)
                 Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(raw)).toString()

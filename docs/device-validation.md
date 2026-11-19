@@ -1,5 +1,13 @@
 # Device validation
 
+## 2027-01-01 Jeju travel pre-payment canary on phone v0.1.24
+
+Sent one natural-language Tailscale request with the dates, family and budget preferences, intentionally omitting departure airport and children's adult/child fare ages. The phone reported versionCode2024 and paused after 90852ms. It asked which airports to use and both children's ages on the travel date, explicitly saying dates of birth were unnecessary. The receipt contains two memory searches and six web searches, with no booking, payment or held inventory action reported. This confirms question generation with sparse input. It does not verify the checkout draft, live price/capacity, itinerary, cross-chat reuse or a successful follow-up. The published remote mailbox did not return a follow-up marker for this paused request.
+
+Separate cross-thread isolation probes initially failed at provider launch; worker logs for those probes show explicit 409 PROVIDER_BUSY. A retry on installed2024 completed both independent threads in15064ms and15054ms, with the second thread reporting it did not know the unshared synthetic alias. This is one negative isolation check, not proof that explicit office handoff works. The owner's manual clarification submission was reported failed; its exact cause was not verified.
+
+The owner's screenshot confirms the separate manual turn stored the airport and ages and stopped as SESSION_UNKNOWN. A fresh read-only Jeju request with explicit inputs then failed after99168ms with PC_BRIDGE_TIMEOUT_GET_SESSION_STATUS, following six successful searches and one page read. No verified quote, checkout, booking, hold or payment receipt. This timeout operation belongs to the fresh retry and does not identify the cause of the manual SESSION_UNKNOWN turn.
+
 ## Published v0.1.24 paired same-conversation canary
 
 Tailscale returned two completed synthetic text turns with phone versionCode2024 and elapsed times 9054ms and 12047ms. The second turn used the first request as its predecessor and recalled the unique alias without tool calls. This tests the already published build. The current Rust budget changes and multi-segment goal behavior were not exercised.

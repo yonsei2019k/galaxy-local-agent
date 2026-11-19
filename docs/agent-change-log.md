@@ -1,3 +1,15 @@
+## Jeju clarification and conversation names
+
+Actual Tailscale phone2024 asked for the missing airport and children's travel-date ages after only read tools. The published queue does not follow paused requests. This source adds an explicit read-only clarification code, requiring closed native execution, confirmed PC broker evidence with no PC calls, unresolved effects or prepared actions, and only registered read-only phone calls. Both ends permit a successor only for this bounded pause or an existing completed result. The original scope, switch epoch and one-successor restrictions still apply.
+
+The React header now exposes owner rename for its current branch; changing thread/branch discards the old rename input. A new default untitled conversation gets a bounded offline name from its first submitted turn within the SQL transaction. Explicit names and the original remote QA label remain intact. No title leaves the phone for this feature.
+
+The worker recorded explicit PROVIDER_BUSY for two independent remote isolation probes. Source now retries only that exact authenticated rejection from the launch endpoint, with a fixed bound and live authority checks before every resend. Other launch errors are not retried. This is not a confirmed diagnosis of the owner's separate manual submission failure.
+
+Office core adds stable member IDs, random display names, roles, explicit invite/accept, project grouping filtered by the viewer's host access, and addressed data-only announcements and thread handoffs. Joining or reading a message grants neither project access nor execution authority. Core Office domain/publication tests16+12 passed. Android storage, Office screen and dispatch to real chat agents are not connected. The named-agent and cross-project group behavior is source-level only. On phone2024 the second independently created test thread did not recall a private alias from the first thread after an initial provider busy failure; explicit reuse across threads remains to be tested.
+
+Grouped verification passed: core990, Android runtime1028, remote queue10, React33 and the TypeScript/Vite build. The screenshot's manual follow-up ended SESSION_UNKNOWN; the later read-only attempt exposed PC_BRIDGE_TIMEOUT_GET_SESSION_STATUS after seven Android public-web tool calls. The PC provided subscription inference and no PC browser or airline-app action was observed. There was no verified quote, checkout, hold, booking or payment. Source and offline checks only for this patch; no release APK rebuild or push.
+
 ## Batched Rust continuation and fixture expansion
 
 Android goal continuation and launch revalidation now call Rust via UniFFI for the segment, tool, wall-clock and no-progress budgets. The JVM reference policy remains for offline tests; the Android parity test covers 108 boundary combinations. Authority, verified readbacks and whole-goal finalization remain host responsibilities. The PC Rust health surface now returns a redacted isolation blocker without relaxing the launch gate. The pinned local CLI returned `MCP_DISABLED_UNCONFIRMED` with no inference invoked. Existing production routing is unchanged.

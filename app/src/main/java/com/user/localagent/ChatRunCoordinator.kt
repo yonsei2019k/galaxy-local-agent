@@ -1467,7 +1467,24 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
                 val question=report.getValue("question").jsonPrimitive.content
-                publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"요청을 마치려면 추가 정보가 필요합니다."},true);return
+                val readOnly=requestSteps.all{com.user.localagent.core.ToolReadPolicy.isReadOnly(it.tool)}
+                val canAnswerInSameTest=readOnly&&question.isNotBlank()&&runCatching {
+                    val evidence=client.taskEvidence()
+                    listOf("pcCalls","unresolvedCalls","preparedCalls").all{evidence.getValue(it).jsonArray.isEmpty()}&&
+                        evidence.getValue("phoneCalls").jsonArray.all{
+                            val call=it.jsonObject
+                            call.getValue("state").jsonPrimitive.content=="COMPLETED"&&
+                                com.user.localagent.core.ToolReadPolicy.isReadOnly(call.getValue("tool").jsonPrimitive.content)
+                        }
+                }.onFailure{if(it is CancellationException)throw it}.getOrDefault(false)
+                if(canAnswerInSameTest){
+                    check(authority().permits(capture))
+                    controller.close();closed=true
+                    persistNativeState(nativeJournal.sealCheckpoint())
+                }
+                publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"요청을 마치려면 추가 정보가 필요합니다."},true,
+                    if(canAnswerInSameTest)"cloud_clarification_read_only" else "execution_not_verified")
+                return
             }
             if(CloudAgentFinals.isToolFreeAnswer(resultState,plan!=null,actual.size,requestSteps.size)){
                 check(authority().permits(capture))
@@ -2433,9 +2450,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(written.messageId==null)answer(final)else lines.value+=ChatLine(written.messageId,"assistant",written.text)
         if(blockedReason!=null){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
     }
-    private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean){
+    private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean,
+        pauseCode:String="execution_not_verified"){
         answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,reason)else reason)
-        if(paused){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
+        if(paused){
+            persistStepEvidence()
+            app.repository.chat.updateRun(request.runId,"paused",errorCode=pauseCode)
+            status.value=if(pauseCode=="cloud_clarification_read_only")"추가 정보 대기 중" else "작업 일시정지"
+        }
     }
     private suspend fun resolveRecipient(call:ToolCall):Pair<ToolCall,Boolean>{
         val tools=checkNotNull(requestTools)

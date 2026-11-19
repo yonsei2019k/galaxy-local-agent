@@ -127,7 +127,8 @@ export default function App() {
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
       <div className="main-column" hidden={collaborationOpen}>
-        <Header snapshot={snapshot} enabled={enabled} onMenu={openMenu}
+        <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu}
+          onRename={title => request({ action: 'renameThread', payload: { title } })}
           onSelectModel={id => request({ action: 'selectModel', payload: { id } })} />
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
           onCopy={messageId => request({ action: 'copy', payload: { messageId } })} onDetails={openNative} />

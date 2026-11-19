@@ -77,6 +77,27 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('binds renaming to the visible conversation and drops old drafts on a room switch', () => {
+    mount()
+    snapshot(base)
+    click('이름 변경')
+    const title = host.querySelector<HTMLInputElement>('input[aria-label="대화 이름"]')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(title, '제주 여행')
+      title.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    click('저장')
+    expect(requests().at(-1)).toMatchObject({
+      threadId: 'thread-a', branchId: 'branch-a', action: 'renameThread', payload: { title: '제주 여행' },
+    })
+    click('이름 변경')
+    snapshot({
+      ...base, threadId: 'thread-b', branchId: 'branch-b',
+      threads: base.threads.map(thread => ({ ...thread, selected: thread.id === 'thread-b' })),
+    })
+    expect(host.querySelector('input[aria-label="대화 이름"]')).toBeNull()
+  })
+
   it('waits for a valid, ready native snapshot and makes the web-only view inert', () => {
     mount(false)
     snapshot(base)

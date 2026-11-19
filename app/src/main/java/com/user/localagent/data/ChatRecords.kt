@@ -327,7 +327,11 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val t=ChatThreadRecord(projectId=projectId,title=title(title),allowOwnerLearning=project?.settings?.learnOwnerFacts?:true)
         dao.thread(t);dao.branch(ChatBranchRecord(id=t.activeBranchId,threadId=t.id));t
     }
-    suspend fun renameThread(threadId:String,title:String):ChatThreadRecord=mutateThread(threadId){it.copy(title=title(title))}
+    suspend fun renameThread(threadId:String,title:String):ChatThreadRecord=database.withTransaction {
+        val renamed=mutateThread(threadId){it.copy(title=title(title))}
+        database.knowledgeDao().meta(KnowledgeMeta("chat.title.manual.$threadId",1))
+        renamed
+    }
     suspend fun pinThread(threadId:String,pinned:Boolean=true):ChatThreadRecord=mutateThread(threadId){it.copy(pinned=pinned)}
     suspend fun archiveThread(threadId:String,archived:Boolean=true):ChatThreadRecord=mutateThread(threadId){it.copy(archived=archived)}
     suspend fun restoreThread(threadId:String):ChatThreadRecord=archiveThread(threadId,false)
@@ -403,6 +407,13 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             check(last?.role=="assistant"&&last.runId==expectedPreviousRunId){"REMOTE_TEST_HISTORY_CHANGED"}
         }
         beforeCommit()
+        if(remoteTestThreadRevision==null){
+            val thread=activeBranch(threadId,branchId)
+            if(thread.title=="새 대화"&&dao.metaValue("chat.title.manual.$threadId")==null&&
+                dao.messagePage(threadId,branchId,null,1).isEmpty()){
+                firstChatTitle(text)?.let{dao.thread(thread.copy(title=it))}
+            }
+        }
         val user=addMessage(threadId,branchId,"user",text)
         val run=createRun(threadId,branchId,user.id,modelId,4096,thinking,runId=runId)
         updateRunContext(run.id,contextFactory(user,run))
