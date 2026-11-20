@@ -1,5 +1,11 @@
 # Device validation
 
+## 2034 rollout via paired PC and mobile Tailscale
+
+Authenticated health showed the paired worker idle before restarting. The worker installed the exact 0563e74 broker module and pinned MCP gateway, restarted under its existing supervisor, and reported provider readiness, no active providers and unchanged model pins. The Android 2034 APK was offered over a temporary private Tailnet route and returned the expected 32-byte range response. The user then enabled wireless ADB. The device reported 2032 and had no active image or agent service at installation. An in-place update installed 2034, the device base APK SHA-256 matched the signed package, and the manifest launcher started successfully. The temporary download route was closed after installation.
+
+The real-model Jeju flight comparison on the paired phone reported 2034 and paused at 39095 ms. The phone verified two public search calls, then withheld a result after its privacy check. The receipt provides no match category and does not establish a false positive or any verified fare. A separate direct public reading case against a synthetic missing page paused at 45055 ms and logged two read_webpage attempts, both FAILED with HTTP_STATUS_404. The final message marked the job incomplete. This verifies the new failure audit on the installed device. Successful alternate-source recovery, real-model steering and argument repair were not demonstrated by these cases.
+
 ## 2032 Jeju public research after deploying efc0689
 
 The paired phone reported 2032 and paused with execution_not_verified after 93160 ms. Three public searches were verified. Twelve page reads and three further searches failed. The worker logged one post-budget reconsideration and a partial response. There was no confirmed fare, inventory, or official route answer. The available receipts contain tool status counts and no exact arguments, so this run does not establish which proposals were identical or whether the repeat guard intercepted one. The deployed worker passed its authenticated restart check independently.
