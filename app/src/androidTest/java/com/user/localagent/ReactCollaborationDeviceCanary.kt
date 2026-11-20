@@ -25,7 +25,7 @@ class ReactCollaborationDeviceCanary {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         assumeTrue(InstrumentationRegistry.getArguments().getString("collaborationCanaryApproved")=="true")
         val context=instrumentation.targetContext
-        val text="협업방 실제 폰 연결 검사 "+UUID.randomUUID().toString().take(8)+" · 실행 요청이나 승인이 아닙니다."
+        val text="협력사 핫라인 실제 폰 연결 검사 "+UUID.randomUUID().toString().take(8)+" · 실행 요청이나 승인이 아닙니다."
         ActivityScenario.launch<MainActivity>(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)).use{scenario->
             suspend fun js(code:String):String {
                 val reply=CompletableDeferred<String>()
@@ -38,8 +38,8 @@ class ReactCollaborationDeviceCanary {
             suspend fun until(timeout:Long,condition:suspend()->Boolean){withTimeout(timeout){while(!condition())delay(150)}}
             until(30_000){js("Boolean(document.querySelector('select[aria-label=\"다음 요청 모델\"]:not(:disabled)')) && document.getElementById('root').getBoundingClientRect().height>innerHeight*0.8")=="true"}
             js("Array.from(document.querySelectorAll('button')).find(b=>(b.getAttribute('aria-label')||'').includes('메뉴')&&b.getClientRects().length)?.click();true")
-            until(10_000){js("Boolean(Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='협업방'&&b.getClientRects().length))")=="true"}
-            js("Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='협업방'&&b.getClientRects().length).click();true")
+            until(10_000){js("Boolean(Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='협력사 핫라인'&&b.getClientRects().length))")=="true"}
+            js("Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='협력사 핫라인'&&b.getClientRects().length).click();true")
             until(60_000){js("Boolean(document.querySelector('textarea[aria-label=\"협업 메시지\"]:not(:disabled)'))")=="true"}
             js("var s=document.querySelector('form[aria-label=\"협업 메시지 작성\"] select');s.value='user';s.dispatchEvent(new Event('change',{bubbles:true}));true")
             val quoted=JsonPrimitive(text).toString()
@@ -53,7 +53,7 @@ class ReactCollaborationDeviceCanary {
             assertEquals("user",saved.single().jsonObject.getValue("recipient").jsonPrimitive.content)
             assertTrue(saved.single().jsonObject.getValue("dataOnly").jsonPrimitive.boolean)
             assertFalse(saved.single().jsonObject.getValue("executionAuthority").jsonPrimitive.boolean)
-            until(10_000){js("document.querySelector('textarea[aria-label=\"협업 메시지\"]').value==='' && document.querySelector('[aria-label=\"협업방 메시지\"]').textContent.includes($quoted)")=="true"}
+            until(10_000){js("document.querySelector('textarea[aria-label=\"협업 메시지\"]').value==='' && document.querySelector('[aria-label=\"협력사 핫라인 메시지\"]').textContent.includes($quoted)")=="true"}
             instrumentation.sendStatus(0,android.os.Bundle().apply{putString("stream","React/Android/paired-PC data-only message saved, acknowledged and rendered; synthetic recipient=user; inference0.\n")})
         }
     }

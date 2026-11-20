@@ -128,14 +128,12 @@ svg { width: 20px; height: 20px; flex: none; }
 .icon-button--compact svg { width: 17px; height: 17px; }
 
 /* The clasp bead: the one filled, pill-shaped action on a surface. */
-.new-thread, .send-button {
+.send-button {
   border-radius: var(--radius-pill);
   background: var(--accent);
   color: var(--accent-ink);
   box-shadow: inset 0 1px 0 var(--bead-highlight), 0 1px 2px var(--shadow);
 }
-.new-thread:hover:not(:disabled), .send-button:hover:not(:disabled) { background: var(--accent-hover); }
-.new-thread:disabled, .send-button:disabled { background: var(--disabled); color: var(--disabled-ink); box-shadow: none; }
 
 .brand-mark {
   display: inline-grid;
@@ -225,20 +223,6 @@ svg { width: 20px; height: 20px; flex: none; }
 .sidebar-brand { display: flex; align-items: center; justify-content: space-between; padding-inline: 5px 0; min-height: 46px; }
 .wordmark { display: flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 800; letter-spacing: -.05em; white-space: nowrap; }
 .wordmark > span:last-child { margin-inline-start: -8px; color: var(--muted); font-weight: 500; }
-.new-thread {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: center;
-  width: 100%;
-  min-height: var(--tap);
-  margin-block: 20px 22px;
-  border: 0;
-  font-size: 14px;
-  font-weight: 700;
-}
-.new-thread svg { width: 18px; height: 18px; }
-
 .thread-nav { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-nav h2 { margin: 0 10px 8px; color: var(--muted); font-size: var(--fs-caption); font-weight: 700; letter-spacing: .04em; }
 .thread-nav ul { margin: 0 -5px; padding: 3px 5px; list-style: none; }
@@ -286,6 +270,8 @@ svg { width: 20px; height: 20px; flex: none; }
 .more-menu summary svg { width: 17px; height: 17px; }
 .more-menu[open] summary svg { transform: rotate(180deg); }
 .more-menu .sidebar-row { width: 100%; }
+.thread-nav { margin-top: 14px; }
+.shared-rooms { display: grid; margin-top: 4px; }
 
 /* Conversation -------------------------------------------------------------------------------------- */
 .conversation-wrap { display: grid; position: relative; min-height: 0; min-width: 0; }
@@ -530,12 +516,12 @@ svg { width: 20px; height: 20px; flex: none; }
 @keyframes ziphap-clasp-turn { to { transform: rotate(360deg); } }
 
 @media (forced-colors: active) {
-  .task-icon, .send-button, .new-thread, .brand-mark { forced-color-adjust: auto; border: 1px solid CanvasText; }
+  .task-icon, .send-button, .brand-mark { forced-color-adjust: auto; border: 1px solid CanvasText; }
 }
 
 /* Point color accents ("Sunlit Porcelain") ----------------------------------------------------------- */
 /* Shared icon tiles for the fixed staff rooms and app menu. */
-.utility-nav .sidebar-row > svg, .staff-rooms .sidebar-row > svg {
+.utility-nav .sidebar-row > svg, .shared-rooms .sidebar-row > svg, .staff-rooms .sidebar-row > svg {
   box-sizing: content-box;
   width: 16px;
   height: 16px;
@@ -546,11 +532,6 @@ svg { width: 20px; height: 20px; flex: none; }
 }
 .utility-nav .sidebar-row:nth-child(1) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
 .utility-nav .sidebar-row:nth-child(2) { --tile-bg: var(--lilac-soft);  --tile-fg: var(--lilac-text); }
-.utility-nav .sidebar-row:nth-child(3) { --tile-bg: var(--sun-soft);    --tile-fg: var(--sun-text); }
-.utility-nav .sidebar-row:nth-child(4) { --tile-bg: var(--coral-soft);  --tile-fg: var(--coral-text); }
-.utility-nav .sidebar-row:nth-child(5) { --tile-bg: var(--mint-soft);   --tile-fg: var(--mint-text); }
-.utility-nav .sidebar-row:nth-child(6) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
-.utility-nav .sidebar-row:nth-child(7) { --tile-bg: var(--surface-soft); --tile-fg: var(--secondary); }
 .staff-rooms li:nth-child(1) { --tile-bg: var(--cobalt-soft); --tile-fg: var(--cobalt-text); }
 .staff-rooms li:nth-child(2) { --tile-bg: var(--lilac-soft); --tile-fg: var(--lilac-text); }
 .staff-rooms li:nth-child(3) { --tile-bg: var(--mint-soft); --tile-fg: var(--mint-text); }
@@ -558,7 +539,7 @@ svg { width: 20px; height: 20px; flex: none; }
 .utility-nav .sidebar-row[aria-current="page"] > svg, .staff-rooms .sidebar-row[aria-current="page"] > svg { background: var(--tile-fg); color: var(--surface); }
 
 /* Selected conversation: a bright cobalt tint instead of a grey slab. */
-.thread-nav .sidebar-row[aria-current="page"] { background: var(--cobalt-soft); color: var(--cobalt-text); box-shadow: none; }
+.thread-nav .sidebar-row[aria-current="page"], .shared-rooms .sidebar-row[aria-current="page"] { background: var(--cobalt-soft); color: var(--cobalt-text); box-shadow: none; }
 
 /* Welcome: the mascot sits on a sunlit plate of soft cobalt, coral and mint light. */
 .mascot-field::before {
@@ -607,9 +588,4 @@ svg { width: 20px; height: 20px; flex: none; }
   .rename-thread { position: relative; width: 36px; padding: 0; font-size: 0; }
   .rename-thread::before { content: "✎"; font-size: 17px; line-height: 1; color: currentColor; }
   .rename-thread::after { content: ""; position: absolute; inset: -4px; }  /* 44px hit area */
-}
-
-@media (max-height: 670px) {
-  .mobile-sidebar .sidebar-content { grid-template-rows: auto auto auto auto; align-content: start; }
-  .mobile-sidebar .new-thread { margin-block: 10px 14px; }
 }

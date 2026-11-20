@@ -88,7 +88,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
       setNotice('')
     } else if (attempt.awaiting && receipt?.clientMessageId === attempt.clientMessageId && receiptKey(receipt) !== attempt.previousReceipt) {
       setAttempt({ ...attempt, awaiting: false })
-      setNotice('협업방에 저장하지 못했습니다. 작성한 내용은 유지됩니다.')
+      setNotice('협력사 핫라인에 저장하지 못했습니다. 작성한 내용은 유지됩니다.')
     }
   }, [attempt, bindingEpoch, messages, room?.sendReceipt, text, recipient])
 
@@ -115,7 +115,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
   const invalid = text.includes('\0')
   const canSend = open && available && !attempt?.awaiting && !!text.trim() && !tooLong && !invalid
   const status = tooLong ? '메시지는 8,000자까지 보낼 수 있습니다.' : invalid ? '입력에 사용할 수 없는 문자가 있습니다.'
-    : notice || (attempt?.awaiting ? '협업방에 저장되었는지 확인 중입니다.' : room?.status || '')
+    : notice || (attempt?.awaiting ? '협력사 핫라인에 저장되었는지 확인 중입니다.' : room?.status || '')
 
   function send() {
     if (!canSend || bindingEpoch === undefined) return
@@ -124,7 +124,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
     const message = { bindingEpoch, clientMessageId, text, recipient }
     const sent = onSend(message)
     setAttempt({ ...message, awaiting: sent, previousReceipt: receiptKey(room?.sendReceipt) })
-    setNotice(sent ? '' : '협업방에 연결하지 못했습니다. 작성한 내용은 유지됩니다.')
+    setNotice(sent ? '' : '협력사 핫라인에 연결하지 못했습니다. 작성한 내용은 유지됩니다.')
   }
 
   return (
@@ -133,12 +133,12 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
         <div className="topbar-context">
           <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
           <button type="button" className="icon-button collab-back" aria-label="일반 대화로 돌아가기" title="일반 대화로 돌아가기" onClick={onBack}><Icon name="back" /></button>
-          <h1 className="topbar-title" tabIndex={-1} ref={heading}>협업방</h1>
+          <h1 className="topbar-title" tabIndex={-1} ref={heading}>협력사 핫라인</h1>
         </div>
-        <button type="button" className="icon-button" disabled={!enabled || !room || room.loading} aria-label="협업방 새로고침" title="협업방 새로고침"
+        <button type="button" className="icon-button" disabled={!enabled || !room || room.loading} aria-label="협력사 핫라인 새로고침" title="협력사 핫라인 새로고침"
           onClick={() => { if (bindingEpoch !== undefined && onRefresh(bindingEpoch)) setNotice('') }}><Icon name="refresh" /></button>
       </header>
-      <main className="conversation collab-feed" aria-label="협업방 메시지" ref={feed} onScroll={event => {
+      <main className="conversation collab-feed" aria-label="협력사 핫라인 메시지" ref={feed} onScroll={event => {
         const pane = event.currentTarget
         pinned.current = pane.scrollHeight - pane.clientHeight - pane.scrollTop < 96
       }}>
@@ -147,7 +147,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
         </div> : <div className="collab-empty">
           <span className="brand-mark"><Icon name="group" /></span>
           <h2>사용자, Codex, Claude</h2>
-          <p>{available && !room?.loading ? '협업 메시지가 없습니다.' : '협업방 연결을 확인해 주세요.'}</p>
+          <p>{available && !room?.loading ? '협업 메시지가 없습니다.' : '협력사 핫라인 연결을 확인해 주세요.'}</p>
         </div>}
       </main>
       <footer className="composer-footer">

@@ -55,6 +55,7 @@ export interface Snapshot {
   resultPreviews?: ResultPreview[]
   threads: Thread[]
   staffRooms?: Thread[]
+  officeSelected?: boolean
   tasks: Task[]
   models: Model[]
   activeModelLabel?: string
@@ -116,7 +117,7 @@ type Intent =
   | { action: 'selectThread' | 'selectModel' | 'removeAttachment'; payload: { id: string } }
   | { action: 'renameThread'; payload: { title: string } }
   | { action: 'navigate'; payload: { panel: Panel } }
-  | { action: 'newThread' | 'openOffice' | 'attach' | 'chatMenu' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
+  | { action: 'openOffice' | 'attach' | 'manageThreads' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
 
 interface RunTarget {
   runId: string
@@ -215,6 +216,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.resultPreviews !== undefined && (!list(value.resultPreviews, resultPreview) ||
     value.resultPreviews.length > 2 ||
     value.resultPreviews.some(preview => !messages.some(message => message.id === preview.messageId && message.role === 'assistant')))) return null
+  if (value.officeSelected !== undefined && typeof value.officeSelected !== 'boolean') return null
   if (value.staffRooms !== undefined && (!list(value.staffRooms, thread) || value.staffRooms.length > 4 ||
     value.staffRooms.some(room => !threads.some(item => item.id === room.id && item.selected === room.selected)))) return null
   if (value.activeModelLabel !== undefined && typeof value.activeModelLabel !== 'string') return null

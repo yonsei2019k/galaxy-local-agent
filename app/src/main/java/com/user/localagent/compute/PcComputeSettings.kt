@@ -91,6 +91,10 @@ class PcComputeSettings private constructor(private val context:Context) {
         }
         revision
     }
+    internal fun storedImagePreference(expectedRevision:Long):Boolean?=synchronized(lock){
+        if(revision!=expectedRevision||connection==null)return@synchronized null
+        Json.parseToJsonElement(store.readStrict()).jsonObject["preferPcImages"]?.jsonPrimitive?.booleanOrNull
+    }
     /** Choice applies to the next image client; changing it does not revoke an active run. */
     fun imageModel(id:String)=synchronized(lock){
         val pin=PcImageModelCatalog.selection(id)

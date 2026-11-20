@@ -121,9 +121,10 @@ class ModelManager(private val context: Context) {
         }
     }
 
-    private val mutableAsrSelection=MutableStateFlow(AsrSelection(
+    private val mutableAsrSelection=MutableStateFlow(storedAsrSelection())
+    internal fun storedAsrSelection()=AsrSelection(
         selected.getString("asr-id",AsrCatalog.DEFAULT_MODEL)?:AsrCatalog.DEFAULT_MODEL,
-        selected.getString("asr-language","ko")?:"ko"))
+        selected.getString("asr-language","ko")?:"ko")
     val asrSelection:StateFlow<AsrSelection> = mutableAsrSelection.asStateFlow()
     private val mutableDeviceAsrStatus=MutableStateFlow(DeviceAsrStatus())
     val deviceAsrStatus:StateFlow<DeviceAsrStatus> = mutableDeviceAsrStatus.asStateFlow()
@@ -146,12 +147,14 @@ class ModelManager(private val context: Context) {
         return com.user.localagent.inference.InferenceOptions(contextSize=2048,thinking=false,backend="CPU",maxOutputTokens=512,
             audioEnabled=true,projectorPath=projector.path,cpuThreads=if(model.id=="asr-qwen-17b")2 else 4)
     }
-    suspend fun selectAsr(id:String)=withContext(Dispatchers.IO){mutex.withLock {
+    suspend fun selectAsr(id:String, expected:AsrSelection?=null, allowed:()->Boolean={true})=withContext(Dispatchers.IO){mutex.withLock {
+        check(allowed() && (expected == null || asrSelection.value == expected))
         require(if(id==AsrCatalog.DEVICE_MODEL)mutableDeviceAsrStatus.value.available&&asrSelection.value.language!="auto" else asrReady(id)){"음성 모델의 다운로드 또는 기기 내 AI의 지원 확인이 필요합니다."}
         check(selected.edit().putString("asr-id",id).commit())
         mutableAsrSelection.value=mutableAsrSelection.value.copy(modelId=id)
     }}
-    suspend fun selectAsrLanguage(language:String)=withContext(Dispatchers.IO){mutex.withLock {
+    suspend fun selectAsrLanguage(language:String, expected:AsrSelection?=null, allowed:()->Boolean={true})=withContext(Dispatchers.IO){mutex.withLock {
+        check(allowed() && (expected == null || asrSelection.value == expected))
         require(language in setOf("ko","en","auto"))
         require(language!="auto"||asrSelection.value.modelId!=AsrCatalog.DEVICE_MODEL){"기기 내 음성 AI는 한국어 또는 영어를 지정해주세요."}
         check(selected.edit().putString("asr-language",language).commit())

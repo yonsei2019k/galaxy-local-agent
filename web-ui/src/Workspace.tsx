@@ -7,20 +7,17 @@ import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 
 const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
-  { panel: 'collab', label: '협업방', icon: 'group' },
   { panel: 'images', label: '이미지 만들기', icon: 'image' },
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
 
-export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew, onOpenOffice, onNavigate, onChatMenu, onClose }: {
+export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpenOffice, onNavigate, onClose }: {
   snapshot: Snapshot | null
   enabled: boolean
   collaborationOpen: boolean
   onSelect(id: string): void
-  onNew(): void
   onOpenOffice(): void
   onNavigate(panel: Panel): void
-  onChatMenu(): void
   onClose?(): void
 }) {
   const staff = snapshot?.staffRooms
@@ -31,41 +28,34 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
         <span className="wordmark"><BrandMark /> ZipHap<span>.Agent</span></span>
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
       </div>
-      <button type="button" className="new-thread" disabled={!enabled} onClick={onNew}><Icon name="plus" /> 새 대화</button>
       <nav className={`thread-nav${staff ? ' staff-rooms' : ''}`} aria-label={staff ? '직원 채팅방' : '대화 목록'}>
-        <h2>{staff ? '직원 채팅방' : '대화'}</h2>
+        <h2>채팅방</h2>
         {threads.length > 0 ? <ul>{threads.map(thread => (
           <li key={thread.id}>
             <button type="button" className="sidebar-row" aria-current={thread.selected && !collaborationOpen ? 'page' : undefined}
               disabled={!enabled} onClick={() => onSelect(thread.id)}>
-              <Icon name="chat" /><span>{thread.title || '새 대화'}</span>
+              <Icon name="chat" /><span>{thread.title || '제목 없는 대화'}</span>
               {thread.working && <span className="room-working" role="status" aria-label="작업 중" title="작업 중" />}
             </button>
           </li>
         ))}</ul> : snapshot?.ready && <p className="no-threads">대화가 없습니다.</p>}
       </nav>
+      <nav className="shared-rooms" aria-label="공용 채팅방">
+        <button type="button" className="sidebar-row" disabled={!enabled}
+          aria-current={snapshot?.officeSelected && !collaborationOpen ? 'page' : undefined} onClick={onOpenOffice}>
+          <Icon name="group" /><span>사무실</span>
+        </button>
+        <button type="button" className="sidebar-row" disabled={!enabled}
+          aria-current={collaborationOpen ? 'page' : undefined} onClick={() => onNavigate('collab')}>
+          <Icon name="group" /><span>협력사 핫라인</span>
+        </button>
+      </nav>
       <nav className="utility-nav" aria-label="앱 메뉴">
         {shortcuts.map(({ panel, label, icon }) => (
-          <button key={panel} type="button" className="sidebar-row" disabled={!enabled}
-            aria-current={panel === 'collab' && collaborationOpen ? 'page' : undefined} onClick={() => onNavigate(panel)}>
+          <button key={panel} type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate(panel)}>
             <Icon name={icon} /><span>{label}</span>
           </button>
         ))}
-        <details className="more-menu">
-          <summary><Icon name="down" />더 보기</summary>
-          <button type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate('history')}>
-            <Icon name="history" /><span>대화 기록</span>
-          </button>
-          <button type="button" className="sidebar-row" disabled={!enabled} onClick={onChatMenu}>
-            <Icon name="chat" /><span>대화 관리</span>
-          </button>
-          <button type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate('tools')}>
-            <Icon name="tools" /><span>파일 작업</span>
-          </button>
-          <button type="button" className="sidebar-row" disabled={!enabled} onClick={onOpenOffice}>
-            <Icon name="group" /><span>사무실</span>
-          </button>
-        </details>
       </nav>
     </div>
   )
@@ -86,10 +76,11 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onSelectModel, onRename }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onRename }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
+  onManage(): void
   onSelectModel(id: string): void
   onRename(title: string): boolean
 }) {
@@ -118,6 +109,7 @@ export function Header({ snapshot, enabled, onMenu, onSelectModel, onRename }: {
         </form>}
       </div>
       <div className="model-group">
+        <button type="button" className="icon-button" aria-label="이 대화" title="이 대화" disabled={!enabled} onClick={onManage}><Icon name="chat" /></button>
         {activeLabel && <span className="active-model" title={`실행 중인 모델 ${activeLabel}`}><span />{activeLabel}</span>}
         <label className="model-control" title={`다음 답변 방식 ${selectedLabel}`}>
           <Icon name="chip" />

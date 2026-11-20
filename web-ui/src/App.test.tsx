@@ -125,7 +125,8 @@ describe('native conversation', () => {
     expect(host.textContent).toContain('Android 앱에서 대화를 열어 주세요.')
     expect(host.textContent).toContain('무엇을 도와드릴까요?')
     expect(input().disabled).toBe(true)
-    expect(button('새 대화').disabled).toBe(true)
+    expect(button('사무실').disabled).toBe(true)
+    expect(host.querySelector('.desktop-sidebar')?.textContent).not.toContain('새 대화')
     expect(requests()).toEqual([])
   })
 
@@ -146,8 +147,8 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a', action: 'selectThread', payload: { id: 'thread-b' } })
     snapshot({ ...base, threadId: 'thread-b', branchId: 'branch-b', draft: 'B 전용 초안', threads: base.threads.map(thread => ({ ...thread, selected: thread.id === 'thread-b' })) })
     expect(input().value).toBe('B 전용 초안')
-    click('파일 작업')
-    expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'navigate', payload: { panel: 'tools' } })
+    click('설정')
+    expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'navigate', payload: { panel: 'settings' } })
     click('파일 첨부')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'attach', payload: {} })
   })
@@ -166,6 +167,21 @@ describe('native conversation', () => {
     expect(host.querySelector('.desktop-sidebar')?.textContent).not.toContain('프로젝트')
     items[2].click()
     expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'seat-2' } })
+  })
+
+  it('puts shared rooms together and uses the newly saved staff title on the same room', () => {
+    mount()
+    const original = { id: 'thread-a', title: '본부장 김호영', selected: true }
+    snapshot({ ...base, threads: [original], staffRooms: [original] })
+    const shared = host.querySelector('.desktop-sidebar [aria-label="공용 채팅방"]')!
+    expect(Array.from(shared.querySelectorAll('button'), row => row.textContent?.trim())).toEqual(['사무실', '협력사 핫라인'])
+    click('사무실')
+    expect(requests().at(-1)).toMatchObject({ action: 'openOffice', threadId: 'thread-a' })
+    const renamed = { ...original, title: '김호영 과장' }
+    snapshot({ ...base, threads: [renamed], staffRooms: [renamed] })
+    expect(host.querySelector('.topbar-title')?.textContent).toBe('김호영 과장')
+    click('김호영 과장')
+    expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'thread-a' } })
   })
 
   it('renders assistant output and evidence as text and copies the selected answer by native identity', () => {
@@ -248,11 +264,9 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'cancelPreparation', payload: {} })
     click('확인이 필요한 대화 열기')
     expect(requests().at(-1)).toMatchObject({ action: 'openWaitingApproval', payload: {} })
-    const more = host.querySelector<HTMLDetailsElement>('.desktop-sidebar .more-menu')!
-    expect(more.open).toBe(false)
-    more.open = true
-    click('대화 관리')
-    expect(requests().at(-1)).toMatchObject({ action: 'chatMenu' })
+    expect(host.querySelector('.desktop-sidebar .more-menu')).toBeNull()
+    click('이 대화')
+    expect(requests().at(-1)).toMatchObject({ action: 'manageThreads' })
     expect(input().value).toBe('요청 원문')
     expect(host.textContent).not.toContain('기존 화면')
   })
@@ -378,14 +392,14 @@ describe('native collaboration', () => {
     mount()
     snapshot({ ...base, draft: '일반 대화 초안' })
     expect(collaboration().hidden).toBe(true)
-    click('협업방')
+    click('협력사 핫라인')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a', action: 'navigate', payload: { panel: 'collab' } })
     expect(collaboration().hidden).toBe(false)
-    expect(collaboration().textContent).toContain('협업방 연결을 확인해 주세요.')
+    expect(collaboration().textContent).toContain('협력사 핫라인 연결을 확인해 주세요.')
     expect(editor().disabled).toBe(true)
-    expect(button('협업방 새로고침').disabled).toBe(true)
+    expect(button('협력사 핫라인 새로고침').disabled).toBe(true)
     snapshot({ ...base, draft: '일반 대화 초안', collab: { ...room, available: false } })
-    click('협업방 새로고침')
+    click('협력사 핫라인 새로고침')
     expect(requests().at(-1)).toMatchObject({ action: 'collabRefresh', payload: { bindingEpoch: 7 } })
     click('일반 대화로 돌아가기')
     expect(collaboration().hidden).toBe(true)
@@ -413,7 +427,7 @@ describe('native collaboration', () => {
       { ...message, messageId: 'same-sequence' },
       { ...message, sequence: 5, messageId: 'authority', executionAuthority: true },
     ] } })
-    click('협업방')
+    click('협력사 핫라인')
     const texts = [...collaboration().querySelectorAll('.message-text')].map(item => item.textContent)
     expect(texts).toEqual(['<b>참고 자료</b>', '호스트에 기록된 응답'])
     expect(collaboration().querySelector('b')).toBeNull()
@@ -424,7 +438,7 @@ describe('native collaboration', () => {
   it('preserves rejected input, reuses the client id, and clears only after a confirmed host receipt', () => {
     mount()
     snapshot({ ...base, collab: room })
-    click('협업방')
+    click('협력사 핫라인')
     edit('다른 자료를 확인합니다', editor())
     click('협업 메시지 보내기')
     const sent = requests().at(-1)
@@ -437,7 +451,7 @@ describe('native collaboration', () => {
     snapshot({ ...base, collab: { ...room, sendReceipt: rejection } })
     expect(editor().value).toBe('다른 자료를 확인합니다')
     click('일반 대화로 돌아가기')
-    click('협업방')
+    click('협력사 핫라인')
     expect(editor().value).toBe('다른 자료를 확인합니다')
     click('협업 메시지 보내기')
     expect(requests().at(-1)).toEqual(sent)
@@ -451,7 +465,7 @@ describe('native collaboration', () => {
   it('preserves a pending draft across PC replacement and rejects stale actions and receipts', () => {
     mount()
     snapshot({ ...base, collab: room })
-    click('협업방')
+    click('협력사 핫라인')
     edit('작성 중인 협업 메시지', editor())
     click('협업 메시지 보내기')
     const old = requests().at(-1)

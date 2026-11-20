@@ -125,6 +125,7 @@ fun ChatNavigator(
     onOpenImages: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    conversationActions: (@Composable () -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(RoomFilter.ACTIVE) }
@@ -180,6 +181,9 @@ fun ChatNavigator(
             RoomFilter.entries.filter{it!=RoomFilter.TRASH||navigation.supportsTrash}.forEach { item -> FilterChip(selected = filter == item, onClick = { filter = item }, label = { Text(item.label) }) }
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (conversationActions != null && query.isBlank() && filter == RoomFilter.ACTIVE) item(key = "conversation-actions") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) { conversationActions() }
+            }
             navigation.projects.forEach { project ->
                 val rooms = visible.filter { it.projectId == project.id }
                 if (rooms.isNotEmpty() || (query.isBlank() && filter == RoomFilter.ACTIVE)) {
@@ -206,7 +210,6 @@ fun ChatNavigator(
             if(visible.any{it.projectId !in known})item(key="unassigned_header"){
                 Row(Modifier.fillMaxWidth().padding(start=18.dp,end=8.dp,top=12.dp),verticalAlignment=Alignment.CenterVertically){
                     Text("일반 대화",Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=ZipHapColors.TextSecondary)
-                    IconButton(onClick={actions.onNewThread("");onDismiss()},modifier=Modifier.size(36.dp).semantics{contentDescription="일반 새 대화"}){Text("＋")}
                 }
             }
             items(visible.filter { it.projectId !in known }, key = { "orphan:${it.id}" }) { room ->

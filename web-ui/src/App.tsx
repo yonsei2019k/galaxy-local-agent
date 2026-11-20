@@ -115,10 +115,8 @@ export default function App() {
     enabled,
     collaborationOpen,
     onSelect: id => sidebarRequest({ action: 'selectThread', payload: { id } }),
-    onNew: () => sidebarRequest({ action: 'newThread' }),
     onOpenOffice: () => sidebarRequest({ action: 'openOffice' }),
     onNavigate: panel => sidebarRequest({ action: 'navigate', payload: { panel } }),
-    onChatMenu: () => sidebarRequest({ action: 'chatMenu' }),
   }
   const openMenu = () => setMobileOpen(true)
 
@@ -127,7 +125,7 @@ export default function App() {
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
       <div className="main-column" hidden={collaborationOpen}>
-        <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu}
+        <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
           onSelectModel={id => request({ action: 'selectModel', payload: { id } })} />
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}

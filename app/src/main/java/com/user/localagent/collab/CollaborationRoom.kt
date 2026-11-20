@@ -115,7 +115,7 @@ internal class CollaborationRoom private constructor(context:Context) {
         }catch(cancel:CancellationException){throw cancel}
         catch(_:StalePairing){invalidatePairing()}
         catch(reset:CursorReset){if(!current(captured))invalidatePairing()else {messages.clear();cursor=reset.first-1;mutable.value=snapshot(true,false,"이전 기록의 보관 범위가 바뀌었습니다. 새로고침하면 보관된 기록부터 확인합니다.")}}
-        catch(_:Exception){if(!current(captured))invalidatePairing()else mutable.value=snapshot(false,false,"협업방에 연결하지 못했습니다. PC 연결과 작업기 버전을 확인하세요.")}
+        catch(_:Exception){if(!current(captured))invalidatePairing()else mutable.value=snapshot(false,false,"협력사 핫라인에 연결하지 못했습니다. PC 연결과 작업기 버전을 확인하세요.")}
     }
     private fun checkedMessage(raw:JsonObject):JsonObject {
         require(raw.keys==setOf("sequence","messageId","sender","recipient","text","createdAtMs","clientMessageId","bodyDigest","dataOnly","executionAuthority"))

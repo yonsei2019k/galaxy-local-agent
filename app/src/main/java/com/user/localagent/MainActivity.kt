@@ -206,14 +206,15 @@ class MainActivity : ComponentActivity() {
         var tab by rememberSaveable {mutableIntStateOf(0)}
         var settingsPage by rememberSaveable {mutableStateOf(SettingsPage.HOME)}
         var panelFromSettings by rememberSaveable {mutableStateOf(false)}
+        var manualSettings by rememberSaveable {mutableStateOf(false)}
         fun openPanel(destination:Int,fromSettings:Boolean=false){
             settingsPage=SettingsPage.HOME
             panelFromSettings=fromSettings
+            manualSettings=fromSettings
             tab=destination
         }
         var chatScreenAttempt by remember {mutableIntStateOf(0)}
         var chatScreenUnavailable by remember {mutableStateOf(false)}
-        var chatMenuOpen by rememberSaveable {mutableStateOf(false)}
         var chatManagerOpen by rememberSaveable {mutableStateOf(false)}
         var composerEpoch by remember {mutableLongStateOf(0)}
         val collaboration=remember{com.user.localagent.collab.CollaborationRoom.get(applicationContext)}
@@ -321,6 +322,7 @@ class MainActivity : ComponentActivity() {
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
                         put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
                     })}})
+                    put("officeSelected",composerThreadId==ZipHapRoom.OFFICE.threadId)
                     put("staffRooms",buildJsonArray{staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}})
                     put("threads",buildJsonArray{
                         staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}
@@ -376,7 +378,6 @@ class MainActivity : ComponentActivity() {
                                 if(command.action!="stop")composerEpoch++
                             }
                             "selectThread"->payload.getValue("id").jsonPrimitive.content.takeIf{id->roomThreads.any{it.id==id&&!it.archived&&it.deletedAt==null}}?.let(chat::selectThread)
-                            "newThread"->chat.newThread()
                             "renameThread"->chat.renameThread(composerThreadId,payload.getValue("title").jsonPrimitive.content)
                             "openOffice"->chat.openFixedOfficeRooms()
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
@@ -389,7 +390,7 @@ class MainActivity : ComponentActivity() {
                                 val id=payload.getValue("messageId").jsonPrimitive.content
                                 if(messages.any{it.id==id&&it.role in setOf("user","assistant")})messageMenuId=id
                             }
-                            "chatMenu"->chatMenuOpen=true
+                            "manageThreads"->chatManagerOpen=true
                             "removeAttachment"->{
                                 val id=payload.getValue("id").jsonPrimitive.content
                                 if(app.chatAttachments.state.value.any{it.id==id})app.chatAttachments.remove(id)
@@ -408,32 +409,41 @@ class MainActivity : ComponentActivity() {
                 }
             }
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
-                val returnsToSettings=panelFromSettings || (tab==4 && settingsPage!=SettingsPage.HOME)
+                val returnsToSettings = panelFromSettings || (tab == 4 && manualSettings)
+                fun showManual(link:SettingsLink) {
+                    if(link==SettingsLink.VOICE) {openPanel(1,fromSettings=true);return}
+                    manualSettings = true
+                    settingsPage = when(link) {
+                        SettingsLink.CONNECTIONS -> SettingsPage.CONNECTIONS
+                        SettingsLink.PRIVACY -> SettingsPage.PRIVACY
+                        SettingsLink.AUTOMATION -> SettingsPage.AUTOMATION
+                        SettingsLink.UPDATES -> SettingsPage.UPDATES
+                        else -> SettingsPage.HOME
+                    }
+                }
                 fun returnToParent(){
-                    if(returnsToSettings)openPanel(4)
-                    else {openPanel(0);refreshVisibleHistory()}
+                    when {
+                        panelFromSettings -> {openPanel(4);showManual(SettingsLink.MANUAL)}
+                        tab==4 && settingsPage!=SettingsPage.HOME -> showManual(SettingsLink.MANUAL)
+                        tab==4 && manualSettings -> openPanel(4)
+                        else -> {openPanel(0);refreshVisibleHistory()}
+                    }
                 }
                 androidx.activity.compose.BackHandler {returnToParent()}
                 Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
                     TextButton(onClick=::returnToParent){Text(if(returnsToSettings)"‹ 설정"else"‹ 대화")}
                     val title=if(tab==4)settingsPage.title
                         else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
-                    Text(title,style=MaterialTheme.typography.titleMedium)
+                    Text(title,style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
+                    if(tab==4 && !manualSettings) TextButton(onClick={showManual(SettingsLink.MANUAL)}){Text("수동 설정")}
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state
-                if(panelStatus.isNotBlank())Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
-                when(tab){1->VoiceSettingsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->key(settingsPage){SettingsScreen(settingsPage,chatScreenUnavailable,{settingsPage=it}){openPanel(it,fromSettings=true)}};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
+                if(panelStatus.isNotBlank() && (tab!=4 || manualSettings))Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
+                when(tab){1->VoiceSettingsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->if(manualSettings) key(settingsPage){
+                    SettingsScreen(settingsPage,chatScreenUnavailable,{settingsPage=it}){openPanel(it,fromSettings=true)}
+                }else SettingsAssistantPanel(app,::showManual,Modifier.weight(1f));5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
             }
         }
-        if(chatMenuOpen)AlertDialog(onDismissRequest={chatMenuOpen=false}, title={Text("대화 관리")}, text={Column {
-            TextButton(onClick={chatMenuOpen=false;chatManagerOpen=true}){Text("대화와 프로젝트 관리")}
-            TextButton(onClick={chatMenuOpen=false;queueOpen=true}){Text("대기 중인 요청")}
-            TextButton(onClick={chatMenuOpen=false;goalEditorThreadId=composerThreadId}){Text("이 대화의 목표")}
-            TextButton(onClick={chatMenuOpen=false;skillLibraryOpen=true}){Text("도움 기능")}
-            if(roomBranches.size>1)roomBranches.forEach{branch->
-                TextButton(enabled=branch.id!=currentBranchId,onClick={chatMenuOpen=false;chat.selectBranch(composerThreadId,branch.id)}){Text(branch.title)}
-            }
-        }}, confirmButton={TextButton(onClick={chatMenuOpen=false}){Text("닫기")}})
         if(chatManagerOpen){
             val projects by app.repository.chat.projects.collectAsState(initial=emptyList())
             val selectedProjectId by chat.selectedProjectId.collectAsState()
@@ -460,7 +470,18 @@ class MainActivity : ComponentActivity() {
             androidx.compose.ui.window.Dialog(onDismissRequest={chatManagerOpen=false}){
                 Surface(shape=MaterialTheme.shapes.large,modifier=Modifier.fillMaxHeight(0.9f)){
                     ChatNavigator(navigation,onDismiss={chatManagerOpen=false},
-                        onOpenImages={chatManagerOpen=false;openPanel(7)},onOpenSettings={chatManagerOpen=false;openPanel(4)})
+                        onOpenImages={chatManagerOpen=false;openPanel(7)},onOpenSettings={chatManagerOpen=false;openPanel(4)},
+                        conversationActions={
+                            TextButton(onClick={chatManagerOpen=false;openPanel(6)}){Text("대화 기록")}
+                            TextButton(onClick={chatManagerOpen=false;queueOpen=true}){Text("대기 중인 요청")}
+                            TextButton(onClick={chatManagerOpen=false;goalEditorThreadId=composerThreadId}){Text("이 대화의 목표")}
+                            TextButton(onClick={chatManagerOpen=false;skillLibraryOpen=true}){Text("도움 기능")}
+                            if(roomBranches.size>1)roomBranches.forEach{branch->
+                                TextButton(enabled=branch.id!=currentBranchId,onClick={
+                                    chatManagerOpen=false;chat.selectBranch(composerThreadId,branch.id)
+                                }){Text(branch.title)}
+                            }
+                        })
                 }
             }
         }
@@ -645,11 +666,11 @@ class MainActivity : ComponentActivity() {
                     item {SettingsEntry("자동으로 도와주기","통화 뒤 정리하거나 사용 중에 도움을 받도록 설정해요."){onPage(SettingsPage.AUTOMATION)}}
                     item {SettingsEntry("앱 업데이트","새 버전을 확인하고 설치해요."){onPage(SettingsPage.UPDATES)}}
                     if(showChatRecoveryLinks){
-                        item {SettingsEntry("파일 작업","파일을 열고 작업해요."){onOpen(3)}}
                         item {SettingsEntry("대화 기록","저장한 대화를 찾아요."){onOpen(6)}}
                     }
                     item {
                         SettingsDisclosure("저장한 자료와 기록","기억, 문자, 일정, 검색 자료를 찾아요."){
+                            TextButton(onClick={onOpen(3)}){Text("파일 작업")}
                             TextButton(onClick={onOpen(2)}){Text("기억과 할 일")}
                             TextButton(onClick={onOpen(5)}){Text("연결된 자료")}
                             TextButton(onClick={onOpen(8)}){Text("문자와 일정")}

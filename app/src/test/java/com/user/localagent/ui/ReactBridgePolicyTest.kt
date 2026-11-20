@@ -20,7 +20,8 @@ class ReactBridgePolicyTest {
     }
     @Test fun oldChatRouteIsClosedAndScopedMenuActionsRemainAvailable(){
         assertNull(ReactBridgePolicy.parse(wire("nativeDetails","{}")))
-        assertNotNull(ReactBridgePolicy.parse(wire("chatMenu","{}")))
+        assertNotNull(ReactBridgePolicy.parse(wire("manageThreads","{}")))
+        assertNull(ReactBridgePolicy.parse(wire("chatMenu","{}")))
         assertNotNull(ReactBridgePolicy.parse(wire("messageMenu","""{"messageId":"m"}""")))
         assertNotNull(ReactBridgePolicy.parse(wire("removeAttachment","""{"id":"one-file"}""")))
         assertNull(ReactBridgePolicy.parse(wire("removeAttachment","""{"id":"one-file","approved":true}""")))

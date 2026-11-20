@@ -16,6 +16,8 @@ class ExternalAgentCapture(
     val requirePlan:Boolean=false,
 ) {
     val phoneTools:Set<String> = Collections.unmodifiableSet(phoneTools.toSet())
+    private val settingsAssistant = this.phoneTools == setOf(SettingsProposal.TOOL) &&
+        projectId == null && projectBinding == "settings:$parentRunId" && pcWorkspaceProfile == "phone-only" && requirePlan
     val pcTools:Set<String> get()=if(pcWorkspaceProfile=="phone-only")emptySet()else ExternalAgentContract.PC_TOOLS
     init {
         ExternalAgentContract.uuid(parentRunId)
@@ -23,13 +25,16 @@ class ExternalAgentCapture(
         require(authorityRevision>=0&&requestDigest.matches(Regex("[a-f0-9]{64}")))
         require(expiresAfterMs in 1000..ExternalAgentContract.MAX_TTL_MS)
         require(pcWorkspaceProfile.matches(Regex("[a-z0-9_-]{1,64}")))
-        require(this.phoneTools.isNotEmpty()&&this.phoneTools.size<=128&&this.phoneTools.all { it in ToolRegistry.definitions })
-        if(requirePlan)require(this.phoneTools.all { it in ExternalAgentContract.NORMAL_PHONE_TOOLS }){"BRIDGE_UNQUALIFIED_NORMAL_TOOL"}
+        if (!settingsAssistant) {
+            require(this.phoneTools.isNotEmpty()&&this.phoneTools.size<=128&&this.phoneTools.all { it in ToolRegistry.definitions })
+            if(requirePlan)require(this.phoneTools.all { it in ExternalAgentContract.NORMAL_PHONE_TOOLS }){"BRIDGE_UNQUALIFIED_NORMAL_TOOL"}
+        }
     }
     /** Metadata/schema only: no original request, conversation, attachment, or credential. */
     fun registration():JsonObject {
         check(allowExternalAgent){"EXTERNAL_AGENT_NOT_CAPTURED"}
-        val schemas=Json.parseToJsonElement(ToolRegistry.schemaJson(phoneTools.sorted())).jsonArray
+        val schemas = if (settingsAssistant) JsonArray(listOf(SettingsProposal.schema))
+            else Json.parseToJsonElement(ToolRegistry.schemaJson(phoneTools.sorted())).jsonArray
         return buildJsonObject {
             put("version",1);put("parentRunId",parentRunId);put("projectBinding",projectBinding)
             put("authorityRevision",authorityRevision);put("allowExternalAgent",true);put("expiresAfterMs",expiresAfterMs)
@@ -71,6 +76,10 @@ class ExternalAgentProposal(
         require(requestDigest==capture.requestDigest&&projectBinding==capture.projectBinding&&authorityRevision==capture.authorityRevision)
         require(tool in capture.phoneTools&&arguments.toString().toByteArray(Charsets.UTF_8).size<=32_768)
         val call=ToolCall(callId,tool,arguments)
+        if (tool == SettingsProposal.TOOL) {
+            SettingsProposal.parse(arguments)
+            return call
+        }
         // Unknown tools, scope, size and undeclared argument names stay hard rejections (never reach the executor).
         // A declared argument with a bad value is never executed either: runTool's performTool validates again
         // before any effect and returns a FAILED, effect-not-applied result, so the model can correct it.
