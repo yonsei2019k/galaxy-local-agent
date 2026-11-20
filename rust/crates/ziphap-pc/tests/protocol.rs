@@ -90,7 +90,7 @@ fn request(id: &str) -> RunRequest {
 }
 #[tokio::test]
 async fn stdio_failure_names_only_the_active_host_request() {
-    let fault = stop_stdio_with_pending_phone_call(false).await;
+    let fault = stop_stdio_with_pending_phone_call(StdioStop::ForeignToolResult).await;
     assert_eq!(
         json!({"type":"error","errorCode":"RUN_BINDING","requestId":"active-fixture","pendingPhoneCallId":"fixture-call-1"}),
         fault
@@ -99,14 +99,29 @@ async fn stdio_failure_names_only_the_active_host_request() {
 
 #[tokio::test]
 async fn stdio_cancel_keeps_the_outstanding_phone_call_reference() {
-    let notice = stop_stdio_with_pending_phone_call(true).await;
+    let notice = stop_stdio_with_pending_phone_call(StdioStop::Cancel).await;
     assert_eq!(
         json!({"type":"cancelled","requestId":"active-fixture","pendingPhoneCallId":"fixture-call-1"}),
         notice
     );
 }
 
-async fn stop_stdio_with_pending_phone_call(cancel: bool) -> serde_json::Value {
+#[tokio::test]
+async fn stdio_mismatched_phone_authority_refresh_terminates_the_active_request() {
+    let fault = stop_stdio_with_pending_phone_call(StdioStop::MismatchedPhoneAuthority).await;
+    assert_eq!(fault["type"], "error", "{fault}");
+    assert_eq!(fault["errorCode"], "PHONE_AUTHORITY_BINDING", "{fault}");
+    assert_eq!(fault["requestId"], "active-fixture", "{fault}");
+}
+
+#[derive(Clone, Copy)]
+enum StdioStop {
+    Cancel,
+    ForeignToolResult,
+    MismatchedPhoneAuthority,
+}
+
+async fn stop_stdio_with_pending_phone_call(stop: StdioStop) -> serde_json::Value {
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -156,20 +171,28 @@ async fn stop_stdio_with_pending_phone_call(cancel: bool) -> serde_json::Value {
             }
             assert_ne!(event["type"], "error", "{event}");
         };
-        let stop = if cancel {
-            json!({"op":"cancel","requestId":"active-fixture"})
-        } else {
-            json!({"op":"tool_result","result":{
+        let command = match stop {
+            StdioStop::Cancel => json!({"op":"cancel","requestId":"active-fixture"}),
+            StdioStop::ForeignToolResult => json!({"op":"tool_result","result":{
                 "requestId":"unbound-fixture","callId":call_id,"success":true,"text":"hidden fixture"
-            }})
+            }}),
+            StdioStop::MismatchedPhoneAuthority => json!({
+                "op":"refresh_phone_authority","requestId":"active-fixture",
+                "authorityRevision":2,"expiresAtEpochMs":deadline
+            }),
         };
         input
-            .write_all(format!("{stop}\n").as_bytes())
+            .write_all(format!("{command}\n").as_bytes())
             .await
             .unwrap();
         let line = lines.next_line().await.unwrap().unwrap();
         let notice = serde_json::from_str(&line).unwrap();
-        assert_eq!(cancel, child.wait().await.unwrap().success());
+        if matches!(stop, StdioStop::MismatchedPhoneAuthority) {
+            // Keep stdin open so EOF proves the adapter stopped on its own.
+            let subsequent = lines.next_line().await.unwrap();
+            assert!(subsequent.is_none(), "output after failed refresh: {subsequent:?}");
+        }
+        assert_eq!(matches!(stop, StdioStop::Cancel), child.wait().await.unwrap().success());
         notice
     })
     .await
