@@ -96,9 +96,12 @@ def proof(config, task, review, root):
                 key: {"type": "string"} for key in ("path", "old", "new")
             }, "required": ["path", "old", "new"], "additionalProperties": False}}},
             "required": ["edits"], "additionalProperties": False}), encoding="utf-8")
-        run([config["codex"], "-a", "never", "exec", "--ephemeral", "--ignore-user-config",
-             "-s", "read-only", "-C", str(work), "--output-schema", str(schema),
-             "-o", str(output), "-"], work, 1500, stdin=prompt)
+        try:
+            run([config["codex"], "-a", "never", "exec", "--ephemeral", "--ignore-user-config",
+                 "-s", "read-only", "-C", str(work), "--output-schema", str(schema),
+                 "-o", str(output), "-"], work, 1500, stdin=prompt)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("CODEX_PATCH_TIMEOUT") from None
         edits = json.loads(output.read_text(encoding="utf-8"))["edits"]
     updated = patch_sources(allowed, sources, edits)
     if run(["git", "status", "--porcelain"], work, 10, read=True).strip():
@@ -117,6 +120,8 @@ def proof(config, task, review, root):
     check = validation_command(config, task)
     try:
         run(check, work, 1200)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("VALIDATION_TIMEOUT") from None
     except FileNotFoundError:
         raise RuntimeError("VALIDATOR_NOT_FOUND") from None
     except RuntimeError as error:
@@ -144,9 +149,12 @@ def review_task(config, task, root):
     prompt = (f"Choose the most important regression case for this maintenance task: {task['spec']}\n"
               + "\n".join(f"{key}: {REVIEWS[key]}" for key in options)
               + "\nReturn only the selected review in the requested JSON schema.")
-    raw = run([config["claude"], "--print", "--no-session-persistence", "--tools", "",
-               "--strict-mcp-config", "--setting-sources", "", "--output-format", "json",
-               "--json-schema", json.dumps(schema)], root, 300, stdin=prompt, read=True)
+    try:
+        raw = run([config["claude"], "--print", "--no-session-persistence", "--tools", "",
+                   "--strict-mcp-config", "--setting-sources", "", "--output-format", "json",
+                   "--json-schema", json.dumps(schema)], root, 300, stdin=prompt, read=True)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("CLAUDE_REVIEW_TIMEOUT") from None
     value = json.loads(raw)
     answer = value.get("structured_output")
     if value.get("is_error") or not isinstance(answer, dict) or answer.get("review") not in options:
