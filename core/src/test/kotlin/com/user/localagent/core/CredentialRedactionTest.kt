@@ -1,5 +1,6 @@
 package com.user.localagent.core
 
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -65,5 +66,13 @@ class CredentialRedactionTest {
         assertEquals(0, CredentialRedaction.redact(r.text).count)
         assertEquals("자격증명으로 보이는 값 2개는 기기 밖으로 보내지 않았습니다.", CredentialRedaction.notice(2))
         assertEquals(CredentialRedaction.Result("  ", 0), CredentialRedaction.redact("  "))
+    }
+
+    @Test fun structuredToolResultsKeepValidJsonAndMaskCredentialFields() {
+        val input = """{"items":[{"password":"a \"quoted\" value","otp":1234,"body":"인증번호 654321","phone":"010-0000-0000"}],"status":"ok"}"""
+        val expected = """{"items":[{"password":"[가림]","otp":"[가림]","body":"인증번호 [가림]","phone":"010-0000-0000"}],"status":"ok"}"""
+        assertEquals(Json.parseToJsonElement(expected), Json.parseToJsonElement(CredentialRedaction.forCloudToolResult(input)))
+        val harmless = """{ "status": "ok", "password": null }"""
+        assertEquals(harmless, CredentialRedaction.forCloudToolResult(harmless))
     }
 }

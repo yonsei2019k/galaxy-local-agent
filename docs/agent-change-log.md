@@ -1,3 +1,13 @@
+## 2026-11-20 — Integrate OpenClaw-inspired tool recovery improvements
+
+Fast-forwarded the isolated research candidate to afc3e58. The approved tool catalog still gates execution. The MCP gateway and PC broker tell the model where an argument disagrees with the schema without echoing values or unknown keys. The gateway and broker each cap pre-dispatch rejections. A successor after an effect-free read can restart using the owner's latest instruction. Prepared, unresolved and mutating actions keep the recorded evidence and remain excluded from that restart.
+
+The existing phone privacy gate still withholds sensitive results and preserves the local path. The additional transport mask keeps recognized credential fields out of cloud-bound tool output while preserving parseable JSON and unchanged harmless results. The broker acknowledgement still binds the actual transmitted bytes. The mask recognizes specific fields and text patterns.
+
+Compared the upstream changes to [OpenClaw tool argument feedback](https://github.com/openclaw/openclaw/pull/202272) and [steering at the next request boundary](https://github.com/openclaw/openclaw/pull/198127). Claude's follow-up prefers declaring a fallback in the first accepted plan. Keep the mapping in the versioned plan digest, offer only already captured public read tools, and require a settled failure followed by an approved fallback observation in the same request. A fallback can cover one declared obligation only. The phone still needs to validate the original target, terms and evidence. OpenClaw's later-success rule for unknown tools does not, by itself, meet that condition. [OpenClaw terminal outcome change](https://github.com/openclaw/openclaw/pull/201638). The fallback contract remains under review.
+
+The integrated PC bridge, MCP gateway, provider supervisor and Codex provider suites ran 153 cases, with 152 passing and one skipped. Focused Android and core JVM suites passed all 47 cases, including the structured-result regression. Release assembly and lint passed. Local APK 2034 passed the pinned certificate, unchanged permissions, 16 KiB alignment and static Rust/React package checks. SHA-256 3466e65becfed99fde3cbf9e426fca3a63498d7acce9dd7b43f7fcca423b5ef9. No phone install, deployed worker update, or real-model replay was performed for this candidate.
+
 ## 2026-11-20 — Redact credential values in cloud tool results, bound rejected calls, carry read-only steers (Claude)
 
 Branch `claude/egress-steer-validation` (from 31fcbc5). The owner directed Claude to implement C-044/C-045/C-046 directly when Codex had not replied. Not merged, pushed, installed or deployed.

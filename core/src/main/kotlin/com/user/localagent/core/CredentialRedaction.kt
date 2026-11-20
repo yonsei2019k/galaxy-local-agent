@@ -1,5 +1,12 @@
 package com.user.localagent.core
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+
 /**
  * Deterministic masking of credential VALUES in text sent to a cloud model.
  * This is not intent classification: only secret-looking values are replaced,
@@ -30,6 +37,36 @@ object CredentialRedaction {
         RegexOption.IGNORE_CASE,
     )
     private val card = Regex("""(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)""")
+
+    private val credentialField = Regex(
+        """(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|passphrase|authorization|otp|pin|verification[_-]?code|비밀\s*번호|비번|인증\s*(?:번호|코드))""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Preserve structured tool results so masked evidence can still be decoded. */
+    fun forCloudToolResult(text: String): String {
+        val first = text.firstOrNull { !it.isWhitespace() }
+        val structured = if (first == '{' || first == '[')
+            runCatching { Json.parseToJsonElement(text) }.getOrNull() else null
+        if (structured is JsonObject || structured is JsonArray) {
+            val masked = maskJson(checkNotNull(structured), 0)
+            return if (masked == structured) text else masked.toString()
+        }
+        val masked = redact(text)
+        return if (masked.count == 0) text else masked.text + "\n" + notice(masked.count)
+    }
+
+    private fun maskJson(value: JsonElement, depth: Int): JsonElement {
+        if (depth == 32) return JsonPrimitive(MASK)
+        return when (value) {
+            is JsonObject -> JsonObject(value.mapValues { (key, field) ->
+                if (credentialField.matches(key) && field != JsonNull && field != JsonPrimitive(""))
+                    JsonPrimitive(MASK) else maskJson(field, depth + 1)
+            })
+            is JsonArray -> JsonArray(value.map { maskJson(it, depth + 1) })
+            is JsonPrimitive -> if (value.isString) JsonPrimitive(redact(value.content).text) else value
+        }
+    }
 
     fun redact(text: String): Result {
         if (text.isBlank()) return Result(text, 0)
