@@ -53,7 +53,7 @@ internal data class UiWorkEvidenceCounts(val tools:Int,val verified:Int,val prep
 
 private val internalReasoningMarkup=Regex("(?i)<\\s*/?\\s*(?:think|analysis|reasoning)\\b|\\[\\s*(?:analysis|chain.of.thought)\\s*]")
 internal fun visibleActivityText(value:String,maxChars:Int=1600):String=when{
-    internalReasoningMarkup.containsMatchIn(value)->""
+    internalReasoningMarkup.containsMatchIn(value)||value.contains("판단 과정: ")->""
     value.length>maxChars->"요약이 너무 길어 이 카드에 표시하지 않았습니다."
     else->value
 }
@@ -71,6 +71,12 @@ internal fun visibleActivityEvents(activity:UiRunActivity):List<UiRunActivityEve
         }
     }
     return byId.values.toList()
+}
+
+/** Keep the public explanation alongside recent actions in the bounded web snapshot. */
+internal fun publicActivityWindow(events:List<UiRunActivityEvent>):List<UiRunActivityEvent> {
+    val explanation=events.indices.filter{events[it].kind==UiWorkEventKind.PLAN}.take(16).toSet()
+    return events.filterIndexed{index,_->index in explanation||index>=events.size-16}
 }
 internal fun workEvidenceCounts(events:List<UiRunActivityEvent>):UiWorkEvidenceCounts {
     // File/readback rows describe a tool result; counting them again would triple one action.
@@ -100,16 +106,7 @@ private fun hashLabel(hash:String?):String=hash?.takeIf{Regex("[a-fA-F0-9]{64}")
 
 internal fun activityInitiallyExpanded(status:String):Boolean = status in setOf("queued","running","waiting_approval","paused","failed","interrupted")
 
-private const val THOUGHT_PREFIX="판단 과정: "
-
-/** True when Chinese characters outnumber Hangul, so the owner never sees an unreadable thought. */
-internal fun mostlyHan(text:String):Boolean {
-    val han=text.count {Character.UnicodeScript.of(it.code)==Character.UnicodeScript.HAN}
-    val hangul=text.count {Character.UnicodeScript.of(it.code)==Character.UnicodeScript.HANGUL}
-    return han>10&&han>hangul
-}
-
-/** Rows worth showing in a transcript-style log: thoughts, decisions, tools, files, checks and failures. */
+/** Select the plans, actions and verification results worth showing in the transcript. */
 internal fun transcriptEvents(events:List<UiRunActivityEvent>):List<UiRunActivityEvent> = events.filter {event->
     event.evidence==UiWorkEvidence.FAILED||event.kind in setOf(UiWorkEventKind.PLAN,UiWorkEventKind.TOOL,UiWorkEventKind.FILE,UiWorkEventKind.VERIFICATION)
 }
@@ -117,30 +114,17 @@ internal fun transcriptEvents(events:List<UiRunActivityEvent>):List<UiRunActivit
 /** One transcript row: a marker and title, then an indented "⎿" result line, like a coding-assistant chat. */
 @Composable
 private fun TranscriptRow(event:UiRunActivityEvent){
-    val thought=THOUGHT_PREFIX in event.label||THOUGHT_PREFIX in event.detail
-    var open by rememberSaveable(event.id){mutableStateOf(false)}
     val evidence=displayedWorkEvidence(event)
     val accent=when(evidence){UiWorkEvidence.FAILED->ZipHapColors.Error;UiWorkEvidence.VERIFIED->ZipHapColors.Mint;UiWorkEvidence.PREPARED->ZipHapColors.SunText;else->ZipHapColors.TextSecondary}
     Column(Modifier.fillMaxWidth().testTag("activity_event_${event.id}"),verticalArrangement=Arrangement.spacedBy(2.dp)){
-        if(thought){
-            val raw=(if(THOUGHT_PREFIX in event.label)event.label else event.detail).substringAfter(THOUGHT_PREFIX)
-            val body=if(mostlyHan(raw))"모델이 한국어가 아닌 언어로 생각해 표시하지 않았습니다." else raw
-            TextButton(onClick={open=!open},contentPadding=androidx.compose.foundation.layout.PaddingValues(0.dp)){
-                Text("✻ 생각 ${if(open)"▾" else "▸"}",style=MaterialTheme.typography.labelLarge,color=ZipHapColors.TextSecondary)
-            }
-            Text(body,maxLines=if(open)Int.MAX_VALUE else 3,overflow=TextOverflow.Ellipsis,
-                style=MaterialTheme.typography.bodySmall.copy(fontStyle=androidx.compose.ui.text.font.FontStyle.Italic),
-                color=ZipHapColors.TextSecondary,modifier=Modifier.padding(start=14.dp))
-            return@Column
-        }
         Text("● ${event.label}",style=MaterialTheme.typography.bodyMedium,color=if(evidence==UiWorkEvidence.FAILED)ZipHapColors.Error else ZipHapColors.TextPrimary)
         val result=listOfNotNull(event.detail.takeIf{it.isNotBlank()},
             workEvidenceLabel(evidence).takeIf{event.kind==UiWorkEventKind.TOOL||evidence==UiWorkEvidence.FAILED}).joinToString(" · ")
-        if(result.isNotBlank())Text("└ $result",style=MaterialTheme.typography.bodySmall.copy(fontFamily=androidx.compose.ui.text.font.FontFamily.Monospace),
+        if(result.isNotBlank())Text("└ $result",style=MaterialTheme.typography.bodySmall,
             color=accent,modifier=Modifier.padding(start=14.dp))
         event.fileChanges.forEach{file->
             val operation=when(file.operation){UiFileChangeOperation.CREATED->"생성";UiFileChangeOperation.UPDATED->"수정";UiFileChangeOperation.DELETED->"삭제"}
-            Text("└ $operation ${file.path}",style=MaterialTheme.typography.bodySmall.copy(fontFamily=androidx.compose.ui.text.font.FontFamily.Monospace),
+            Text("└ $operation ${file.path}",style=MaterialTheme.typography.bodySmall,
                 color=ZipHapColors.TextSecondary,modifier=Modifier.padding(start=14.dp))
         }
     }

@@ -147,6 +147,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
         val toolGroups=records.filter{it.event.kind==WorkTraceKind.TOOL&&it.event.invocationId!=null}.groupBy{it.event.invocationId!!}
         val chosen=toolGroups.mapValues{(_,events)->events.lastOrNull{it.event.code==WorkTraceCode.TOOL_RESULT}?:events.last()}
         val events=records.mapNotNull{record->
+            if(record.event.publicSummary?.contains("판단 과정: ")==true)return@mapNotNull null
             if(record.event.kind==WorkTraceKind.TOOL){
                 val invocation=record.event.invocationId?:return@mapNotNull null
                 if(chosen[invocation]?.id!=record.id)return@mapNotNull null
@@ -173,7 +174,7 @@ private fun activityEvent(record:WorkTraceRecord,run:ChatRunRecord,start:WorkTra
     val tool=event.toolName?.let{ToolRegistry.definitions[it]?.description?.take(150)?:it}
     val label=when(event.code){
         WorkTraceCode.RUN_STARTED->"요청 실행 시작";WorkTraceCode.SEMANTIC_STARTED->"요청과 자료 범위 확인"
-        WorkTraceCode.PLAN_READY->"진행 계획";WorkTraceCode.CONTEXT_READY->"관련 지침·문맥 준비"
+        WorkTraceCode.PLAN_READY->"이번 요청의 이해와 해결 계획";WorkTraceCode.CONTEXT_READY->"관련 지침·문맥 준비"
         WorkTraceCode.INFERENCE_STARTED->"모델 추론 시작";WorkTraceCode.INFERENCE_FINISHED->"모델 추론 구간 종료"
         WorkTraceCode.APPROVAL_WAITING->"실행 전 사용자 확인 대기";WorkTraceCode.APPROVAL_ACCEPTED->"사용자 실행 확인 반영";WorkTraceCode.APPROVAL_DECLINED->"사용자가 실행을 취소함"
         WorkTraceCode.TOOL_STARTED->if(run.status in setOf("running","waiting_approval","queued"))"$tool · 실행 중"else"$tool · 후속 결과 미확인"
@@ -189,7 +190,7 @@ private fun activityEvent(record:WorkTraceRecord,run:ChatRunRecord,start:WorkTra
         else->UiWorkEvidence.NONE
     }
     val detail=buildList {
-        event.publicSummary?.takeIf{it.isNotBlank()}?.let{summary->add(when(event.summarySource){WorkSummarySource.MODEL_PLAN->"모델의 작업 요약: $summary";WorkSummarySource.USER_GOAL->"사용자 목표: $summary";else->summary})}
+        event.publicSummary?.takeIf{it.isNotBlank()}?.let{summary->add(when(event.summarySource){WorkSummarySource.MODEL_PLAN->"에이전트의 공개 설명: $summary";WorkSummarySource.USER_GOAL->"사용자 목표: $summary";else->summary})}
         event.count?.let{add("관찰 항목 수: $it")};if(event.partial==true)add("일부 범위만 확인한 결과입니다.")
         if(start!=null&&record.event.code==WorkTraceCode.TOOL_RESULT){
             add("도구 시작: "+runCatching{Instant.ofEpochMilli(start.atEpochMillis).toString()}.getOrDefault("시각 미기록"))

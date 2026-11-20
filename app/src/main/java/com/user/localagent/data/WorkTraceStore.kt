@@ -215,7 +215,11 @@ object WorkTraceCodec {
         if(event.fileChange!=null){val f=event.fileChange;require(f.relativePath.length in 1..512);com.user.localagent.core.ProjectPaths.segments(f.relativePath);require(sha.matches(f.afterSha256)&&sha.matches(f.workspaceBinding)&&f.bytes>=0);f.beforeSha256?.let{require(sha.matches(it))};require((f.operation==WorkFileOperation.CREATED)==(f.beforeSha256==null));require(f.diffRef==null)}
         return event.copy(publicSummary=event.publicSummary?.let(::maskPreview))
     }
-    fun maskPreview(input:String):String {
+    fun maskPreview(input:String):String = clip(redactPreview(input),280)
+    internal fun redactPublicExplanation(input:String):String =
+        if(hidden.containsMatchIn(input)||input.contains("판단 과정: ")) ""
+        else redactPreview(com.user.localagent.core.CredentialRedaction.redact(input).text)
+    private fun redactPreview(input:String):String {
         var value=input.replace(Regex("[\\p{Cntrl}]")," ")
         value=secret.replace(value){it.groupValues[1]+"\"[비공개]\""}
         value=value.replace(Regex("(?i)\\bBearer\\s+[^\\s]+"),"Bearer [비공개]")
@@ -223,7 +227,7 @@ object WorkTraceCodec {
             .replace(Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"),"[이메일]")
             .replace(Regex("(?<!\\d)(?:\\+?82[- ]?)?0?1[016789][- ]?\\d{3,4}[- ]?\\d{4}(?!\\d)"),"[전화번호]")
             .replace(Regex("[A-Za-z0-9_+/=-]{40,}"),"[비공개 식별값]").trim()
-        return clip(value,280)
+        return value
     }
     internal fun clip(value:String,limit:Int):String {var end=minOf(value.length,limit);if(end<value.length&&end>0&&value[end-1].isHighSurrogate()&&value[end].isLowSurrogate())end--;return value.substring(0,end)}
     fun encode(record:WorkTraceRecord):String {

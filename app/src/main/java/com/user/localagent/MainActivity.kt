@@ -312,7 +312,7 @@ class MainActivity : ComponentActivity() {
                         put("id",run.runId);put("phase",if(run.waitingForApproval)"approval"else "running")
                         put("label",if(run.waitingForApproval)"승인 확인 필요"else "작업 진행 중");put("detail",run.status)
                         put("canCancel",run.runId==runForRoom)
-                        put("evidence",buildJsonArray{roomActivities.values.firstOrNull{it.runId==run.runId&&it.threadId==composerThreadId}?.events.orEmpty().takeLast(8).forEach{event->add(buildJsonObject{
+                        put("evidence",buildJsonArray{publicActivityWindow(roomActivities.values.firstOrNull{it.runId==run.runId&&it.threadId==composerThreadId}?.events.orEmpty()).forEach{event->add(buildJsonObject{
                             put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
                         })}})
                     })}
@@ -321,7 +321,7 @@ class MainActivity : ComponentActivity() {
                                 put("id",activity.runId);put("phase",activity.status)
                                 put("label",when(activity.status){"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
                                 put("detail","");put("canCancel",false)
-                                put("evidence",buildJsonArray{activity.events.takeLast(8).forEach{event->add(buildJsonObject{
+                                put("evidence",buildJsonArray{publicActivityWindow(activity.events).forEach{event->add(buildJsonObject{
                                     put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
                                 })}})
                             })}

@@ -34,10 +34,11 @@ internal class ChatWorkTraceSession private constructor(
     @Suppress("UNUSED_PARAMETER")
     fun progress(summary:String,scope:CoroutineScope){}
 
-    /** The model's own reasoning for one decision, shown as the step's thought process. */
-    suspend fun reasoning(text:String?){
-        val value=text?.trim()?.takeIf {it.isNotEmpty()}?:return
-        stage(WorkTraceCode.PLAN_READY,"판단 과정: "+value.take(900),WorkSummarySource.MODEL_PLAN)
+    /** Only explicit owner-facing plans are published; raw inference is not a public explanation. */
+    suspend fun publicPlan(goal:String,constraints:List<String>){
+        publicWorkPlanParts(goal,constraints).forEach{summary->
+            stage(WorkTraceCode.PLAN_READY,summary,WorkSummarySource.MODEL_PLAN)
+        }
     }
     suspend fun closeProgress(){
         val job=synchronized(progressLock){progressClosed=true;progress.close();progressJob}

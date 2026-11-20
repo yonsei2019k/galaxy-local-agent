@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InlineRunActivityTest {
+    @Test fun publicExplanationRemainsBesideRecentActionsInWebWindow(){
+        val plan=UiRunActivityEvent("plan",UiWorkEventKind.PLAN,"요청 이해",detail="이번 요청의 공개 계획")
+        val actions=(1..40).map{UiRunActivityEvent("tool-$it",UiWorkEventKind.TOOL,"Action")}
+        val window=publicActivityWindow(listOf(plan)+actions)
+        assertEquals(plan,window.first());assertEquals(actions.takeLast(16),window.drop(1))
+        assertEquals(41,(listOf(plan)+actions).size)
+    }
     private fun activity(events:List<UiRunActivityEvent> = emptyList())=UiRunActivity("run-a","thread-a","assistant-a","completed",events=events)
     @Test fun activityRequiresExactRoomAndReservedAssistantId(){
         assertTrue(activityMatchesMessage(activity(),"thread-a","assistant-a"))

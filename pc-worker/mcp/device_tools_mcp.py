@@ -404,7 +404,7 @@ def plan_tool(catalog):
         "and performs no domain effect; host acceptance grants no new permission."),
         "inputSchema": {"type": "object", "additionalProperties": False,
             "required": ["goal", "requiredTools", "constraints"], "properties": {
-                "goal": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "goal": {"type": "string", "minLength": 1, "maxLength": 1000, "description": "Concise Korean public explanation of the current request, concrete steps, and why the method fits. Omit private reasoning, secrets, and completion claims."},
                 "requiredTools": {"type": "array", "minItems": 0, "maxItems": 12,
                     "uniqueItems": True, "items": {"type": "string", "enum": sorted(catalog)}},
                 "constraints": {"type": "array", "minItems": 0, "maxItems": 6,

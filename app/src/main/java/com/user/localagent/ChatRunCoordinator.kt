@@ -945,7 +945,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val directLoop=directNextActionLoop()
                 var semantic=initialSemanticPlan(request,text,actionMode,directLoop,semanticChoice,semanticOfferedTools,usableAttachments.isNotEmpty())
                 requestSemanticPlan=semantic
-                semantic?.let{workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,it.goal,com.user.localagent.data.WorkSummarySource.MODEL_PLAN)}
+                semantic?.let{workTraceSession?.publicPlan(it.goal,it.constraints)}
                 semantic?.let{taskGoal=com.user.localagent.core.SemanticRequestPlanning.toTaskGoal(it)}
                 val directGoalTracking=com.user.localagent.core.DirectSelectedActionGoal.enabled(semantic==null,directLoop,actionMode,request.allowTools)
                 if(directGoalTracking){
@@ -1499,7 +1499,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     }
                     app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("externalAgentPlan" to checkpoint)).toString())
                     persistStepEvidence()
-                    workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,proposed.goal,com.user.localagent.data.WorkSummarySource.MODEL_PLAN)
+                    workTraceSession?.publicPlan(proposed.goal,proposed.constraints)
                     authority().permits(capture)
                 }
             })
@@ -2164,7 +2164,6 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         structuredSchema:String?=null,display:Boolean=true,resume:ContinuationSnapshot?=null,recoverTruncatedTool:Boolean=false,exactManagedReview:Boolean=false):WrittenAnswer =
         LongAnswerWriter(app,request.copy(previousSteps=requestSteps.toList(),readbackObligations=requestReadbackObligations),{id,view->answerStates.value=answerStates.value+(id to view)},makeRequestProgress(request,workTraceSession),engine=executionEngine)
             .write(model,options,if(resume==null)user+com.user.localagent.core.ToolUsePolicy.turnReminder(structuredSchema==null)+com.user.localagent.core.RoundBudget.hint(budgetRound,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS)else user,system,history,structuredSchema=structuredSchema,display=display,resume=resume,recoverTruncatedTool=recoverTruncatedTool,exactManagedReview=exactManagedReview)
-            .also {workTraceSession?.reasoning(executionEngine.lastReasoning)}
 
     private fun modelEvidenceResult(call:ToolCall,result:ToolResult):String=when {
         call.name=="read_note"&&result.success&&result.verification==VerificationState.VERIFIED->com.user.localagent.notes.NoteReadModelDelivery.modelResult(result.content)
