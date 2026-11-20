@@ -1,10 +1,11 @@
 //! Local IPC adapter. This is not a network listener or arbitrary JSON-RPC pass-through.
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use ziphap_pc::{
-    strict_json, AppServerClient, AppServerConfig, RunRequest, ToolResultInput, MAX_LINE,
+    AppServerClient, AppServerConfig, MAX_LINE, ProviderEvent, RunRequest, ToolResultInput,
+    strict_json,
 };
 
 #[derive(Deserialize)]
@@ -42,13 +43,18 @@ async fn output(value: Value) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() {
-    if let Err(code) = execute().await {
-        let _ = output(json!({"type":"error","errorCode":code})).await;
+    let mut active_request = None;
+    if let Err(code) = execute(&mut active_request).await {
+        let mut fault = json!({"type":"error","errorCode":code});
+        if let Some(request_id) = active_request {
+            fault["requestId"] = json!(request_id);
+        }
+        let _ = output(fault).await;
         std::process::exit(1);
     }
 }
 
-async fn execute() -> Result<(), &'static str> {
+async fn execute(active_request: &mut Option<String>) -> Result<(), &'static str> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() != 3
         || args[0] != "--config"
@@ -76,9 +82,7 @@ async fn execute() -> Result<(), &'static str> {
     loop {
         if client.has_pending_events() {
             let event = client.next_event().await.map_err(|e| e.code)?;
-            output(serde_json::to_value(event).map_err(|_| "IPC_OUTPUT")?)
-                .await
-                .map_err(|_| "IPC_OUTPUT")?;
+            publish_event(event, active_request).await?;
             continue;
         }
         enum Next {
@@ -96,11 +100,7 @@ async fn execute() -> Result<(), &'static str> {
         };
         match next {
             Next::Event(result) => {
-                output(
-                    serde_json::to_value(result.map_err(|e| e.code)?).map_err(|_| "IPC_OUTPUT")?,
-                )
-                .await
-                .map_err(|_| "IPC_OUTPUT")?;
+                publish_event(result.map_err(|e| e.code)?, active_request).await?;
             }
             Next::Input(result) => {
                 if result.map_err(|_| "IPC_INPUT")? == 0 {
@@ -123,7 +123,9 @@ async fn execute() -> Result<(), &'static str> {
                         output(json!({"type":"models","catalog":client.models().await.map_err(|e|e.code)?})).await.map_err(|_|"IPC_OUTPUT")?;
                     }
                     Input::Start { request } => {
+                        let request_id = request.request_id.clone();
                         client.begin(request).await.map_err(|e| e.code)?;
+                        *active_request = Some(request_id);
                     }
                     Input::ToolResult { result } => {
                         client
@@ -156,6 +158,20 @@ async fn execute() -> Result<(), &'static str> {
             }
         }
     }
+}
+
+async fn publish_event(
+    event: ProviderEvent,
+    active_request: &mut Option<String>,
+) -> Result<(), &'static str> {
+    let ended = matches!(&event, ProviderEvent::Report { .. });
+    output(serde_json::to_value(event).map_err(|_| "IPC_OUTPUT")?)
+        .await
+        .map_err(|_| "IPC_OUTPUT")?;
+    if ended {
+        *active_request = None;
+    }
+    Ok(())
 }
 
 async fn read_bounded<R: tokio::io::AsyncBufRead + Unpin>(

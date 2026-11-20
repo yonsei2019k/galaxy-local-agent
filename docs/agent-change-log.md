@@ -1,3 +1,7 @@
+## 2026-11-21 — Bind Rust provider faults to the active host request
+
+The Rust PC stdio adapter now includes the active request ID on a fatal error after a start was accepted and before its terminal report was published. A malformed or foreign result cannot replace that ID. The offline executable fixture started a run, waited for a tool proposal, supplied a result bound to a different request, and checked that the error identified the original request and the process exited. The focused test passed. The ID is for a future supervisor lookup in its existing authority table. No broker capability, result text or execution authority is copied into the fault, and the existing provider and phone deployment were untouched.
+
 ## 2026-11-21 — Preserve the late-receipt boundary during Rust PC migration
 
 Claude's read-only comparison found that the currently deployed Python bridge accepts a matching late phone receipt after authority revocation, while the Rust stdio provider rejects expired results and stops the model. A provider stop must leave the separate broker receipt path available. The new synthetic Rust core test verifies that cancelling twice preserves the uncertain call, a different call or authority revision cannot reconcile it, and the exact original verified callback records the outcome without completing or reopening the cancelled run. The focused test passed. This is core regression evidence. No worker, APK or app behavior changed.

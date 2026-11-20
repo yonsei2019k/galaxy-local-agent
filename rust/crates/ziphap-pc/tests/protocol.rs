@@ -88,6 +88,73 @@ fn request(id: &str) -> RunRequest {
         timeout_ms: 10000,
     }
 }
+#[tokio::test]
+async fn stdio_failure_names_only_the_active_host_request() {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let fixture = Fixture::new("tool");
+    let config = fixture.root.join("adapter.json");
+    std::fs::write(
+        &config,
+        json!({
+            "executable":fixture.config.executable,
+            "executableSha256":fixture.config.executable_sha256,
+            "runtimeDirectory":fixture.config.runtime_directory
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_ziphap-pc"))
+        .arg("--config")
+        .arg(config)
+        .arg("--stdio")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let start = json!({"op":"start","request":{
+        "requestId":"active-fixture",
+        "binding":{"ownerId":"owner-fixture","projectBinding":"project-fixture","threadBinding":"thread-fixture",
+            "authorityRevision":1,"executionProfile":"pc-only"},
+        "model":"fixture-model","ownerRequest":"Synthetic bounded request","externalAllowed":true,"timeoutMs":10000,
+        "tools":[{"name":"get_fixture","description":"Synthetic fixture","location":"pc",
+            "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]
+    }});
+    input
+        .write_all(format!("{start}\n").as_bytes())
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let call_id = loop {
+            let line = lines.next_line().await.unwrap().unwrap();
+            let event: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if event["type"] == "tool_call" {
+                break event["callId"].as_str().unwrap().to_owned();
+            }
+            assert_ne!(event["type"], "error", "{event}");
+        };
+        let bad = json!({"op":"tool_result","result":{
+            "requestId":"unbound-fixture","callId":call_id,"success":true,"text":"hidden fixture"
+        }});
+        input
+            .write_all(format!("{bad}\n").as_bytes())
+            .await
+            .unwrap();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let fault: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            json!({"type":"error","errorCode":"RUN_BINDING","requestId":"active-fixture"}),
+            fault
+        );
+        assert!(!child.wait().await.unwrap().success());
+    })
+    .await
+    .unwrap();
+}
 async fn complete(client: &mut AppServerClient) -> Vec<ProviderEvent> {
     let mut events = vec![];
     loop {
