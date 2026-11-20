@@ -299,6 +299,31 @@ class GatewayTests(unittest.TestCase):
                 self.assert_code("INVALID_CALL_RECEIPT", gateway.call_tool, "read_note", {"id": "x"})
                 self.assertEqual(CALL, gateway.uncertain_call)
 
+    def test_public_skip_is_bound_to_the_current_submission(self):
+        transport, clock = FakeTransport(), Clock()
+        transport.status["tools"][0]["name"] = "read_webpage"
+        gateway = mcp.Gateway(binding(), transport, clock.now, clock.now, clock.wait, lambda: CALL)
+        gateway.list_tools()
+        transport.responses = [{"callId": CALL, "state": "SKIPPED", "reason": "PUBLIC_READ_REPEAT"}, receipt()]
+        value = gateway.call_tool("read_webpage", {"id": "repeated"})
+        self.assertTrue(value["isError"])
+        self.assertIn("PUBLIC_READ_REPEAT", value["content"][0]["text"])
+        self.assertIsNone(gateway.uncertain_call)
+        self.assertFalse(gateway.call_tool("read_webpage", {"id": "alternative"})["isError"])
+        self.assertEqual(2, len(transport.submissions()))
+
+    def test_known_public_failure_can_try_another_read_but_invalid_skip_cannot(self):
+        transport, clock = FakeTransport(), Clock()
+        transport.status["tools"][0]["name"] = "read_webpage"
+        gateway = mcp.Gateway(binding(), transport, clock.now, clock.now, clock.wait, lambda: CALL)
+        gateway.list_tools()
+        transport.responses = [receipt(success=False, verification="FAILED"),
+                               {"callId": OTHER, "state": "SKIPPED", "reason": "PUBLIC_READ_REPEAT"}]
+        self.assertTrue(gateway.call_tool("read_webpage", {"id": "first"})["isError"])
+        self.assertIsNone(gateway.uncertain_call)
+        self.assert_code("INVALID_CALL_RECEIPT", gateway.call_tool, "read_webpage", {"id": "second"})
+        self.assertEqual(CALL, gateway.uncertain_call)
+
     def test_cancel_before_submission_has_zero_effect_requests(self):
         gateway, transport, _ = fixture()
         event = threading.Event(); event.set()

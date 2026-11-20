@@ -41,6 +41,10 @@ INSTRUCTIONS = (
 )
 
 
+PUBLIC_WEB_READS = frozenset({"read_webpage", "search_web", "search_shopping"})
+FAILED_READS_HAVE_NO_EFFECT = PUBLIC_WEB_READS | {"read_screen"}
+
+
 class BridgeError(Exception):
     """Fixed public error code only; never include transport/config exception text."""
 
@@ -514,6 +518,11 @@ class Gateway:
             submitted = True  # An HTTP error after this point may conceal an accepted effect.
             response = self.transport.request("POST", self.base + "/call",
                                               {"callId": call_id, "tool": name, "arguments": arguments})
+            if name in PUBLIC_WEB_READS and response == {
+                    "callId": call_id, "state": "SKIPPED", "reason": "PUBLIC_READ_REPEAT"}:
+                return {"content": [{"type": "text", "text":
+                        "PUBLIC_READ_REPEAT: This exact lookup already ran. Use any earlier verified result, "
+                        "choose a different query or source, or report what remains unverified."}], "isError": True}
             sequence = None
             while True:
                 if cancel.is_set():
@@ -621,7 +630,10 @@ class Gateway:
                    "effectVerified": state == "COMPLETED" and result["success"] and result["verification"] == "VERIFIED"}
         # Refuse rather than silently clip source bodies or call a partial result complete.
         raw = json_bytes(payload, MAX_MESSAGE_BYTES - 1024)
-        if not payload["effectVerified"] and not result["effectNotApplied"] and result["verification"] != "PREPARED":
+        settled_failure = (tool in FAILED_READS_HAVE_NO_EFFECT and not result["success"]
+                           and result["verification"] == "FAILED")
+        if (not payload["effectVerified"] and not result["effectNotApplied"]
+                and result["verification"] != "PREPARED" and not settled_failure):
             self.uncertain_call = call_id
         output = {"content": [{"type": "text", "text": raw.decode("utf-8")}],
                   "isError": state != "COMPLETED" or not result["success"]}

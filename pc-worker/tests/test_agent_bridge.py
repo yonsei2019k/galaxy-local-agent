@@ -334,6 +334,32 @@ class AgentBridgePlanTests(unittest.TestCase):
         grant = self.grant | {"parentRunId": uid(), "phoneTools": [spec]}
         self.assertEqual(400, self.broker.dispatch_authenticated("POST", self.base, grant["parentRunId"], grant)[0])
 
+    def test_exact_public_read_repeats_do_not_spend_a_phone_call(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        tool = note_tool() | {"name": "search_web"}
+        self.grant["phoneTools"] = [tool]
+        self._register()
+        self.accept(self.plan(["search_web"]))
+        args = {"content": "same public query"}
+        failure = {"success": False, "verification": "FAILED", "effectNotApplied": False, "content": "temporary"}
+        for _ in range(2):
+            proposed, (status, _) = self.propose("search_web", args)
+            self.assertEqual(202, status)
+            _, ack = self.claim(proposed)
+            self.post_result(proposed, ack, failure)
+        blocked, (status, result) = self.propose("search_web", args)
+        self.assertEqual((200, {"callId": blocked["callId"], "state": "SKIPPED", "reason": "PUBLIC_READ_REPEAT"}),
+                         (status, result))
+        self.assertEqual(2, self.phone_request("GET")[1]["lastSequence"])
+        changed = {"content": "alternative public query"}
+        proposed, (status, _) = self.propose("search_web", changed)
+        self.assertEqual(202, status)
+        _, ack = self.claim(proposed)
+        self.post_result(proposed, ack)
+        self.assertEqual("SKIPPED", self.propose("search_web", changed)[1][1]["state"])
+        self.assertEqual("COMPLETED", self.propose("search_web", changed, cid=proposed["callId"])[1][1]["state"])
+
     def test_plan_ack_capability_roles_and_no_action_before_acceptance(self):
         self.assertEqual(409, self.propose()[1][0])
         self.assertEqual(403, self.phone_request("POST", "/plan", self.plan())[0])
@@ -461,6 +487,26 @@ class AgentBridgePlanTests(unittest.TestCase):
         status, failure = self.propose()[1]
         self.assertEqual(403, status)
         self.assertEqual("RECOVERY_FINAL_ANSWER_ONLY", failure["error"])
+
+    def test_exhausted_read_budget_can_finish_from_bounded_verified_observations(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        self.grant["phoneTools"] = [clock_tool(), clock_tool() | {"name": "read_webpage"}]
+        self._register()
+        self.accept(self.plan(["get_current_datetime", "read_webpage"]))
+        for index in range(MAX_CALLS):
+            proposed, (status, _) = self.propose()
+            self.assertEqual(202, status)
+            _, ack = self.claim(proposed)
+            self.post_result(proposed, ack, verified() | {"content": str(index) + ("x" * 1600)})
+        context = self.broker.read_recovery_context(self.owner, self.sid, self.phone, before_plan=True)
+        self.assertTrue(context["readBudgetExhausted"])
+        self.assertTrue(context["observationsOmitted"])
+        self.assertEqual([], context["acceptedTools"])
+        self.assertLessEqual(len(canonical(context)), 16384)
+        self.assertTrue(context["observedReads"][-1]["result"].startswith(str(MAX_CALLS - 1)))
+        status, rejection = self.propose("read_webpage")[1]
+        self.assertEqual((403, "RECOVERY_FINAL_ANSWER_ONLY"), (status, rejection["error"]))
 
     def test_write_scope_cannot_restart_a_provider_for_a_read(self):
         self.accept(self.plan(["get_current_datetime", "save_note"]))

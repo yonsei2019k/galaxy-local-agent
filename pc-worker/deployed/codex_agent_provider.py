@@ -295,12 +295,16 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
                                   "Choose the next useful action from the original goal, constraints and observations. "
                                   "If browserOpened is true, observe the existing page with read_app_browser_page only. "
                                   "When browserObservationComplete or readObservationsComplete is true, use only the supplied verified observations for the final response. "
-                                  "Use reported_done and answer the question if the observation contains the requested facts. "
+                                  "Use reported_done only if the supplied observations establish the requested answer. "
+                                  "An earlier screen or timestamp observation is historical. "
+                                  "When readBudgetExhausted or observationsOmitted is true, identify any missing facts. "
                                   "If it does not, state the specific missing evidence. Make no further calls. "
                                   "Check that the resulting source matches the request before answering. "
                                   "If the note target is unambiguous, submit the exact requested change for phone review. "
                                   "Ask for a genuinely missing owner choice; never decide it for the owner. "
-                                  "Do not repeat a failed call with identical arguments.")
+                                  "A public web lookup known to have had no effect may be retried once. "
+                                  "If the same lookup fails again or is skipped, change the query or source, "
+                                  "or finish with the verified evidence already available.")
         instructions.write_text(instructions_text, encoding="utf-8")
         schema.write_text(json.dumps(FINAL_SCHEMA), encoding="utf-8")
         args, environment = build_launch(config, bootstrap, instructions, schema, external_allowed)

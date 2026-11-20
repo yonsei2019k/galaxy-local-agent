@@ -29,7 +29,8 @@ import uuid
 
 RESTART_POLICY = "RAM_ONLY_RESTART_REVOKES"
 # Fixed host contracts, never inferred from names, model prose or page contents.
-FAILED_READS_HAVE_NO_EFFECT = frozenset({'read_webpage','search_web','search_shopping','read_screen'})
+PUBLIC_WEB_READS = frozenset({"read_webpage", "search_web", "search_shopping"})
+FAILED_READS_HAVE_NO_EFFECT = PUBLIC_WEB_READS | {"read_screen"}
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
 MAX_TTL_MS = 900_000
@@ -602,16 +603,23 @@ class AgentBridge:
                 else:
                     return None
             all_required_reads_verified = set(plan["requiredTools"]) <= verified_tools
-            if all_required_reads_verified:
-                if failed or not (before_plan or settled_only):
-                    return None
+            out_of_calls = len(session.calls) >= MAX_CALLS
+            if (observed and (before_plan or settled_only)
+                    and ((all_required_reads_verified and not failed) or
+                         (out_of_calls and set(plan["requiredTools"]) <= reads))):
                 context = {"planAccepted": True, "acceptedTools": [], "readObservationsComplete": True,
-                           "failedReads": [], "observedReads": observed}
-                if len(canonical(context)) > 16384:
+                           "readBudgetExhausted": out_of_calls, "observationsOmitted": False,
+                           "failedReads": [], "observedReads": []}
+                for entry in reversed(observed):
+                    context["observedReads"].insert(0, entry)
+                    if len(canonical(context)) > 16384:
+                        context["observedReads"].pop(0)
+                if not context["observedReads"]:
                     return None
+                context["observationsOmitted"] = len(context["observedReads"]) < len(observed)
                 session.finalize_reads_only = True
                 return copy.deepcopy(context)
-            if settled_only or session.finalize_reads_only or len(session.calls) >= MAX_CALLS:
+            if all_required_reads_verified or settled_only or session.finalize_reads_only or out_of_calls:
                 return None
             context = {"planAccepted": True, "acceptedTools": plan["requiredTools"], "failedReads": failed, "observedReads": observed}
             return copy.deepcopy(context) if len(canonical(context)) <= 16384 else None
@@ -716,8 +724,14 @@ class AgentBridge:
                     _require(not tool.startswith("pc_") or s.profile in self._profiles,
                              "WORKSPACE_PROFILE", 403)
                     _require(s.active is None, "CALL_ALREADY_ACTIVE", 409)
-                    _require(len(s.calls) < MAX_CALLS, "CALL_BUDGET", 429)
                     _validate(arguments, s.tools[tool]["inputSchema"])
+                    if tool in PUBLIC_WEB_READS:
+                        previous = [c for c in s.calls.values() if c.payload_digest == payload
+                                    and c.state == "COMPLETED" and c.source == "PHONE_EXECUTOR"]
+                        if len(previous) >= 2 or any(c.result and c.result["success"]
+                                                     and c.result["verification"] == "VERIFIED" for c in previous):
+                            return 200, {"callId": cid, "state": "SKIPPED", "reason": "PUBLIC_READ_REPEAT"}
+                    _require(len(s.calls) < MAX_CALLS, "CALL_BUDGET", 429)
                     c = _Call(cid, len(s.calls) + 1, tool, copy.deepcopy(arguments), payload)
                     s.calls[cid], s.active = c, cid
                     s.revision += 1

@@ -1,3 +1,13 @@
+## 2026-11-20 — Limit identical public web reads and finish from recorded evidence
+
+Claude's X-033/C-038 review applied OpenClaw's tool name and canonical arguments comparison to exact public web lookups. A verified lookup may be used again from its existing observation. A definitive failed public lookup can run once more. A further identical lookup receives a request-ID-bound pre-dispatch notice and consumes no new phone call or evidence row. The gateway preserves the distinction between a settled public read failure and an unresolved effect. Screen/time polling and write behavior retain their existing admission rules.
+
+When every selected action is a read and the call budget is exhausted, the provider can finish once from verified observations within the existing byte and time limits. The broker blocks all new tool calls in that response. Omitted or historical observations are marked, and Android's completion checks still apply. The earlier 18-call Jeju run proved budget exhaustion, while the available receipt did not retain arguments to establish which calls were identical.
+
+PC suite 252 cases, 242 passed and 10 skipped. MCP gateway suite 58 passed. The existing Codex shared-inbox monitor was running and current. Claude's active-session watcher woke on X-033 and was rearmed. Closed-session Claude wake and inactive Codex automatic wake are unverified. The PC-worker release is staged while compute is active. The installed 2032 Android package is unaffected by these PC source changes.
+
+OpenClaw reference: [tool repeat guard in PR #199591](https://github.com/openclaw/openclaw/pull/199591) and [MIT license](https://github.com/openclaw/openclaw/blob/main/LICENSE).
+
 ## 2026-11-20 — Explicit image pause in the studio
 
 The studio offers 일시정지 for a running paired-PC image job after its owner-bound report exposes a saved native checkpoint. Current generation and deletion still use their existing controls. The pause request uses the same owner, route and active job ID, and the UI waits for a paused recovery phase and confirmed resource cleanup. 이어가기 uses the existing encrypted ticket and original reference, seed and model settings.
