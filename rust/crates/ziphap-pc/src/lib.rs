@@ -252,6 +252,7 @@ struct Active {
     turn: String,
     tools: BTreeMap<String, ToolCapability>,
     phone_deadline: Option<u64>,
+    started_epoch_ms: u64,
     authority_revision: u64,
     started: Instant,
     timeout: Duration,
@@ -264,6 +265,12 @@ struct Active {
     final_text: Option<String>,
     pending: BTreeMap<String, (Value, ToolLocation)>,
     observed_calls: BTreeSet<String>,
+}
+
+impl Active {
+    fn authority_now_ms(&self) -> u64 {
+        authority_epoch_ms(self.started_epoch_ms, self.started.elapsed(), epoch_ms())
+    }
 }
 
 pub struct AppServerClient {
@@ -465,6 +472,7 @@ impl AppServerClient {
 
     async fn begin_inner(&mut self, request: RunRequest) -> Result<()> {
         let started = Instant::now();
+        let started_epoch_ms = epoch_ms();
         request.validate()?;
         if !self.usable {
             return Err(error("PROCESS_REVOKED"));
@@ -563,6 +571,7 @@ impl AppServerClient {
                 .map(|v| (v.name.clone(), v))
                 .collect(),
             phone_deadline: request.phone_authority_expires_at_epoch_ms,
+            started_epoch_ms,
             authority_revision: request.binding.authority_revision,
             started,
             timeout: Duration::from_millis(request.timeout_ms),
@@ -743,7 +752,7 @@ impl AppServerClient {
             }
             let capability = a.tools.get(tool).ok_or_else(|| error("UNKNOWN_TOOL"))?;
             if capability.location == ToolLocation::Phone
-                && a.phone_deadline.is_none_or(|at| at <= epoch_ms())
+                && a.phone_deadline.is_none_or(|at| at <= a.authority_now_ms())
             {
                 return Err(error("PHONE_AUTHORITY_EXPIRED"));
             }
@@ -897,7 +906,7 @@ impl AppServerClient {
         if a.started.elapsed() >= a.timeout {
             return Err(error("RUN_TIMEOUT"));
         }
-        if phone && a.phone_deadline.is_none_or(|at| at <= epoch_ms()) {
+        if phone && a.phone_deadline.is_none_or(|at| at <= a.authority_now_ms()) {
             return Err(error("PHONE_AUTHORITY_EXPIRED"));
         }
         Ok(())
@@ -913,10 +922,12 @@ impl AppServerClient {
     ) -> Result<()> {
         self.check_deadline(false)?;
         let a = self.active.as_mut().ok_or_else(|| error("NO_ACTIVE_RUN"))?;
+        let wall_now = epoch_ms();
+        let now = authority_epoch_ms(a.started_epoch_ms, a.started.elapsed(), wall_now);
         if a.request_id != request_id
             || a.authority_revision != authority_revision
-            || expires_at_epoch_ms <= epoch_ms()
-            || expires_at_epoch_ms > epoch_ms().saturating_add(30000)
+            || expires_at_epoch_ms <= now
+            || expires_at_epoch_ms > wall_now.saturating_add(30_000)
         {
             return Err(error("PHONE_AUTHORITY_BINDING"));
         }
@@ -1017,6 +1028,12 @@ impl Drop for AppServerClient {
         let _ = self.child.start_kill();
         let _ = std::fs::remove_dir(&self.workspace);
     }
+}
+
+// Keep accepting the broker timestamp format without permitting wall-clock rollback.
+fn authority_epoch_ms(start_epoch: u64, elapsed: Duration, wall_epoch: u64) -> u64 {
+    let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+    wall_epoch.max(start_epoch.saturating_add(elapsed_ms))
 }
 
 fn epoch_ms() -> u64 {
@@ -1455,6 +1472,22 @@ pub fn strict_json(data: &[u8]) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clock_rollback_cannot_extend_phone_authority() {
+        let start = 1_000_000;
+        let deadline = start + 30_000;
+        assert!(authority_epoch_ms(start, Duration::from_secs(29), start) < deadline);
+        assert_eq!(
+            authority_epoch_ms(start, Duration::from_secs(30), start),
+            deadline
+        );
+        assert!(
+            authority_epoch_ms(start, Duration::from_secs(3), start + 31_000)
+                > deadline
+        );
+    }
+
     #[test]
     fn only_answer_text_streams_and_partial_unicode_escapes_wait_without_panics() {
         assert_eq!(
