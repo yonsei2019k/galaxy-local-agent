@@ -33,6 +33,7 @@ pub fn older_turn_byte_limits(
 /// Choose a second history row to reserve with the newest eligible message.
 /// A same-run exchange wins. On return to a paused, unanswered owner request,
 /// adjacent owner instructions precede an answer from a different run.
+/// A cross-run fallback is reserved only within the newest eligible turn window.
 pub fn context_partner(
     is_owner: &[bool],
     same_run_as_newest: &[bool],
@@ -53,7 +54,7 @@ pub fn context_partner(
         if returning_to_paused_request && is_owner[newest] && is_owner[previous] {
             Some(previous)
         } else {
-            Some(fallback)
+            (newest - fallback < MAX_TURNS).then_some(fallback)
         }
     })?;
     u32::try_from(partner).ok()

@@ -70,6 +70,17 @@ class CloudConversationContextTest {
         assertEquals((5..12).map{binding(it).runId},turns(result).map{it.getValue("sourceRunId").jsonPrimitive.content})
     }
 
+    @Test fun staleCrossRunReplyCannotDisplaceARecentOwnerCorrection() {
+        val correction = "Correction: use Friday."
+        val history = listOf(turn(1), turn(1, "assistant", "Earlier reply"), turn(2, text = correction)) +
+            (3..9).map { turn(it) }
+        val result = checkNotNull(build(history))
+        val rows = turns(result)
+        assertEquals((2..9).map { binding(it).runId }, rows.map { it.getValue("sourceRunId").jsonPrimitive.content })
+        assertEquals(correction, rows.first().getValue("text").jsonPrimitive.content)
+        assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
+    }
+
     @Test fun surrogateBoundaryIsNeverSplitAndClippingIsVisible(){
         val value="a".repeat(CloudConversationContext.MAX_TURN_CHARS-15)+"😀".repeat(20)
         val text=turns(checkNotNull(build(listOf(turn(1,text=value))))).single().getValue("text").jsonPrimitive.content
