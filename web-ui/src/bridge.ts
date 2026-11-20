@@ -1,3 +1,9 @@
+export interface ResultPreview {
+  messageId: string
+  kind: 'image' | 'chart'
+  src: string | null
+}
+
 export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -46,6 +52,7 @@ export interface Snapshot {
   modelId: string
   modelLabel: string
   messages: ConversationMessage[]
+  resultPreviews?: ResultPreview[]
   threads: Thread[]
   staffRooms?: Thread[]
   tasks: Task[]
@@ -136,6 +143,13 @@ function list<T>(value: unknown, guard: (item: unknown) => item is T): value is 
   return Array.isArray(value) && value.every(guard)
 }
 
+function resultPreview(value: unknown): value is ResultPreview {
+  return record(value) && typeof value.messageId === 'string' &&
+    (value.kind === 'image' || value.kind === 'chart') &&
+    (value.src === null || (typeof value.src === 'string' && value.src.length <= 240024 &&
+      /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.src)))
+}
+
 function message(value: unknown): value is ConversationMessage {
   return record(value) && strings(value, 'id', 'text') &&
     (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool')
@@ -197,6 +211,10 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (!list(value.messages, message) || !list(value.threads, thread) || !list(value.tasks, task) || !list(value.models, model)) return null
   const threads = value.threads
   if (threads.some(item => item.selected && item.id !== value.threadId)) return null
+  const messages = value.messages
+  if (value.resultPreviews !== undefined && (!list(value.resultPreviews, resultPreview) ||
+    value.resultPreviews.length > 2 ||
+    value.resultPreviews.some(preview => !messages.some(message => message.id === preview.messageId && message.role === 'assistant')))) return null
   if (value.staffRooms !== undefined && (!list(value.staffRooms, thread) || value.staffRooms.length > 4 ||
     value.staffRooms.some(room => !threads.some(item => item.id === room.id && item.selected === room.selected)))) return null
   if (value.activeModelLabel !== undefined && typeof value.activeModelLabel !== 'string') return null

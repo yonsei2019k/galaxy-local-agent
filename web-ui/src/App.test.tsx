@@ -77,6 +77,27 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('shows two host-bound previews and clears them after switching conversations', () => {
+    mount()
+    host.style.width = '320px'
+    const messages: Snapshot['messages'] = [{ id: 'answer', role: 'assistant', text: '확인한 결과' }]
+    const jpeg = 'data:image/jpeg;base64,AA=='
+    const resultPreviews: Snapshot['resultPreviews'] = [
+      { messageId: 'answer', kind: 'chart', src: jpeg },
+      { messageId: 'answer', kind: 'image', src: jpeg },
+    ]
+    snapshot({ ...base, messages, resultPreviews })
+    const images = [...host.querySelectorAll<HTMLImageElement>('.answer-result img')]
+    expect(images.map(image => image.alt)).toEqual(['데이터 분석 차트', '기기에서 생성한 이미지'])
+    act(() => { images[0].dispatchEvent(new Event('error')) })
+    expect(host.querySelector('.answer-result [role="status"]')?.textContent).toContain('표시할 수 없습니다')
+    expect(readSnapshot({ ...base, messages, resultPreviews: [{ ...resultPreviews[0], src: 'https://invalid.example/image.jpg' }] })).toBeNull()
+    expect(readSnapshot({ ...base, messages: [], resultPreviews })).toBeNull()
+    snapshot({ ...base, threadId: 'thread-b', branchId: 'branch-b',
+      threads: base.threads.map(room => ({ ...room, selected: room.id === 'thread-b' })) })
+    expect(host.querySelector('.answer-result')).toBeNull()
+  })
+
   it('binds renaming to the visible conversation and drops old drafts on a room switch', () => {
     mount()
     snapshot(base)

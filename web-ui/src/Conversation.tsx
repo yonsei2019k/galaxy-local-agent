@@ -2,7 +2,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
 import type { IconName } from './Icon'
-import type { ConversationMessage, Snapshot, Task } from './bridge'
+import type { ConversationMessage, ResultPreview, Snapshot, Task } from './bridge'
 import { isLiveTaskPhase } from './composer'
 
 const phasePresentation: Record<string, { title: string; tone: string; icon: IconName }> = {
@@ -42,8 +42,9 @@ function Welcome() {
   )
 }
 
-function Message({ message, enabled, onCopy, onMessageMenu }: {
+function Message({ message, previews, enabled, onCopy, onMessageMenu }: {
   message: ConversationMessage
+  previews: ResultPreview[]
   enabled: boolean
   onCopy(messageId: string): void
   onMessageMenu(messageId: string): void
@@ -55,6 +56,7 @@ function Message({ message, enabled, onCopy, onMessageMenu }: {
       {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> ZipHap</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
       {assistant ? <RichAnswer text={message.text} /> : <div className="message-text" dir="auto">{message.text}</div>}
+      {assistant && previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}
       {(assistant || user) && (
         <div className="message-actions">
           {assistant && <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
@@ -65,6 +67,17 @@ function Message({ message, enabled, onCopy, onMessageMenu }: {
       )}
     </article>
   )
+}
+
+function ResultFigure({ preview }: { preview: ResultPreview }) {
+  const [failed, setFailed] = useState(false)
+  const label = preview.kind === 'chart' ? '데이터 분석 차트' : '기기에서 생성한 이미지'
+  return <figure className="answer-result">
+    <figcaption>{label}</figcaption>
+    {preview.src && !failed
+      ? <img src={preview.src} alt={label} onError={() => setFailed(true)} />
+      : <p role="status">미리보기를 표시할 수 없습니다</p>}
+  </figure>
 }
 
 function TaskCard({ task }: { task: Task }) {
@@ -148,7 +161,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
               {pausedTasks.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
             <div className="messages" role="log" aria-label="메시지">
-              {messages.map(item => <Message key={item.id} message={item} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />)}
+              {messages.map(item => <Message key={item.id} message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />)}
             </div>
             {liveTasks.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
               {liveTasks.map(item => <TaskCard key={item.id} task={item} />)}

@@ -268,6 +268,14 @@ class MainActivity : ComponentActivity() {
         }
         val pending by approval.collectAsState()
         val messages by lines.collectAsState()
+        val previewMessageIds = messages.takeLast(160).filter { it.role == "assistant" }.map { it.id }.toSet()
+        val resultPreviews = key(composerThreadId, currentBranchId) {
+            val result by produceState(kotlinx.serialization.json.JsonArray(emptyList()), previewMessageIds, activeExecutions.filter { it.threadId == composerThreadId }.map { it.runId }) {
+                value = com.user.localagent.ui.ChatResultPreviews.load(
+                    this@MainActivity, app, composerThreadId, currentBranchId, previewMessageIds)
+            }
+            result
+        }
         val installed by app.models.models.collectAsState()
         val chosenId by preferredModelId.collectAsState()
         val attachments by app.chatAttachments.state.collectAsState()
@@ -303,6 +311,7 @@ class MainActivity : ComponentActivity() {
                     put("status",if(runForRoom!=null||activeExecutions.isEmpty())state else "다른 대화에서 작업 중")
                     put("modelId",chosenId);put("modelLabel",modelChoices.find{it.first==chosenId}?.second?:"선택한 모델")
                     put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&!preparingAttachments&&attachments.isEmpty())
+                    put("resultPreviews",resultPreviews)
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
                         put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
                     })}})

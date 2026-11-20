@@ -137,6 +137,14 @@ class PcToolClient(private val context:Context,private val store:ConnectionStore
                 val output=File(directory,"$requestId.png");output.writeBytes(image);check(sha(output.readBytes())==sha(image))
                 val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",output)
                 shown["chartUri"]=JsonPrimitive(uri.toString());store.write("pc.chart."+PcDataSelection.storageKey(selected),uri.toString())
+                if (computeOwner != null) {
+                    verifyOriginalSource()
+                    store.write("pc.chat.chart." + PcDataSelection.storageKey(selected), buildJsonObject {
+                        put("runId", computeOwner)
+                        put("fileName", output.name)
+                        put("fileSha256", sha(image))
+                    }.toString())
+                }
             }
             if(success)store.write("pc.tools.verified",identity(config))
             var content=JsonObject(shown).toString()

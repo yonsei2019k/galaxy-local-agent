@@ -17,3 +17,7 @@
 .answer-chart ul { list-style: none; padding: 0; margin: .5rem 0 0; }
 .answer-chart li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .5rem; margin-bottom: .35rem; }
 .answer-chart meter { width: 100%; grid-column: 1 / -1; }
+
+.answer-result { margin: .65rem 0; max-width: 100%; }
+.answer-result figcaption { font-weight: 650; margin-bottom: .35rem; }
+.answer-result img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: .6rem; }
