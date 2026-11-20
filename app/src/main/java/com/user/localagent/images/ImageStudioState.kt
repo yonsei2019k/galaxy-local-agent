@@ -10,7 +10,8 @@ data class ImageStudioState(val phase:String="만들고 싶은 장면을 적어�
     val mode:String="txt2img",val referenceSha256:String?=null,val referenceWidth:Int?=null,val referenceHeight:Int?=null,val strength:Float?=null,
     val computeLocation:String="phone",val sourceModelId:String?=null,val canResumePc:Boolean=false,val archivedPcCount:Int=0,
     val outputOrigin:ImageOutputOrigin=ImageOutputOrigin.CURRENT,val outputDetails:ImageOutputDetails?=null,
-    val canPausePc:Boolean=false,val pauseRequested:Boolean=false) {
+    val canPausePc:Boolean=false,val pauseRequested:Boolean=false,val outputHidden:Boolean=false) {
+    val previewPath:String? get()=outputPath.takeUnless{outputHidden}
     private fun resultDetails()=ImageOutputDetails(seed,sourceModelId,computeLocation,mode,referenceSha256,referenceWidth,referenceHeight,strength)
     val displayedOutput:ImageOutputDetails? get()=if(outputPath==null)null else outputDetails?:resultDetails()
     val outputTitle:String get()=when(outputOrigin){
@@ -22,5 +23,5 @@ data class ImageStudioState(val phase:String="만들고 싶은 장면을 적어�
         outputDetails=displayedOutput,canPausePc=false,pauseRequested=false)
     /** Called only after the image and its metadata have been saved and read back. */
     fun savedOutput(restored:Boolean=false)=copy(outputOrigin=if(restored)ImageOutputOrigin.RESTORED else ImageOutputOrigin.CURRENT,
-        outputDetails=if(outputPath==null)null else resultDetails())
+        outputDetails=if(outputPath==null)null else resultDetails(),outputHidden=restored&&outputHidden)
 }

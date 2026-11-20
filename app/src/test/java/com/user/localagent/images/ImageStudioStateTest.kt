@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ImageStudioStateTest {
+    @Test fun hiddenResultDoesNotReappearOnRestoreOrDuringAnotherAttempt(){
+        val hidden=completed().copy(outputHidden=true)
+        assertNull(hidden.savedOutput(restored=true).previewPath)
+        assertNull(hidden.beginAttempt().previewPath)
+        assertEquals(hidden.outputPath,hidden.copy(outputHidden=false).previewPath)
+        assertEquals("new.png",hidden.copy(outputPath="new.png").savedOutput().previewPath)
+    }
     private fun completed()=ImageStudioState(outputPath="synthetic-prior.png",seed=73,sourceModelId="fixture-old-model",
         computeLocation="pc",mode="img2img",referenceSha256="a".repeat(64),referenceWidth=800,referenceHeight=600,
         strength=.5f,progress=1f,step=50,totalSteps=50).savedOutput()

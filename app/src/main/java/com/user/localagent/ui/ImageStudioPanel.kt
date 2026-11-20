@@ -60,6 +60,8 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     var sourceHash by rememberSaveable{mutableStateOf("")}
     var importing by remember{mutableStateOf(false)}
     var saving by remember{mutableStateOf(false)}
+    var changingResult by remember{mutableStateOf(false)}
+    var deleteResultPath by remember{mutableStateOf<String?>(null)}
     var downloadJob by remember{mutableStateOf<Job?>(null)}
     var output by remember{mutableStateOf<ImageBitmap?>(null)}
     var outputForPath by remember{mutableStateOf<String?>(null)}
@@ -103,7 +105,7 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
     var referencePreview by remember{mutableStateOf<ImageBitmap?>(null)}
     val usePc=pc.paired&&pc.preferPcImages
     val displayedOutput=state.displayedOutput
-    val visibleOutput=output.takeIf{outputForPath==state.outputPath}
+    val visibleOutput=output.takeIf{state.previewPath!=null&&outputForPath==state.previewPath}
     val pcModelTitle=if(fastPc)"FLUX.2 klein · 4B Q4_0"
         else if(pc.imageModelId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID)"SDXL 1.0 · Q4_K"
         else if(transform)"Qwen-Image-Edit-2511 · 20B Q4_K_M"else"Qwen-Image-2512 · 20B Q4_K_M"
@@ -140,9 +142,9 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
 
     LaunchedEffect(initialPrompt){if(initialPrompt.isNotBlank()){prompt=initialPrompt;onInitialPromptConsumed()}}
     LaunchedEffect(app){try{app.imageStudio.models.refresh()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("이미지 모델 상태를 확인하지 못했습니다.")}}
-    LaunchedEffect(state.outputPath){
+    LaunchedEffect(state.previewPath){
         output=null;outputForPath=null;previewFailed=false
-        val path=state.outputPath?:return@LaunchedEffect
+        val path=state.previewPath?:return@LaunchedEffect
         output=withContext(Dispatchers.IO){runCatching {
             val file=File(path);require(file.isFile)
             val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
@@ -263,8 +265,20 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
 
             // ③ 결과·저장
             item {Text("결과",style=MaterialTheme.typography.titleMedium)}
+            state.outputPath?.let {path->item {
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    TextButton(enabled=!changingResult,onClick={scope.launch {
+                        changingResult=true
+                        try { app.imageStudio.setOutputHidden(path,!state.outputHidden) }
+                        catch(cancel:CancellationException){throw cancel}
+                        catch(error:Exception){onStatus(error.message?:"이미지 표시 설정을 바꾸지 못했습니다.")}
+                        finally {changingResult=false}
+                    }}){Text(if(state.outputHidden)"다시 보기" else "결과 숨기기")}
+                    TextButton(enabled=!state.running&&!saving&&!changingResult,onClick={deleteResultPath=path}){Text("결과 삭제")}
+                }
+            }}
             item {Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceContainer),contentAlignment=Alignment.Center){
-                if(compareReference&&referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256)Image(bitmap=referencePreview!!,contentDescription="고정 기준 사진",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+                if(!state.outputHidden&&compareReference&&referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256)Image(bitmap=referencePreview!!,contentDescription="고정 기준 사진",modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
                 else if(visibleOutput!=null){
                     Image(bitmap=visibleOutput,contentDescription=state.outputTitle,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
                     if(state.outputOrigin!=com.user.localagent.images.ImageOutputOrigin.CURRENT)Surface(modifier=Modifier.align(Alignment.TopStart).padding(10.dp),shape=RoundedCornerShape(8.dp)){
@@ -273,11 +287,11 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
                 }
                 else Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)){
                     StudioPlaceholder(Modifier.size(70.dp),MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else if(state.outputPath!=null)"결과 이미지를 불러오는 중"else "아직 결과가 없습니다.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if(state.outputHidden)"결과를 숨겼습니다." else if(previewFailed)"미리보기를 열지 못했습니다." else if(state.running)state.phase else if(state.outputPath!=null)"결과 이미지를 불러오는 중"else "아직 결과가 없습니다.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }}
-            if(previewFailed&&!state.running&&state.outputPath!=null)item {ZipHapCard {Text("작업이 끝났다고 표시됐지만 결과 이미지를 확인하지 못했습니다. 완료로 보지 않습니다.",style=MaterialTheme.typography.bodyMedium,color=ZipHapColors.TextSecondary)}}
-            if(state.outputPath!=null)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+            if(previewFailed&&!state.running&&state.previewPath!=null)item {ZipHapCard {Text("작업이 끝났다고 표시됐지만 결과 이미지를 확인하지 못했습니다. 완료로 보지 않습니다.",style=MaterialTheme.typography.bodyMedium,color=ZipHapColors.TextSecondary)}}
+            if(state.previewPath!=null)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
                 if(visibleOutput!=null)Surface(shape=RoundedCornerShape(8.dp),color=ZipHapColors.MintSoft){Text("결과 이미지 준비됨",modifier=Modifier.padding(horizontal=10.dp,vertical=4.dp),style=MaterialTheme.typography.labelMedium,color=ZipHapColors.Mint)}
                 Text(state.outputTitle,style=MaterialTheme.typography.titleMedium)
                 if(referencePreview!=null&&referenceSha==displayedOutput?.referenceSha256){
@@ -361,6 +375,18 @@ fun ImageStudioPanel(app:AppContainer,onStatus:(String)->Unit,initialPrompt:Stri
         catch(cancel:CancellationException){throw cancel}catch(_:Exception){onStatus("시리즈 삭제를 확인하지 못했습니다.")}
         finally{importing=false}
     }})}
+    deleteResultPath?.let {path->AlertDialog(onDismissRequest={deleteResultPath=null},title={Text("작업실 결과를 삭제할까요?")},
+        text={Text("작업실의 이미지 파일을 지웁니다. 갤러리에 저장한 사본은 갤러리에 남습니다.")},
+        confirmButton={TextButton(onClick={
+            deleteResultPath=null
+            scope.launch {
+                changingResult=true
+                try {app.imageStudio.deleteOutput(path);onStatus("작업실 결과를 삭제했습니다.")}
+                catch(cancel:CancellationException){throw cancel}
+                catch(error:Exception){onStatus(error.message?:"결과를 삭제하지 못했습니다.")}
+                finally {changingResult=false}
+            }
+        }){Text("삭제")}},dismissButton={TextButton(onClick={deleteResultPath=null}){Text("취소")}})}
     if(deletePcRecovery)AlertDialog(onDismissRequest={deletePcRecovery=false},title={Text("PC 복구 정보를 삭제할까요?")},
         text={Text("원래 PC 연결에서는 이 작업의 계산을 중지하고 중간 상태·미수신 결과를 삭제합니다. PC 연결이 바뀐 경우에는 이 휴대폰의 복구 표시만 지우며, 이전 PC 파일은 보관 만료 때 정리됩니다. 이미 휴대폰에 저장한 이미지는 유지됩니다.")},
         confirmButton={TextButton(onClick={deletePcRecovery=false;app.imageStudio.discardPcRecovery()}){Text("삭제")}},

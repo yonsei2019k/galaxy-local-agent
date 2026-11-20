@@ -25,6 +25,8 @@ import com.user.localagent.inference.ImageSampler
 import com.user.localagent.core.PhoneImageQuality
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import java.io.File
 import java.util.UUID
@@ -58,6 +60,8 @@ class ImageStudioController(context:Context,private val app:AppContainer,
     private var pcImages=com.user.localagent.compute.RemoteImageClient(this.context,computeOwner=ownerRunId,recoveryScope=recoveryScope,allowRecovery=recoveryAllowed)
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val mutableState=MutableStateFlow(ImageStudioState())
+    private val outputPreferences=this.context.getSharedPreferences("image-studio-output",Context.MODE_PRIVATE)
+    private val outputActions=Mutex()
     val state:StateFlow<ImageStudioState> = mutableState.asStateFlow()
     val residentImageModelPath:String? get()=engine.loadedModelPath
     private fun updatePcRecoveryState(){
@@ -82,7 +86,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
                 val directory=File(this@ImageStudioController.context.filesDir,"generated-images").canonicalFile
                 val file=File(directory,name).canonicalFile
                 require(file.parentFile==directory&&file.isFile)
-                mutableState.update {state->if(state.running||state.outputPath!=null)state else state.copy(outputPath=file.path,seed=info["seed"]?.jsonPrimitive?.longOrNull,prompt=info["prompt"]?.jsonPrimitive?.content.orEmpty(),phase="최근 완성한 이미지",mode=info["mode"]?.jsonPrimitive?.content?:"txt2img",referenceSha256=info["referenceSha256"]?.jsonPrimitive?.contentOrNull,referenceWidth=info["referenceWidth"]?.jsonPrimitive?.intOrNull,referenceHeight=info["referenceHeight"]?.jsonPrimitive?.intOrNull,strength=info["strength"]?.jsonPrimitive?.floatOrNull,computeLocation=info["computeLocation"]?.jsonPrimitive?.content?:"phone",sourceModelId=info["modelFile"]?.jsonPrimitive?.contentOrNull).savedOutput(restored=true)}
+                mutableState.update {state->if(state.running||state.outputPath!=null)state else state.copy(outputPath=file.path,outputHidden=outputPreferences.getString("hidden-file",null)==file.name,seed=info["seed"]?.jsonPrimitive?.longOrNull,prompt=info["prompt"]?.jsonPrimitive?.content.orEmpty(),phase="최근 완성한 이미지",mode=info["mode"]?.jsonPrimitive?.content?:"txt2img",referenceSha256=info["referenceSha256"]?.jsonPrimitive?.contentOrNull,referenceWidth=info["referenceWidth"]?.jsonPrimitive?.intOrNull,referenceHeight=info["referenceHeight"]?.jsonPrimitive?.intOrNull,strength=info["strength"]?.jsonPrimitive?.floatOrNull,computeLocation=info["computeLocation"]?.jsonPrimitive?.content?:"phone",sourceModelId=info["modelFile"]?.jsonPrimitive?.contentOrNull).savedOutput(restored=true)}
             }
         }
     }}
@@ -259,7 +263,7 @@ class ImageStudioController(context:Context,private val app:AppContainer,
                 check(saved!=null&&saved.body==metadata&&saved.collection=="generated-images"){"생성 이미지 메타데이터 저장을 확인하지 못했습니다."}
                 currentCoroutineContext().ensureActive();verifyAccess();committed=true;completed=true
                 if(result.computeLocation=="pc")withContext(NonCancellable){runCatching{remoteSession.acknowledgeSavedFile(artifact.file)}}
-                mutableState.update {it.copy(outputPath=artifact.file.path,seed=artifact.seed,progress=1f,step=result.samplingSteps,totalSteps=result.samplingSteps,error=null,computeLocation=result.computeLocation,sourceModelId=result.sourceModelId,strength=if(result.computeLocation=="phone"&&reference!=null)strength else null).savedOutput()}
+                mutableState.update {it.copy(outputPath=artifact.file.path,outputHidden=false,seed=artifact.seed,progress=1f,step=result.samplingSteps,totalSteps=result.samplingSteps,error=null,computeLocation=result.computeLocation,sourceModelId=result.sourceModelId,strength=if(result.computeLocation=="phone"&&reference!=null)strength else null).savedOutput()}
                 return artifact
             }finally {result.bitmap.recycle()}
         }catch(cancel:CancellationException){mutableState.update {it.copy(phase="중단했습니다",error=null)};throw cancel}
@@ -417,16 +421,43 @@ class ImageStudioController(context:Context,private val app:AppContainer,
     }
 
     fun cancel(){pcImages.cancel();engine.cancel();executionEngine.cancel();activeJob?.cancel()}
-    suspend fun exportToGallery():Uri=withContext(Dispatchers.IO){
-        val file=outputFile()?:error("먼저 이미지를 생성해주세요.")
+    suspend fun setOutputHidden(expectedPath:String,hidden:Boolean):Unit=withContext(Dispatchers.IO){
+        outputActions.withLock {
+            val file=outputFile(expectedPath)?:error("표시 중인 결과가 바뀌었습니다.")
+            val edit=outputPreferences.edit()
+            if(hidden)edit.putString("hidden-file",file.name) else edit.remove("hidden-file")
+            check(edit.commit()){ "숨김 설정을 저장하지 못했습니다." }
+            mutableState.update { if(it.outputPath==expectedPath)it.copy(outputHidden=hidden) else it }
+        }
+    }
+
+    suspend fun deleteOutput(expectedPath:String):Unit=withContext(Dispatchers.IO){
+        outputActions.withLock {
+            check(operation.compareAndSet(false,true)){ "현재 이미지 작업이 끝난 뒤 삭제해주세요." }
+            try {
+                val file=outputFile(expectedPath)?:error("표시 중인 결과가 바뀌었습니다.")
+                val tickets=listOfNotNull(pcRecovery.read())+pcRecovery.archived()
+                check(tickets.none{it.context["deliveredFile"]?.jsonPrimitive?.contentOrNull==file.name}){
+                    "PC가 이 이미지의 저장을 확인하는 중입니다. 복구 작업이 끝난 뒤 삭제해주세요."
+                }
+                check(file.delete()){ "작업실 이미지를 삭제하지 못했습니다." }
+                mutableState.update { if(it.outputPath==expectedPath)it.copy(outputPath=null,outputDetails=null,outputHidden=false,phase="작업실 이미지를 삭제했습니다.") else it }
+            } finally {
+                operation.set(false)
+            }
+        }
+    }
+
+    suspend fun exportToGallery():Uri=withContext(Dispatchers.IO){outputActions.withLock {
+        val file=mutableState.value.previewPath?.let(::outputFile)?:error("먼저 이미지를 표시해주세요.")
         val values=ContentValues().apply {put(MediaStore.Images.Media.DISPLAY_NAME,file.name);put(MediaStore.Images.Media.MIME_TYPE,"image/png");put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/ZipHap.Agent");put(MediaStore.Images.Media.IS_PENDING,1)}
         val uri=context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values)?:error("갤러리 저장 공간을 열지 못했습니다.")
         try {
             context.contentResolver.openOutputStream(uri,"w")?.use {out->file.inputStream().use {it.copyTo(out)}}?:error("갤러리 파일을 쓸 수 없습니다.")
             context.contentResolver.update(uri,ContentValues().apply {put(MediaStore.Images.Media.IS_PENDING,0)},null,null);uri
         }catch(error:Throwable){context.contentResolver.delete(uri,null,null);throw error}
-    }
-    private fun outputFile():File?=mutableState.value.outputPath?.let {File(it).canonicalFile}?.takeIf {
-        it.isFile&&it.parentFile==File(context.filesDir,"generated-images").canonicalFile&&Regex("image-[a-f0-9-]{36}\\.png").matches(it.name)
+    }}
+    private fun outputFile(expectedPath:String):File?=expectedPath.takeIf{it==mutableState.value.outputPath}?.let {File(it).canonicalFile}?.takeIf {
+        it.path==expectedPath&&it.isFile&&it.parentFile==File(context.filesDir,"generated-images").canonicalFile&&Regex("image-[a-f0-9-]{36}\\.png").matches(it.name)
     }
 }
