@@ -1623,6 +1623,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
             status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
         } catch(privateResult:PrivateResultWithheld){
+            FailureLog.cloudStop(context,"PRIVATE_RESULT_WITHHELD_${privateResult.kind.name}",
+                controller.stopMetadata(),lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
             val publicReadPlan=plan?.requiredTools?.let {tools->
                 tools.isNotEmpty()&&tools.all {it in ExternalAgentContract.PUBLIC_RESEARCH_PHONE_TOOLS}
             }==true

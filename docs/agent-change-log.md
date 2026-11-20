@@ -1,3 +1,12 @@
+## 2026-11-20 — Diagnose public-research privacy handoff locally
+
+The installed 2034 Jeju replay was stopped by the phone's privacy gate after two verified searches. The receipt did not identify which existing rule matched. The phone now records one of three fixed match categories in its local cloud-bridge stop log before the current handoff or pause. The classification uses the existing rules and priority. No matched content, URL or extracted value is recorded. The broker still receives no withheld result, and the local preservation and handoff use the same conditions.
+
+Upstream comparison cursor: [agent loop](https://github.com/openclaw/openclaw/commit/f5958f4049ea2d8d87a60fbb7093628ef8da1b91), [repeat guard](https://github.com/openclaw/openclaw/commit/3a3eed8695e68e182c4851285a3de90ca2cba0ff), and [argument validation](https://github.com/openclaw/openclaw/commit/5d597de0c9c02a779f88a372054456b22361f7e1). The upstream paths match the last reviewed changes. This diagnostic follows the observed ZipHap device failure and introduces no upstream code.
+
+
+Focused privacy, extension-security and controller JVM tests passed all 31 cases. Release lint and assembly passed. Signed local 2035 candidate passed the existing signer pin, unchanged permissions, 16 KiB alignment and static Rust/React package checks. SHA-256 125abe82947bbc361e1bf48955f0b9e7396a0f03c7b9e671c8031ddcc49553d4. The category was verified in JVM fixtures. No phone installation or new Jeju replay was performed.
+
 ## 2026-11-20 — Integrate OpenClaw-inspired tool recovery improvements
 
 Fast-forwarded the isolated research candidate to afc3e58. The approved tool catalog still gates execution. The MCP gateway and PC broker tell the model where an argument disagrees with the schema without echoing values or unknown keys. The gateway and broker each cap pre-dispatch rejections. A successor after an effect-free read can restart using the owner's latest instruction. Prepared, unresolved and mutating actions keep the recorded evidence and remain excluded from that restart.

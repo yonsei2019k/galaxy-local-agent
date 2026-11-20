@@ -68,7 +68,9 @@ class ExternalAgentControllerTest {
         val result=ToolResult(callId,true,"연락처 fixture@example.invalid",VerificationState.VERIFIED)
         val controller=ExternalAgentController(c,b,{live(c)},{result},{receipts+=it},{1})
         controller.start();b.offer(proposal(c))
-        assertTrue(runCatching {controller.pumpOnce()}.exceptionOrNull() is PrivateResultWithheld)
+        val withheld = runCatching { controller.pumpOnce() }.exceptionOrNull() as PrivateResultWithheld
+        assertEquals(com.user.localagent.core.ConversationPrivacy.MatchKind.IDENTIFIER, withheld.kind)
+        assertEquals("PRIVATE_RESULT_WITHHELD", withheld.message)
         assertSame(result,receipts.single().result)
         assertEquals(0,b.reports)
     }

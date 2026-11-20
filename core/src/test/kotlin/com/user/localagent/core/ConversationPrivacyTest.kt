@@ -5,6 +5,20 @@ import org.junit.Test
 
 class ConversationPrivacyTest {
     private val cloud="cloud"
+
+    @Test fun privacyDiagnosticsExposeOnlyFixedMatchKinds() {
+        val cases = mapOf(
+            "비밀번호 안내" to ConversationPrivacy.MatchKind.CREDENTIAL,
+            "fixture@example.invalid" to ConversationPrivacy.MatchKind.IDENTIFIER,
+            "내 메모를 읽어줘" to ConversationPrivacy.MatchKind.PRIVATE_RECORD,
+            "제주행 항공편 2027년 1월 1일" to null,
+        )
+        for ((text, kind) in cases) {
+            assertEquals(kind, ConversationPrivacy.matchKind(text))
+            assertEquals(kind != null, ConversationPrivacy.sensitiveText(text))
+        }
+    }
+
     @Test fun freshGeneralRequestsUseCloudAndOldLocalSelectionsCannotExport(){
         assertEquals(cloud,ConversationPrivacy.modelForNewRequest("auto",cloud,"두 산의 높이를 비교해줘",false))
         assertEquals("old-local",ConversationPrivacy.modelForNewRequest("old-local",cloud,"요약해줘",false))
