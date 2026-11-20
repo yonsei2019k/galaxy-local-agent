@@ -2675,6 +2675,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
             val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
+                else if(error is com.user.localagent.integrations.ScreenControl.SnapshotChanged)
+                    ToolResult(call.id,false,checkNotNull(error.message),VerificationState.FAILED,"화면 변경 · 실행 전 중단",effectNotApplied=true)
                 else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))

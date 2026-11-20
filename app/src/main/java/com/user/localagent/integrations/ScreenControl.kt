@@ -5,6 +5,7 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.os.UserManager
 import android.text.InputType
@@ -20,7 +21,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.Locale
+import uniffi.ziphap_android.NativeScreenRole
+import uniffi.ziphap_android.NativeScreenTarget
+import uniffi.ziphap_android.nativeScreenSnapshotId
 
 /**
  * Agent control of the foreground app through the owner-enabled accessibility service.
@@ -36,7 +41,7 @@ class ScreenControl(context:Context) {
     fun ready():Boolean=enabled()&&ScreenBridgeController(context).state().let{it.systemEnabled&&it.connected}
 
     /** Element of a read: ref is its index in a deterministic traversal of the same screen. */
-    private data class Element(val ref:String,val role:String,val label:String,val node:AccessibilityNodeInfo,val sensitive:Boolean)
+    private data class Element(val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,val sensitive:Boolean)
     private data class Snapshot(val packageName:String,val id:String,val texts:List<String>,val elements:List<Element>,val truncated:Boolean)
 
     suspend fun execute(call:ToolCall):ToolResult=try {
@@ -59,7 +64,8 @@ class ScreenControl(context:Context) {
         ScreenControlToolCatalog.validate(call)
         val action=call.arguments.getValue("action").jsonPrimitive.content
         if(action in setOf("back","home","open_app"))return false to describe(call,null,null)
-        val screen=onMain{snapshot(service())}
+        val requested=call.arguments.getValue("snapshotId").jsonPrimitive.content
+        val screen=onMain{snapshot(service()).also { requireCurrentSnapshot(requested,it.id) }}
         val target=call.arguments["ref"]?.jsonPrimitive?.content?.let{ref->screen.elements.firstOrNull{it.ref==ref}}
         val app=appLabel(screen.packageName)
         val needs=action=="type"||(action=="tap"&&target!=null&&ScreenControlToolCatalog.isCommitLabel(target.label))
@@ -91,14 +97,20 @@ class ScreenControl(context:Context) {
                 "open_app"->openApp(a.getValue("packageName").jsonPrimitive.content)
                 else->{
                     val screen=snapshot(service)
-                    if(screen.id!=requested)throw ScreenRefused("화면이 바뀌었습니다. read_screen으로 다시 읽은 뒤 새 snapshotId로 요청하세요.")
+                    requireCurrentSnapshot(requested,screen.id)
                     if(action=="back")check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)){"뒤로 가지 못했습니다."}
                     else perform(screen,action,a)
                 }
             }
         }
         delay(900) // Let the app render the result before the observation read.
-        return "동작: $action 실행\n\n동작 후 화면:\n"+render(onMain{snapshot(service())})
+        val after=try {
+            onMain{snapshot(service())}
+        } catch (refused:ScreenRefused) {
+            // The effect was already requested. A protected successor screen cannot prove it failed.
+            throw IllegalStateException("동작을 요청했지만 동작 후 화면을 확인하지 못했습니다.",refused)
+        }
+        return "동작: $action 실행\n\n동작 후 화면:\n"+render(after)
     }
 
     private fun perform(screen:Snapshot,action:String,a:JsonObject) {
@@ -112,12 +124,12 @@ class ScreenControl(context:Context) {
             }
             "type"->{
                 checkNotNull(target){"입력칸 $ref 를 찾지 못했습니다."}
-                if(target.sensitive||target.role!="edit")throw ScreenRefused("이 요소에는 입력하지 않습니다.")
+                if(target.sensitive||target.role!=NativeScreenRole.EDIT)throw ScreenRefused("이 요소에는 입력하지 않습니다.")
                 val args=Bundle().apply{putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,a.getValue("text").jsonPrimitive.content)}
                 check(target.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args)){"글자를 입력하지 못했습니다."}
             }
             "scroll"->{
-                val node=(target?:screen.elements.firstOrNull{it.role=="scroll"})?.node?:error("스크롤할 영역이 없습니다.")
+                val node=(target?:screen.elements.firstOrNull{it.role==NativeScreenRole.SCROLL})?.node?:error("스크롤할 영역이 없습니다.")
                 val id=if(a["direction"]?.jsonPrimitive?.content=="backward")AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                 check(node.performAction(id)){"더 스크롤할 수 없습니다."}
             }
@@ -180,9 +192,9 @@ class ScreenControl(context:Context) {
             val label=labelOf(node)
             val actions=node.actionList.map{it.id}.toSet()
             val role=when {
-                node.isEditable&&AccessibilityNodeInfo.ACTION_SET_TEXT in actions->"edit"
-                node.isClickable&&AccessibilityNodeInfo.ACTION_CLICK in actions&&node.isEnabled->"tap"
-                node.isScrollable->"scroll"
+                node.isEditable&&AccessibilityNodeInfo.ACTION_SET_TEXT in actions->NativeScreenRole.EDIT
+                node.isClickable&&AccessibilityNodeInfo.ACTION_CLICK in actions&&node.isEnabled->NativeScreenRole.TAP
+                node.isScrollable->NativeScreenRole.SCROLL
                 else->null
             }
             if(role!=null&&elements.size<150){
@@ -196,11 +208,22 @@ class ScreenControl(context:Context) {
         }
         visit(root,0,false)
         if(elements.size>=150||textBudget<=0)truncated=true
-        val signature=buildString {
-            append(packageName)
-            elements.forEach{e->val r=Rect();e.node.getBoundsInScreen(r);append('|').append(e.role).append(e.label).append(r.flattenToString())}
+        val digest=MessageDigest.getInstance("SHA-256")
+        fun hash(value:String)=digest.digest(value.toByteArray(Charsets.UTF_8))
+        val identity=MessageDigest.getInstance("SHA-256")
+        val targets=elements.map { element->
+            val node=element.node
+            val bounds=Rect().also(node::getBoundsInScreen)
+            val uniqueId=if(Build.VERSION.SDK_INT>=33) node.uniqueId else null
+            // Use fixed-width field digests so adjacent identity components cannot alias.
+            for (part in listOf(node.packageName,node.className,node.viewIdResourceName,uniqueId)) {
+                identity.update(hash(part?.toString().orEmpty()))
+            }
+            NativeScreenTarget(element.role,hash(element.label),identity.digest(),bounds.left,bounds.top,
+                bounds.right,bounds.bottom,element.sensitive,node.isEnabled)
         }
-        val id=MessageDigest.getInstance("SHA-256").digest(signature.toByteArray()).joinToString(""){"%02x".format(it)}.take(16)
+        val id=checkNotNull(nativeScreenSnapshotId(snapshotNonce,hash(packageName),window.id,truncated,
+            texts.map(::hash),targets)){"화면 관측을 확인하지 못했습니다."}
         return Snapshot(packageName,id,texts,elements,truncated)
     }
 
@@ -209,7 +232,7 @@ class ScreenControl(context:Context) {
         put("snapshotId",screen.id);put("truncated",screen.truncated)
         put("texts",JsonArray(screen.texts.map(::JsonPrimitive)))
         put("elements",buildJsonArray{screen.elements.forEach{e->add(buildJsonObject{
-            put("ref",e.ref);put("role",e.role);put("label",e.label);if(e.sensitive)put("blocked",true)
+            put("ref",e.ref);put("role",e.role.name.lowercase(Locale.ROOT));put("label",e.label);if(e.sensitive)put("blocked",true)
         })}})
     }.toString()
 
@@ -245,8 +268,15 @@ class ScreenControl(context:Context) {
 
     open class ScreenRefused(message:String):IllegalStateException(message)
     class OwnAppForeground:ScreenRefused("ZipHap.Agent 자신의 화면은 조작하지 않습니다.")
+    internal class SnapshotChanged:ScreenRefused("화면이 바뀌었습니다. read_screen으로 다시 읽은 뒤 새 snapshotId로 요청하세요.")
 
     companion object {
+        private val snapshotNonce=ByteArray(32).also(SecureRandom()::nextBytes)
+
+        internal fun requireCurrentSnapshot(requested:String,current:String) {
+            if(current!=requested)throw SnapshotChanged()
+        }
+
         private val refusedPackages=listOf("com.user.localagent.images","com.android.settings","com.samsung.android.settings","com.android.systemui","com.android.permissioncontroller",
             "com.google.android.permissioncontroller","com.android.packageinstaller","com.google.android.packageinstaller","com.samsung.android.packageinstaller",
             "com.android.vending","com.samsung.android.spay","com.samsung.android.samsungpass","com.samsung.android.biometrics","com.android.keychain",

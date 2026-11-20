@@ -19,6 +19,8 @@ pub fn native_public_page_interstitial(title: String, text: String) -> bool {
     ziphap_core::is_public_page_interstitial(&title, &text)
 }
 
+mod screen_snapshot;
+
 #[derive(uniffi::Enum)]
 pub enum NativePhoneVerification {
     Verified,
