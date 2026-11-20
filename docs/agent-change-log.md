@@ -1,3 +1,12 @@
+## 2026-11-21 — 통합 후보 2041의 메뉴·답변·문맥·대상 확인
+
+- 2040 기준의 분리 통합 브랜치에 공개 계획 61cec50, 메뉴 7c2a831, 답변 서식 677f531, 대화에 결합된 미리보기 08bdc07, Rust 문맥 배정 b3708fe, 화면 대상 확인 2a8dc1d를 적용했다. 공유 체크아웃의 미커밋 변경은 보존했다.
+- 상단 직원방 순서를 유지하며 바로 보이는 보조 메뉴를 3개로 줄였다. 답변에 제목·목록·표·코드·차트와 현재 대화의 검증된 결과 이미지를 지원한다. 합성 앱 브리지의 Chrome 320×568 및 393×700에서 각 10개 메뉴 전환, 표·막대 차트와 이미지 두 개의 디코딩, 가로 넘침을 확인했다. 외부 이미지 URL을 자동으로 불러오지 않는다.
+- 공개 작업계획은 표시하기 전에 한 덩어리로 자격증명·연락처를 가리고 비공개 추론 표시를 배제한다. 계획과 실제 실행 증거의 상태는 구분된다. 초기 코어 시험에서 공개 계획 지침이 좁은 프롬프트 한도를 넘었다. 표현을 압축하고 기존 기본값 지침을 유지한 뒤 전체 시험을 통과했다.
+- 통합 시험은 코어 JVM 1,014건, Android 집중 JVM 39건, Rust 67건, React 39건, Python MCP 67건 및 구독 제공자 17건 통과다. 화면·문맥 원천 두 변경은 독립 작업 트리에서 시험한 뒤 통합했다. 고정 채팅 두 곳에서 후속 증류를 분담한다.
+- 릴리스 lint·조립 완료. 기존 앱 서명, 16 KiB 정렬, 권한 목록, Rust/React 자산 검사 통과. 무선 ADB에서 2039 → 2041 설치 후 기기 base APK 해시와 서명 후보가 일치했고 MainActivity 시작에 성공했다. 휴대폰이 다른 앱으로 전환한 뒤 메뉴·설정과 실제 결과 생성 경로의 검증은 보류했다. GitHub 배포나 PC 워커 업데이트는 진행하지 않았다.
+- Claude C-068/C-069의 다음 구현 사례는 임대 만료 뒤 성공 영수증 도착, 실행 전 무효과 거절, ACK 재전송, 휴대폰 실행과 브로커 세션 마감의 차이다. 진행값은 유효한 세션에서 처음 접수한 검증된 성공만 인정해야 한다. 이 마감 변경은 2041에 포함되지 않는다.
+
 ## 2026-11-21 — Distinguish search links from page evidence
 
 After a 2039 real phone test returned five search candidates alongside a 404, Claude's focused review found that the caption could imply the pages had been inspected. The host now labels entries as search results with content unconfirmed or as pages read. If the same source was subsequently read, the latter label takes precedence. The run remains paused. The Rust page reader detects narrow Korean access-check prompts and a generic Cloudflare interstitial title, so these responses do not qualify as read evidence. The result stays behind the existing published-content and privacy checks.

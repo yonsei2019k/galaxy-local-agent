@@ -1,5 +1,9 @@
 # Device validation
 
+## 2041 integrated UI and Rust candidate
+
+Wireless ADB updated 2039 to signed 2041 after the phone and compute health checks found no active work. The installed base APK matched SHA-256 `8153cf50c99e1612ad0039e4ff9b691253004dbeaad16ce918d3cb39fcaf4e43`, and MainActivity startup returned OK. The phone moved to a different foreground app before menu and settings navigation could be confirmed. Chart and image rendering in Chrome used synthetic files and a synthetic bridge. This receipt establishes installation and launch only.
+
 ## 2039 partial public source display
 
 Installed signed version 2039 with wireless ADB after the image job and PC worker became idle. Installed package digest matched the signed candidate and the app launched.
