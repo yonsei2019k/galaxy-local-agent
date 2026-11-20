@@ -1,5 +1,9 @@
 # Device validation
 
+## 2042 integrated settings and recovery candidate
+
+Updated the existing 2041 installation after the phone image service and paired compute worker were idle. Both connected transports resolved to the same physical phone, and the installation used one transport. The installed package reported versionCode 2042 and its base APK matched the signed candidate SHA-256 6f1538d15e15852256f92b496676363d703449531cb07f5d176cc8eb2a245d06. The installation did not launch the app or exercise the UI.
+
 ## 2041 integrated UI and Rust candidate
 
 Wireless ADB updated 2039 to signed 2041 after the phone and compute health checks found no active work. The installed base APK matched SHA-256 `8153cf50c99e1612ad0039e4ff9b691253004dbeaad16ce918d3cb39fcaf4e43`, and MainActivity startup returned OK. The phone moved to a different foreground app before menu and settings navigation could be confirmed. Chart and image rendering in Chrome used synthetic files and a synthetic bridge. This receipt establishes installation and launch only.
