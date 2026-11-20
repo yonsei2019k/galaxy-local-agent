@@ -1,5 +1,10 @@
 # Device validation
 
+## 2032 Jeju public research after deploying efc0689
+
+The paired phone reported 2032 and paused with execution_not_verified after 93160 ms. Three public searches were verified. Twelve page reads and three further searches failed. The worker logged one post-budget reconsideration and a partial response. There was no confirmed fare, inventory, or official route answer. The available receipts contain tool status counts and no exact arguments, so this run does not establish which proposals were identical or whether the repeat guard intercepted one. The deployed worker passed its authenticated restart check independently.
+
+
 ## 2032 installed over mobile Tailscale
 
 The paired phone reported versionCode 2032 twice. A deliberately source-free public-research test paused with research_evidence_unavailable and zero tool rows. A separate public-site test completed in 108184 ms and returned only the fixed local-only notice, no tool rows, and no remote follow-up authority. For this explicit cloud/public-only fixture the local completion notice verifies that the phone switched to the private path. The exact answer text and answer quality were not checked over the PC mailbox.
