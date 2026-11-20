@@ -1,3 +1,7 @@
+## 2026-11-21 — Preserve the late-receipt boundary during Rust PC migration
+
+Claude's read-only comparison found that the currently deployed Python bridge accepts a matching late phone receipt after authority revocation, while the Rust stdio provider rejects expired results and stops the model. A provider stop must leave the separate broker receipt path available. The new synthetic Rust core test verifies that cancelling twice preserves the uncertain call, a different call or authority revision cannot reconcile it, and the exact original verified callback records the outcome without completing or reopening the cancelled run. The focused test passed. This is core regression evidence. No worker, APK or app behavior changed.
+
 ## 2026-11-21 — Move phone completion evidence checks into the Rust engine
 
 The production phone completion path now verifies the ordered call receipts and each required tool in ziphap-core through one UniFFI call. The Rust policy rejects mismatched call IDs, sequence numbers and tools, duplicate observations, missing proof, withheld results, and failed or unknown effects. The Android host still checks the live session and plan bindings before passing bounded evidence metadata. Tool arguments, results, account data and credentials do not cross the new binding. The native journal and the completion check use the same Rust screen-handoff rule.

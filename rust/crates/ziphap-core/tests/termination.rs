@@ -53,6 +53,35 @@ fn failed_run_reconciled_as_verified_still_ends_failed() {
 }
 
 #[test]
+fn repeated_cancellation_preserves_only_the_original_late_effect_receipt() {
+    let original = binding();
+    let mut run = started(&original);
+    let requirement = write("fixture-target");
+    run.capture_requirements(vec![requirement.clone()], &live(&original), 100)
+        .unwrap();
+    run.claim_effect("claimed-call".into(), permit(&original, &requirement.action), &live(&original), 102, |_| true)
+        .unwrap();
+
+    run.cancel(103).unwrap();
+    run.cancel(104).unwrap();
+    assert_eq!(RunState::UnknownEffect, run.state());
+    assert_eq!(Some(EffectState::Unknown), run.effect_state("claimed-call"));
+
+    let mut new_authority = original.clone();
+    new_authority.authorization_revision += 1;
+    assert_eq!(Err(CoreError::AuthorityChanged),
+        run.reconcile_effect(&new_authority, "claimed-call", verified(), 105));
+    assert_eq!(Err(CoreError::InvalidTransition),
+        run.reconcile_effect(&original, "different-call", verified(), 105));
+    assert_eq!(Some(EffectState::Unknown), run.effect_state("claimed-call"));
+
+    run.reconcile_effect(&original, "claimed-call", verified(), 106).unwrap();
+    assert_eq!(Some(EffectState::Verified), run.effect_state("claimed-call"));
+    assert_eq!(RunState::Cancelled, run.state());
+    assert_eq!(Err(CoreError::Cancelled), run.complete(&[requirement], &live(&original), 107));
+}
+
+#[test]
 fn failure_without_uncertain_effects_is_terminal_immediately() {
     let b = binding(); let mut m = started(&b);
     m.fail(FailureCode::EngineFailure, 101).unwrap();
