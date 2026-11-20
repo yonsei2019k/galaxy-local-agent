@@ -160,8 +160,14 @@ class PublicWebClientTest {
         assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<html>Verify that you are human</html>")))
         assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<title>Just a moment…</title>")))
         assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<body>자동입력 방지 문자를 입력해주세요</body>")))
-        val emptyPage = client { _, _ -> response(url, "<html><!-- no text --><script>loadContent()</script></html>") }
-        assertTrue(emptyPage.fetchPage(url).text.isBlank())
+        val emptyPage = client { _, _ -> response(url, """
+            <html><head><title>Synthetic page</title>
+            <meta name="description" content="Synthetic description"></head>
+            <body><!-- no text --><script>loadContent()</script></body></html>
+        """.trimIndent()) }
+        val page = emptyPage.fetchPage(url)
+        assertEquals("Synthetic page", page.title)
+        assertTrue(page.text.isBlank())
         val result = emptyPage.readToolResult("empty", url)
         assertFalse(result.success)
         assertEquals(VerificationState.FAILED, result.verification)
@@ -169,11 +175,26 @@ class PublicWebClientTest {
         assertTrue(result.effectNotApplied)
     }
 
+    @Test fun aReadableBodyStillVerifiesWithHeadMetadataPresent() = runBlocking {
+        val url = "https://example.com/public"
+        val web = client { _, _ -> response(url, """
+            <html><head><title>Synthetic page</title>
+            <meta name="description" content="Synthetic description"></head>
+            <body><p>Readable &amp; public text</p></body></html>
+        """.trimIndent()) }
+        assertEquals("Readable & public text", web.fetchPage(url).text)
+        val result = web.readToolResult("readable", url)
+        assertTrue(result.success)
+        assertEquals(VerificationState.VERIFIED, result.verification)
+    }
+
     @Test fun anOfferOnlyPageRemainsUsableForStructuredPriceResearch() = runBlocking {
         val web = client { url, _ -> response(url, """
+            <html><head><title>Synthetic product</title>
             <script type="application/ld+json">
             {"@type":"Product","offers":{"@type":"Offer","price":"2500","priceCurrency":"KRW"}}
             </script>
+            </head><body></body></html>
         """.trimIndent()) }
         val page = web.fetchPage("https://example.com/product")
         assertTrue(page.text.isBlank())
