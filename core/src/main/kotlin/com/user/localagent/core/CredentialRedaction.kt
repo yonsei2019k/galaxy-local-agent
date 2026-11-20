@@ -69,7 +69,9 @@ object CredentialRedaction {
     }
 
     fun redact(text: String): Result {
-        if (text.isBlank()) return Result(text, 0)
+        if (text.isBlank() || text.trim().removeSuffix(".").removeSuffix("!") == "비밀번호가 틀렸습니다") {
+            return Result(text, 0)
+        }
         var count = 0
         var out = text
         out = pem.replace(out) { count++; MASK }

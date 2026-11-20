@@ -34,6 +34,15 @@ class CredentialRedactionTest {
         one("비밀번호는 test9999 입니다", "test9999")
     }
 
+    @Test fun standaloneWrongPasswordNoticePreservesTextButNotCredentialValues() {
+        val notice = "비밀번호가 틀렸습니다."
+        assertEquals(CredentialRedaction.Result(notice, 0), CredentialRedaction.redact(notice))
+        one("비밀번호: 틀렸습니다", "틀렸습니다")
+        one("비밀번호가 틀렸습니다.\n인증번호 482913", "482913")
+        val json = """{"password":"비밀번호가 틀렸습니다."}"""
+        assertEquals("""{"password":"[가림]"}""", CredentialRedaction.forCloudToolResult(json))
+    }
+
     @Test fun verificationCode() {
         val r = CredentialRedaction.redact("[Web발신] 인증번호 [482913]를 입력")
         assertEquals("[Web발신] 인증번호 [[가림]]를 입력", r.text)
