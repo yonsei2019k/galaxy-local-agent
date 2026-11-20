@@ -511,6 +511,11 @@ class MainActivity : ComponentActivity() {
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(progress!=null) item {val p=progress!!;InfoCard(if(p.phase=="hash")"모델 무결성 검증" else "모델 다운로드","${p.title}\n${p.bytes/1024/1024} / ${p.total/1024/1024} MB");LinearProgressIndicator(progress={if(p.total>0)(p.bytes.toDouble()/p.total).toFloat().coerceIn(0f,1f)else 0f},modifier=Modifier.fillMaxWidth());TextButton(onClick={downloadJob?.cancel()}){Text("중단 · 다음 다운로드에서 이어받기")}}
             item {InfoCard("녹음에서 글 만들기", "이 휴대폰에서 음성을 글로 바꿀 때 쓸 언어와 인식 방법을 고를 수 있어요.")}
+            item {Text("녹음 언어",style=MaterialTheme.typography.titleSmall);Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                listOf("ko" to "한국어", "en" to "영어", "auto" to "자동 감지").forEach {(code,label)->
+                    FilterChip(selected=asr.language==code,enabled=code!="auto"||asr.modelId!=com.user.localagent.models.AsrCatalog.DEVICE_MODEL,onClick={scope.launch {app.models.selectAsrLanguage(code)}},label={Text(label)})
+                }
+            }}
             item {
                 val deviceAsr by app.models.deviceAsrStatus.collectAsState()
                 Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
@@ -518,20 +523,16 @@ class MainActivity : ComponentActivity() {
                     Text("한국어와 영어를 지원해요. 이 휴대폰에서 사용할 수 있는지 확인하세요.",style=MaterialTheme.typography.bodySmall)
                     Text(deviceAsr.message,style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        TextButton(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.prepareDeviceAsr(deviceAsr.downloadable)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"기기 내 AI 확인 실패"}}}){Text(if(deviceAsr.downloadable)"시스템 AI 준비"else"지원 확인")}
+                        TextButton(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.prepareDeviceAsr(deviceAsr.downloadable)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"기기 내 AI 확인 실패"}}}){Text(if(deviceAsr.downloadable)"음성 인식 준비"else"지원 확인")}
                         FilterChip(selected=asr.modelId==com.user.localagent.models.AsrCatalog.DEVICE_MODEL,enabled=deviceAsr.available&&asr.language!="auto",onClick={scope.launch {app.models.selectAsr(com.user.localagent.models.AsrCatalog.DEVICE_MODEL)}},label={Text("사용하기")})
                     }
                 }}
             }
-            item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                listOf("ko" to "한국어", "en" to "영어", "auto" to "자동 감지").forEach {(code,label)->
-                    FilterChip(selected=asr.language==code,enabled=code!="auto"||asr.modelId!=com.user.localagent.models.AsrCatalog.DEVICE_MODEL,onClick={scope.launch {app.models.selectAsrLanguage(code)}},label={Text(label)})
-                }
-            }}
             items(app.models.candidates.filter {it.id in com.user.localagent.models.AsrCatalog.modelIds}) {candidate->
                 Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
-                    Text(candidate.title,fontWeight=FontWeight.Bold)
-                    Text(if(candidate.id=="asr-qwen-17b")"정확도 우선 · 지원 파일 포함 약 2.8GB"else"가벼운 모드 · 지원 파일 포함 약 1.2GB",style=MaterialTheme.typography.bodySmall)
+                    val accuracyFirst=candidate.id=="asr-qwen-17b"
+                    Text(if(accuracyFirst)"정확도 우선"else"저장 공간 절약",fontWeight=FontWeight.Bold)
+                    Text(if(accuracyFirst)"약 2.8GB 다운로드"else"약 1.2GB 다운로드",style=MaterialTheme.typography.bodySmall)
                     Text("휴대폰에서 처리 · 공식 배포 파일",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         Button(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.downloadBundle(candidate);status.value="음성 인식 파일 검증 완료"}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"}}}){Text("다운로드")}
