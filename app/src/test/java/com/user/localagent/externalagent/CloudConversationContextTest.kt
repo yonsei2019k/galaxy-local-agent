@@ -119,7 +119,7 @@ class CloudConversationContextTest {
     @Test fun budgetDoesNotDiscardNewerTurnToIncludeAnOlderShortTurn(){
         val values=listOf(turn(1,text="old-short"),turn(2,text="漢".repeat(1500)),turn(3,text="漢".repeat(1500)),turn(4,text="漢".repeat(1500)))
         val selected=turns(checkNotNull(build(values))).map{it.getValue("sourceRunId").jsonPrimitive.content}
-        assertEquals(listOf(binding(3).runId,binding(4).runId),selected)
+        assertEquals(listOf(binding(2).runId,binding(3).runId,binding(4).runId),selected)
         assertFalse(selected.contains(binding(1).runId))
     }
 
@@ -200,6 +200,32 @@ class CloudConversationContextTest {
         val result=checkNotNull(build(listOf(forbidden,currentAssistant),task(unknown=true,owner="漢".repeat(6000),goal="漢".repeat(6000))))
         assertEquals(1,turns(result).size);assertFalse(result.toString().contains("OTHER_BRANCH_PRIVATE"))
         assertTrue(turns(result).single().getValue("text").jsonPrimitive.content.endsWith("latest assistant"))
+    }
+
+
+    @Test fun olderTurnUsesRemainingBytesWhilePreservingTheLatestPairAndSource() {
+        val correction = "원래 대상 " + "漢".repeat(2500) + " 마지막 정정 😀"
+        val pair = listOf(turn(2, text = "가".repeat(1500)), turn(2, "assistant", "나".repeat(1500)))
+        val excluded = turn(3, text = "different grant").copy(binding = binding(3).copy(authorizationRevision = 6))
+        val result = checkNotNull(build(listOf(turn(1, text = correction), excluded) + pair, task(unknown = null)))
+        val entries = turns(result)
+        assertEquals(listOf(1, 2, 2).map { binding(it).runId }, entries.map { it.getValue("sourceRunId").jsonPrimitive.content })
+        val excerpt = entries.first().getValue("text").jsonPrimitive.content
+        assertTrue(excerpt.startsWith("원래 대상 "))
+        assertTrue(excerpt.contains("생략"))
+        assertTrue(excerpt.endsWith(" 마지막 정정 😀"))
+        assertWellFormed(excerpt)
+        assertEquals(pair.map { it.text }, entries.drop(1).map { it.getValue("text").jsonPrimitive.content })
+        assertTrue(previous(result).getValue("unresolvedEffects").jsonPrimitive.boolean)
+        assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
+    }
+
+    @Test fun boundaryBelowMinimumOmitsTheRowAndKeepsRecentPair() {
+        val older = turn(1, text = "漢".repeat(1800))
+        val escaped = "HEAD" + "\u0001".repeat(1500) + "TAIL"
+        val pair = listOf(turn(2, text = escaped), turn(2, "assistant", escaped))
+        val expected = checkNotNull(build(pair))
+        assertEquals(expected, build(listOf(older) + pair))
     }
 
     private fun assertWellFormed(value:String){

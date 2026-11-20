@@ -6,6 +6,7 @@
 //! logged here. All times are host-supplied epoch milliseconds; callers must use a
 //! trusted clock and preserve unknown-effect state durably across process restarts.
 
+mod context_budget;
 mod grant;
 mod goal_budget;
 mod journal;
@@ -15,6 +16,7 @@ mod run;
 mod scheduler;
 mod types;
 
+pub use context_budget::older_turn_byte_limits;
 pub use grant::*;
 pub use goal_budget::*;
 pub use journal::*;

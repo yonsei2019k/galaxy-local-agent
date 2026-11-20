@@ -5,6 +5,14 @@ use ziphap_core::{CoreError, EffectState, EventKind, ExecutionProfile, RunBindin
 use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
+#[uniffi::export]
+pub fn native_older_turn_byte_limits(
+    reserved_bytes: u32,
+    reserved_turns: u32,
+    row_bytes: Vec<u32>,
+) -> Vec<u32> {
+    ziphap_core::older_turn_byte_limits(reserved_bytes, reserved_turns, &row_bytes)
+}
 
 #[uniffi::export]
 pub fn native_public_page_interstitial(title: String, text: String) -> bool {

@@ -1,6 +1,7 @@
 package com.user.localagent.externalagent
 
 import java.util.UUID
+import uniffi.ziphap_android.nativeOlderTurnByteLimits
 import kotlinx.serialization.json.*
 
 /**
@@ -66,12 +67,32 @@ object CloudConversationContext {
                 fits(priority.map{turnJson(eligibleTurns[it],limit)})
             }
             priority.forEach{selected[it]=turnJson(eligibleTurns[it],turnLimit)}
-            for(index in eligibleTurns.indices.reversed()){
-                if(selected.size==MAX_TURNS)break
-                if(index in selected)continue
-                val candidate=selected.toSortedMap().apply{put(index,turnJson(eligibleTurns[index],MAX_TURN_CHARS))}
-                if(!fits(candidate.values.toList()))break
-                selected[index]=candidate.getValue(index)
+            val older = eligibleTurns.indices.reversed().asSequence()
+                .filterNot(selected::containsKey)
+                .take(MAX_TURNS - selected.size)
+                .map { index -> index to turnJson(eligibleTurns[index], MAX_TURN_CHARS) }
+                .toList()
+            if (older.isNotEmpty()) {
+                val costs = older.map { (_, row) -> bytes(row).toUInt() }
+                val limits = nativeOlderTurnByteLimits(
+                    bytes(envelope(selected.values.toList(), taskValue())).toUInt(),
+                    selected.size.toUInt(), costs,
+                )
+                for ((position, limit) in limits.withIndex()) {
+                    val (index, full) = older[position]
+                    if (costs[position] <= limit) {
+                        selected[index] = full
+                    } else {
+                        // The boundary row alone may be shortened. Keep both ends and its original source.
+                        val turn = eligibleTurns[index]
+                        fun rowFits(chars: Int) = bytes(turnJson(turn, chars)).toUInt() <= limit
+                        if (rowFits(MIN_TURN_CHARS)) {
+                            val chars = largestFitting(MIN_TURN_CHARS, MAX_TURN_CHARS, ::rowFits)
+                            selected[index] = turnJson(turn, chars)
+                        }
+                        break
+                    }
+                }
             }
         }
         // Historical task prose uses only the remaining budget; its metadata and uncertainty never disappear.
