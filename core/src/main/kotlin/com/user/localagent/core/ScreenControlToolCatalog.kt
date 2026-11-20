@@ -11,6 +11,7 @@ import kotlinx.serialization.json.*
 object ScreenControlToolCatalog {
     const val READ="read_screen"
     const val ACTION="screen_action"
+    const val STALE_SNAPSHOT_RECEIPT="화면 변경 · 실행 전 중단"
     val actions=setOf("tap","type","scroll","back","home","open_app")
     val definitions=listOf(
         ToolDefinition(READ,Risk.LOW,emptyMap(),
@@ -63,3 +64,11 @@ object ScreenControlToolCatalog {
     fun looksLikeSecret(text:String):Boolean =
         text.replace(Regex("[\\s-]"),"").matches(Regex("[0-9]{13,19}"))
 }
+
+/** In-memory observation from the host screen reader. It is never model or checkpoint data. */
+data class ScreenReadEvidence(
+    val snapshotId:String,
+    val packageDigest:String,
+    val windowId:Int,
+    val targets:Map<String,String>,
+)

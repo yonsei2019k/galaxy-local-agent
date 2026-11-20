@@ -25,6 +25,41 @@ pub struct NativeScreenTarget {
     pub enabled: bool,
 }
 
+#[derive(uniffi::Record)]
+pub struct NativeScreenRebindEvidence {
+    pub snapshot_id: String,
+    pub package_digest: String,
+    pub window_id: i32,
+    pub target_digest: String,
+}
+
+/// The Android host supplies two trusted, uniquely resolved observations in order,
+/// with a settled stale rejection between them. Neither observation grants approval.
+#[uniffi::export]
+pub fn native_can_rebind_screen_target(
+    rejected_snapshot: String,
+    proposed_snapshot: String,
+    before: NativeScreenRebindEvidence,
+    after: NativeScreenRebindEvidence,
+) -> bool {
+    fn digest(value: &str) -> bool {
+        value.len() == DIGEST_BYTES * 2
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    }
+    digest(&before.snapshot_id)
+        && digest(&after.snapshot_id)
+        && digest(&before.package_digest)
+        && digest(&before.target_digest)
+        && before.snapshot_id == rejected_snapshot
+        && after.snapshot_id == proposed_snapshot
+        && before.snapshot_id != after.snapshot_id
+        && before.package_digest == after.package_digest
+        && before.window_id == after.window_id
+        && before.target_digest == after.target_digest
+}
+
 /// Bind the bounded accessibility observation. Only digests and structural metadata
 /// cross the ABI. The process nonce makes IDs opaque and invalid after a restart.
 #[uniffi::export]
@@ -87,6 +122,30 @@ pub fn native_screen_snapshot_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rebinding_requires_fresh_snapshot_for_the_same_physical_target() {
+        fn observed(snapshot: &str, window: i32, target: &str) -> NativeScreenRebindEvidence {
+            NativeScreenRebindEvidence {
+                snapshot_id: snapshot.repeat(64),
+                package_digest: "c".repeat(64),
+                window_id: window,
+                target_digest: target.repeat(64),
+            }
+        }
+        let check = |after| {
+            native_can_rebind_screen_target(
+                "a".repeat(64),
+                "b".repeat(64),
+                observed("a", 3, "d"),
+                after,
+            )
+        };
+        assert!(check(observed("b", 3, "d")));
+        assert!(!check(observed("a", 3, "d")));
+        assert!(!check(observed("b", 4, "d")));
+        assert!(!check(observed("b", 3, "e")));
+    }
 
     fn target() -> NativeScreenTarget {
         NativeScreenTarget {

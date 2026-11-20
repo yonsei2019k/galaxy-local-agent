@@ -13,6 +13,7 @@ import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.user.localagent.core.ScreenControlToolCatalog
+import com.user.localagent.core.ScreenReadEvidence
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolResult
 import com.user.localagent.core.VerificationState
@@ -42,20 +43,28 @@ class ScreenControl(context:Context) {
 
     /** Element of a read: ref is its index in a deterministic traversal of the same screen. */
     private data class Element(val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,val sensitive:Boolean)
-    private data class Snapshot(val packageName:String,val id:String,val texts:List<String>,val elements:List<Element>,val truncated:Boolean)
+    private data class Snapshot(val packageName:String,val texts:List<String>,val elements:List<Element>,
+        val truncated:Boolean,val evidence:ScreenReadEvidence) {
+        val id get()=evidence.snapshotId
+    }
 
     suspend fun execute(call:ToolCall):ToolResult=try {
         check(enabled()){"화면 제어가 꺼져 있습니다. 설정 > 화면 연결에서 '에이전트 화면 제어'를 켜주세요."}
+        val observation=if(call.name==ScreenControlToolCatalog.READ) {
+            try{onMain{snapshot(service())}}catch(own:OwnAppForeground){null}
+        } else null
         val result=when(call.name){
-            ScreenControlToolCatalog.READ->try{render(onMain{snapshot(service())})}catch(own:OwnAppForeground){ownAppView()}
+            ScreenControlToolCatalog.READ->observation?.let(::render)?:ownAppView()
             ScreenControlToolCatalog.ACTION->act(call)
             else->error("지원하지 않는 화면 도구입니다.")
         }
         ToolResult(call.id,true,result,VerificationState.VERIFIED,
-            if(call.name==ScreenControlToolCatalog.READ)"현재 화면 접근성 정보 조회" else "동작 후 화면을 다시 읽음 · 앱 안의 최종 결과는 화면 내용으로만 판단")
+            if(call.name==ScreenControlToolCatalog.READ)"현재 화면 접근성 정보 조회" else "동작 후 화면을 다시 읽음 · 앱 안의 최종 결과는 화면 내용으로만 판단",
+            screenReadEvidence=observation?.evidence)
     }catch(error:Throwable){
         if(error is kotlinx.coroutines.CancellationException)throw error
-        ToolResult(call.id,false,error.message?:"화면 제어 실패",VerificationState.FAILED,"화면 동작을 실행하지 않았거나 확인하지 못함",
+        val summary=if(error is SnapshotChanged)ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT else "화면 동작을 실행하지 않았거나 확인하지 못함"
+        ToolResult(call.id,false,error.message?:"화면 제어 실패",VerificationState.FAILED,summary,
             effectNotApplied=error is ScreenRefused)
     }
 
@@ -211,20 +220,37 @@ class ScreenControl(context:Context) {
         val digest=MessageDigest.getInstance("SHA-256")
         fun hash(value:String)=digest.digest(value.toByteArray(Charsets.UTF_8))
         val identity=MessageDigest.getInstance("SHA-256")
+        fun ByteArray.hex():String=buildString(size*2) {
+            val digits="0123456789abcdef"
+            for (byte in this@hex) {
+                append(digits[(byte.toInt() ushr 4) and 15])
+                append(digits[byte.toInt() and 15])
+            }
+        }
+        val targetKeys=mutableMapOf<String,String>()
         val targets=elements.map { element->
             val node=element.node
             val bounds=Rect().also(node::getBoundsInScreen)
             val uniqueId=if(Build.VERSION.SDK_INT>=33) node.uniqueId else null
+            val resourceId=node.viewIdResourceName
             // Use fixed-width field digests so adjacent identity components cannot alias.
-            for (part in listOf(node.packageName,node.className,node.viewIdResourceName,uniqueId)) {
+            for (part in listOf(node.packageName,node.className,resourceId,uniqueId)) {
                 identity.update(hash(part?.toString().orEmpty()))
             }
-            NativeScreenTarget(element.role,hash(element.label),identity.digest(),bounds.left,bounds.top,
+            val target=NativeScreenTarget(element.role,hash(element.label),identity.digest(),bounds.left,bounds.top,
                 bounds.right,bounds.bottom,element.sensitive,node.isEnabled)
+            if(!target.sensitive&&target.enabled&&element.label.isNotBlank()&&
+                (!resourceId.isNullOrBlank()||!uniqueId.isNullOrBlank())){
+                identity.update(target.role.ordinal.toByte())
+                identity.update(target.labelDigest)
+                targetKeys[element.ref]=identity.digest(target.identityDigest).hex()
+            }
+            target
         }
-        val id=checkNotNull(nativeScreenSnapshotId(snapshotNonce,hash(packageName),window.id,truncated,
+        val packageDigest=hash(packageName)
+        val id=checkNotNull(nativeScreenSnapshotId(snapshotNonce,packageDigest,window.id,truncated,
             texts.map(::hash),targets)){"화면 관측을 확인하지 못했습니다."}
-        return Snapshot(packageName,id,texts,elements,truncated)
+        return Snapshot(packageName,texts,elements,truncated,ScreenReadEvidence(id,packageDigest.hex(),window.id,targetKeys))
     }
 
     private fun render(screen:Snapshot):String=buildJsonObject {

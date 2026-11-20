@@ -1223,7 +1223,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                     withContext(NonCancellable){persistStepEvidence()}
                                 }
                             }
-                            val guard=if(actionMode)TaskHarness.beforeStep(taskGoal,requestSteps,call)else HarnessDecision.Advance("선택한 모드의 읽기 도구이며 실제 실행 경계에서 다시 검사합니다.")
+                            val guard=if(actionMode)TaskHarness.beforeStep(taskGoal,requestSteps,call,
+                                com.user.localagent.integrations.ScreenActionRecovery.boundFailures(requestSteps,observedOutcomes,call))
+                            else HarnessDecision.Advance("선택한 모드의 읽기 도구이며 실제 실행 경계에서 다시 검사합니다.")
                             if(guard is HarnessDecision.Stop){
                                 val retry=harnessStop(request,guard,stuckRecovery,call.name,text,toolEvidence)
                                 if(retry!=null){query=retry;return@roundStep}
@@ -1265,7 +1267,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 val modelResult=modelEvidenceResult(call,result)
                                 toolEvidence+=buildJsonObject {put("tool",call.name);put("success",result.success);put("verification",result.verification.name);put("verificationSummary",result.verificationSummary);put("result",Json.parseToJsonElement(modelResult))}
                             }
-                            val next=if(com.user.localagent.core.PreparedHandoff.pendingEffect(call.name,result.verification))HarnessDecision.Stop("관련 앱에서 확인할 때까지 작업을 일시 정지했습니다. 실제 외부 작업의 완료는 확인되지 않았습니다.",pendingExternalCompletion=true)else if(actionMode)TaskHarness.decide(taskGoal,requestSteps)else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
+                            val next=if(com.user.localagent.core.PreparedHandoff.pendingEffect(call.name,result.verification))HarnessDecision.Stop("관련 앱에서 확인할 때까지 작업을 일시 정지했습니다. 실제 외부 작업의 완료는 확인되지 않았습니다.",pendingExternalCompletion=true)
+                            else if(actionMode)TaskHarness.decide(taskGoal,requestSteps,recoveredScreenSteps=
+                                com.user.localagent.integrations.ScreenActionRecovery.boundFailures(requestSteps,observedOutcomes))
+                            else HarnessDecision.Advance("조회 근거로 계획·검토·조사 결과를 작성합니다.")
                             if(next is HarnessDecision.Stop){publishActionFinal(request,taskGoal.requiredTools,next.reason,true);complete=true;return@roundStep}
                             // A full action budget may satisfy host checks; still allow the review/final-writing rounds.
                             query=evidenceQuery(request,text,toolEvidence,workMode==AgentWorkMode.RESEARCH)
@@ -1873,7 +1878,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             request.previousSteps.size,allowed,(goal.stepBudget-requestSteps.size).coerceAtLeast(0),remainingRounds,requestedFinish=forCompletion)
 
     private suspend fun checkedTaskFinish(request:QueuedChatRequest,goal:com.user.localagent.core.TaskGoal,allowed:Set<String>):HarnessDecision {
-        val decision=TaskHarness.decide(goal,requestSteps,requestedFinish=true)
+        val decision=TaskHarness.decide(goal,requestSteps,requestedFinish=true,recoveredScreenSteps=
+            com.user.localagent.integrations.ScreenActionRecovery.boundFailures(requestSteps,observedOutcomes))
         if(decision !is HarnessDecision.Finish)return decision
         val readback=assessReadbacks(request,goal,allowed,1,forCompletion=true)
         return if(readback.applicable&&!readback.readbackSatisfied)HarnessDecision.Stop("변경한 같은 대상의 후속 조회·버전 확인이 끝나지 않아 전체 요청의 완료는 확인되지 않았습니다.")else decision
@@ -2166,6 +2172,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             .write(model,options,if(resume==null)user+com.user.localagent.core.ToolUsePolicy.turnReminder(structuredSchema==null)+com.user.localagent.core.RoundBudget.hint(budgetRound,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS)else user,system,history,structuredSchema=structuredSchema,display=display,resume=resume,recoverTruncatedTool=recoverTruncatedTool,exactManagedReview=exactManagedReview)
 
     private fun modelEvidenceResult(call:ToolCall,result:ToolResult):String=when {
+        call.name==com.user.localagent.core.ScreenControlToolCatalog.READ->
+            com.user.localagent.integrations.ScreenActionRecovery.modelRead(observedOutcomes,call)
+                ?:com.user.localagent.core.compactJsonData(result.content,1100)
         call.name=="read_note"&&result.success&&result.verification==VerificationState.VERIFIED->com.user.localagent.notes.NoteReadModelDelivery.modelResult(result.content)
         call.name=="read_project_file"->com.user.localagent.workspace.ProjectReadDelivery.modelResult(result.content)
         call.name in com.user.localagent.core.ProjectStorageToolCatalog.names&&result.success&&result.verification==VerificationState.VERIFIED->
@@ -2676,7 +2685,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         catch(error:Exception){
             val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
                 else if(error is com.user.localagent.integrations.ScreenControl.SnapshotChanged)
-                    ToolResult(call.id,false,checkNotNull(error.message),VerificationState.FAILED,"화면 변경 · 실행 전 중단",effectNotApplied=true)
+                    ToolResult(call.id,false,checkNotNull(error.message),VerificationState.FAILED,
+                        com.user.localagent.core.ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT,effectNotApplied=true)
                 else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))

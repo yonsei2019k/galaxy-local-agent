@@ -7,7 +7,8 @@ import java.time.ZoneId
 import java.util.UUID
 
 data class ToolCall(val id:String,val name:String,val arguments:JsonObject)
-data class ToolResult(val id:String,val success:Boolean,val content:String,val verification:VerificationState=VerificationState.UNVERIFIED,val verificationSummary:String="",val effectNotApplied:Boolean=false){
+data class ToolResult(val id:String,val success:Boolean,val content:String,val verification:VerificationState=VerificationState.UNVERIFIED,val verificationSummary:String="",val effectNotApplied:Boolean=false,
+    val screenReadEvidence:ScreenReadEvidence?=null){
     init {require(!effectNotApplied||!success&&verification==VerificationState.FAILED)}
 }
 enum class Risk { LOW, MEDIUM, HIGH }

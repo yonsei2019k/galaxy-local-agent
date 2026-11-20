@@ -160,20 +160,21 @@ object TaskHarness {
     private fun researchGoal(ownerRequest:String,plan:WebTaskPlan.WebResearch,stepBudget:Int):TaskGoal =
         TaskGoal(ownerRequest.take(6000).ifBlank {plan.query},listOf("요청한 공개 주제의 실제 검색 결과·출처·조회 범위를 확인한다. 개인 자료 개수 조회는 공개 조사 완료의 근거가 아니다."),stepBudget,setOf(if(plan.shopping)"search_shopping"else"search_web"))
 
-    fun decide(goal:TaskGoal,steps:List<HarnessStep>,requestedFinish:Boolean=false):HarnessDecision {
+    fun decide(goal:TaskGoal,steps:List<HarnessStep>,requestedFinish:Boolean=false,
+        recoveredScreenSteps:Set<HarnessStep> = emptySet()):HarnessDecision {
         if(goal.requiredTools.any {it in SkillToolCatalog.names})return HarnessDecision.Stop("스킬 지침 읽기는 사용자 목표의 완료 근거가 아닙니다.")
         val actionSteps=steps.filterNot {it.tool in SkillToolCatalog.names}
-        if(actionSteps.size!=steps.size)return decide(goal,actionSteps,requestedFinish)
+        if(actionSteps.size!=steps.size)return decide(goal,actionSteps,requestedFinish,recoveredScreenSteps)
         if(steps.size>goal.stepBudget)return HarnessDecision.Stop("작업 단계 예산을 초과했습니다.")
         loopReason(steps)?.let {return HarnessDecision.Stop(it)}
         if(!requestedFinish){
-            if(steps.size>=goal.stepBudget)return decide(goal,steps,requestedFinish=true)
+            if(steps.size>=goal.stepBudget)return decide(goal,steps,requestedFinish=true,recoveredScreenSteps=recoveredScreenSteps)
             return HarnessDecision.Advance(if(steps.lastOrNull()?.evidence?.state==VerificationState.FAILED)"실패한 결과를 보완하는 안전한 다른 단계가 필요합니다." else "다음 필요한 실행 또는 결과 검증을 진행합니다.")
         }
         val unresolvedFailure=steps.withIndex().any {(index,step)->
             val optionalReadFailedWithoutEffect = step.tool !in goal.requiredTools &&
                 step.evidence.effectNotApplied && ToolInterruptionPolicy.hasNoMutation(step.tool)
-            step.evidence.state==VerificationState.FAILED&&!optionalReadFailedWithoutEffect&&steps.drop(index+1).none {later->
+            step.evidence.state==VerificationState.FAILED&&!optionalReadFailedWithoutEffect&&!screenReobserved(step,recoveredScreenSteps)&&steps.drop(index+1).none {later->
                 later.evidence.state==VerificationState.VERIFIED&&later.tool==step.tool&&
                     (readOnly(step.tool)||(rejectedBeforeEffect(step)&&!later.evidence.effectNotApplied&&recoveryTarget(later)==recoveryTarget(step)))
             }
@@ -192,10 +193,12 @@ object TaskHarness {
     }
 
     /** Optional pre-execution guard; permissions and typed argument validation remain separate. */
-    fun beforeStep(goal:TaskGoal,steps:List<HarnessStep>,call:ToolCall):HarnessDecision {
+    fun beforeStep(goal:TaskGoal,steps:List<HarnessStep>,call:ToolCall,
+        reobservedScreenSteps:Set<HarnessStep> = emptySet()):HarnessDecision {
         if(steps.size>=goal.stepBudget)return HarnessDecision.Stop("작업 단계 예산에 도달했습니다.")
         val safeRead=readOnly(call.name)
-        if(!safeRead&&steps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)&&!readOnly(it.tool)&&!rejectedBeforeEffect(it)})
+        if(!safeRead&&steps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)&&!readOnly(it.tool)&&
+                !rejectedBeforeEffect(it)&&!screenReobserved(it,reobservedScreenSteps)})
             return HarnessDecision.Stop("이전 변경 작업의 결과가 확인되지 않았습니다. 먼저 대상 상태를 조회하고 중복 변경을 피해야 합니다.")
         if(goal.requiredTools.isEmpty()&&!safeRead)return HarnessDecision.Stop("확인된 사용자 작업 목표에 포함되지 않은 변경·외부 행동입니다.")
         if(call.name !in goal.requiredTools&&!safeRead)return HarnessDecision.Stop("요청한 목표에 포함되지 않은 변경·외부 행동입니다.")
@@ -211,6 +214,10 @@ object TaskHarness {
     /** Only host-confirmed, unapplied updates can be repaired. Text and model claims never set this fact. */
     private fun rejectedBeforeEffect(step:HarnessStep):Boolean =
         step.evidence.state==VerificationState.FAILED&&step.evidence.effectNotApplied&&recoveryTarget(step)!=null
+
+    private fun screenReobserved(step:HarnessStep,bound:Set<HarnessStep>):Boolean =
+        step in bound&&step.tool==ScreenControlToolCatalog.ACTION&&step.evidence.state==VerificationState.FAILED&&
+            step.evidence.effectNotApplied&&step.evidence.summary==ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT
 
     /** Requests stay in their original scoped run; this matches only the stable record/file target. */
     private fun recoveryTarget(step:HarnessStep):String? {
