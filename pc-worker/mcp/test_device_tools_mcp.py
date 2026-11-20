@@ -519,6 +519,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(first, gateway.call_tool("plan_task", plan_arguments()))
         gateway.call_tool("read_note", {"id": "qa"})
         self.assert_code("PLAN_CHANGED", gateway.call_tool, "plan_task", {**plan_arguments(), "goal": "A different goal"})
+        self.assertEqual(1, gateway.rejected_calls)
         self.assertEqual(1, len(transport.plans()))
         self.assertEqual(1, len(transport.domain_calls()))
 
@@ -541,7 +542,9 @@ class PlanTests(unittest.TestCase):
                 transport.plan_state = "ACCEPTED"
                 gateway.call_tool("plan_task", plan_arguments())
                 transport.status["plan"].update(changes)
-                self.assert_code("PLAN_CHANGED", gateway.call_tool, "read_note", {"id": "qa"})
+                for _ in range(mcp.MAX_REJECTED_CALLS + 1):
+                    self.assert_code("PLAN_CHANGED", gateway.call_tool, "read_note", {"id": "qa"})
+                self.assertEqual(0, gateway.rejected_calls)
                 self.assertEqual([], transport.domain_calls())
 
     def test_plan_mode_missing_metadata_collision_or_downgrade_fails_closed(self):

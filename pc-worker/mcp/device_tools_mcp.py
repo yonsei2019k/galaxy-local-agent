@@ -533,6 +533,7 @@ class Gateway:
             raise BridgeError("CALL_IN_PROGRESS")
         cancel = cancel or threading.Event()
         submitted = False
+        checking_proposal = False
         call_id = None
         try:
             if self.uncertain_call is not None:
@@ -542,6 +543,7 @@ class Gateway:
                     "REJECTED_CALL_LIMIT",
                     "too many rejected tool calls in this task; stop calling tools and answer with the "
                     "verified results you already have, or tell the owner what remains unverified")
+            checking_proposal = True
             virtual_plan = name == "plan_task" and self.requires_plan is True
             if self.catalog is None or name not in self.catalog and not virtual_plan:
                 raise BridgeError("UNKNOWN_TOOL")
@@ -553,15 +555,20 @@ class Gateway:
                 validate_plan_arguments(arguments, self.catalog)
             else:
                 validate_arguments(arguments, self.catalog[name]["inputSchema"])
+            checking_proposal = False
             self._snapshot()  # Reject stale/revoked/changed grants before every enqueue.
             if cancel.is_set():
                 raise BridgeError("CANCELLED_BEFORE_SUBMISSION")
             if virtual_plan:
+                checking_proposal = True
+                self._check_plan_proposal(arguments)
+                checking_proposal = False
                 return self._plan_task(arguments, cancel)
             if self.requires_plan:
                 if self.plan is None or self.plan["state"] != "ACCEPTED":
                     raise BridgeError("PLAN_NOT_ACCEPTED")
                 if name not in self.plan["requiredTools"]:
+                    checking_proposal = True
                     raise BridgeError("TOOL_OUTSIDE_ACCEPTED_PLAN")
             call_id = canonical_uuid(self.new_id())
             deadline = self.monotonic() + MAX_WAIT_SECONDS
@@ -597,20 +604,22 @@ class Gateway:
             if submitted:
                 self.uncertain_call = call_id
             if isinstance(error, BridgeError):
-                if not submitted and error.code in COUNTED_REJECTIONS:
+                if checking_proposal and error.code in COUNTED_REJECTIONS:
                     self.rejected_calls += 1
                 raise
             raise BridgeError("BRIDGE_FAILURE") from None
         finally:
             self._call_lock.release()
 
-    def _plan_task(self, arguments, cancel):
+    def _check_plan_proposal(self, arguments):
         if self.proposed_plan is not None and json_bytes(arguments) != json_bytes(self.proposed_plan):
             raise BridgeError("PLAN_CHANGED")
         if self.plan is not None:
             current = {key: self.plan[key] for key in ("goal", "requiredTools", "constraints")}
             if json_bytes(arguments) != json_bytes(current):
                 raise BridgeError("PLAN_CHANGED")
+
+    def _plan_task(self, arguments, cancel):
         self.proposed_plan = parse_json(json_bytes(arguments))
         deadline = self.monotonic() + MAX_WAIT_SECONDS
         if self.plan is None:
