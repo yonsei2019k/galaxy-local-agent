@@ -1,5 +1,11 @@
 # Device validation
 
+## 2039 partial public source display
+
+Installed signed version 2039 with wireless ADB after the image job and PC worker became idle. Installed package digest matched the signed candidate and the app launched.
+
+A synthetic public-only task verified a search, then recorded HTTP_STATUS_404 on the deliberately missing page. The real model run paused at 38786 ms and the phone returned five observed search links with the incomplete status. No source page body was confirmed. A distinct ordinary-mode Jeju replay on 2039 paused at 33085 ms after a verified search and an app-browser open triggered the privacy gate. That path is outside the restricted public-read receipt display. The fixture establishes the public-only partial-result behavior. The replay did not verify fares, seating, or a general fix to browser privacy handoff.
+
 ## 2036 Jeju privacy-handoff replay
 
 Installed signed 2036 by wireless ADB while phone agent/image services and the paired worker were idle. App launch and installed APK digest matched. The same Jeju research fixture triggered the on-device credential-category guard. The PC cloud provider then became idle while local inference was active. The paired phone returned completed after 321460 ms with the fixed local-only result notice. The remote response exposed no private answer or tool rows. This verifies the local handoff reached the result, and provides no evidence of flight inventory, quoted fares, or which search projection ran. The safe-search projection was verified in the injected controller tests.
