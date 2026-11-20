@@ -1,5 +1,6 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
+import { RichAnswer } from './RichAnswer'
 import type { IconName } from './Icon'
 import type { ConversationMessage, Snapshot, Task } from './bridge'
 import { isLiveTaskPhase } from './composer'
@@ -53,7 +54,7 @@ function Message({ message, enabled, onCopy, onMessageMenu }: {
     <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? 'ZipHap 답변' : '작업 기록'}>
       {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> ZipHap</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
-      <div className="message-text" dir="auto">{message.text}</div>
+      {assistant ? <RichAnswer text={message.text} /> : <div className="message-text" dir="auto">{message.text}</div>}
       {(assistant || user) && (
         <div className="message-actions">
           {assistant && <button type="button" className="icon-button icon-button--compact" disabled={!enabled}

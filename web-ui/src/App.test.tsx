@@ -156,7 +156,7 @@ describe('native conversation', () => {
         evidence: [{ id: 'evidence-a', label: '호스트 결과', detail: text }] }],
     })
     expect(host.querySelectorAll('.message')).toHaveLength(1)
-    expect(host.querySelector('.message-text')?.textContent).toBe(text)
+    expect(Array.from(host.querySelectorAll('.rich-answer > p'), node => node.textContent).join('\n')).toBe(text)
     expect(host.querySelector('.task-evidence p')?.textContent).toBe(text)
     expect(host.querySelector('.message img, .task-evidence img, .message b')).toBeNull()
     click('답변 복사')
@@ -266,7 +266,7 @@ describe('native conversation', () => {
     const staleNativeTarget = running({ activeModelLabel: '테스트 모델', canSteer: true, draft: '이전 질문의 답을 작성 중',
       messages: [{ id: 'question', role: 'assistant', text: question }], tasks: [paused, completed] })
     snapshot(staleNativeTarget)
-    expect(host.querySelector('.message-text')?.textContent).toBe(question)
+    expect(host.querySelector('.rich-answer')?.textContent).toBe(question)
     expect(host.querySelector('[aria-label="일시 정지된 작업"] .task-state')?.textContent).toBe('일시 정지')
     expect(host.querySelector('.task-evidence:not([open]) summary')?.textContent).toContain('이전 작업 기록')
     expect(host.querySelector('.active-model, [aria-label="추가 지시"], [aria-label="현재 작업 중단"]')).toBeNull()

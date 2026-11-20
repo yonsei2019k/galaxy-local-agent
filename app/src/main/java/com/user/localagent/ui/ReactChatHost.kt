@@ -51,8 +51,18 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
             webViewClient=object:WebViewClient(){
                 override fun shouldInterceptRequest(view:WebView,request:WebResourceRequest):WebResourceResponse?=
                     loader.shouldInterceptRequest(request.url)?:WebResourceResponse("text/plain","UTF-8",403,"Blocked",emptyMap(),java.io.ByteArrayInputStream(byteArrayOf()))
-                override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean=
-                    request.url.scheme!="https"||request.url.host!="appassets.androidplatform.net"||!request.url.path.orEmpty().startsWith("/assets/react/")
+                override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean {
+                    val url=request.url
+                    if(url.scheme=="https"&&url.host=="appassets.androidplatform.net"&&url.path.orEmpty().startsWith("/assets/react/"))return false
+                    if(request.isForMainFrame&&request.hasGesture()&&request.method=="GET"&&
+                        url.scheme in setOf("https","http")&&!url.host.isNullOrBlank()&&
+                        !url.encodedAuthority.orEmpty().contains('@')&&url.host!="appassets.androidplatform.net"){
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,url)
+                            .addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
+                    return true
+                }
                 override fun onPageFinished(view:WebView,url:String){
                     if(url=="https://appassets.androidplatform.net/assets/react/index.html")publish(view)
                 }
