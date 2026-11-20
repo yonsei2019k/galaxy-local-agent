@@ -159,6 +159,19 @@ class CloudConversationContextTest {
         assertTrue(result.toString().toByteArray(Charsets.UTF_8).size<=12_000)
     }
 
+    @Test fun sameRunReplyKeepsItsMiddleWhenTheOlderRequestUsesMostBytes() {
+        val request = "x" + "\u0001".repeat(1499)
+        val reply = "가".repeat(749) + "정정" + "나".repeat(749)
+        val result = checkNotNull(build(listOf(turn(8, text = request), turn(8, "assistant", reply))))
+        val rows = turns(result)
+        assertEquals(listOf("user", "assistant"), rows.map { it.getValue("role").jsonPrimitive.content })
+        assertTrue(rows.all { it.getValue("sourceRunId").jsonPrimitive.content == binding(8).runId })
+        val excerpt = rows.first().getValue("text").jsonPrimitive.content
+        assertTrue(excerpt.startsWith("x") && excerpt.contains("생략") && excerpt.endsWith("\u0001"))
+        assertEquals(reply, rows.last().getValue("text").jsonPrimitive.content)
+        assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
+    }
+
     @Test fun headAndTailClippingKeepsLiteralLateCorrectionWithoutInventingMeaning(){
         val original="원래 요청: 서울역\n"+"자료 ".repeat(2000)+"\n정정: 부산역만 검색, 예약 금지"
         val result=checkNotNull(build(listOf(turn(1,text=original))))
