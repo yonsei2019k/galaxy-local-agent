@@ -102,13 +102,14 @@ class PcExternalAgentClient(
         require(result.id==proposal.callId&&revision>=claimRevision&&
             result.content.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES)
         val outgoing=com.user.localagent.core.CredentialRedaction.forCloudToolResult(result.content)
-        require(outgoing.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES)
-        val actual=buildJsonObject {
-            put("success",result.success);put("content",outgoing);put("verification",result.verification.name)
+        fun payload(content:String)=buildJsonObject {
+            put("success",result.success);put("content",content);put("verification",result.verification.name)
             put("effectNotApplied",result.effectNotApplied)
         }
+        val actual=payload(outgoing).takeIf {
+            ExternalAgentContract.sorted(it).toString().toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES
+        }?:payload("도구 결과가 전송 한도를 초과해 원문을 모델에 전달하지 않았습니다.")
         val expectedDigest=ExternalAgentContract.sha(ExternalAgentContract.sorted(actual).toString())
-        require(ExternalAgentContract.sorted(actual).toString().toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES)
         val root=call("POST","/result",buildJsonObject {
             put("callId",proposal.callId);put("sequence",proposal.sequence);put("revision",claimRevision);put("result",actual)
         })

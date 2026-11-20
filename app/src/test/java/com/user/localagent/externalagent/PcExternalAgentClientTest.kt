@@ -129,6 +129,19 @@ class PcExternalAgentClientTest {
         assertFalse(sent.contains("482913"));assertTrue(sent.contains("[가림]"))
         assertTrue(sent.contains(com.user.localagent.core.CredentialRedaction.notice(1)))
     }
+    @Test fun overLimitMaskedEnvelopeReportsEffectWithoutSendingResultBody()=runBlocking {
+        val wire=Wire();val client=PcExternalAgentClient(capture,wire)
+        client.register(capture);wire.offer();val status=client.poll();val claim=client.claim(proposal(),status.revision)
+        val secret="인증번호 482913"
+        val text="x".repeat(ExternalAgentContract.MAX_RESULT_BYTES-secret.toByteArray().size-1)+" "+secret
+        val ack=client.report(proposal(),ToolResult(call,true,text,VerificationState.VERIFIED),claim.snapshot.revision)
+        assertEquals(call,ack.callId)
+        val actual=checkNotNull(wire.lastResult)
+        assertTrue(actual.getValue("content").jsonPrimitive.content.contains("전송 한도"))
+        assertFalse(actual.toString().contains("482913"))
+        assertEquals("VERIFIED",actual.getValue("verification").jsonPrimitive.content)
+    }
+
     @Test fun resultWithoutSecretsIsPostedByteIdentical()=runBlocking {
         val wire=Wire();val client=PcExternalAgentClient(capture,wire)
         client.register(capture);wire.offer();val status=client.poll();val claim=client.claim(proposal(),status.revision)
