@@ -247,6 +247,9 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
         val stamp=now().toString()
         val title=Regex("(?is)<title\\b[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)?.let {plain(it,300)}.orEmpty()
         val text=plain(html,MAX_TEXT)
+        if (uniffi.ziphap_android.nativePublicPageInterstitial(title, text.take(2048))) {
+            throw PublicPageReadException(PublicPageReadReason.ACCESS_CHALLENGE)
+        }
         return WebPage(response.finalUrl, title, text, extractOffers(html, response.finalUrl, stamp), stamp)
     }
 

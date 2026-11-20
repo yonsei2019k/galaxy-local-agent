@@ -158,6 +158,8 @@ class PublicWebClientTest {
         assertEquals("HTTP_STATUS", auditCode(response(url, "").copy(statusCode = 999)))
         assertEquals("UNSUPPORTED_CONTENT", auditCode(response(url, "data", "application/octet-stream")))
         assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<html>Verify that you are human</html>")))
+        assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<title>Just a moment…</title>")))
+        assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<body>자동입력 방지 문자를 입력해주세요</body>")))
         val emptyPage = client { _, _ -> response(url, "<html><!-- no text --><script>loadContent()</script></html>") }
         assertTrue(emptyPage.fetchPage(url).text.isBlank())
         val result = emptyPage.readToolResult("empty", url)

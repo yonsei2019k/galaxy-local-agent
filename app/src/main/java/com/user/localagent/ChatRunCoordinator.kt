@@ -1608,13 +1608,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(resultState!="reported_done"||!hostComplete){
                 val links=if(accepted!=null&&resultState in setOf("reported_done","partial")&&authority().permits(capture)&&
                     ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),
-                        checkNotNull(bridgeSessionId),publicPartial=true))
-                    actual.values.asSequence().flatMap{CloudPublicSearchProjection.links(it).asSequence()}.distinct().take(5).toList()
-                    else emptyList()
+                        checkNotNull(bridgeSessionId),publicPartial=true)){
+                    val sources=linkedMapOf<String,Boolean>()
+                    for(execution in actual.values){
+                        val pageRead=execution.proposal.tool=="read_webpage"
+                        for(url in CloudPublicSearchProjection.links(execution))
+                            sources[url]=sources[url]==true||pageRead
+                    }
+                    sources.entries.take(5).map{(url,pageRead)->
+                        "- <$url> · "+if(pageRead)"페이지 읽음" else "검색 결과 · 내용 미확인"
+                    }
+                }else emptyList()
                 val notice="확인할 근거가 부족해 작업을 일시정지했습니다."
                 if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,notice,true)
                 else publishActionFinal(request,requestAuthorizedTools,
-                    "$notice\n\n조회 중 확인한 공개 출처\n"+links.joinToString("\n"){"- <$it>"},
+                    "$notice\n\n조회 중 찾은 공개 링크\n"+links.joinToString("\n"),
                     true,"partial_verified_sources")
                 return
             }

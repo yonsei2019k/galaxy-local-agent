@@ -1,3 +1,9 @@
+## 2026-11-21 — Distinguish search links from page evidence
+
+After a 2039 real phone test returned five search candidates alongside a 404, Claude's focused review found that the caption could imply the pages had been inspected. The host now labels entries as search results with content unconfirmed or as pages read. If the same source was subsequently read, the latter label takes precedence. The run remains paused. The Rust page reader detects narrow Korean access-check prompts and a generic Cloudflare interstitial title, so these responses do not qualify as read evidence. The result stays behind the existing published-content and privacy checks.
+
+The focused Rust classifier test and all 36 Android and core JVM cases passed. Release lint and assembly passed. Signed 2040 retained the signer and permissions, passed APK alignment and static packaging checks, and remains a candidate. SHA-256 be55c759adaf4c3fd6a0e99738ab14ab67578961ecd6d468b79ab91f67be2e29. The phone remains on 2039. Package and phone verification of the parallel UI and Rust branches will follow integration.
+
 ## 2026-11-21 — Retain verified public links when the cloud run remains incomplete
 
 The phone now has a Rust-backed receipt check for partial public research. The accepted plan and original authority still apply. Every broker row must match an actual settled public phone observation, and at least one visible, verified source is required. The check excludes any run with writes, prepared or unresolved calls and any source withheld from the model. When the provider reports partial or reports done without completion proof, the host may render up to five safe links from verified phone results. It uses no model prose, price claim, or withheld payload. The run stays paused. This addresses the public-source display gap in C-055 and the withheld-page scenario in C-063. Private answer handling and the cloud completion gate retain their existing contracts.
