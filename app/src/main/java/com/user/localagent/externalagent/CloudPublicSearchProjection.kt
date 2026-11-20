@@ -17,9 +17,7 @@ internal object CloudPublicSearchProjection {
         val items = data["items"] as? JsonArray ?: return null
         val safeRows = items.take(5).mapNotNull { element ->
             val row = element as? JsonObject ?: return@mapNotNull null
-            val url = safeField(row, "url", 2048) ?: return@mapNotNull null
-            val uri = runCatching { PublicWebSafety.requireHttps(url) }.getOrNull() ?: return@mapNotNull null
-            if (uri.rawQuery != null || '#' in url || '%' in url) return@mapNotNull null
+            val url = safeUrl(row) ?: return@mapNotNull null
             val title = safeField(row, "title", 300) ?: return@mapNotNull null
             buildJsonObject {
                 put("url", url)
@@ -39,6 +37,29 @@ internal object CloudPublicSearchProjection {
         }.toString()
         if (ConversationPrivacy.sensitiveText(outgoing)) return null
         return result.copy(content = outgoing)
+    }
+
+    /** Only the phone's verified output supplies links for a partial report. */
+    fun links(execution: PhoneAgentExecution): List<String> {
+        val result = execution.result
+        if (execution.withheldFromCloud || !result.success || result.effectNotApplied ||
+            result.verification != VerificationState.VERIFIED) return emptyList()
+        val tool = execution.proposal.tool
+        val content = when (tool) {
+            "search_web" -> from(tool, result)?.content ?: return emptyList()
+            "read_webpage" -> result.content
+            else -> return emptyList()
+        }
+        val data = runCatching { Json.parseToJsonElement(content) }.getOrNull() as? JsonObject ?: return emptyList()
+        if (data["untrustedSourceData"] != JsonPrimitive(true)) return emptyList()
+        return if (tool == "read_webpage") listOfNotNull(safeUrl(data))
+        else (data["items"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.let(::safeUrl) }
+    }
+
+    private fun safeUrl(row: JsonObject): String? {
+        val url = safeField(row, "url", 2048) ?: return null
+        val uri = runCatching { PublicWebSafety.requireHttps(url) }.getOrNull() ?: return null
+        return url.takeIf { uri.rawQuery == null && '#' !in it && '%' !in it }
     }
 
     private fun safeField(row: JsonObject, key: String, limit: Int): String? {

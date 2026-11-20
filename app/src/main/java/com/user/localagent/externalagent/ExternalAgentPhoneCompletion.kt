@@ -8,7 +8,8 @@ import uniffi.ziphap_android.nativePhoneCompletionProven
 
 /** Joins broker metadata to actual local callbacks. Server phone results are never evidence. */
 object ExternalAgentPhoneCompletion {
-    fun matches(capture:ExternalAgentCapture,plan:ExternalAgentPlan,evidence:JsonObject,actual:List<PhoneAgentExecution>,expectedSessionId:String):Boolean=runCatching {
+    fun matches(capture:ExternalAgentCapture,plan:ExternalAgentPlan,evidence:JsonObject,actual:List<PhoneAgentExecution>,
+        expectedSessionId:String,publicPartial:Boolean=false):Boolean=runCatching {
         require(capture.requirePlan&&capture.pcWorkspaceProfile=="phone-only")
         fun text(key:String)=ExternalAgentContract.text(evidence,key)
         require(text("sessionId")==expectedSessionId&&ExternalAgentContract.long(evidence,"revision")>0)
@@ -18,7 +19,9 @@ object ExternalAgentPhoneCompletion {
         require(evidence["phoneEvidenceImported"]==JsonPrimitive(false))
         listOf("verifiedPcTools","pcCalls","unresolvedCalls").forEach{require(evidence.getValue(it).jsonArray.isEmpty())}
         // Only screen openers (map, web page, consumer-app search) may stay PREPARED; a pending send/save never completes here.
-        require(evidence.getValue("preparedCalls").jsonArray.all{ExternalAgentContract.text(it.jsonObject,"tool").let(com.user.localagent.core.PreparedHandoff::opensScreenOnly)})
+        val prepared=evidence.getValue("preparedCalls").jsonArray
+        require(if(publicPartial)prepared.isEmpty() else prepared.all{
+            ExternalAgentContract.text(it.jsonObject,"tool").let(com.user.localagent.core.PreparedHandoff::opensScreenOnly)})
         val accepted=ExternalAgentContract.plan(evidence.getValue("acceptedPlan").jsonObject,capture)
         require(accepted.state==AgentPlanState.ACCEPTED&&accepted.planDigest==plan.planDigest&&accepted.goal==plan.goal&&
             accepted.requiredTools==plan.requiredTools&&accepted.constraints==plan.constraints)
@@ -41,6 +44,6 @@ object ExternalAgentPhoneCompletion {
             NativePhoneObservation(proposal.callId,proposal.sequence.toUInt(),proposal.tool,local.result.success,
                 NativePhoneVerification.valueOf(local.result.verification.name),local.result.effectNotApplied,local.withheldFromCloud)
         }
-        nativePhoneCompletionProven(plan.requiredTools.toList(),receipts,observations)
+        nativePhoneCompletionProven(plan.requiredTools.toList(),receipts,observations,publicPartial)
     }.getOrDefault(false)
 }

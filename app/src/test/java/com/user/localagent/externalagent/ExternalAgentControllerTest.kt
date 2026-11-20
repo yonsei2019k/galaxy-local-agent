@@ -100,6 +100,7 @@ class ExternalAgentControllerTest {
         assertFalse(safe.containsKey("query"))
         val row = safe.getValue("items").jsonArray.single().jsonObject
         assertEquals("https://example.com/routes", row.getValue("url").jsonPrimitive.content)
+        assertEquals(listOf("https://example.com/routes"), CloudPublicSearchProjection.links(local.single()))
         assertFalse(row.containsKey("snippet"))
         assertFalse(reported.content.contains("fixture@example.invalid"))
     }
@@ -126,6 +127,7 @@ class ExternalAgentControllerTest {
         assertEquals(ExternalAgentController.Pump.EXECUTED, controller.pumpOnce())
         assertSame(original, local.single().result)
         assertTrue(local.single().withheldFromCloud)
+        assertTrue(CloudPublicSearchProjection.links(local.single()).isEmpty())
         val reported = broker.reported.single()
         assertFalse(reported.success)
         assertTrue(reported.effectNotApplied)

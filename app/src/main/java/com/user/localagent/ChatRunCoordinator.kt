@@ -1606,7 +1606,17 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val hostComplete=accepted!=null&&ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),checkNotNull(bridgeSessionId))&&
                 (if(accepted.requiredTools.isEmpty())requestSteps.isEmpty() else taskGoal?.let{checkedTaskFinish(request,it,requestAuthorizedTools) is HarnessDecision.Finish}==true)
             if(resultState!="reported_done"||!hostComplete){
-                publishActionFinal(request,requestAuthorizedTools,"클라우드 모델의 종료 응답과 별도로 실행·후속 조회 근거가 충분하지 않아 일시 정지했습니다. 전체 완료는 확인하지 않았습니다.",true);return
+                val links=if(accepted!=null&&resultState in setOf("reported_done","partial")&&authority().permits(capture)&&
+                    ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),
+                        checkNotNull(bridgeSessionId),publicPartial=true))
+                    actual.values.asSequence().flatMap{CloudPublicSearchProjection.links(it).asSequence()}.distinct().take(5).toList()
+                    else emptyList()
+                val notice="확인할 근거가 부족해 작업을 일시정지했습니다."
+                if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,notice,true)
+                else publishActionFinal(request,requestAuthorizedTools,
+                    "$notice\n\n조회 중 확인한 공개 출처\n"+links.joinToString("\n"){"- <$it>"},
+                    true,"partial_verified_sources")
+                return
             }
             check(authority().permits(capture))
             controller.close();closed=true

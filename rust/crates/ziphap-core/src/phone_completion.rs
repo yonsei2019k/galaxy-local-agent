@@ -31,12 +31,16 @@ pub fn can_withhold_public_read(
     verification: PhoneVerification,
     effect_not_applied: bool,
 ) -> bool {
-    matches!(tool, "search_web" | "read_webpage" | "search_shopping")
+    is_public_web_read(tool)
         && match verification {
             PhoneVerification::Verified => success,
             PhoneVerification::Failed => !success && effect_not_applied,
             PhoneVerification::Prepared | PhoneVerification::Unverified => false,
         }
+}
+
+fn is_public_web_read(tool: &str) -> bool {
+    matches!(tool, "search_web" | "read_webpage" | "search_shopping")
 }
 
 pub fn opens_phone_screen(tool: &str) -> bool {
@@ -62,11 +66,31 @@ pub fn phone_completion_proven(
     reported: &[PhoneReceipt],
     observed: &[PhoneObservation],
 ) -> bool {
+    phone_evidence_matches(required_tools, reported, observed, false)
+}
+
+/// Partial public evidence never widens the plan or permits completion.
+pub fn phone_public_partial_proven(
+    required_tools: &[String],
+    reported: &[PhoneReceipt],
+    observed: &[PhoneObservation],
+) -> bool {
+    phone_evidence_matches(required_tools, reported, observed, true)
+}
+
+fn phone_evidence_matches(
+    required_tools: &[String],
+    reported: &[PhoneReceipt],
+    observed: &[PhoneObservation],
+    public_only: bool,
+) -> bool {
     if reported.len() != observed.len() || observed.len() > 128 || required_tools.len() > 128 {
         return false;
     }
     let required: BTreeSet<_> = required_tools.iter().map(String::as_str).collect();
-    if required.len() != required_tools.len() {
+    if required.len() != required_tools.len()
+        || public_only && !required.iter().all(|tool| is_public_web_read(tool))
+    {
         return false;
     }
     let mut unique_calls = BTreeSet::new();
@@ -78,6 +102,13 @@ pub fn phone_completion_proven(
             || receipt.tool != observation.tool
             || !unique_calls.insert(observation.call_id.as_str())
             || !required.contains(tool)
+            || public_only
+                && !can_withhold_public_read(
+                    tool,
+                    observation.success,
+                    observation.verification,
+                    observation.effect_not_applied,
+                )
         {
             return false;
         }
@@ -91,5 +122,9 @@ pub fn phone_completion_proven(
             proven.insert(tool);
         }
     }
-    required == proven
+    if public_only {
+        !proven.is_empty()
+    } else {
+        required == proven
+    }
 }

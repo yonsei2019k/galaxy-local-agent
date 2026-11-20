@@ -1,7 +1,53 @@
 use ziphap_core::{
     PhoneObservation, PhoneReceipt, PhoneVerification, can_withhold_public_read,
-    phone_completion_proven,
+    phone_completion_proven, phone_public_partial_proven,
 };
+
+#[test]
+fn partial_sources_require_exact_settled_public_receipts_without_completing_the_run() {
+    let search = observation("one", 1, "search_web", PhoneVerification::Verified);
+    let mut page = observation("two", 2, "read_webpage", PhoneVerification::Failed);
+    page.success = false;
+    page.effect_not_applied = true;
+    let required = ["search_web".into(), "read_webpage".into()];
+    let receipts = [receipt(&search), receipt(&page)];
+    let mut observations = [search, page];
+    assert!(phone_public_partial_proven(
+        &required,
+        &receipts,
+        &observations
+    ));
+    assert!(!phone_completion_proven(
+        &required,
+        &receipts,
+        &observations
+    ));
+
+    observations[1].effect_not_applied = false;
+    assert!(!phone_public_partial_proven(
+        &required,
+        &receipts,
+        &observations
+    ));
+    observations[1].effect_not_applied = true;
+    observations[0].withheld = true;
+    assert!(!phone_public_partial_proven(
+        &required,
+        &receipts,
+        &observations
+    ));
+    observations[0].withheld = false;
+    let required = [
+        "search_web".into(),
+        "read_webpage".into(),
+        "prepare_sms".into(),
+    ];
+    assert!(!phone_public_partial_proven(
+        &required,
+        &receipts,
+        &observations
+    ));
+}
 
 #[test]
 fn withholding_only_continues_a_settled_public_read() {

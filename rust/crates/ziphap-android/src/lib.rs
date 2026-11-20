@@ -58,6 +58,7 @@ pub fn native_phone_completion_proven(
     required_tools: Vec<String>,
     reported: Vec<NativePhoneReceipt>,
     observed: Vec<NativePhoneObservation>,
+    public_partial: bool,
 ) -> bool {
     let reported: Vec<_> = reported
         .into_iter()
@@ -79,7 +80,11 @@ pub fn native_phone_completion_proven(
             verification: row.verification.into(),
         })
         .collect();
-    ziphap_core::phone_completion_proven(&required_tools, &reported, &observed)
+    if public_partial {
+        ziphap_core::phone_public_partial_proven(&required_tools, &reported, &observed)
+    } else {
+        ziphap_core::phone_completion_proven(&required_tools, &reported, &observed)
+    }
 }
 
 #[derive(uniffi::Enum)]
