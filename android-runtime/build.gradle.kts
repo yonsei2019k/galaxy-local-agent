@@ -68,15 +68,22 @@ dependencies {
     api("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
     api("com.squareup.okhttp3:okhttp:5.3.2")
     testImplementation("junit:junit:4.13.2")
+    testRuntimeOnly("net.java.dev.jna:jna:5.17.0@jar")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
-tasks.withType<Test>().configureEach { workingDir(rootProject.file("app")) }
 val buildRustEngine by tasks.registering(Exec::class) {
     workingDir(rootProject.projectDir)
     commandLine(providers.environmentVariable("ZIPHAP_PYTHON").orElse("python").get(), "scripts/build-rust-android.py")
     inputs.files(fileTree("../rust") { include("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/**"); exclude("target/**") })
     inputs.file("../scripts/build-rust-android.py")
     outputs.dir(layout.buildDirectory.dir("generated/rust"))
+}
+tasks.withType<Test>().configureEach {
+    workingDir(rootProject.file("app"))
+    dependsOn(buildRustEngine)
+    val hostLibrary = layout.buildDirectory.file("generated/rust/host/${System.mapLibraryName("ziphap_android")}")
+    inputs.file(hostLibrary)
+    systemProperty("uniffi.component.ziphap_android.libraryOverride", hostLibrary.get().asFile.absolutePath)
 }
 val buildReactUi by tasks.registering(Exec::class) {
     workingDir(rootProject.projectDir)

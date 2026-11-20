@@ -1,6 +1,10 @@
 package com.user.localagent.externalagent
 
 import kotlinx.serialization.json.*
+import uniffi.ziphap_android.NativePhoneObservation
+import uniffi.ziphap_android.NativePhoneReceipt
+import uniffi.ziphap_android.NativePhoneVerification
+import uniffi.ziphap_android.nativePhoneCompletionProven
 
 /** Joins broker metadata to actual local callbacks. Server phone results are never evidence. */
 object ExternalAgentPhoneCompletion {
@@ -21,19 +25,22 @@ object ExternalAgentPhoneCompletion {
         fun names(key:String)=evidence.getValue(key).jsonArray.map{(it as JsonPrimitive).also{p->require(p.isString)}.content}
         require(names("requiredTools").let{it.size==it.toSet().size&&it.toSet()==plan.requiredTools})
         require(names("phoneToolsRequiringLocalEvidence").let{it.size==it.toSet().size&&it.toSet()==plan.requiredTools})
-        val calls=evidence.getValue("phoneCalls").jsonArray.map{it.jsonObject}
-        require(calls.size==actual.size&&actual.map{it.proposal.callId}.distinct().size==actual.size)
-        require(plan.requiredTools.all{name->actual.any{it.proposal.tool==name&&!it.withheldFromCloud&&it.result.success&&!it.result.effectNotApplied&&
-            (it.result.verification==com.user.localagent.core.VerificationState.VERIFIED||
-                com.user.localagent.core.PreparedHandoff.opensScreenOnly(name)&&it.result.verification==com.user.localagent.core.VerificationState.PREPARED)}})
-        calls.forEachIndexed{index,row->
+        val calls=evidence.getValue("phoneCalls").jsonArray
+        require(calls.size==actual.size&&calls.size<=128)
+        val receipts=calls.map{item->
+            val row=item.jsonObject
             ExternalAgentContract.fields(row,setOf("callId","sequence","tool","state"))
-            val local=actual[index];val proposal=local.proposal
-            require(local.parentRunId==capture.parentRunId&&local.projectBinding==capture.projectBinding&&local.authorityRevision==capture.authorityRevision)
-            require(ExternalAgentContract.text(row,"callId")==proposal.callId&&ExternalAgentContract.long(row,"sequence")==proposal.sequence.toLong()&&
-                ExternalAgentContract.text(row,"tool")==proposal.tool&&ExternalAgentContract.text(row,"state")=="COMPLETED")
-            require(proposal.tool in plan.requiredTools&&local.result.id==proposal.callId)
+            val sequence=ExternalAgentContract.long(row,"sequence")
+            require(sequence in 1..Int.MAX_VALUE.toLong()&&ExternalAgentContract.text(row,"state")=="COMPLETED")
+            NativePhoneReceipt(ExternalAgentContract.text(row,"callId"),sequence.toUInt(),ExternalAgentContract.text(row,"tool"))
         }
-        true
+        val observations=actual.map{local->
+            val proposal=local.proposal
+            require(local.parentRunId==capture.parentRunId&&local.projectBinding==capture.projectBinding&&local.authorityRevision==capture.authorityRevision)
+            require(proposal.sequence>0&&local.result.id==proposal.callId)
+            NativePhoneObservation(proposal.callId,proposal.sequence.toUInt(),proposal.tool,local.result.success,
+                NativePhoneVerification.valueOf(local.result.verification.name),local.result.effectNotApplied,local.withheldFromCloud)
+        }
+        nativePhoneCompletionProven(plan.requiredTools.toList(),receipts,observations)
     }.getOrDefault(false)
 }

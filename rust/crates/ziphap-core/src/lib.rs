@@ -9,6 +9,7 @@
 mod grant;
 mod goal_budget;
 mod journal;
+mod phone_completion;
 mod run;
 mod scheduler;
 mod types;
@@ -16,6 +17,7 @@ mod types;
 pub use grant::*;
 pub use goal_budget::*;
 pub use journal::*;
+pub use phone_completion::*;
 pub use run::*;
 pub use scheduler::*;
 pub use types::*;

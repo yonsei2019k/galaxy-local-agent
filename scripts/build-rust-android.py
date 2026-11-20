@@ -26,6 +26,9 @@ def main():
     run([cargo, "build", "--locked", "-p", "ziphap-android"], cwd=workspace, env=env)
     library = workspace / "target/debug" / ("ziphap_android.dll" if os.name == "nt" else
               "libziphap_android.dylib" if platform.system() == "Darwin" else "libziphap_android.so")
+    host_library = generated / "host"
+    host_library.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(library, host_library / library.name)
     run([cargo, "run", "--locked", "-p", "ziphap-android", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
          "generate", "--library", library, "--language", "kotlin", "--config", workspace / "crates/ziphap-android/uniffi.toml", "--out-dir", bindings], cwd=workspace, env=env)
     if args.bindings_only:

@@ -6,6 +6,8 @@ import com.user.localagent.core.VerificationState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import uniffi.ziphap_android.NativePhoneVerification
+import uniffi.ziphap_android.nativeCanWithholdPublicRead
 
 internal class PrivateResultWithheld(val kind: com.user.localagent.core.ConversationPrivacy.MatchKind) :
     IllegalStateException("PRIVATE_RESULT_WITHHELD")
@@ -183,9 +185,8 @@ class ExternalAgentController(
 
     private fun publicResultForCloud(tool:String,result:ToolResult):ToolResult? {
         if(tool !in ExternalAgentContract.PUBLIC_WEB_READS || !com.user.localagent.core.ToolReadPolicy.isReadOnly(tool))return null
-        val settled=(result.success&&result.verification==VerificationState.VERIFIED) ||
-            (!result.success&&result.verification==VerificationState.FAILED&&result.effectNotApplied)
-        if(!settled)return null
+        val verification=NativePhoneVerification.valueOf(result.verification.name)
+        if(!nativeCanWithholdPublicRead(tool,result.success,verification,result.effectNotApplied))return null
         return CloudPublicSearchProjection.from(tool,result)?:ToolResult(
             result.id,false,
             "이 공개 자료는 개인정보 보호 확인을 통과하지 못해 사용할 수 없습니다. 기존 허용 도구로 다른 공개 출처를 확인하거나 이미 확인한 자료만 답변에 사용하세요.",

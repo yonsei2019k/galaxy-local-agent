@@ -7,6 +7,82 @@ use serde::{Deserialize, Serialize};
 uniffi::setup_scaffolding!();
 
 #[derive(uniffi::Enum)]
+pub enum NativePhoneVerification {
+    Verified,
+    Prepared,
+    Unverified,
+    Failed,
+}
+
+impl From<NativePhoneVerification> for ziphap_core::PhoneVerification {
+    fn from(value: NativePhoneVerification) -> Self {
+        match value {
+            NativePhoneVerification::Verified => Self::Verified,
+            NativePhoneVerification::Prepared => Self::Prepared,
+            NativePhoneVerification::Unverified => Self::Unverified,
+            NativePhoneVerification::Failed => Self::Failed,
+        }
+    }
+}
+
+#[uniffi::export]
+pub fn native_can_withhold_public_read(
+    tool: String,
+    success: bool,
+    verification: NativePhoneVerification,
+    effect_not_applied: bool,
+) -> bool {
+    ziphap_core::can_withhold_public_read(&tool, success, verification.into(), effect_not_applied)
+}
+
+#[derive(uniffi::Record)]
+pub struct NativePhoneObservation {
+    pub call_id: String,
+    pub sequence: u32,
+    pub tool: String,
+    pub success: bool,
+    pub verification: NativePhoneVerification,
+    pub effect_not_applied: bool,
+    pub withheld: bool,
+}
+
+#[derive(uniffi::Record)]
+pub struct NativePhoneReceipt {
+    pub call_id: String,
+    pub sequence: u32,
+    pub tool: String,
+}
+
+#[uniffi::export]
+pub fn native_phone_completion_proven(
+    required_tools: Vec<String>,
+    reported: Vec<NativePhoneReceipt>,
+    observed: Vec<NativePhoneObservation>,
+) -> bool {
+    let reported: Vec<_> = reported
+        .into_iter()
+        .map(|row| ziphap_core::PhoneReceipt {
+            call_id: row.call_id,
+            sequence: row.sequence,
+            tool: row.tool,
+        })
+        .collect();
+    let observed: Vec<_> = observed
+        .into_iter()
+        .map(|row| ziphap_core::PhoneObservation {
+            call_id: row.call_id,
+            sequence: row.sequence,
+            tool: row.tool,
+            success: row.success,
+            effect_not_applied: row.effect_not_applied,
+            withheld: row.withheld,
+            verification: row.verification.into(),
+        })
+        .collect();
+    ziphap_core::phone_completion_proven(&required_tools, &reported, &observed)
+}
+
+#[derive(uniffi::Enum)]
 pub enum NativeGoalBudgetStop {
     Segments,
     Tools,
@@ -62,8 +138,7 @@ struct Checkpoint {
 fn read_only(tool:&str)->bool { matches!(tool,"get_current_datetime"|"search_notes"|"read_note"|"search_contacts"|
     "read_screen"|"read_kakao_screen"|"read_calendar_events"|"list_calendar_events"|"list_reminders"|"read_reminder"|
     "inspect_project_storage"|"read_project_file"|"search_web"|"read_webpage"|"read_app_browser_page"|"read_pc_browser_page") }
-fn opens_screen(tool:&str)->bool { matches!(tool,"open_tmap"|"open_tmap_destination"|"open_netflix"|"search_netflix"|
-    "open_netflix_title"|"open_coupang"|"search_coupang"|"open_coupang_product"|"open_coupang_eats"|"open_map"|"open_url") }
+use ziphap_core::opens_phone_screen as opens_screen;
 
 #[derive(uniffi::Object)]
 pub struct NativeRunJournal { state: Mutex<State> }
