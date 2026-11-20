@@ -28,6 +28,7 @@ object CredentialRedaction {
         """(\b(?:api[_-]?key|access[_-]?token|token|secret|password|passwd|passphrase|authorization)\s*[:=]\s*["']?)(?!bearer\b)$NOT_MASK([^\s"',;]{6,})""",
         RegexOption.IGNORE_CASE,
     )
+    private val standaloneWrongPasswordNotice = Regex("비밀번호가 틀렸습니다[.!]?")
     private const val COMMON_WORDS = "변경|재설정|확인|입력|찾기|설정|정책|오류|화"
     private val koreanLabel = Regex(
         """((?:비밀\s*번호|비번|패스워드|암호|(?<![A-Za-z])PIN|핀\s*번호|보안\s*코드|복구\s*(?:키|코드))\s*(?:[:=]|은|는|이|가)?\s*)(?!(?:$COMMON_WORDS))$NOT_MASK([^\s,;]{4,})""",
@@ -69,7 +70,7 @@ object CredentialRedaction {
     }
 
     fun redact(text: String): Result {
-        if (text.isBlank() || text.trim().removeSuffix(".").removeSuffix("!") == "비밀번호가 틀렸습니다") {
+        if (text.isBlank() || standaloneWrongPasswordNotice.matches(text.trim())) {
             return Result(text, 0)
         }
         var count = 0

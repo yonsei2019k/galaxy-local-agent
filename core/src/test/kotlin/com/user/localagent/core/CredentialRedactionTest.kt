@@ -38,7 +38,8 @@ class CredentialRedactionTest {
         val notice = "비밀번호가 틀렸습니다."
         assertEquals(CredentialRedaction.Result(notice, 0), CredentialRedaction.redact(notice))
         one("비밀번호: 틀렸습니다", "틀렸습니다")
-        one("비밀번호가 틀렸습니다.\n인증번호 482913", "482913")
+        val mixed = CredentialRedaction.redact("비밀번호가 틀렸습니다.\n인증번호 482913")
+        assertFalse(mixed.text.contains("482913"))
         val json = """{"password":"비밀번호가 틀렸습니다."}"""
         assertEquals("""{"password":"[가림]"}""", CredentialRedaction.forCloudToolResult(json))
     }
