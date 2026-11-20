@@ -12,6 +12,11 @@ object ScreenControlToolCatalog {
     const val READ="read_screen"
     const val ACTION="screen_action"
     const val STALE_SNAPSHOT_RECEIPT="화면 변경 · 실행 전 중단"
+    const val APPROVED_SNAPSHOT_CHANGED_RECEIPT="승인 후 화면 변경 · 실행 전 중단"
+    const val APPROVED_SNAPSHOT_CHANGED_NOTICE="화면이 바뀌어 승인한 동작을 실행하지 않았습니다. 다시 진행하려면 새 요청을 보내주세요."
+
+    fun approvalInvalidated(tool:String,state:VerificationState,summary:String,effectNotApplied:Boolean):Boolean =
+        tool==ACTION&&state==VerificationState.FAILED&&effectNotApplied&&summary==APPROVED_SNAPSHOT_CHANGED_RECEIPT
     val actions=setOf("tap","type","scroll","back","home","open_app")
     val definitions=listOf(
         ToolDefinition(READ,Risk.LOW,emptyMap(),

@@ -1417,6 +1417,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         var plan:ExternalAgentPlan?=null
         var privatePlan=false
         var preparedSeen=false
+        var screenApprovalInvalidated=false
         var taskGoal:com.user.localagent.core.TaskGoal?=null
         val actual=linkedMapOf<String,PhoneAgentExecution>()
         var nativeDeadlineAt=Long.MAX_VALUE
@@ -1483,6 +1484,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     FailureLog.record(context,"cloud_public_read",null,"PUBLIC_READ_WITHHELD")
                 // Same as the local path: a handed-off Intent stops the run before the model can repeat it.
                 if(entry.result.success&&com.user.localagent.core.PreparedHandoff.pendingEffect(entry.proposal.tool,entry.result.verification))preparedSeen=true
+                if(com.user.localagent.core.ScreenControlToolCatalog.approvalInvalidated(entry.proposal.tool,
+                        entry.result.verification,entry.result.verificationSummary,entry.result.effectNotApplied))
+                    screenApprovalInvalidated=true
                 check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
@@ -1546,6 +1550,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         publishActionFinal(request,emptySet(),"개인 자료를 읽기 전에 멈췄습니다. 이 실행의 저장된 권한 범위에서는 모델을 바꿀 수 없습니다. 개인정보 · 로컬에서 이어갈 수 있습니다.",true,"private_plan_requires_local")
                         return@withTimeout value
                     }
+                    if(screenApprovalInvalidated)return@withTimeout value
                     if(pauseGoalBudgetIfExhausted(request))return@withTimeout value
                     if(preparedSeen)return@withTimeout value
                     if(controller.phase !in setOf(ExternalAgentController.Phase.ACTIVE,ExternalAgentController.Phase.RESULT_PENDING))return@withTimeout value
@@ -1554,6 +1559,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 @Suppress("UNREACHABLE_CODE") error("BRIDGE_PROVIDER_LOOP")
             }
             if(privatePlan || requestAutopilotPauseReason!=null)return
+            if(screenApprovalInvalidated){
+                publishActionFinal(request,requestAuthorizedTools,
+                    com.user.localagent.core.ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE,true)
+                return
+            }
             if(preparedSeen){
                 publishActionFinal(request,requestAuthorizedTools,CloudAgentFinals.PREPARED_PAUSE,true);return
             }
@@ -2684,9 +2694,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
             val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
-                else if(error is com.user.localagent.integrations.ScreenControl.SnapshotChanged)
-                    ToolResult(call.id,false,checkNotNull(error.message),VerificationState.FAILED,
-                        com.user.localagent.core.ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT,effectNotApplied=true)
+                else if(error is com.user.localagent.integrations.ScreenControl.SnapshotChanged)error.failure(call.id)
                 else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))
@@ -2762,6 +2770,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)||tools.screenActionNeedsOwner(call)
         val targetReview=tools.reviewForAction(call)
         var noteOwnerAccepted=false
+        var approvedScreenSnapshot:String?=null
         if((confirmation&&!targetConfirmed||call.name=="patch_note")&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
             traceAttempt?.let{workTraceSession?.approval(it,com.user.localagent.data.WorkTraceCode.APPROVAL_WAITING)}
             val deferred=CompletableDeferred<Boolean>()
@@ -2770,6 +2779,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val allowed=try { deferred.await() } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
+            if(action.call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION)
+                approvedScreenSnapshot=action.call.arguments.getValue("snapshotId").jsonPrimitive.content
             noteOwnerAccepted=call.name=="patch_note"
             check(app.repository.chat.run(action.runId)?.let {it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true){"실행 대상이 변경되어 이전 승인을 적용하지 않았습니다."}
             if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)tools.confirmCalendarOwner(call,targetReview)
@@ -2829,7 +2840,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         } else {
             val observed=try {
                 withTimeoutOrNull(ToolRegistry.definitions.getValue(call.name).timeoutMillis) {
-                    com.user.localagent.core.ToolInterruptionPolicy.observed(call,tools.execute(call))
+                    com.user.localagent.core.ToolInterruptionPolicy.observed(call,tools.execute(call,approvedScreenSnapshot))
                 }
                     ?: com.user.localagent.core.ToolInterruptionPolicy.timedOut(call)
             }

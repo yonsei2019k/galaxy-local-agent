@@ -24,8 +24,10 @@ import kotlinx.serialization.json.*
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Locale
+import uniffi.ziphap_android.NativeScreenDispatchDecision
 import uniffi.ziphap_android.NativeScreenRole
 import uniffi.ziphap_android.NativeScreenTarget
+import uniffi.ziphap_android.nativeScreenDispatchDecision
 import uniffi.ziphap_android.nativeScreenSnapshotId
 
 /**
@@ -48,14 +50,14 @@ class ScreenControl(context:Context) {
         val id get()=evidence.snapshotId
     }
 
-    suspend fun execute(call:ToolCall):ToolResult=try {
+    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult=try {
         check(enabled()){"화면 제어가 꺼져 있습니다. 설정 > 화면 연결에서 '에이전트 화면 제어'를 켜주세요."}
         val observation=if(call.name==ScreenControlToolCatalog.READ) {
             try{onMain{snapshot(service())}}catch(own:OwnAppForeground){null}
         } else null
         val result=when(call.name){
             ScreenControlToolCatalog.READ->observation?.let(::render)?:ownAppView()
-            ScreenControlToolCatalog.ACTION->act(call)
+            ScreenControlToolCatalog.ACTION->act(call,approvedSnapshot)
             else->error("지원하지 않는 화면 도구입니다.")
         }
         ToolResult(call.id,true,result,VerificationState.VERIFIED,
@@ -63,8 +65,8 @@ class ScreenControl(context:Context) {
             screenReadEvidence=observation?.evidence)
     }catch(error:Throwable){
         if(error is kotlinx.coroutines.CancellationException)throw error
-        val summary=if(error is SnapshotChanged)ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT else "화면 동작을 실행하지 않았거나 확인하지 못함"
-        ToolResult(call.id,false,error.message?:"화면 제어 실패",VerificationState.FAILED,summary,
+        if(error is SnapshotChanged)error.failure(call.id)
+        else ToolResult(call.id,false,error.message?:"화면 제어 실패",VerificationState.FAILED,"화면 동작을 실행하지 않았거나 확인하지 못함",
             effectNotApplied=error is ScreenRefused)
     }
 
@@ -94,7 +96,7 @@ class ScreenControl(context:Context) {
         }
     }
 
-    private suspend fun act(call:ToolCall):String {
+    private suspend fun act(call:ToolCall,approvedSnapshot:String?):String {
         ScreenControlToolCatalog.validate(call)
         val a=call.arguments
         val action=a.getValue("action").jsonPrimitive.content
@@ -105,8 +107,11 @@ class ScreenControl(context:Context) {
                 "home"->check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)){"홈으로 이동하지 못했습니다."}
                 "open_app"->openApp(a.getValue("packageName").jsonPrimitive.content)
                 else->{
-                    val screen=snapshot(service)
-                    requireCurrentSnapshot(requested,screen.id)
+                    val screen=try{snapshot(service)}catch(refused:ScreenRefused){
+                        if(approvedSnapshot!=null)throw SnapshotChanged(afterApproval=true)
+                        throw refused
+                    }
+                    requireCurrentSnapshot(requested,screen.id,approvedSnapshot)
                     if(action=="back")check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)){"뒤로 가지 못했습니다."}
                     else perform(screen,action,a)
                 }
@@ -294,13 +299,24 @@ class ScreenControl(context:Context) {
 
     open class ScreenRefused(message:String):IllegalStateException(message)
     class OwnAppForeground:ScreenRefused("ZipHap.Agent 자신의 화면은 조작하지 않습니다.")
-    internal class SnapshotChanged:ScreenRefused("화면이 바뀌었습니다. read_screen으로 다시 읽은 뒤 새 snapshotId로 요청하세요.")
+    internal class SnapshotChanged(private val afterApproval:Boolean):ScreenRefused(
+        if(afterApproval)ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE
+        else "화면이 바뀌었습니다. read_screen으로 다시 읽은 뒤 새 snapshotId로 요청하세요."
+    ) {
+        fun failure(callId:String)=ToolResult(callId,false,checkNotNull(message),VerificationState.FAILED,
+            if(afterApproval)ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_RECEIPT else ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT,
+            effectNotApplied=true)
+    }
 
     companion object {
         private val snapshotNonce=ByteArray(32).also(SecureRandom()::nextBytes)
 
-        internal fun requireCurrentSnapshot(requested:String,current:String) {
-            if(current!=requested)throw SnapshotChanged()
+        internal fun requireCurrentSnapshot(requested:String,current:String,approvedSnapshot:String?=null) {
+            when(nativeScreenDispatchDecision(requested,current,approvedSnapshot)){
+                NativeScreenDispatchDecision.CURRENT->Unit
+                NativeScreenDispatchDecision.STALE->throw SnapshotChanged(afterApproval=false)
+                NativeScreenDispatchDecision.APPROVAL_INVALIDATED->throw SnapshotChanged(afterApproval=true)
+            }
         }
 
         private val refusedPackages=listOf("com.user.localagent.images","com.android.settings","com.samsung.android.settings","com.android.systemui","com.android.permissioncontroller",

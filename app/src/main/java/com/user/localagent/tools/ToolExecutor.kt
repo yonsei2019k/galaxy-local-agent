@@ -153,8 +153,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             else->null
         }
     }
-    suspend fun execute(call:ToolCall):ToolResult=if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call)}else executeUnlocked(call)
-    private suspend fun executeUnlocked(call:ToolCall):ToolResult = withContext(Dispatchers.IO) {
+    suspend fun execute(call:ToolCall,approvedScreenSnapshot:String?=null):ToolResult=
+        if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call,null)}
+        else executeUnlocked(call,approvedScreenSnapshot)
+    private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
             if(call.name in NoteReadPatchToolCatalog.names){
@@ -163,7 +165,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             }
             if(call.name in com.user.localagent.core.ScreenControlToolCatalog.names){
                 check(connectionRunId==null||connectionIsRunLive()){"화면 제어 요청이 중단됐습니다."}
-                return@withContext com.user.localagent.integrations.ScreenControl(context).execute(call)
+                return@withContext com.user.localagent.integrations.ScreenControl(context).execute(call,approvedScreenSnapshot)
             }
             browserFor(call.name)?.let{browser->
                 check(connectionRunId==null||connectionIsRunLive()){"브라우저 요청이 중단됐습니다."}

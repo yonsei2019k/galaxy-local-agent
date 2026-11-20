@@ -3,6 +3,8 @@ package com.user.localagent.integrations
 import com.user.localagent.core.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +34,37 @@ class ScreenActionRecoveryTest {
         assertTrue(preflight(reobserved,next) is HarnessDecision.Advance)
         assertTrue(finish(reobserved) is HarnessDecision.Stop)
         assertTrue(finish(reobserved+success(next)) is HarnessDecision.Finish)
+    }
+
+    @Test
+    fun staleAfterOwnerApprovalStopsBeforeAnySecondRecovery() {
+        val laterId="d".repeat(64)
+        val readyForApproval=listOf(before,stale,after)
+        assertTrue(preflight(readyForApproval,next) is HarnessDecision.Advance)
+        var dispatches=0
+        val mismatch=assertThrows(ScreenControl.SnapshotChanged::class.java) {
+            ScreenControl.requireCurrentSnapshot(newId,laterId,approvedSnapshot=newId)
+            dispatches++
+        }
+        assertEquals(0,dispatches)
+        val result=mismatch.failure(next.id)
+        assertFalse(result.success)
+        assertTrue(result.effectNotApplied)
+        assertEquals(ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_RECEIPT,result.verificationSummary)
+        assertTrue(ScreenControlToolCatalog.approvalInvalidated(next.name,result.verification,result.verificationSummary,result.effectNotApplied))
+        val run=readyForApproval+ObservedToolOutcome(next,result)
+        assertEquals(HarnessDecision.Stop(ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE),
+            TaskHarness.decide(goal,steps(run)))
+        val laterRead=read("later",laterId,mapOf("e6" to target))
+        assertTrue(preflight(run,laterRead.call) is HarnessDecision.Stop)
+        assertTrue(preflight(run+laterRead,action("again",laterId,"e6")) is HarnessDecision.Stop)
+
+        val firstApprovalMismatch=assertThrows(ScreenControl.SnapshotChanged::class.java) {
+            ScreenControl.requireCurrentSnapshot(oldId,newId,approvedSnapshot=oldId)
+        }
+        val firstApprovalRun=listOf(before,ObservedToolOutcome(old,firstApprovalMismatch.failure(old.id)))
+        assertTrue(preflight(firstApprovalRun,after.call) is HarnessDecision.Stop)
+        assertTrue(preflight(firstApprovalRun+after,next) is HarnessDecision.Stop)
     }
 
     @Test

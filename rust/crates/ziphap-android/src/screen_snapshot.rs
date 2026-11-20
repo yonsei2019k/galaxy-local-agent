@@ -12,6 +12,32 @@ pub enum NativeScreenRole {
     Scroll,
 }
 
+#[derive(Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum NativeScreenDispatchDecision {
+    Current,
+    Stale,
+    ApprovalInvalidated,
+}
+
+/// The approval snapshot comes from the host's accepted review for this exact call.
+#[uniffi::export]
+pub fn native_screen_dispatch_decision(
+    requested_snapshot: String,
+    current_snapshot: String,
+    approved_snapshot: Option<String>,
+) -> NativeScreenDispatchDecision {
+    if let Some(approved) = approved_snapshot {
+        if approved != requested_snapshot || approved != current_snapshot {
+            return NativeScreenDispatchDecision::ApprovalInvalidated;
+        }
+    }
+    if requested_snapshot == current_snapshot {
+        NativeScreenDispatchDecision::Current
+    } else {
+        NativeScreenDispatchDecision::Stale
+    }
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct NativeScreenTarget {
     pub role: NativeScreenRole,
@@ -122,6 +148,28 @@ pub fn native_screen_snapshot_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepted_approval_is_bound_to_the_requested_and_current_snapshot() {
+        use NativeScreenDispatchDecision::*;
+        let decide = |requested: &str, current: &str, approved: Option<&str>| {
+            native_screen_dispatch_decision(
+                requested.into(),
+                current.into(),
+                approved.map(str::to_string),
+            )
+        };
+        assert_eq!(decide("reviewed", "reviewed", Some("reviewed")), Current);
+        assert_eq!(decide("reviewed", "changed", None), Stale);
+        assert_eq!(
+            decide("reviewed", "changed", Some("reviewed")),
+            ApprovalInvalidated
+        );
+        assert_eq!(
+            decide("changed", "changed", Some("reviewed")),
+            ApprovalInvalidated
+        );
+    }
 
     #[test]
     fn rebinding_requires_fresh_snapshot_for_the_same_physical_target() {

@@ -162,6 +162,8 @@ object TaskHarness {
 
     fun decide(goal:TaskGoal,steps:List<HarnessStep>,requestedFinish:Boolean=false,
         recoveredScreenSteps:Set<HarnessStep> = emptySet()):HarnessDecision {
+        if(steps.any(::screenApprovalInvalidated))
+            return HarnessDecision.Stop(ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE)
         if(goal.requiredTools.any {it in SkillToolCatalog.names})return HarnessDecision.Stop("스킬 지침 읽기는 사용자 목표의 완료 근거가 아닙니다.")
         val actionSteps=steps.filterNot {it.tool in SkillToolCatalog.names}
         if(actionSteps.size!=steps.size)return decide(goal,actionSteps,requestedFinish,recoveredScreenSteps)
@@ -195,6 +197,8 @@ object TaskHarness {
     /** Optional pre-execution guard; permissions and typed argument validation remain separate. */
     fun beforeStep(goal:TaskGoal,steps:List<HarnessStep>,call:ToolCall,
         reobservedScreenSteps:Set<HarnessStep> = emptySet()):HarnessDecision {
+        if(steps.any(::screenApprovalInvalidated))
+            return HarnessDecision.Stop(ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE)
         if(steps.size>=goal.stepBudget)return HarnessDecision.Stop("작업 단계 예산에 도달했습니다.")
         val safeRead=readOnly(call.name)
         if(!safeRead&&steps.any {it.evidence.state in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)&&!readOnly(it.tool)&&
@@ -218,6 +222,9 @@ object TaskHarness {
     private fun screenReobserved(step:HarnessStep,bound:Set<HarnessStep>):Boolean =
         step in bound&&step.tool==ScreenControlToolCatalog.ACTION&&step.evidence.state==VerificationState.FAILED&&
             step.evidence.effectNotApplied&&step.evidence.summary==ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT
+
+    private fun screenApprovalInvalidated(step:HarnessStep):Boolean =
+        ScreenControlToolCatalog.approvalInvalidated(step.tool,step.evidence.state,step.evidence.summary,step.evidence.effectNotApplied)
 
     /** Requests stay in their original scoped run; this matches only the stable record/file target. */
     private fun recoveryTarget(step:HarnessStep):String? {
