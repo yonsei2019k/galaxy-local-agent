@@ -1,3 +1,9 @@
+## 2026-11-21 — Retain the unfinished phone call reference on Rust provider stop
+
+The Rust PC stdio adapter now retains the ID of a phone proposal after it has published that proposal to its trusted host. An explicit cancel or fatal error returns that ID with the active request ID. The adapter removes it only after a matching tool result is sent successfully or the run ends. A queued proposal that never reached the host is excluded. This is a lookup reference for the existing broker record, and does not assert that a phone effect happened or authorize replay. The broker still owns the original claim binding and late result. Two offline executable tests passed (cancellation and a result submitted under the wrong request). The production worker was not changed.
+
+Claude findings still tracked for Rust cutover: C-051 verified-progress deadlines, C-053 descriptive metadata provenance, C-055 verified partial results, and C-058–062 supervisor/broker handoff with original claim revision and late results. The active image keeps the signed 2038 installer and real-model replay pending. The collaboration inbox monitor stays active while the minute-by-minute chat automation is paused.
+
 ## 2026-11-21 — Bind Rust provider faults to the active host request
 
 The Rust PC stdio adapter now includes the active request ID on a fatal error after a start was accepted and before its terminal report was published. A malformed or foreign result cannot replace that ID. The offline executable fixture started a run, waited for a tool proposal, supplied a result bound to a different request, and checked that the error identified the original request and the process exited. The focused test passed. The ID is for a future supervisor lookup in its existing authority table. No broker capability, result text or execution authority is copied into the fault, and the existing provider and phone deployment were untouched.

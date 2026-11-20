@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use ziphap_pc::{
-    AppServerClient, AppServerConfig, MAX_LINE, ProviderEvent, RunRequest, ToolResultInput,
+    AppServerClient, AppServerConfig, MAX_LINE, ProviderEvent, RunRequest, ToolLocation, ToolResultInput,
     strict_json,
 };
 
@@ -46,15 +46,23 @@ async fn main() {
     let mut active_request = None;
     if let Err(code) = execute(&mut active_request).await {
         let mut fault = json!({"type":"error","errorCode":code});
-        if let Some(request_id) = active_request {
-            fault["requestId"] = json!(request_id);
+        if let Some(active) = active_request {
+            fault["requestId"] = json!(active.request_id);
+            if let Some(call_id) = active.pending_phone_call {
+                fault["pendingPhoneCallId"] = json!(call_id);
+            }
         }
         let _ = output(fault).await;
         std::process::exit(1);
     }
 }
 
-async fn execute(active_request: &mut Option<String>) -> Result<(), &'static str> {
+struct ActiveRequest {
+    request_id: String,
+    pending_phone_call: Option<String>,
+}
+
+async fn execute(active_request: &mut Option<ActiveRequest>) -> Result<(), &'static str> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() != 3
         || args[0] != "--config"
@@ -125,13 +133,19 @@ async fn execute(active_request: &mut Option<String>) -> Result<(), &'static str
                     Input::Start { request } => {
                         let request_id = request.request_id.clone();
                         client.begin(request).await.map_err(|e| e.code)?;
-                        *active_request = Some(request_id);
+                        *active_request = Some(ActiveRequest { request_id, pending_phone_call: None });
                     }
                     Input::ToolResult { result } => {
+                        let call_id = result.call_id.clone();
                         client
                             .submit_tool_result(result)
                             .await
                             .map_err(|e| e.code)?;
+                        if let Some(active) = active_request.as_mut() {
+                            if active.pending_phone_call.as_deref() == Some(&call_id) {
+                                active.pending_phone_call = None;
+                            }
+                        }
                     }
                     Input::RefreshPhoneAuthority {
                         request_id,
@@ -148,9 +162,7 @@ async fn execute(active_request: &mut Option<String>) -> Result<(), &'static str
                     }
                     Input::Cancel { request_id } => {
                         let event = client.cancel(&request_id).await.map_err(|e| e.code)?;
-                        output(serde_json::to_value(event).map_err(|_| "IPC_OUTPUT")?)
-                            .await
-                            .map_err(|_| "IPC_OUTPUT")?;
+                        publish_event(event, active_request).await?;
                         // A cancelled adapter exits; the host must create a new process and fresh capabilities.
                         return Ok(());
                     }
@@ -162,13 +174,24 @@ async fn execute(active_request: &mut Option<String>) -> Result<(), &'static str
 
 async fn publish_event(
     event: ProviderEvent,
-    active_request: &mut Option<String>,
+    active_request: &mut Option<ActiveRequest>,
 ) -> Result<(), &'static str> {
-    let ended = matches!(&event, ProviderEvent::Report { .. });
-    output(serde_json::to_value(event).map_err(|_| "IPC_OUTPUT")?)
-        .await
-        .map_err(|_| "IPC_OUTPUT")?;
-    if ended {
+    let pending = match &event {
+        ProviderEvent::ToolCall { location: ToolLocation::Phone, call_id, .. } => Some(call_id.clone()),
+        _ => None,
+    };
+    let cancelled = matches!(&event, ProviderEvent::Cancelled { .. });
+    let ended = cancelled || matches!(&event, ProviderEvent::Report { .. });
+    let mut wire = serde_json::to_value(event).map_err(|_| "IPC_OUTPUT")?;
+    if cancelled {
+        if let Some(call_id) = active_request.as_ref().and_then(|active| active.pending_phone_call.as_ref()) {
+            wire["pendingPhoneCallId"] = json!(call_id);
+        }
+    }
+    output(wire).await.map_err(|_| "IPC_OUTPUT")?;
+    if let (Some(call_id), Some(active)) = (pending, active_request.as_mut()) {
+        active.pending_phone_call = Some(call_id);
+    } else if ended {
         *active_request = None;
     }
     Ok(())

@@ -90,6 +90,23 @@ fn request(id: &str) -> RunRequest {
 }
 #[tokio::test]
 async fn stdio_failure_names_only_the_active_host_request() {
+    let fault = stop_stdio_with_pending_phone_call(false).await;
+    assert_eq!(
+        json!({"type":"error","errorCode":"RUN_BINDING","requestId":"active-fixture","pendingPhoneCallId":"fixture-call-1"}),
+        fault
+    );
+}
+
+#[tokio::test]
+async fn stdio_cancel_keeps_the_outstanding_phone_call_reference() {
+    let notice = stop_stdio_with_pending_phone_call(true).await;
+    assert_eq!(
+        json!({"type":"cancelled","requestId":"active-fixture","pendingPhoneCallId":"fixture-call-1"}),
+        notice
+    );
+}
+
+async fn stop_stdio_with_pending_phone_call(cancel: bool) -> serde_json::Value {
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -116,12 +133,14 @@ async fn stdio_failure_names_only_the_active_host_request() {
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let deadline = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 + 20_000;
     let start = json!({"op":"start","request":{
         "requestId":"active-fixture",
         "binding":{"ownerId":"owner-fixture","projectBinding":"project-fixture","threadBinding":"thread-fixture",
             "authorityRevision":1,"executionProfile":"pc-only"},
         "model":"fixture-model","ownerRequest":"Synthetic bounded request","externalAllowed":true,"timeoutMs":10000,
-        "tools":[{"name":"get_fixture","description":"Synthetic fixture","location":"pc",
+        "phoneAuthorityExpiresAtEpochMs":deadline,
+        "tools":[{"name":"get_fixture","description":"Synthetic fixture","location":"phone",
             "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]
     }});
     input
@@ -137,23 +156,24 @@ async fn stdio_failure_names_only_the_active_host_request() {
             }
             assert_ne!(event["type"], "error", "{event}");
         };
-        let bad = json!({"op":"tool_result","result":{
-            "requestId":"unbound-fixture","callId":call_id,"success":true,"text":"hidden fixture"
-        }});
+        let stop = if cancel {
+            json!({"op":"cancel","requestId":"active-fixture"})
+        } else {
+            json!({"op":"tool_result","result":{
+                "requestId":"unbound-fixture","callId":call_id,"success":true,"text":"hidden fixture"
+            }})
+        };
         input
-            .write_all(format!("{bad}\n").as_bytes())
+            .write_all(format!("{stop}\n").as_bytes())
             .await
             .unwrap();
         let line = lines.next_line().await.unwrap().unwrap();
-        let fault: serde_json::Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(
-            json!({"type":"error","errorCode":"RUN_BINDING","requestId":"active-fixture"}),
-            fault
-        );
-        assert!(!child.wait().await.unwrap().success());
+        let notice = serde_json::from_str(&line).unwrap();
+        assert_eq!(cancel, child.wait().await.unwrap().success());
+        notice
     })
     .await
-    .unwrap();
+    .unwrap()
 }
 async fn complete(client: &mut AppServerClient) -> Vec<ProviderEvent> {
     let mut events = vec![];
