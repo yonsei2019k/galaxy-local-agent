@@ -283,7 +283,11 @@ class Dispatch:
             elif state == "apply_done":
                 self.publish(row, "result")
                 self.update(row["id"], state="done")
-        self.ingest()
+        mailbox_error = ""
+        try:
+            self.ingest()
+        except Exception as error:
+            mailbox_error = type(error).__name__
         if (time.monotonic() >= self.next_auth_probe and
                 self.db.execute("SELECT 1 FROM jobs WHERE state='awaiting_claude_login'").fetchone()):
             self.next_auth_probe = time.monotonic() + 30
@@ -307,6 +311,7 @@ class Dispatch:
             else:
                 future = pool.submit(proof, self.config, self.tasks[job], row["review"], self.root)
             pending[phase] = (job, future)
+        return mailbox_error
 
 
 def main():
@@ -326,8 +331,7 @@ def main():
                     queue = root / "queue.json"
                     if queue.exists():
                         dispatcher.add_tasks(json.loads(queue.read_text(encoding="utf-8-sig")))
-                    dispatcher.tick(pool, pending)
-                    error = ""
+                    error = dispatcher.tick(pool, pending)
                 except Exception as exc:
                     error = type(exc).__name__
                 status = {"lastCheck": time.time(), "error": error,

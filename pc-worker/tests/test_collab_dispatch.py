@@ -136,6 +136,13 @@ class DispatcherTests(unittest.TestCase):
         config = {"validator_paths": {"host-validator": sys.executable}}
         self.assertEqual([sys.executable, "--fixture"], validation_command(config, task))
 
+    def test_ready_work_can_run_while_mailbox_is_unreachable(self):
+        self.runner.update("one", state="apply_ready", review="empty_body")
+        self.runner.update("two", state="request_published")
+        with patch.object(self.runner, "ingest", side_effect=TimeoutError):
+            self.assertEqual("TimeoutError", self.runner.tick(self.pool, self.pending))
+        self.assertEqual([("proof", "one")], [item[:2] for item in self.pool.calls])
+
     def test_no_work_does_not_start_models_or_publish(self):
         other = self.root / "empty"
         other.mkdir()
