@@ -99,10 +99,12 @@ class PcExternalAgentClient(
     }
     override suspend fun report(proposal:ExternalAgentProposal,result:ToolResult,revision:Long):AgentResultAck {
         val claimRevision=checkNotNull(claims[proposal.callId])
+        val redacted=com.user.localagent.core.CredentialRedaction.redact(result.content)
+        val outgoing=if(redacted.count>0)redacted.text+"\n"+com.user.localagent.core.CredentialRedaction.notice(redacted.count) else result.content
         require(result.id==proposal.callId&&revision>=claimRevision&&
-            result.content.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES)
+            outgoing.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES)
         val actual=buildJsonObject {
-            put("success",result.success);put("content",result.content);put("verification",result.verification.name)
+            put("success",result.success);put("content",outgoing);put("verification",result.verification.name)
             put("effectNotApplied",result.effectNotApplied)
         }
         val expectedDigest=ExternalAgentContract.sha(ExternalAgentContract.sorted(actual).toString())

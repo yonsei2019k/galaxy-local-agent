@@ -30,6 +30,10 @@ MAX_TOOLS = 128
 MAX_DEPTH = 24
 MAX_WAIT_SECONDS = 120
 POLL_SECONDS = 0.25
+MAX_REJECTED_CALLS = 6
+# Pre-submission rejections caused by the model's own call content.
+COUNTED_REJECTIONS = frozenset({"UNKNOWN_TOOL", "INVALID_ARGUMENTS", "TOOL_OUTSIDE_ACCEPTED_PLAN",
+                                "PLAN_CHANGED", "BYTE_LIMIT", "INVALID_JSON"})
 OWNER_HEADER = "X-ZipHap-Compute-Owner"
 CAPABILITY_HEADER = "X-ZipHap-Agent-Capability"
 INSTRUCTIONS = (
@@ -48,9 +52,13 @@ FAILED_READS_HAVE_NO_EFFECT = PUBLIC_WEB_READS | {"read_screen"}
 class BridgeError(Exception):
     """Fixed public error code only; never include transport/config exception text."""
 
-    def __init__(self, code):
+    def __init__(self, code, detail=None):
         self.code = code
+        self.detail = detail
         super().__init__(code)
+
+    def public_text(self):
+        return self.code if not self.detail else self.code + ": " + self.detail
 
 
 def parse_json(raw):
@@ -283,20 +291,48 @@ PATTERNS = frozenset({r"^[a-fA-F0-9]{64}$", r"^[a-f0-9]{64}$", r"^[0-9]{1,19}$",
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$", r"^[1-9][0-9]{0,18}$"})
 
 
-def validate_arguments(value, schema, depth=0):
+def json_type_name(value):
+    if value is None:
+        return "null"
+    if type(value) is bool:
+        return "boolean"
+    if type(value) is int:
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "unsupported"
+
+
+def invalid_arguments(path, message):
+    """Detail is built only from schema-derived text and type names, never argument values."""
+    return BridgeError("INVALID_ARGUMENTS", f"{path or '/'} {message}")
+
+
+def validate_arguments(value, schema, depth=0, path=""):
     if depth > MAX_DEPTH:
-        raise BridgeError("INVALID_ARGUMENTS")
+        raise BridgeError("INVALID_ARGUMENTS", "arguments nested too deeply")
     kind = schema.get("type")
     matches = {"object": isinstance(value, dict), "array": isinstance(value, list),
                "string": isinstance(value, str), "integer": type(value) is int,
                "number": type(value) in (int, float), "boolean": type(value) is bool,
                "null": value is None}
     if kind is not None and not matches.get(kind, False):
-        raise BridgeError("INVALID_ARGUMENTS")
+        hint = (" — pass the value itself, not a JSON string"
+                if kind in ("object", "array") and isinstance(value, str) else "")
+        raise invalid_arguments(path, f"expected {kind}, received {json_type_name(value)}{hint}")
     if "enum" in schema and not any(json_bytes(value) == json_bytes(item) for item in schema["enum"]):
-        raise BridgeError("INVALID_ARGUMENTS")
+        allowed = schema["enum"]
+        if (len(allowed) <= 12 and all(isinstance(item, str) and len(item) <= 40 for item in allowed)):
+            raise invalid_arguments(path, "must be one of: " + ", ".join(allowed))
+        raise invalid_arguments(path, "must be one of the allowed values")
     if "const" in schema and json_bytes(value) != json_bytes(schema["const"]):
-        raise BridgeError("INVALID_ARGUMENTS")
+        raise invalid_arguments(path, "must be one of the allowed values")
     for key in ("oneOf", "anyOf", "allOf", "not"):
         if key not in schema:
             continue
@@ -310,28 +346,33 @@ def validate_arguments(value, schema, depth=0):
                 pass
         if ((key == "oneOf" and count != 1) or (key == "anyOf" and count < 1)
                 or (key == "allOf" and count != len(branches)) or (key == "not" and count)):
-            raise BridgeError("INVALID_ARGUMENTS")
+            raise invalid_arguments(path, f"violates {key}")
     if isinstance(value, dict):
         properties = schema.get("properties", {})
-        if (any(key not in value for key in schema.get("required", []))
-                or (schema.get("additionalProperties") is False and set(value) - set(properties))):
-            raise BridgeError("INVALID_ARGUMENTS")
+        missing = [key for key in schema.get("required", []) if key not in value]
+        if missing:
+            raise invalid_arguments(path, "missing required: " + ", ".join(sorted(missing)))
+        if schema.get("additionalProperties") is False:
+            extra = len(set(value) - set(properties))
+            if extra:
+                raise invalid_arguments(
+                    path, f"has {extra} unexpected key(s); allowed: " + ", ".join(sorted(properties)))
         for key, item in value.items():
             if key in properties:
-                validate_arguments(item, properties[key], depth + 1)
+                validate_arguments(item, properties[key], depth + 1, f"{path}/{key}")
     elif isinstance(value, list):
         if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", 1024):
-            raise BridgeError("INVALID_ARGUMENTS")
+            raise invalid_arguments(path, "violates minItems/maxItems")
         if schema.get("uniqueItems") and len({json_bytes(item) for item in value}) != len(value):
-            raise BridgeError("INVALID_ARGUMENTS")
-        for item in value:
+            raise invalid_arguments(path, "violates uniqueItems")
+        for index, item in enumerate(value):
             if "items" in schema:
-                validate_arguments(item, schema["items"], depth + 1)
+                validate_arguments(item, schema["items"], depth + 1, f"{path}/{index}")
     elif isinstance(value, str):
         if not schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", MAX_ARGUMENT_BYTES):
-            raise BridgeError("INVALID_ARGUMENTS")
+            raise invalid_arguments(path, "violates minLength/maxLength")
         if "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
-            raise BridgeError("INVALID_ARGUMENTS")
+            raise invalid_arguments(path, "violates pattern")
         if "format" in schema:
             from datetime import datetime
             try:
@@ -339,13 +380,13 @@ def validate_arguments(value, schema, depth=0):
                 if parsed.tzinfo is None or "T" not in value:
                     raise ValueError()
             except ValueError:
-                raise BridgeError("INVALID_ARGUMENTS") from None
+                raise invalid_arguments(path, "violates format") from None
     elif type(value) in (int, float):
         if (not math.isfinite(value) or value < schema.get("minimum", -math.inf)
                 or value > schema.get("maximum", math.inf)
                 or ("exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"])
                 or ("exclusiveMaximum" in schema and value >= schema["exclusiveMaximum"])):
-            raise BridgeError("INVALID_ARGUMENTS")
+            raise invalid_arguments(path, "violates minimum/maximum")
 
 
 def closed_object_schema(schema):
@@ -374,7 +415,8 @@ def validate_plan_arguments(arguments, catalog):
     validate_arguments(arguments, plan_tool(catalog)["inputSchema"])
     for text, maximum in [(arguments["goal"], 1000)] + [(value, 240) for value in arguments["constraints"]]:
         if not text.strip() or len(text.encode("utf-16-le")) // 2 > maximum:
-            raise BridgeError("INVALID_ARGUMENTS")
+            raise BridgeError("INVALID_ARGUMENTS",
+                              "goal and constraints must be non-blank text within their length limits")
 
 
 class Gateway:
@@ -395,6 +437,8 @@ class Gateway:
         self.plan = None
         self.proposed_plan = None
         self._call_lock = threading.Lock()
+        # One Gateway serves one bound session/task (built once in main); never reset.
+        self.rejected_calls = 0
 
     @property
     def base(self):
@@ -493,11 +537,17 @@ class Gateway:
         try:
             if self.uncertain_call is not None:
                 raise BridgeError("PREVIOUS_EFFECT_UNRESOLVED")
+            if self.rejected_calls >= MAX_REJECTED_CALLS:
+                raise BridgeError(
+                    "REJECTED_CALL_LIMIT",
+                    "too many rejected tool calls in this task; stop calling tools and answer with the "
+                    "verified results you already have, or tell the owner what remains unverified")
             virtual_plan = name == "plan_task" and self.requires_plan is True
             if self.catalog is None or name not in self.catalog and not virtual_plan:
                 raise BridgeError("UNKNOWN_TOOL")
             if not isinstance(arguments, dict):
-                raise BridgeError("INVALID_ARGUMENTS")
+                raise BridgeError("INVALID_ARGUMENTS",
+                                  f"arguments expected object, received {json_type_name(arguments)}")
             json_bytes(arguments, MAX_ARGUMENT_BYTES - 256)
             if virtual_plan:
                 validate_plan_arguments(arguments, self.catalog)
@@ -547,6 +597,8 @@ class Gateway:
             if submitted:
                 self.uncertain_call = call_id
             if isinstance(error, BridgeError):
+                if not submitted and error.code in COUNTED_REJECTIONS:
+                    self.rejected_calls += 1
                 raise
             raise BridgeError("BRIDGE_FAILURE") from None
         finally:
@@ -722,7 +774,7 @@ class MCPServer:
             try:
                 return reply(self.gateway.call_tool(params["name"], params.get("arguments", {}), event))
             except BridgeError as error:
-                return reply({"content": [{"type": "text", "text": error.code}], "isError": True})
+                return reply({"content": [{"type": "text", "text": error.public_text()}], "isError": True})
             except Exception:
                 return reply({"content": [{"type": "text", "text": "BRIDGE_FAILURE"}], "isError": True})
             finally:

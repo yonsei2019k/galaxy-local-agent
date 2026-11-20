@@ -120,6 +120,22 @@ class PcExternalAgentClientTest {
         assertTrue(wire.calls.drop(1).all{it.third==wire.capability})
         assertFalse(wire.calls.mapNotNull{it.second}.any{it.containsKey("phoneCapability")||it.containsKey("agentCapability")})
     }
+    @Test fun credentialInResultIsRedactedBeforeEgressAndAckDigestStillMatches()=runBlocking {
+        val wire=Wire();val client=PcExternalAgentClient(capture,wire)
+        client.register(capture);wire.offer();val status=client.poll();val claim=client.claim(proposal(),status.revision)
+        val ack=client.report(proposal(),ToolResult(call,true,"[Web발신] 인증번호 [482913]",VerificationState.VERIFIED),claim.snapshot.revision)
+        assertEquals(call,ack.callId)
+        val sent=wire.lastResult!!.getValue("content").jsonPrimitive.content
+        assertFalse(sent.contains("482913"));assertTrue(sent.contains("[가림]"))
+        assertTrue(sent.contains(com.user.localagent.core.CredentialRedaction.notice(1)))
+    }
+    @Test fun resultWithoutSecretsIsPostedByteIdentical()=runBlocking {
+        val wire=Wire();val client=PcExternalAgentClient(capture,wire)
+        client.register(capture);wire.offer();val status=client.poll();val claim=client.claim(proposal(),status.revision)
+        val text="오늘은 맑음 2026-11-20 14:30"
+        client.report(proposal(),ToolResult(call,true,text,VerificationState.VERIFIED),claim.snapshot.revision)
+        assertEquals(text,wire.lastResult!!.getValue("content").jsonPrimitive.content)
+    }
     @Test fun forgedResultAckNeverCountsAsAReportReceipt()=runBlocking {
         val wire=Wire();val client=PcExternalAgentClient(capture,wire)
         client.register(capture);wire.offer();val status=client.poll();val claim=client.claim(proposal(),status.revision)

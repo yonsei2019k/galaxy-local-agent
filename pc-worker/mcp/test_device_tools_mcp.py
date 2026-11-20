@@ -768,6 +768,129 @@ class MCPTests(unittest.TestCase):
         self.assertEqual({}, server.active)
 
 
+def nested_fixture():
+    transport, clock = FakeTransport(), Clock()
+    transport.status["tools"].append(
+        {"name": "save_item", "description": "Save a nested item.",
+         "inputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["item"], "properties": {
+                             "item": {"type": "object", "additionalProperties": False,
+                                      "required": ["name"], "properties": {
+                                          "name": {"type": "string", "minLength": 1, "maxLength": 32}}}}}})
+    gateway = mcp.Gateway(binding(), transport, clock.now, clock.now, clock.wait, lambda: CALL)
+    gateway.list_tools()
+    return gateway, transport, clock
+
+
+def call_text(server, name, arguments):
+    reply = server.handle(rpc("tools/call", {"name": name, "arguments": arguments}))["result"]
+    return reply["isError"], reply["content"][0]["text"]
+
+
+class RejectionDetailTests(unittest.TestCase):
+    def test_stringified_object_is_rejected_with_type_hint_and_never_coerced(self):
+        gateway, transport, _ = nested_fixture()
+        server = ready_server(gateway)
+        stringified = '{"name": "secret-value-xyz"}'
+        is_error, text = call_text(server, "save_item", {"item": stringified})
+        self.assertTrue(is_error)
+        self.assertTrue(text.startswith(
+            "INVALID_ARGUMENTS: /item expected object, received string — pass the value itself"), text)
+        self.assertNotIn("secret-value-xyz", text)
+        self.assertEqual([], transport.submissions())
+
+    def test_unexpected_key_lists_allowed_keys_without_echoing_the_key(self):
+        gateway, transport, _ = fixture()
+        server = ready_server(gateway)
+        is_error, text = call_text(server, "read_note", {"id": "x", "leaked_key_name": 1})
+        self.assertTrue(is_error)
+        self.assertIn("1 unexpected key(s); allowed: id", text)
+        self.assertNotIn("leaked_key_name", text)
+        self.assertEqual([], transport.submissions())
+
+    def test_missing_required_lists_schema_key(self):
+        gateway, _, _ = fixture()
+        server = ready_server(gateway)
+        is_error, text = call_text(server, "read_note", {})
+        self.assertTrue(is_error)
+        self.assertEqual("INVALID_ARGUMENTS: / missing required: id", text)
+
+    def test_other_violations_name_keyword_not_value(self):
+        gateway, _, _ = fixture()
+        server = ready_server(gateway)
+        _, text = call_text(server, "read_note", {"id": ""})
+        self.assertEqual("INVALID_ARGUMENTS: /id violates minLength/maxLength", text)
+        _, text = call_text(server, "pc_read_file", {"path": "a", "offset": 5000})
+        self.assertEqual("INVALID_ARGUMENTS: /offset violates minimum/maximum", text)
+
+    def test_plan_unknown_required_tool_does_not_echo_the_name(self):
+        gateway, transport, _ = plan_fixture()
+        with self.assertRaises(mcp.BridgeError) as caught:
+            gateway.call_tool("plan_task", plan_arguments(["secret_tool_name"]))
+        self.assertEqual("INVALID_ARGUMENTS", caught.exception.code)
+        self.assertNotIn("secret_tool_name", caught.exception.public_text())
+        self.assertIn("/requiredTools/0 must be one of: pc_read_file, read_note", caught.exception.public_text())
+        self.assertEqual([], transport.calls[1:])
+
+    def test_limit_blocks_valid_call_after_six_counted_rejections_without_submitting(self):
+        gateway, transport, _ = fixture()
+        for _ in range(mcp.MAX_REJECTED_CALLS):
+            with self.assertRaises(mcp.BridgeError):
+                gateway.call_tool("read_note", {"id": 1})
+        self.assertEqual(6, gateway.rejected_calls)
+        calls_before = len(transport.calls)
+        with self.assertRaises(mcp.BridgeError) as caught:
+            gateway.call_tool("read_note", {"id": "valid"})
+        self.assertEqual("REJECTED_CALL_LIMIT", caught.exception.code)
+        self.assertIn("stop calling tools", caught.exception.public_text())
+        self.assertEqual(6, gateway.rejected_calls)
+        self.assertEqual(calls_before, len(transport.calls))
+        self.assertEqual([], transport.submissions())
+
+    def test_unknown_tool_oversize_and_outside_plan_are_counted(self):
+        gateway, _, _ = fixture()
+        with self.assertRaises(mcp.BridgeError):
+            gateway.call_tool("shell", {})
+        with self.assertRaises(mcp.BridgeError):
+            gateway.call_tool("read_note", {"id": "é" * 40000})
+        self.assertEqual(2, gateway.rejected_calls)
+        plan_gateway, transport, _ = plan_fixture()
+        transport.status["plan"] = plan_metadata(state="ACCEPTED")
+        with self.assertRaises(mcp.BridgeError) as caught:
+            plan_gateway.call_tool("pc_read_file", {"path": "a"})
+        self.assertEqual("TOOL_OUTSIDE_ACCEPTED_PLAN", caught.exception.code)
+        self.assertEqual(1, plan_gateway.rejected_calls)
+
+    def test_in_progress_plan_not_accepted_and_post_submission_failures_are_not_counted(self):
+        gateway, _, _ = fixture()
+        self.assertTrue(gateway._call_lock.acquire(blocking=False))
+        try:
+            with self.assertRaises(mcp.BridgeError) as caught:
+                gateway.call_tool("read_note", {"id": "x"})
+            self.assertEqual("CALL_IN_PROGRESS", caught.exception.code)
+        finally:
+            gateway._call_lock.release()
+        self.assertEqual(0, gateway.rejected_calls)
+        plan_gateway, _, _ = plan_fixture()
+        with self.assertRaises(mcp.BridgeError) as caught:
+            plan_gateway.call_tool("read_note", {"id": "x"})
+        self.assertEqual("PLAN_NOT_ACCEPTED", caught.exception.code)
+        self.assertEqual(0, plan_gateway.rejected_calls)
+        failing, transport, _ = fixture()
+        transport.responses = [urllib.error.URLError("down")]
+        with self.assertRaises(mcp.BridgeError):
+            failing.call_tool("read_note", {"id": "x"})
+        self.assertEqual(0, failing.rejected_calls)
+
+    def test_json_string_object_argument_is_never_coerced_into_a_submission(self):
+        gateway, transport, _ = nested_fixture()
+        with self.assertRaises(mcp.BridgeError):
+            gateway.call_tool("save_item", {"item": json.dumps({"name": "x"})})
+        with self.assertRaises(mcp.BridgeError):
+            gateway.call_tool("save_item", json.dumps({"item": {"name": "x"}}))
+        self.assertEqual([], transport.submissions())
+
+
 class TransportTests(unittest.TestCase):
     def test_private_json_bootstrap_is_exact_bounded_and_not_combined_with_legacy(self):
         data = {"sessionId": SESSION, "parentRunId": OWNER, "agentCapability": CAPABILITY, "revision": 1}

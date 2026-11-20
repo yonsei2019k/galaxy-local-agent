@@ -33,6 +33,10 @@ PUBLIC_WEB_READS = frozenset({"read_webpage", "search_web", "search_shopping"})
 FAILED_READS_HAVE_NO_EFFECT = PUBLIC_WEB_READS | {"read_screen"}
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
+MAX_REJECTED_CALLS = 6
+# Rejections caused by the model's call content (never values) count toward the pre-execution cap.
+_COUNTED_REJECTIONS = frozenset({"TOOL_NOT_OFFERED", "PRIVATE_IMAGE_WORKROOM", "PLAN_TOOL_NOT_SELECTED",
+                                 "ARGUMENT_OBJECT", "BROWSER_RECOVERY_READ_ONLY", "WORKSPACE_PROFILE"})
 MAX_TTL_MS = 900_000
 PHONE_LEASE_MS = 30_000
 MAX_ARGUMENT_BYTES = 32_768
@@ -55,8 +59,8 @@ _PATTERNS = frozenset((r"^[a-f0-9]{64}$", r"^[a-fA-F0-9]{64}$", r"^[0-9]{1,19}$"
 
 class BridgeError(Exception):
     """Only fixed error codes; never stringify arguments, capabilities or file paths."""
-    def __init__(self, code, status=400):
-        self.code, self.status = code, status
+    def __init__(self, code, status=400, detail=None):
+        self.code, self.status, self.detail = code, status, detail
         super().__init__(code)
 
 
@@ -205,53 +209,85 @@ def _schema(schema, depth=0):
         _schema(schema["items"], depth + 1)
 
 
-def _validate(value, schema):
+_JSON_TYPE_NAMES = ((type(None), "null"), (bool, "boolean"), (int, "integer"), (float, "number"),
+                    (str, "string"), (list, "array"), (dict, "object"))
+
+
+def _json_type_name(value):
+    for python_type, name in _JSON_TYPE_NAMES:
+        if type(value) is python_type:
+            return name
+    return "unknown"
+
+
+def _fail(code, path, **extra):
+    """Detail carries only schema-derived paths/keywords and type names, never argument values."""
+    raise BridgeError(code, 400, {"path": path, **extra})
+
+
+def _validate(value, schema, path=""):
     kind = schema.get("type")
     if kind:
         valid = {"object": type(value) is dict, "array": type(value) is list,
                  "string": type(value) is str, "integer": type(value) is int,
                  "boolean": type(value) is bool,
                  "number": type(value) in (int, float) and math.isfinite(value)}[kind]
-        _require(valid, "ARGUMENT_TYPE")
+        if not valid:
+            extra = {"expected": kind, "received": _json_type_name(value)}
+            if kind in ("object", "array") and type(value) is str:
+                extra["hint"] = "object 또는 array 자리에 문자열을 보냈습니다. 문자열로 감싸지 말고 값 자체를 보내세요."
+            _fail("ARGUMENT_TYPE", path, **extra)
     if type(value) is dict:
-        _require(set(schema.get("required", ())) <= value.keys(), "ARGUMENT_REQUIRED")
+        missing = sorted(set(schema.get("required", ())) - value.keys())
+        if missing:
+            _fail("ARGUMENT_REQUIRED", path, missing=missing)
         if schema.get("additionalProperties") is False:
-            _require(value.keys() <= schema.get("properties", {}).keys(), "ARGUMENT_UNKNOWN")
+            unknown = value.keys() - schema.get("properties", {}).keys()
+            if unknown:
+                _fail("ARGUMENT_UNKNOWN", path, unknownKeyCount=len(unknown))
         if "properties" in schema:
             props = schema["properties"]
             for key in value.keys() & props.keys():
-                _validate(value[key], props[key])
+                _validate(value[key], props[key], f"{path}/{key}")
     if "oneOf" in schema:
         matches = 0
         for variant in schema["oneOf"]:
             try:
-                _validate(value, variant)
+                _validate(value, variant, path)
                 matches += 1
             except BridgeError:
                 pass
-        _require(matches == 1, "ARGUMENT_ONE_OF")
+        if matches != 1:
+            _fail("ARGUMENT_ONE_OF", path)
     if "enum" in schema:
-        _require(any(type(value) is type(x) and value == x for x in schema["enum"]), "ARGUMENT_ENUM")
+        if not any(type(value) is type(x) and value == x for x in schema["enum"]):
+            _fail("ARGUMENT_ENUM", path, expected="enum")
     if type(value) is str:
-        _require(schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", MAX_ARGUMENT_BYTES), "ARGUMENT_LENGTH")
+        if not schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", MAX_ARGUMENT_BYTES):
+            _fail("ARGUMENT_LENGTH", path, expected="length")
         if "pattern" in schema:
-            _require(re.fullmatch(schema["pattern"], value) is not None, "ARGUMENT_PATTERN")
+            if re.fullmatch(schema["pattern"], value) is None:
+                _fail("ARGUMENT_PATTERN", path, expected="pattern")
         if "format" in schema:
             from datetime import datetime
             try:
                 parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                _require(parsed.tzinfo is not None, "ARGUMENT_DATETIME")
             except ValueError:
-                raise BridgeError("ARGUMENT_DATETIME") from None
+                _fail("ARGUMENT_DATETIME", path, expected="date-time")
+            if parsed.tzinfo is None:
+                _fail("ARGUMENT_DATETIME", path, expected="date-time")
     if type(value) in (int, float):
-        _require(schema.get("minimum", -float("inf")) <= value <= schema.get("maximum", float("inf")), "ARGUMENT_RANGE")
+        if not schema.get("minimum", -float("inf")) <= value <= schema.get("maximum", float("inf")):
+            _fail("ARGUMENT_RANGE", path, expected="range")
     if type(value) is list:
-        _require(schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", 128), "ARGUMENT_LENGTH")
+        if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", 128):
+            _fail("ARGUMENT_LENGTH", path, expected="length")
         if schema.get("uniqueItems"):
-            _require(len({canonical(x) for x in value}) == len(value), "ARGUMENT_UNIQUE")
+            if len({canonical(x) for x in value}) != len(value):
+                _fail("ARGUMENT_UNIQUE", path, expected="uniqueItems")
         if "items" in schema:
-            for item in value:
-                _validate(item, schema["items"])
+            for index, item in enumerate(value):
+                _validate(item, schema["items"], f"{path}/{index}")
 
 
 def result_digest(result):
@@ -303,6 +339,7 @@ class _Session:
     plan: dict | None = field(default=None, repr=False)
     browser_recovery_tools: frozenset[str] | None = None
     finalize_reads_only: bool = False
+    rejected_calls: int = 0
 
 
 class AgentBridge:
@@ -603,7 +640,7 @@ class AgentBridge:
                 else:
                     return None
             all_required_reads_verified = set(plan["requiredTools"]) <= verified_tools
-            out_of_calls = len(session.calls) >= MAX_CALLS
+            out_of_calls = len(session.calls) >= MAX_CALLS or session.rejected_calls >= MAX_REJECTED_CALLS
             if (observed and (before_plan or settled_only)
                     and ((all_required_reads_verified and not failed) or
                          (out_of_calls and set(plan["requiredTools"]) <= reads))):
@@ -706,25 +743,31 @@ class AgentBridge:
                     _shape(request, ("callId", "tool", "arguments"))
                     cid = _uuid(request["callId"])
                     tool, arguments = request["tool"], request["arguments"]
-                    _require(type(tool) is str, "TOOL_NOT_OFFERED", 403)
-                    _require(tool not in PRIVATE_PHONE_TOOLS, "PRIVATE_IMAGE_WORKROOM", 403)
-                    if s.require_plan:
-                        _require(s.plan is not None and s.plan["state"] == "ACCEPTED", "PLAN_NOT_ACCEPTED", 409)
-                        _require(tool in s.plan["requiredTools"], "PLAN_TOOL_NOT_SELECTED", 403)
-                    _require(type(arguments) is dict, "ARGUMENT_OBJECT")
-                    payload = hashlib.sha256(_bounded_json({"tool": tool, "arguments": arguments}, MAX_ARGUMENT_BYTES)).hexdigest()
-                    if cid in s.calls:
-                        c = s.calls[cid]
-                        _require(hmac.compare_digest(c.payload_digest, payload), "CALL_PAYLOAD_CONFLICT", 409)
-                        return 200, self._call_view(c)  # Never dispatch the same call twice.
-                    _require(not s.finalize_reads_only, "RECOVERY_FINAL_ANSWER_ONLY", 403)
-                    if s.browser_recovery_tools is not None:
-                        _require(tool in s.browser_recovery_tools, "BROWSER_RECOVERY_READ_ONLY", 403)
-                    _require(tool in s.tools, "TOOL_NOT_OFFERED", 403)
-                    _require(not tool.startswith("pc_") or s.profile in self._profiles,
-                             "WORKSPACE_PROFILE", 403)
-                    _require(s.active is None, "CALL_ALREADY_ACTIVE", 409)
-                    _validate(arguments, s.tools[tool]["inputSchema"])
+                    _require(cid in s.calls or s.rejected_calls < MAX_REJECTED_CALLS, "REJECTED_CALL_LIMIT", 429)
+                    try:
+                        _require(type(tool) is str, "TOOL_NOT_OFFERED", 403)
+                        _require(tool not in PRIVATE_PHONE_TOOLS, "PRIVATE_IMAGE_WORKROOM", 403)
+                        if s.require_plan:
+                            _require(s.plan is not None and s.plan["state"] == "ACCEPTED", "PLAN_NOT_ACCEPTED", 409)
+                            _require(tool in s.plan["requiredTools"], "PLAN_TOOL_NOT_SELECTED", 403)
+                        _require(type(arguments) is dict, "ARGUMENT_OBJECT")
+                        payload = hashlib.sha256(_bounded_json({"tool": tool, "arguments": arguments}, MAX_ARGUMENT_BYTES)).hexdigest()
+                        if cid in s.calls:
+                            c = s.calls[cid]
+                            _require(hmac.compare_digest(c.payload_digest, payload), "CALL_PAYLOAD_CONFLICT", 409)
+                            return 200, self._call_view(c)  # Never dispatch the same call twice.
+                        _require(not s.finalize_reads_only, "RECOVERY_FINAL_ANSWER_ONLY", 403)
+                        if s.browser_recovery_tools is not None:
+                            _require(tool in s.browser_recovery_tools, "BROWSER_RECOVERY_READ_ONLY", 403)
+                        _require(tool in s.tools, "TOOL_NOT_OFFERED", 403)
+                        _require(not tool.startswith("pc_") or s.profile in self._profiles,
+                                 "WORKSPACE_PROFILE", 403)
+                        _require(s.active is None, "CALL_ALREADY_ACTIVE", 409)
+                        _validate(arguments, s.tools[tool]["inputSchema"])
+                    except BridgeError as rejected:
+                        if rejected.code in _COUNTED_REJECTIONS or rejected.code.startswith("ARGUMENT_"):
+                            s.rejected_calls += 1  # Separate counter; never bumps revision or calls.
+                        raise
                     if tool in PUBLIC_WEB_READS:
                         previous = [c for c in s.calls.values() if c.payload_digest == payload
                                     and c.state == "COMPLETED" and c.source == "PHONE_EXECUTOR"]
@@ -764,6 +807,8 @@ class AgentBridge:
                 s.revision += 1
                 return 200, self._call_view(c)
         except BridgeError as error:
+            if error.detail is not None:
+                return error.status, {"error": error.code, "detail": error.detail}
             return error.status, {"error": error.code}
 
     def _phone(self, s, operation, body):

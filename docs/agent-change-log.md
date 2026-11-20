@@ -1,3 +1,33 @@
+## 2026-11-20 — Redact credential values in cloud tool results, bound rejected calls, carry read-only steers (Claude)
+
+Branch `claude/egress-steer-validation` (from 31fcbc5). The owner directed Claude to implement C-044/C-045/C-046 directly when Codex had not replied. Not merged, pushed, installed or deployed.
+
+**Credential egress.** `PcExternalAgentClient.report()` now runs the phone tool result content through the new `core` `CredentialRedaction` before sending it to the PC broker.
+- It redacts PEM keys, prefixed API keys, JWTs, bearer and labelled secret values, Korean password/PIN labels, verification-code digits, and Luhn-valid card numbers.
+- When anything is masked, the fixed notice is appended. The size limit and the result digest are computed on the outgoing text.
+- The local ToolResult, audit records and UI keep the original.
+- Phone numbers, emails, times, amounts and order numbers are kept; this comparison follows [OpenClaw 4a47d02c6d](https://github.com/openclaw/openclaw/commit/4a47d02c6d).
+- Known limits:
+  - A result close to the 128KB limit that contains secrets can exceed the limit after the notice. This fails closed: report() refuses rather than leaking.
+  - A label followed by an ordinary word (e.g. "비밀번호가 틀렸습니다") is over-masked.
+
+**Rejected tool calls.** The MCP gateway (`device_tools_mcp.py`) explains rejections, following [OpenClaw #202272](https://github.com/openclaw/openclaw/pull/202272) with no coercion.
+- `INVALID_ARGUMENTS` now carries a safe detail: a schema-derived path, the expected type, the received type name, missing schema keys, and allowed keys. A string sent where an object is expected gets a "pass the value itself" hint. Argument values and model-supplied unexpected key names are never echoed.
+- After 6 pre-submission rejections (unknown tool, invalid arguments, tool outside the plan, plan change, size or JSON errors), further calls return `REJECTED_CALL_LIMIT` with a finish-with-verified-results instruction.
+- The broker (`agent_bridge.py`) adds the same detail and cap as a second line: `BridgeError.detail`, `rejected_calls`, `MAX_REJECTED_CALLS=6`. `read_recovery_context` treats the cap like call-budget exhaustion. Rejections never change calls or revision.
+
+**Cloud steer.** Steering a cloud run after any phone tool step was always refused, because `steer()` carried `previousSteps` and `executeCloudPhoneRequest` refuses any non-empty value.
+- The new `CloudSteerCarry` drops the carried steps only when all of them are effect-free reads with no continuation. Effect-free means read-only, and VERIFIED or FAILED with `effectNotApplied`.
+- Prepared, write, unknown and unverified steps still carry and are refused, now with a specific message.
+- Local steers are unchanged. The UI exposure of steer during cloud runs is unverified.
+
+Validation (Claude reran the Python suites and CredentialRedaction itself; the app suites were run by the implementing subagent):
+- `py -3.12 -m unittest`: mcp 95 OK, `tests.test_agent_bridge` 44 OK (1 pre-existing skip).
+- Full `pc-worker/tests` discover: 258 run, 1 environment error (`test_recovery` needs an installed worker file) and 9 skips.
+- Gradle `:core:test` CredentialRedactionTest 9/9.
+- android-runtime unit tests: CloudSteerCarryTest 9/9 and `externalagent.*` 73/73, including the 2 new PcExternalAgentClient redaction tests.
+- No release build, lint, device or real-model evidence. The `ChatRunCoordinator` message branch has no unit test (compile only).
+
 ## 2026-11-20 — Record actionable public-page read failures
 
 The installed 2032 Jeju run recorded twelve failed public page reads under the same generic verification summary. The phone's public-page tool now records fixed failure reasons for URL rejection, HTTP status, access challenges, unreadable content, transport errors and size limits. Audit summaries contain only a fixed code and, for a valid HTTP response status, its three digits. Owner cancellation still propagates to the run. The read-only tool verifies a page when it delivers text or a documented structured offer. A body with neither is reported as failed. The separate evidence research workflow still receives blank responses as unverified observations and can try a different source within its request budget.

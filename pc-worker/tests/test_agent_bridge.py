@@ -271,6 +271,99 @@ class AgentBridgeTests(unittest.TestCase):
         self.assertEqual(200, broker.dispatch_authenticated("POST", url + "/close", owner, wire["control"], phone)[0])
 
 
+def detail_tool():
+    return {"name": "schedule_item", "description": "Synthetic nested-schema tool",
+            "inputSchema": {"type": "object", "additionalProperties": False, "required": ["title"], "properties": {
+                "title": {"type": "string", "maxLength": 20},
+                "details": {"type": "object", "additionalProperties": False, "properties": {
+                    "start": {"type": "object", "additionalProperties": False,
+                              "properties": {"hour": {"type": "integer"}}}}},
+                "items": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                                                       "properties": {}}}}}}
+
+
+class AgentBridgeRejectedCallTests(unittest.TestCase):
+    phone_request = AgentBridgeTests.phone_request
+    agent_request = AgentBridgeTests.agent_request
+    propose = AgentBridgeTests.propose
+
+    def setUp(self):
+        self.clock = Clock()
+        self.broker = AgentBridge(clock_ms=self.clock.now, epoch_ms=self.clock.epoch)
+        self.owner = uid()
+        grant = {"version": 1, "parentRunId": self.owner, "projectBinding": "synthetic-project-binding",
+                 "authorityRevision": 7, "allowExternalAgent": True, "expiresAfterMs": 600_000,
+                 "phoneTools": [clock_tool(), detail_tool()], "pcWorkspaceProfile": None, "requestDigest": "a" * 64}
+        self.base = "/v1/agent/sessions"
+        status, created = self.broker.dispatch_authenticated("POST", self.base, self.owner, grant)
+        self.assertEqual(201, status)
+        self.sid = created["sessionId"]
+        self.phone = created["phoneCapability"]
+        self.url = self.base + "/" + self.sid
+        self.assertEqual(200, self.phone_request("GET")[0])
+        self.agent = self.broker.bootstrap_agent(self.owner, self.sid, local_authenticated=True)["agentCapability"]
+
+    def reject(self, args, tool="schedule_item"):
+        status, body = self.propose(tool, args)[1]
+        return status, body, json.dumps(body, ensure_ascii=False)
+
+    def test_stringified_object_reports_path_and_type_without_value_or_coercion(self):
+        secret = '{"start": "SECRET-VALUE-123"}'
+        status, body, text = self.reject({"title": "t", "details": secret})
+        self.assertEqual(400, status)
+        self.assertEqual("ARGUMENT_TYPE", body["error"])
+        self.assertEqual({"path": "/details", "expected": "object", "received": "string"},
+                         {k: v for k, v in body["detail"].items() if k != "hint"})
+        self.assertIn("hint", body["detail"])
+        self.assertNotIn("SECRET-VALUE-123", text)
+        # No coercion: nothing was created or dispatched.
+        self.assertEqual({}, self.broker._sessions[self.sid].calls)
+        status, body, _ = self.reject({"title": "t", "details": {"start": "x"}})
+        self.assertEqual("/details/start", body["detail"]["path"])
+        self.assertEqual("/items/0", self.reject({"title": "t", "items": [5]})[1]["detail"]["path"])
+
+    def test_unknown_key_reports_only_count(self):
+        status, body, text = self.reject({"title": "t", "zzSecretKeyName": 1, "qqOther": 2})
+        self.assertEqual("ARGUMENT_UNKNOWN", body["error"])
+        self.assertEqual({"path": "", "unknownKeyCount": 2}, body["detail"])
+        self.assertNotIn("zzSecretKeyName", text)
+        self.assertNotIn("qqOther", text)
+
+    def test_missing_required_lists_schema_key(self):
+        status, body, _ = self.reject({})
+        self.assertEqual("ARGUMENT_REQUIRED", body["error"])
+        self.assertEqual({"path": "", "missing": ["title"]}, body["detail"])
+
+    def test_plain_errors_stay_without_detail(self):
+        status, body = self.propose("nonexistent", {})[1]
+        self.assertEqual({"error": "TOOL_NOT_OFFERED"}, body)
+
+    def test_rejection_cap_blocks_valid_call_without_touching_calls_or_revision(self):
+        good, (status, _) = self.propose("get_current_datetime", {})
+        self.assertEqual(202, status)
+        revision = self.phone_request("GET")[1]["revision"]
+        calls_before = set(self.broker._sessions[self.sid].calls)
+        # Clear the active call so only the cap can block a fresh valid call.
+        self.broker._sessions[self.sid].active = None
+        for _ in range(6):
+            self.assertEqual(400, self.propose("schedule_item", {"title": "t", "details": "x"})[1][0])
+        self.assertEqual(6, self.broker._sessions[self.sid].rejected_calls)
+        self.assertEqual(revision, self.phone_request("GET")[1]["revision"])
+        status, body = self.propose("get_current_datetime", {})[1]
+        self.assertEqual((429, {"error": "REJECTED_CALL_LIMIT"}), (status, body))
+        self.assertEqual(calls_before, set(self.broker._sessions[self.sid].calls))
+        self.assertEqual(revision, self.phone_request("GET")[1]["revision"])
+        # Idempotent replay of an existing call is unaffected by the cap.
+        self.assertEqual(200, self.agent_request("POST", "/call", good)[0])
+
+    def test_uncounted_rejections_do_not_consume_the_cap(self):
+        proposal, (status, _) = self.propose("get_current_datetime", {})
+        self.assertEqual(202, status)
+        for _ in range(8):
+            self.assertEqual(409, self.propose("get_current_datetime", {})[1][0])  # CALL_ALREADY_ACTIVE
+        self.assertEqual(0, self.broker._sessions[self.sid].rejected_calls)
+
+
 class AgentBridgePlanTests(unittest.TestCase):
     phone_request = AgentBridgeTests.phone_request
     agent_request = AgentBridgeTests.agent_request

@@ -138,7 +138,7 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
             val request=finalRequest
             val thread=app.repository.chat.thread(threadId)?:error("대화가 삭제되었습니다.")
             check(thread.activeBranchId==request.branchId&&thread.projectId==request.projectId){"대화 버전이나 프로젝트가 변경되었습니다."}
-            val steps=request.previousSteps
+            val steps=if(request.readbackObligations==null)CloudSteerCarry.carriedSteps(request.allowExternalAgent,request.previousSteps)else request.previousSteps
             val updated="${request.text}\n\n사용자의 최신 추가 지시:\n$text"
             require(updated.length<=12000){"원래 요청과 추가 지시가 너무 깁니다."}
             if(request.goal!=null)goalMutation.withLock {

@@ -1379,7 +1379,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             !request.allowTools||request.continuation!=null||request.previousSteps.isNotEmpty()||(request.goal!=null&&request.goalSegment==null)||
             request.readbackObligations!=null||request.attachments.isNotEmpty()||
             (mode !in setOf(AgentWorkMode.ACT,AgentWorkMode.DEBUG,AgentWorkMode.RESEARCH) && !request.cloudReadOnlyModes)||(publicResearch&&request.goal!=null)){
-            publishActionFinal(request,emptySet(),"이 요청에는 새 클라우드 도구 권한이 없거나 아직 지원하지 않는 첨부·이어가기 조건이 있습니다. 원문을 보존했습니다. 모델과 권한을 확인한 뒤 새 요청으로 보내주세요.",true);return
+            val onlyCarriedSteps=request.previousSteps.isNotEmpty()&&request.allowExternalAgent&&request.externalAgentRevision!=null&&request.capturedPcRevision!=null&&
+                request.allowTools&&request.continuation==null&&(request.goal==null||request.goalSegment!=null)&&request.readbackObligations==null&&request.attachments.isEmpty()&&
+                (mode in setOf(AgentWorkMode.ACT,AgentWorkMode.DEBUG,AgentWorkMode.RESEARCH)||request.cloudReadOnlyModes)&&!(publicResearch&&request.goal!=null)
+            publishActionFinal(request,emptySet(),if(onlyCarriedSteps)"이미 준비하거나 실행한 작업이 있어 추가 지시를 새 클라우드 작업으로 이어갈 수 없습니다. 원문과 이전 결과를 보존했습니다. 결과를 확인한 뒤 새 요청으로 보내주세요."
+                else "이 요청에는 새 클라우드 도구 권한이 없거나 아직 지원하지 않는 첨부·이어가기 조건이 있습니다. 원문을 보존했습니다. 모델과 권한을 확인한 뒤 새 요청으로 보내주세요.",true);return
         }
         if(request.goal!=null) {
             val access=app.repository.chat.accessScope(request.threadId)
