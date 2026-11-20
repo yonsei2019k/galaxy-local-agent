@@ -26,7 +26,12 @@ Validation (Claude reran the Python suites and CredentialRedaction itself; the a
 - Full `pc-worker/tests` discover: 258 run, 1 environment error (`test_recovery` needs an installed worker file) and 9 skips.
 - Gradle `:core:test` CredentialRedactionTest 9/9.
 - android-runtime unit tests: CloudSteerCarryTest 9/9 and `externalagent.*` 73/73, including the 2 new PcExternalAgentClient redaction tests.
-- No release build, lint, device or real-model evidence. The `ChatRunCoordinator` message branch has no unit test (compile only).
+- Claude then ran the CI-equivalent subset on d874231: `:core:test :android-runtime:testDebugUnitTest :android-runtime:lintRelease :app:lintRelease :app:assembleRelease` (in-process Kotlin, CMake debug excluded).
+- BUILD SUCCESSFUL in 34m11s.
+- core 1,012 tests and android-runtime 1,054 tests, with 0 failures, 0 errors and 0 skips.
+- `app-release-unsigned.apk` was produced. It is unsigned; signing, `local-image` and androidTest were not run.
+
+No device or real-model evidence. The `ChatRunCoordinator` message branch has no dedicated unit test.
 
 ## 2026-11-20 — Record actionable public-page read failures
 
