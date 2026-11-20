@@ -1,5 +1,9 @@
 # Device validation
 
+## 2036 Jeju privacy-handoff replay
+
+Installed signed 2036 by wireless ADB while phone agent/image services and the paired worker were idle. App launch and installed APK digest matched. The same Jeju research fixture triggered the on-device credential-category guard. The PC cloud provider then became idle while local inference was active. The paired phone returned completed after 321460 ms with the fixed local-only result notice. The remote response exposed no private answer or tool rows. This verifies the local handoff reached the result, and provides no evidence of flight inventory, quoted fares, or which search projection ran. The safe-search projection was verified in the injected controller tests.
+
 ## 2034 rollout via paired PC and mobile Tailscale
 
 Authenticated health showed the paired worker idle before restarting. The worker installed the exact 0563e74 broker module and pinned MCP gateway, restarted under its existing supervisor, and reported provider readiness, no active providers and unchanged model pins. The Android 2034 APK was offered over a temporary private Tailnet route and returned the expected 32-byte range response. The user then enabled wireless ADB. The device reported 2032 and had no active image or agent service at installation. An in-place update installed 2034, the device base APK SHA-256 matched the signed package, and the manifest launcher started successfully. The temporary download route was closed after installation.
