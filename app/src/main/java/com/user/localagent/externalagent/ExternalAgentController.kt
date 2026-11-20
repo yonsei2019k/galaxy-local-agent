@@ -163,8 +163,10 @@ class ExternalAgentController(
         }
         fence()
         require(result.id==entry.proposal.callId&&result.content.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES){"BRIDGE_RESULT_BOUND"}
-        com.user.localagent.core.ConversationPrivacy.matchKind(result.content)?.let { throw PrivateResultWithheld(it) }
-        val ack=client.report(entry.proposal,result,checkNotNull(session).revision)
+        val kind=com.user.localagent.core.ConversationPrivacy.matchKind(result.content)
+        val outgoing=if(kind==null)result else CloudPublicSearchProjection.from(entry.proposal.tool,result)
+            ?:throw PrivateResultWithheld(kind)
+        val ack=client.report(entry.proposal,outgoing,checkNotNull(session).revision)
         require(ack.callId==entry.proposal.callId&&ack.sequence==entry.proposal.sequence){"BRIDGE_RESULT_ACK"}
         accept(ack.snapshot)
         entry.reported=true;pending=null

@@ -75,6 +75,46 @@ class ExternalAgentControllerTest {
         assertEquals(0,b.reports)
     }
 
+    @Test fun publicLookupContinuesWithSafeSourcesAndKeepsOriginalLocally() = runBlocking {
+        val capture = capture(setOf("search_web"))
+        val broker = Broker()
+        val original = ToolResult(callId, true, """
+            {"success":true,"shopping":false,"privateSourcesRead":false,"untrustedSourceData":true,
+             "query":"fixture@example.invalid","items":[
+               {"title":"Public route timetable","url":"https://example.com/routes","snippet":"문의 fixture@example.invalid"},
+               {"title":"Other result","url":"https://example.org/?session=value"},
+               {"title":"내 메모","url":"https://example.com/notes"}
+             ]}
+        """.trimIndent(), VerificationState.VERIFIED)
+        val local = mutableListOf<PhoneAgentExecution>()
+        val controller = ExternalAgentController(capture, broker, { live(capture) }, { original }, { local += it }, { 1 })
+        controller.start()
+        broker.offer(proposal(capture, "search_web", buildJsonObject { put("query", "public timetable") }))
+        assertEquals(ExternalAgentController.Pump.EXECUTED, controller.pumpOnce())
+        assertEquals(ExternalAgentController.Phase.ACTIVE, controller.phase)
+        assertSame(original, local.single().result)
+        val reported = broker.reported.single()
+        assertEquals(VerificationState.VERIFIED, reported.verification)
+        val safe = Json.parseToJsonElement(reported.content).jsonObject
+        assertTrue(safe.getValue("partial").jsonPrimitive.boolean)
+        assertFalse(safe.containsKey("query"))
+        val row = safe.getValue("items").jsonArray.single().jsonObject
+        assertEquals("https://example.com/routes", row.getValue("url").jsonPrimitive.content)
+        assertFalse(row.containsKey("snippet"))
+        assertFalse(reported.content.contains("fixture@example.invalid"))
+    }
+
+    @Test fun projectionDoesNotAcceptPrivateReadsOrFabricateSafeRows() {
+        val source = """{"success":true,"shopping":false,"privateSourcesRead":false,"untrustedSourceData":true,
+            "items":[{"title":"Public route timetable","url":"https://example.com/routes"}]}"""
+        val result = ToolResult(callId, true, source, VerificationState.VERIFIED)
+        assertNull(CloudPublicSearchProjection.from("read_note", result))
+        assertNull(CloudPublicSearchProjection.from("search_web", result.copy(content = source.replace(
+            "\"privateSourcesRead\":false", "\"privateSourcesRead\":true"))))
+        assertNull(CloudPublicSearchProjection.from("search_web", result.copy(content = source.replace(
+            "https://example.com/routes", "https://example.com/%66ixture"))))
+    }
+
     @Test fun claimedPhoneCallbackIsTheOnlyReceiptSourceAndDuplicatePollNeverExecutesAgain()=runBlocking {
         val c=capture();val b=Broker();val receipts=mutableListOf<PhoneAgentExecution>();var executions=0
         val result=ToolResult(callId,true,"actual synthetic clock",VerificationState.VERIFIED)

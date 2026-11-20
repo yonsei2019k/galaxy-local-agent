@@ -1,3 +1,11 @@
+## 2026-11-20 — Continue public research when a search row triggers the privacy gate
+
+The phone still records the original verified observation locally. When the existing privacy gate would withhold a built-in public web search result, the controller can submit a partial projection of the actual public hits. Only bounded titles, excerpts, timestamps and exact public HTTPS source URLs may remain. The query and provider errors stay local. A sensitive field is omitted, and a source without a safe title and URL is omitted. Query-bearing, encoded and fragment-bearing URLs are omitted from the projection. At least one safe observed source is required, and the whole outgoing projection must pass the existing privacy gate again. Private and non-search tools cannot use this path. Cancellation, tool authority, and result acknowledgement continue through the existing controller.
+
+For a withheld result with no safe projection, the existing read-only local handoff now checks actual, settled public reads rather than rejecting a run solely because its accepted plan also listed an unexecuted tool. The local writer receives only the bounded observations and no tool authority. Previous writes, unresolved effects and persistent goals remain outside this handoff. Product pricing and document bodies are outside the cloud projection.
+
+Focused privacy, security, phone controller and local evidence suites passed all 35 cases. Release lint and assembly passed. Signed 2036 matched the signer pin, permissions, 16 KiB alignment and static package audit. APK SHA-256 ca23017ee559fc2b653a65d661f8976cd5b669881980b3bbeff2a5773d66340f.
+
 ## 2026-11-20 — Diagnose public-research privacy handoff locally
 
 The installed 2034 Jeju replay was stopped by the phone's privacy gate after two verified searches. The receipt did not identify which existing rule matched. The phone now records one of three fixed match categories in its local cloud-bridge stop log before the current handoff or pause. The classification uses the existing rules and priority. No matched content, URL or extracted value is recorded. The broker still receives no withheld result, and the local preservation and handoff use the same conditions.

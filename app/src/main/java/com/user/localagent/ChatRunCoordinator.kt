@@ -1625,10 +1625,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         } catch(privateResult:PrivateResultWithheld){
             FailureLog.cloudStop(context,"PRIVATE_RESULT_WITHHELD_${privateResult.kind.name}",
                 controller.stopMetadata(),lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
-            val publicReadPlan=plan?.requiredTools?.let {tools->
-                tools.isNotEmpty()&&tools.all {it in ExternalAgentContract.PUBLIC_RESEARCH_PHONE_TOOLS}
-            }==true
-            if(request.goal==null&&publicReadPlan){
+            // The local writer gets only settled observations and no tools. An unexecuted plan step
+            // cannot expand that authority or make an already observed public read unsafe to retain.
+            if(request.goal==null&&plan!=null){
                 val evidence=PrivateResearchReadEvidence.capture(actual.values.map {it.proposal.tool to it.result})
                 if(evidence!=null)throw PrivateResearchReadReady(evidence)
             }

@@ -1,0 +1,51 @@
+package com.user.localagent.externalagent
+
+import com.user.localagent.core.ConversationPrivacy
+import com.user.localagent.core.CredentialRedaction
+import com.user.localagent.core.ToolResult
+import com.user.localagent.core.VerificationState
+import com.user.localagent.web.PublicWebSafety
+import kotlinx.serialization.json.*
+
+/** The phone keeps the original search result. Only a safe subset of public source rows leaves it. */
+internal object CloudPublicSearchProjection {
+    fun from(tool: String, result: ToolResult): ToolResult? {
+        if (tool != "search_web" || !result.success || result.verification != VerificationState.VERIFIED) return null
+        val data = runCatching { Json.parseToJsonElement(result.content) }.getOrNull() as? JsonObject ?: return null
+        if (data["success"] != JsonPrimitive(true) || data["shopping"] != JsonPrimitive(false) ||
+            data["privateSourcesRead"] != JsonPrimitive(false) || data["untrustedSourceData"] != JsonPrimitive(true)) return null
+        val items = data["items"] as? JsonArray ?: return null
+        val safeRows = items.take(5).mapNotNull { element ->
+            val row = element as? JsonObject ?: return@mapNotNull null
+            val url = safeField(row, "url", 2048) ?: return@mapNotNull null
+            val uri = runCatching { PublicWebSafety.requireHttps(url) }.getOrNull() ?: return@mapNotNull null
+            if (uri.rawQuery != null || '#' in url || '%' in url) return@mapNotNull null
+            val title = safeField(row, "title", 300) ?: return@mapNotNull null
+            buildJsonObject {
+                put("url", url)
+                put("title", title)
+                safeField(row, "snippet", 300)?.let { put("snippet", it) }
+                safeField(row, "fetchedAt", 40)?.let { put("fetchedAt", it) }
+            }
+        }
+        if (safeRows.isEmpty()) return null
+        val outgoing = buildJsonObject {
+            put("success", true)
+            put("shopping", false)
+            put("privateSourcesRead", false)
+            put("untrustedSourceData", true)
+            put("partial", true)
+            put("items", JsonArray(safeRows))
+        }.toString()
+        if (ConversationPrivacy.sensitiveText(outgoing)) return null
+        return result.copy(content = outgoing)
+    }
+
+    private fun safeField(row: JsonObject, key: String, limit: Int): String? {
+        val value = (row[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+        return value.takeIf {
+            it.isNotBlank() && it.length <= limit && !ConversationPrivacy.sensitiveText(it) &&
+                CredentialRedaction.redact(it).count == 0
+        }
+    }
+}
