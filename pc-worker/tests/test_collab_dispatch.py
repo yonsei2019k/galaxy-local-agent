@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from collab_dispatch import Dispatch, patch_sources
+from collab_dispatch import Dispatch, patch_sources, validation_command
 
 
 class Mailbox:
@@ -128,6 +128,13 @@ class DispatcherTests(unittest.TestCase):
         ):
             with self.subTest(edit=edit), self.assertRaises(RuntimeError):
                 patch_sources(allowed, files, [edit])
+
+    def test_validator_does_not_depend_on_the_scheduled_tasks_search_path(self):
+        task = {"check": ["host-validator", "--fixture"]}
+        with self.assertRaisesRegex(RuntimeError, "VALIDATOR_NOT_FOUND"):
+            validation_command({}, task)
+        config = {"validator_paths": {"host-validator": sys.executable}}
+        self.assertEqual([sys.executable, "--fixture"], validation_command(config, task))
 
     def test_no_work_does_not_start_models_or_publish(self):
         other = self.root / "empty"

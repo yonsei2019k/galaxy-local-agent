@@ -114,11 +114,27 @@ def proof(config, task, review, root):
     if run(["git", "rev-parse", "HEAD"], work, 10, read=True).strip() != before:
         raise RuntimeError("BASE_CHANGED")
     run(["git", "diff", "--check"], work, 10)
-    run(task["check"], work, 1200)
+    check = validation_command(config, task)
+    try:
+        run(check, work, 1200)
+    except FileNotFoundError:
+        raise RuntimeError("VALIDATOR_NOT_FOUND") from None
+    except RuntimeError as error:
+        if str(error) == "CHILD_FAILED":
+            raise RuntimeError("VALIDATION_FAILED") from None
+        raise
     run(["git", "add", "--", *sorted(paths)], work, 10)
     run(["git", "diff", "--cached", "--check"], work, 10)
     run(["git", "commit", "-m", f"Validate collaboration task {task['id']}"], work, 30)
     return run(["git", "rev-parse", "HEAD"], work, 10, read=True).strip()
+
+
+def validation_command(config, task):
+    executable, *args = task["check"]
+    executable = config.get("validator_paths", {}).get(executable, executable)
+    if not Path(executable).is_absolute() or not Path(executable).is_file():
+        raise RuntimeError("VALIDATOR_NOT_FOUND")
+    return [executable, *args]
 
 
 def review_task(config, task, root):
