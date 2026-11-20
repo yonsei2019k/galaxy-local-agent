@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -27,7 +28,7 @@ import kotlinx.coroutines.*
     var checking by remember{mutableStateOf(false)}
     var networkAllowed by remember{mutableStateOf(PcLocalNetwork.allowed(context))}
     var showPairing by remember{mutableStateOf(false)}
-    var showConnectionOptions by remember{mutableStateOf(false)}
+    var showConnectionOptions by rememberSaveable{mutableStateOf(false)}
     var pendingDiscovery by remember{mutableStateOf(false)}
     fun checkConnection(){scope.launch {
         checking=true
@@ -56,62 +57,66 @@ import kotlinx.coroutines.*
         }
     }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-        Text("내 PC",style=MaterialTheme.typography.titleMedium)
-        Text(state.status,style=MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            OutlinedButton(enabled=!busy&&!checking,onClick={connect()},modifier=Modifier.testTag("pc_connect")){Text(if(checking)"확인 중"else if(state.paired)"연결 확인"else"내 PC 연결")}
-            if(state.paired)TextButton(enabled=!busy&&!checking,onClick={connect(true)}){Text("다른 PC 연결")}
+        Text(if(state.paired)"연결을 등록했어요" else "아직 연결된 컴퓨터가 없어요.",style=MaterialTheme.typography.titleMedium)
+        Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
+            OutlinedButton(enabled=!busy&&!checking,onClick={connect()},modifier=Modifier.testTag("pc_connect")){Text(if(checking)"확인 중"else if(state.paired)"연결 확인"else"컴퓨터 연결")}
+            if(state.paired)TextButton(enabled=!busy&&!checking,onClick={connect(true)}){Text("다른 컴퓨터 연결")}
         }
         if(state.paired){
-            Text("답변 방식",style=MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                FilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("내 PC")},modifier=Modifier.testTag("text_engine_local"))
-                FilterChip(selected=state.claudeText,onClick={settings.claudeText(true)},enabled=!busy,label={Text("Claude")},modifier=Modifier.testTag("text_engine_claude"))
+            TextButton(onClick={showConnectionOptions=!showConnectionOptions}){
+                Text(if(showConnectionOptions)"세부 설정 접기"else"세부 설정 더 보기")
             }
-            if(state.claudeText)Text("Claude를 쓰면 대화와 작업 결과가 Anthropic으로 전송되고 별도 요금이 듭니다.",style=MaterialTheme.typography.bodySmall)
-            TextButton(onClick={showConnectionOptions=!showConnectionOptions}){Text(if(showConnectionOptions)"접기"else"연결 설정 더 보기")}
             if(showConnectionOptions){
-            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("이미지 · PC")})
-                FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("이미지 · 휴대폰")})
-            }
-            PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
-            val remote=remember{com.user.localagent.compute.PcRemoteTestSettings.get(context)}
-            var remoteOn by remember{mutableStateOf(remote.enabled())}
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                Column(Modifier.weight(1f)){
-                    Text("PC에서 시험 요청 받기",style=MaterialTheme.typography.labelLarge)
-                    Text("집합이 실행 중일 때 연결된 PC가 시험 요청을 보내고 결과를 받아요. 승인할 작업은 휴대폰에서 확인해요.",style=MaterialTheme.typography.bodySmall)
+                Text(state.status,style=MaterialTheme.typography.bodySmall)
+                Text("기존 PC 답변 연결",style=MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    FilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("내 PC")},modifier=Modifier.testTag("text_engine_local"))
+                    FilterChip(selected=state.claudeText,onClick={settings.claudeText(true)},enabled=!busy,label={Text("Claude")},modifier=Modifier.testTag("text_engine_claude"))
                 }
-                Switch(checked=remoteOn,onCheckedChange={on->
-                    remote.setEnabled(on)
-                    remoteOn=remote.enabled()
-                    onStatus(if(on)"PC 원격 시험 요청을 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
-                },modifier=Modifier.testTag("pc_remote_test"))
-            }
-            if(loadQaLessons!=null){
-                var lessons by remember { mutableStateOf<Map<com.user.localagent.data.RemoteQaLesson,Long>?>(null) }
-                TextButton(onClick={scope.launch {
-                    try {lessons=loadQaLessons()}
-                    catch(cancel:CancellationException){throw cancel}
-                    catch(_:Exception){onStatus("시험 교훈을 불러오지 못했습니다.")}
-                }}){Text("시험 교훈 보기")}
-                lessons?.let{items->
-                    if(items.isEmpty())Text("보관된 시험에서 확인된 교훈이 없습니다.")
-                    else items.forEach{(lesson,count)->Text("${lesson.guidance} · 관련 시험 ${count}건",style=MaterialTheme.typography.bodySmall)}
+                if(state.claudeText)Text("Claude를 쓰면 대화와 작업 결과가 Anthropic으로 전송되고 별도 요금이 듭니다.",style=MaterialTheme.typography.bodySmall)
+                Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
+                    FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("컴퓨터에서 만들기")})
+                    FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("휴대폰에서 만들기")})
                 }
-            }
-            com.user.localagent.voice.BackgroundRunExemptionRow(onStatus)
-            val browser=remember{com.user.localagent.compute.BrowserAgentSettings.pc(context)}
-            var browserOn by remember{mutableStateOf(browser.enabled())}
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                Column(Modifier.weight(1f)){
-                    Text("PC에서 웹 작업",style=MaterialTheme.typography.labelLarge)
-                    Text("PC 화면에 창을 띄우지 않고 웹 작업을 해요. 결제·주문·예약 확정·전송이나 검색 외 입력은 휴대폰에서 승인해요.",style=MaterialTheme.typography.bodySmall)
+                PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
+                SettingsDisclosure("연결 시험 도구","문제가 있을 때 시험 요청과 기록을 확인해요."){
+                    val remote=remember{com.user.localagent.compute.PcRemoteTestSettings.get(context)}
+                    var remoteOn by remember{mutableStateOf(remote.enabled())}
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        Column(Modifier.weight(1f)){
+                            Text("컴퓨터에서 시험 요청 받기",style=MaterialTheme.typography.labelLarge)
+                            Text("집합이 실행 중일 때 연결된 PC가 시험 요청을 보내고 결과를 받아요. 승인할 작업은 휴대폰에서 확인해요.",style=MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked=remoteOn,onCheckedChange={on->
+                            remote.setEnabled(on)
+                            remoteOn=remote.enabled()
+                            onStatus(if(on)"PC 원격 시험 요청을 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
+                        },modifier=Modifier.testTag("pc_remote_test"))
+                    }
+                    if(loadQaLessons!=null){
+                        var lessons by remember { mutableStateOf<Map<com.user.localagent.data.RemoteQaLesson,Long>?>(null) }
+                        TextButton(onClick={scope.launch {
+                            try {lessons=loadQaLessons()}
+                            catch(cancel:CancellationException){throw cancel}
+                            catch(_:Exception){onStatus("시험 교훈을 불러오지 못했습니다.")}
+                        }}){Text("시험 교훈 보기")}
+                        lessons?.let{items->
+                            if(items.isEmpty())Text("보관된 시험에서 확인된 교훈이 없습니다.")
+                            else items.forEach{(lesson,count)->Text("${lesson.guidance} · 관련 시험 ${count}건",style=MaterialTheme.typography.bodySmall)}
+                        }
+                    }
                 }
-                Switch(checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
-            }
-            TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
+                com.user.localagent.voice.BackgroundRunExemptionRow(onStatus)
+                val browser=remember{com.user.localagent.compute.BrowserAgentSettings.pc(context)}
+                var browserOn by remember{mutableStateOf(browser.enabled())}
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    Column(Modifier.weight(1f)){
+                        Text("PC에서 웹 작업",style=MaterialTheme.typography.labelLarge)
+                        Text("PC 화면에 창을 띄우지 않고 웹 작업을 해요. 결제·주문·예약 확정·전송이나 검색 외 입력은 휴대폰에서 승인해요.",style=MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
+                }
+                TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
             }
         }
     }

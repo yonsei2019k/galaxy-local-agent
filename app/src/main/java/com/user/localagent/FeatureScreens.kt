@@ -42,24 +42,24 @@ import kotlinx.coroutines.*
             delay(2000)
         }}
     }
-    Text("백그라운드 오케스트레이션",style=MaterialTheme.typography.titleLarge)
-    Text("규칙과 이벤트를 상시 대기하고 15분 이상 간격으로 패턴을 분석합니다. 모델 가중치는 고정하며, 추천이 앱 설치나 권한 승인을 대신하지 않습니다.")
+    Text("사용 기록으로 도움 받기",style=MaterialTheme.typography.titleLarge)
+    Text("선택한 사용 기록을 살펴보고 도움이 될 기능을 제안해요. 제안은 내용을 확인한 뒤 적용할 수 있어요.")
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-        Text("비서 작업 결과 분석",Modifier.weight(1f)); Switch(state.settings.assistantPatternsEnabled,onCheckedChange={state=controller.updateSettings(state.settings.copy(assistantPatternsEnabled=it))})
+        Text("집합의 작업 기록 살펴보기",Modifier.weight(1f)); Switch(state.settings.assistantPatternsEnabled,onCheckedChange={state=controller.updateSettings(state.settings.copy(assistantPatternsEnabled=it))})
     }
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-        Text("다른 앱 사용 시간 분석",Modifier.weight(1f)); Switch(state.settings.usageStatsEnabled,onCheckedChange={state=controller.updateSettings(state.settings.copy(usageStatsEnabled=it))})
+        Text("다른 앱 사용 시간 살펴보기",Modifier.weight(1f)); Switch(state.settings.usageStatsEnabled,onCheckedChange={state=controller.updateSettings(state.settings.copy(usageStatsEnabled=it))})
     }
     Text(if(state.usageAccessGranted)"사용 시간 접근 허용됨" else "사용 시간 접근: 시스템에서 별도 허용 필요")
     OutlinedButton(onClick={open(controller.usageAccessSettingsIntent())}){Text("사용 시간 접근 설정")}
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-        Button(onClick={runCatching {state=controller.startVisibleMode()}.onFailure {report(it.message?:"시작 실패")}},enabled=state.settings.assistantPatternsEnabled||state.settings.usageStatsEnabled){Text("상시 모드 시작")}
+        Button(onClick={runCatching {state=controller.startVisibleMode()}.onFailure {report(it.message?:"시작 실패")}},enabled=state.settings.assistantPatternsEnabled||state.settings.usageStatsEnabled){Text("자동 분석 시작")}
         OutlinedButton(onClick={state=controller.stop()}){Text("중지")}
     }
     Text("${if(state.enabled)"분석 켜짐" else "분석 꺼짐"} · 작업 ${state.recordedOutcomes}건 · ${state.lastStatus}",style=MaterialTheme.typography.bodySmall)
     Text("Android가 프로세스를 종료하거나 강제 중지하면 상시 실행은 멈출 수 있습니다. 주기 작업은 시스템 일정에 따라 복원됩니다.",style=MaterialTheme.typography.bodySmall)
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("충전 중 로컬 모델로 개선 제안",Modifier.weight(1f));Switch(reflectionState.enabled,onCheckedChange={reflectionState=reflection.enable(it)})}
-    Text("8시간 주기로 충전·잠금 해제·발열 상태를 확인합니다. 집계 통계로 만든 제안은 ‘기억’ 탭에서 승인해야 적용됩니다.",style=MaterialTheme.typography.bodySmall)
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("충전 중 휴대폰에서 개선점 찾기",Modifier.weight(1f));Switch(reflectionState.enabled,onCheckedChange={reflectionState=reflection.enable(it)})}
+    Text("충전 중 휴대폰 상태가 괜찮을 때 제안해요. ‘기억과 할 일’에서 확인하고 적용할 수 있어요.",style=MaterialTheme.typography.bodySmall)
     Text(reflectionReadinessMessage(reflectionState.enabled,state.enabled,state.settings.assistantPatternsEnabled),style=MaterialTheme.typography.bodySmall)
     Text("최근 제안 작업: ${reflectionStatusMessage(reflectionState.lastStatus)}",style=MaterialTheme.typography.bodySmall)
     HorizontalDivider()
@@ -72,7 +72,7 @@ import kotlinx.coroutines.*
     state.recommendations.forEach {recommendation->
         Card(Modifier.fillMaxWidth()) {Column(Modifier.padding(12.dp)){Text(recommendation.title);Text(recommendation.reason,style=MaterialTheme.typography.bodySmall)}}
     }
-    OutlinedButton(onClick={reflectionState=reflection.clearHistory();state=controller.clearLocalHistory();scope.launch {eraseProposals();report("패턴 집계와 승인 전 제안을 삭제했습니다.")}}){Text("패턴 기록 지우기")}
+    OutlinedButton(onClick={reflectionState=reflection.clearHistory();state=controller.clearLocalHistory();scope.launch {eraseProposals();report("패턴 집계와 승인 전 제안을 삭제했습니다.")}}){Text("분석 기록 지우기")}
 }
 
 @Composable internal fun DocumentSkillsScreen(skills:BuiltinSkills, report:(String)->Unit, analyze:(String)->Unit) {

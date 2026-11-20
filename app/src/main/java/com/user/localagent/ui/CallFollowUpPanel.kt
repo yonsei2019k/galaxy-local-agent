@@ -66,10 +66,10 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
     }
     LaunchedEffect(app,jobsOffset){while(isActive){try {refresh()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){};delay(10_000)}}
     ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
-        Text("통화 후속 비서",style=MaterialTheme.typography.titleMedium)
+        Text("통화 뒤 정리",style=MaterialTheme.typography.titleMedium)
         Text("삼성 전화가 저장한 새 통화 녹음을 기기 안에서 분석하고, 일정·메모·메일 답장 후보를 전용 대화에 보고합니다. 원본 녹음은 유지합니다.",style=MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-            Text("통화 후 자동 분석")
+            Text("새 통화 녹음 자동 정리")
             Switch(checked=state?.enabled==true,enabled=state!=null&&!busy,onCheckedChange={enabled->
                 if(enabled&&!sourceSelected){pendingGeneration=state?.generation;picker.launch(null)}
                 else launchWork {app.callFollowUp.setEnabled(enabled)}
@@ -88,11 +88,13 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
         },style=MaterialTheme.typography.bodyMedium)
         OutlinedButton(enabled=!busy&&state!=null,onClick={pendingGeneration=state?.generation;picker.launch(null)}){Text(if(sourceSelected)"통화 녹음 폴더 변경" else "통화 녹음 폴더 연결")}
         Text("전화 앱의 녹음 목록에서 저장 위치를 확인한 뒤 해당 폴더만 선택하세요. 새로 켠 시점 이전 녹음과 다른 폴더는 자동 수집하지 않습니다.",style=MaterialTheme.typography.bodySmall)
-        OutlinedButton(enabled=!busy,onClick={permissions.launch(arrayOf(Manifest.permission.READ_PHONE_STATE,Manifest.permission.POST_NOTIFICATIONS))}){Text("통화 종료·보고 알림 권한 확인")}
+        OutlinedButton(enabled=!busy,onClick={permissions.launch(arrayOf(Manifest.permission.READ_PHONE_STATE,Manifest.permission.POST_NOTIFICATIONS))}){Text("통화와 알림 권한 확인")}
         TextButton(enabled=!busy&&state?.enabled==true,onClick={launchWork {app.callFollowUp.requestReconciliation("owner_refresh");refresh()}}){Text("새 녹음 확인")}
         OutlinedButton(enabled=!busy&&sourceSelected&&state?.enabled==true,onClick={selectedRecordingGeneration=state?.generation;recordingPicker.launch(arrayOf("audio/*"))}){Text("기존 통화 녹음 한 개 선택")}
         Text("파일 저장과 Android의 백그라운드 실행 일정에 따라 지연될 수 있습니다. 전사 구간 시각은 단어 시각이 아니며, 날짜·이름·수신자·부정·정정은 원음과 대조해야 합니다. 실제 일정 등록과 메일 발송은 별도로 확인합니다.",style=MaterialTheme.typography.bodySmall)
-        Text("자동 통화 전사는 별도 Qwen 경로를 사용합니다. 기기 내 ML Kit는 화면을 연 상태의 비교 후보이며 일반 음성 인식 선택은 바꾸지 않습니다.",style=MaterialTheme.typography.bodySmall)
+        SettingsDisclosure("음성 인식 세부 정보","통화 정리에서 사용하는 인식 방법을 확인해요."){
+            Text("자동 통화 전사는 별도 Qwen 경로를 사용합니다. 기기 내 ML Kit는 화면을 연 상태의 비교 후보이며 일반 음성 인식 선택은 바꾸지 않습니다.",style=MaterialTheme.typography.bodySmall)
+        }
         jobs.forEach {job->
             HorizontalDivider()
             Text("${callJobLabel(job.status.name)} · 전사 ${job.completedChunks}구간 / 분석 ${job.analyzedChunks}구간",style=MaterialTheme.typography.bodyMedium)
@@ -114,7 +116,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
                 }}){Text("녹음 열기")}
                 TextButton(enabled=!busy&&job.completedChunks>0,onClick={launchWork {
                     transcriptStart=0;transcriptChunks=app.callFollowUpPipeline.transcriptForReview(job.queueId,0,5);transcriptJob=job.queueId
-                }}){Text("전사 원문 확인")}
+                }}){Text("녹음에서 만든 글 보기")}
             }
             TextButton(enabled=!busy,onClick={forgetTarget=job.queueId}){Text("이 녹음의 분석 기록 삭제")}
         }
@@ -123,7 +125,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
             if(jobs.size==20)TextButton(enabled=!busy,onClick={jobsOffset+=20}){Text("이전 기록")}
         }
     }}
-    transcriptJob?.let {id->AlertDialog(onDismissRequest={transcriptJob=null},title={Text("전사 원문 · ${transcriptStart+1}구간부터")},text={
+    transcriptJob?.let {id->AlertDialog(onDismissRequest={transcriptJob=null},title={Text("녹음에서 만든 글 · ${transcriptStart+1}구간부터")},text={
         Column(Modifier.heightIn(max=460.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text("자동 인식 원문입니다. 교정된 정답이 아니며 표시 시간은 조각 범위입니다.",style=MaterialTheme.typography.bodySmall)
             SelectionContainer {Column {transcriptChunks.forEach {chunk->Text("[${chunk.startMillis/1000}–${chunk.endMillis/1000}초]\n${chunk.text}");HorizontalDivider()}}}

@@ -2,7 +2,6 @@ package com.user.localagent
 
 import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -198,10 +197,10 @@ class MainActivity : ComponentActivity() {
                 externalAgentConsentThread.value=null
             }){Text("연결하고 선택")}},dismissButton={TextButton(onClick={externalAgentConsentThread.value=null}){Text("취소")}})}
         var tab by rememberSaveable {mutableIntStateOf(0)}
-        var settingsSection by rememberSaveable {mutableIntStateOf(0)}
+        var settingsPage by rememberSaveable {mutableStateOf(SettingsPage.HOME)}
         var panelFromSettings by rememberSaveable {mutableStateOf(false)}
         fun openPanel(destination:Int,fromSettings:Boolean=false){
-            settingsSection=0
+            settingsPage=SettingsPage.HOME
             panelFromSettings=fromSettings
             tab=destination
         }
@@ -398,7 +397,7 @@ class MainActivity : ComponentActivity() {
                 })}
             }
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
-                val returnsToSettings=panelFromSettings || (tab==4 && settingsSection!=0)
+                val returnsToSettings=panelFromSettings || (tab==4 && settingsPage!=SettingsPage.HOME)
                 fun returnToParent(){
                     if(returnsToSettings)openPanel(4)
                     else {openPanel(0);refreshVisibleHistory()}
@@ -406,13 +405,13 @@ class MainActivity : ComponentActivity() {
                 androidx.activity.compose.BackHandler {returnToParent()}
                 Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
                     TextButton(onClick=::returnToParent){Text(if(returnsToSettings)"‹ 설정"else"‹ 대화")}
-                    val title=if(tab==4)listOf("설정","자동으로 할 일","앱과 PC 연결","앱 업데이트와 권한")[settingsSection]
-                        else listOf("","답변 방식과 음성 인식","기억과 할 일","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
+                    val title=if(tab==4)settingsPage.title
+                        else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
                     Text(title,style=MaterialTheme.typography.titleMedium)
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state
                 if(panelStatus.isNotBlank())Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
-                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen(settingsSection,chatScreenUnavailable,{settingsSection=it}){openPanel(it,fromSettings=true)};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
+                when(tab){1->VoiceSettingsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->key(settingsPage){SettingsScreen(settingsPage,chatScreenUnavailable,{settingsPage=it}){openPanel(it,fromSettings=true)}};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
             }
         }
         if(chatMenuOpen)AlertDialog(onDismissRequest={chatMenuOpen=false}, title={Text("대화 관리")}, text={Column {
@@ -494,7 +493,7 @@ class MainActivity : ComponentActivity() {
         }
         pending?.takeIf{it.threadId==composerThreadId}?.let { action -> ActionApprovalDialog(action,action.reviewText?:actionSummary(action.call)) }
     }
-    @Composable private fun ColumnScope.ModelsScreen() {
+    @Composable private fun ColumnScope.VoiceSettingsScreen() {
         val installed by app.models.models.collectAsState()
         val selectedId by preferredModelId.collectAsState()
         val media by app.models.mediaSelection.collectAsState()
@@ -504,61 +503,23 @@ class MainActivity : ComponentActivity() {
         val options by modelOptions.collectAsState()
         val thinkingThreadId=app.runs.selectedThreadId.collectAsState().value
         val thinkingReady by app.runs.selectionReady.collectAsState()
+        var advancedModels by rememberSaveable {mutableStateOf(false)}
         var endurance by remember { mutableStateOf(false) }
         var downloadJob by remember {mutableStateOf<Job?>(null)}
         var hashTarget by remember {mutableStateOf<String?>(null)}
         var expectedHash by remember {mutableStateOf("")}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            item {TextButton(onClick={
-                com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity).setEnabled(false)
-                status.value="클라우드 도구 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
-            }){Text("클라우드 도구 연결 해제")}}
-            item { InfoCard("PC와 휴대폰에서 나누어 계산","연결한 PC가 계산 중이면 다른 대화의 작업 하나를 휴대폰에서 진행할 수 있습니다. 휴대폰에는 모델 하나씩만 올립니다. 모델 파일은 APK와 별도로 내려받습니다.") }
-            item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
-            item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});FilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
-            item {Row {FilterChip(selected=options.contextSize==4096,onClick={modelOptions.value=options.copy(contextSize=4096)},label={Text("4K 문맥")});Spacer(Modifier.width(8.dp));FilterChip(selected=options.contextSize==8192,onClick={modelOptions.value=options.copy(contextSize=8192)},label={Text("8K 문맥")})}}
-            item {Text("CPU/GPU와 4K/8K는 아래 성능 측정에 사용합니다. 깊게 생각 요청은 현재 대화에 저장되며, 실제 모델·설정은 기기의 검증 결과와 자원 상태에 따라 선택됩니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
-            item {Row {Checkbox(endurance,onCheckedChange={endurance=it});Text("10분 연속 안정성 측정")}}
-            item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick={importModel.launch(arrayOf("application/octet-stream","*/*"))}) { Text("파일 가져오기") }
-                OutlinedButton(onClick={scope.launch {maintainModelFiles {status.value="휴대폰 모델 메모리를 해제했습니다."}}}) {Text("메모리 해제")}
-            } }
             if(progress!=null) item {val p=progress!!;InfoCard(if(p.phase=="hash")"모델 무결성 검증" else "모델 다운로드","${p.title}\n${p.bytes/1024/1024} / ${p.total/1024/1024} MB");LinearProgressIndicator(progress={if(p.total>0)(p.bytes.toDouble()/p.total).toFloat().coerceIn(0f,1f)else 0f},modifier=Modifier.fillMaxWidth());TextButton(onClick={downloadJob?.cancel()}){Text("중단 · 다음 다운로드에서 이어받기")}}
-            items(app.models.candidates.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { candidate -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text(candidate.title,fontWeight=FontWeight.Bold)
-                Text("공식 메타데이터에서 버전·해시를 확인한 뒤 다운로드",style=MaterialTheme.typography.bodySmall)
-                Button(enabled=progress==null,onClick={downloadJob=scope.launch { status.value="모델 출처 확인 중";try{app.models.downloadBundle(candidate);status.value="다운로드·해시 검증 완료"}catch(cancel:CancellationException){status.value="중단했습니다. 받은 부분은 이어받기에 사용합니다.";throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"} }}) {Text("다운로드")}
-            } } }
-            item {Text("설치한 모델",style=MaterialTheme.typography.titleMedium)}
-            items(installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { model -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text(model.title,fontWeight=FontWeight.Bold)
-                Text(if(selectedId==model.id) "이 대화에서 선택됨" else "선택 가능",color=Mint)
-                if(model.id in com.user.localagent.models.GemmaMediaCatalog.modelIds) {
-                    val ready=app.models.mediaReady(model)
-                    Text(if(ready)"음성 내용 분석·사진 분석 지원"else"사진 분석 지원 파일 다운로드 필요",style=MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
-                        FilterChip(selected=media.vision==model.id,enabled=ready,onClick={scope.launch {app.models.selectMedia("vision",model.id)}},label={Text("사진용")})
-                    }
-                    if(model.id=="gemma-e4b")Text("음성·사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
-                }
-                if(!model.verified)TextButton(onClick={hashTarget=model.id;expectedHash=""}){Text("확인 코드 입력")}
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("선택")}
-                    TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("벤치마크")}
-                    TextButton(onClick={scope.launch {maintainModelFiles {app.models.delete(model.id);status.value="모델을 삭제했습니다."}}}){Text("삭제")}
-                }
-            } } }
-            item {InfoCard("전용 음성 인식", "녹음 전사는 전용 ASR이, 전사 내용의 요약·분석은 선택한 대화 모델이 담당합니다. 모델은 순서대로 메모리에 올립니다.")}
+            item {InfoCard("녹음에서 글 만들기", "이 휴대폰에서 음성을 글로 바꿀 때 쓸 언어와 인식 방법을 고를 수 있어요.")}
             item {
                 val deviceAsr by app.models.deviceAsrStatus.collectAsState()
                 Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
-                    Text("기기 내 음성 AI · ML Kit",fontWeight=FontWeight.Bold)
-                    Text("S26의 시스템 AI 활용 후보 · 한국어·영어 · 기기·언어별 지원 확인",style=MaterialTheme.typography.bodySmall)
+                    Text("휴대폰 기본 음성 인식",fontWeight=FontWeight.Bold)
+                    Text("한국어와 영어를 지원해요. 이 휴대폰에서 사용할 수 있는지 확인하세요.",style=MaterialTheme.typography.bodySmall)
                     Text(deviceAsr.message,style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         TextButton(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.prepareDeviceAsr(deviceAsr.downloadable)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"기기 내 AI 확인 실패"}}}){Text(if(deviceAsr.downloadable)"시스템 AI 준비"else"지원 확인")}
-                        FilterChip(selected=asr.modelId==com.user.localagent.models.AsrCatalog.DEVICE_MODEL,enabled=deviceAsr.available&&asr.language!="auto",onClick={scope.launch {app.models.selectAsr(com.user.localagent.models.AsrCatalog.DEVICE_MODEL)}},label={Text("전사용")})
+                        FilterChip(selected=asr.modelId==com.user.localagent.models.AsrCatalog.DEVICE_MODEL,enabled=deviceAsr.available&&asr.language!="auto",onClick={scope.launch {app.models.selectAsr(com.user.localagent.models.AsrCatalog.DEVICE_MODEL)}},label={Text("사용하기")})
                     }
                 }}
             }
@@ -574,11 +535,48 @@ class MainActivity : ComponentActivity() {
                     Text("휴대폰에서 처리 · 공식 배포 파일",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         Button(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.downloadBundle(candidate);status.value="음성 인식 파일 검증 완료"}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"}}}){Text("다운로드")}
-                        FilterChip(selected=asr.modelId==candidate.id,enabled=app.models.asrReady(candidate.id),onClick={scope.launch {app.models.selectAsr(candidate.id)}},label={Text("전사용")})
+                        FilterChip(selected=asr.modelId==candidate.id,enabled=app.models.asrReady(candidate.id),onClick={scope.launch {app.models.selectAsr(candidate.id)}},label={Text("사용하기")})
                     }
                 }}
             }
-            item {InfoCard("모델 역할을 나눕니다","E2B는 빠른 대화, E4B·Qwen은 수동 비교용입니다. 이미지 작업실에서는 별도 로컬 이미지 모델을 사용하며, 대화 모델을 먼저 메모리에서 내립니다.")}
+            item {TextButton(onClick={advancedModels=!advancedModels}){Text(if(advancedModels)"모델·성능 설정 접기"else"모델·성능 설정 더 보기")}}
+            if(advancedModels){
+                item { InfoCard("PC와 휴대폰에서 나누어 계산","연결한 PC가 계산 중이면 다른 대화의 작업 하나를 휴대폰에서 진행할 수 있습니다. 휴대폰에는 모델 하나씩만 올립니다. 모델 파일은 APK와 별도로 내려받습니다.") }
+                item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
+                item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});FilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
+                item {Row {FilterChip(selected=options.contextSize==4096,onClick={modelOptions.value=options.copy(contextSize=4096)},label={Text("4K 문맥")});Spacer(Modifier.width(8.dp));FilterChip(selected=options.contextSize==8192,onClick={modelOptions.value=options.copy(contextSize=8192)},label={Text("8K 문맥")})}}
+                item {Text("CPU/GPU와 4K/8K는 아래 성능 측정에 사용합니다. 깊게 생각 요청은 현재 대화에 저장되며, 실제 모델·설정은 기기의 검증 결과와 자원 상태에 따라 선택됩니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                item {Row {Checkbox(endurance,onCheckedChange={endurance=it});Text("10분 연속 안정성 측정")}}
+                item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick={importModel.launch(arrayOf("application/octet-stream","*/*"))}) { Text("파일 가져오기") }
+                    OutlinedButton(onClick={scope.launch {maintainModelFiles {status.value="휴대폰 모델 메모리를 해제했습니다."}}}) {Text("메모리 해제")}
+                } }
+                items(app.models.candidates.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { candidate -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(candidate.title,fontWeight=FontWeight.Bold)
+                    Text("공식 메타데이터에서 버전·해시를 확인한 뒤 다운로드",style=MaterialTheme.typography.bodySmall)
+                    Button(enabled=progress==null,onClick={downloadJob=scope.launch { status.value="모델 출처 확인 중";try{app.models.downloadBundle(candidate);status.value="다운로드·해시 검증 완료"}catch(cancel:CancellationException){status.value="중단했습니다. 받은 부분은 이어받기에 사용합니다.";throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"} }}) {Text("다운로드")}
+                } } }
+                item {Text("설치한 모델",style=MaterialTheme.typography.titleMedium)}
+                items(installed.filterNot {com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { model -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(model.title,fontWeight=FontWeight.Bold)
+                    Text(if(selectedId==model.id) "이 대화에서 선택됨" else "선택 가능",color=Mint)
+                    if(model.id in com.user.localagent.models.GemmaMediaCatalog.modelIds) {
+                        val ready=app.models.mediaReady(model)
+                        Text(if(ready)"음성 내용 분석·사진 분석 지원"else"사진 분석 지원 파일 다운로드 필요",style=MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
+                            FilterChip(selected=media.vision==model.id,enabled=ready,onClick={scope.launch {app.models.selectMedia("vision",model.id)}},label={Text("사진용")})
+                        }
+                        if(model.id=="gemma-e4b")Text("음성·사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
+                    }
+                    if(!model.verified)TextButton(onClick={hashTarget=model.id;expectedHash=""}){Text("확인 코드 입력")}
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        if(model.id !in com.user.localagent.models.GemmaMediaCatalog.modelIds)TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("이 대화에서 사용")}
+                        TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("성능 측정")}
+                        TextButton(onClick={scope.launch {maintainModelFiles {app.models.delete(model.id);status.value="모델을 삭제했습니다."}}}){Text("삭제")}
+                    }
+                } } }
+            }
         }
         hashTarget?.let {id->AlertDialog(onDismissRequest={hashTarget=null},title={Text("파일 확인")},text={Column{Text("배포처가 알려준 64자리 확인 코드를 입력해 주세요.");OutlinedTextField(value=expectedHash,onValueChange={expectedHash=it.trim()},label={Text("확인 코드")})}},confirmButton={TextButton(enabled=expectedHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={scope.launch {runCatching {app.models.verifyImported(id,expectedHash)}.onSuccess{status.value="파일이 배포처의 원본과 일치해요.";hashTarget=null}.onFailure{status.value=it.message?:"검증 실패"}}}){Text("파일 검증")}},dismissButton={TextButton(onClick={hashTarget=null}){Text("취소")}})}
     }
@@ -618,34 +616,78 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    @Composable private fun ColumnScope.ExtensionsScreen(section:Int,showChatRecoveryLinks:Boolean,onSection:(Int)->Unit,onOpen:(Int)->Unit) {
+    @Composable private fun ColumnScope.SettingsScreen(
+        page:SettingsPage,
+        showChatRecoveryLinks:Boolean,
+        onPage:(SettingsPage)->Unit,
+        onOpen:(Int)->Unit,
+    ) {
         val assistantBusy by app.runs.busy.collectAsState()
         val imageWork by app.imageStudio.state.collectAsState()
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            if(section==0){
-                items(listOf("앱과 PC 연결" to 2,"자동으로 할 일" to 1,"앱 업데이트와 권한" to 3)){(label,destination)->
-                    OutlinedButton(onClick={onSection(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}
+            when(page){
+                SettingsPage.HOME->{
+                    item {SettingsEntry("앱과 컴퓨터 연결","메일·문서·메신저 또는 내 컴퓨터를 연결해요."){onPage(SettingsPage.CONNECTIONS)}}
+                    item {SettingsEntry("음성을 글로 바꾸기","녹음에 쓸 언어와 휴대폰의 음성 인식을 설정해요."){onOpen(1)}}
+                    item {SettingsEntry("개인정보와 권한","화면 접근이나 전에 허용한 작업을 확인해요."){onPage(SettingsPage.PRIVACY)}}
+                    item {SettingsEntry("자동으로 도와주기","통화 뒤 정리하거나 사용 중에 도움을 받도록 설정해요."){onPage(SettingsPage.AUTOMATION)}}
+                    item {SettingsEntry("앱 업데이트","새 버전을 확인하고 설치해요."){onPage(SettingsPage.UPDATES)}}
+                    if(showChatRecoveryLinks){
+                        item {SettingsEntry("파일 작업","파일을 열고 작업해요."){onOpen(3)}}
+                        item {SettingsEntry("대화 기록","저장한 대화를 찾아요."){onOpen(6)}}
+                    }
+                    item {
+                        SettingsDisclosure("저장한 자료와 기록","기억, 문자, 일정, 검색 자료를 찾아요."){
+                            TextButton(onClick={onOpen(2)}){Text("기억과 할 일")}
+                            TextButton(onClick={onOpen(5)}){Text("연결된 자료")}
+                            TextButton(onClick={onOpen(8)}){Text("문자와 일정")}
+                            TextButton(onClick={onOpen(9)}){Text("검색 기록")}
+                        }
+                    }
                 }
-                items(listOf("답변 방식과 음성 인식" to 1,"기억과 할 일" to 2,"연결된 자료" to 5,"문자와 일정" to 8,"검색 기록" to 9)){(label,destination)->
-                    TextButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}
+                SettingsPage.CONNECTIONS->{
+                    item {SettingsEntry("메일·일정·문서 연결","Google 계정으로 사용할 기능을 선택해요."){
+                        startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))
+                    }}
+                    item {SettingsDisclosure("내 컴퓨터","컴퓨터를 추가하거나 연결 상태를 확인해요."){
+                        PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),
+                            loadQaLessons=app.repository.chat::remoteQaLessons){status.value=it}
+                    }}
+                    item {SettingsDisclosure("메신저","카카오톡 등에서 받아볼 내용을 정해요."){
+                        com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}
+                    }}
                 }
-                if(showChatRecoveryLinks)items(listOf("파일 작업" to 3,"대화 기록" to 6)){(label,destination)->
-                    TextButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}
+                SettingsPage.AUTOMATION->{
+                    item {SettingsDisclosure("통화 뒤 정리","통화 녹음으로 할 일과 메모를 제안받아요."){
+                        CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}
+                    }}
+                    item {SettingsDisclosure("사용 기록으로 도움 받기","사용 시간과 알림 횟수로 제안을 받아요."){
+                        AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})
+                    }}
+                }
+                SettingsPage.PRIVACY->{
+                    item {SettingsDisclosure("다른 앱 화면 접근","화면을 읽거나 조작할 수 있는 범위를 정해요."){
+                        com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}
+                    }}
+                    item {SettingsDisclosure("이전에 허용한 작업","반복 작업에 저장한 허용을 해제할 수 있어요."){
+                        val scope=rememberCoroutineScope()
+                        OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("반복 작업 허용 해제")}
+                    }}
+                    item {SettingsDisclosure("Codex 연결","이 앱이 Codex를 사용하도록 허용한 상태를 관리해요."){
+                        TextButton(onClick={
+                            com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity).setEnabled(false)
+                            status.value="Codex 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
+                        }){Text("Codex 연결 해제")}
+                    }}
+                }
+                SettingsPage.UPDATES->{
+                    item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
+                    item {SettingsDisclosure("확장 기능 검사","직접 추가할 확장 파일의 정보를 확인해요."){
+                        ExtensionInspectionPanel{status.value=it}
+                    }}
+                    item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName}",style=MaterialTheme.typography.bodySmall)}
                 }
             }
-            if(section==1)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
-            if(section==1)item {CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}}
-            if(section==2)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}}
-            if(section==2)item {com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}}
-            if(section==2)item {OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))},modifier=Modifier.fillMaxWidth()){Text("Google·메일·문서 연결")}}
-            if(section==2)item {PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),
-                loadQaLessons=app.repository.chat::remoteQaLessons){status.value=it}}
-            if(section==3){
-            item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
-            item {ExtensionInspectionPanel{status.value=it}}
-            item {val scope=rememberCoroutineScope();OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("저장한 도구 허용 해제")}}
-            }
-            item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName} · ${Build.MODEL}",style=MaterialTheme.typography.bodySmall)}
         }
     }
     @Composable private fun InfoCard(title:String,body:String) {ZipHapCard {Text(title,fontWeight=FontWeight.Bold);Spacer(Modifier.height(6.dp));Text(body,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodyMedium)}}
