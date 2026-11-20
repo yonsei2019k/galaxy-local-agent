@@ -1,5 +1,9 @@
 # Device validation
 
+## 2044 consolidated conversation, evidence and Image Studio candidate
+
+The idle phone was updated from 2043 to the signed 2044, with the same package and signer. The installed base APK matched SHA-256 64d13460f2d4842a5fdf87d640f35ae0ed25e641df9625393511d7dad89bbdf3. Release lint, core JVM 1,015, Android focused JVM 51 and four Rust context tests passed. The installation did not launch the app or act on an existing image or conversation.
+
 ## 2043 integrated approval and tool-result candidate
 
 Updated the idle physical phone from 2042 to 2043 with the existing package and signer. The installed base APK matched SHA-256 49dd6142ae58fbdb00f26b7a504ffd26f1f32f890e88b57478773ac3f138c0f8. Release and mandatory lint passed; core JVM 1,014 and Android focused JVM 19 passed. No foreground launch, approval interaction, conversation replay, or PC worker deployment was part of this receipt.
