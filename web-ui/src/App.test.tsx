@@ -227,7 +227,10 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'cancelPreparation', payload: {} })
     click('확인이 필요한 대화 열기')
     expect(requests().at(-1)).toMatchObject({ action: 'openWaitingApproval', payload: {} })
-    click('대화 메뉴')
+    const more = host.querySelector<HTMLDetailsElement>('.desktop-sidebar .more-menu')!
+    expect(more.open).toBe(false)
+    more.open = true
+    click('대화 관리')
     expect(requests().at(-1)).toMatchObject({ action: 'chatMenu' })
     expect(input().value).toBe('요청 원문')
     expect(host.textContent).not.toContain('기존 화면')

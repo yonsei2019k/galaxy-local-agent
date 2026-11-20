@@ -14,7 +14,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -199,6 +198,13 @@ class MainActivity : ComponentActivity() {
                 externalAgentConsentThread.value=null
             }){Text("연결하고 선택")}},dismissButton={TextButton(onClick={externalAgentConsentThread.value=null}){Text("취소")}})}
         var tab by rememberSaveable {mutableIntStateOf(0)}
+        var settingsSection by rememberSaveable {mutableIntStateOf(0)}
+        var panelFromSettings by rememberSaveable {mutableStateOf(false)}
+        fun openPanel(destination:Int,fromSettings:Boolean=false){
+            settingsSection=0
+            panelFromSettings=fromSettings
+            tab=destination
+        }
         var chatScreenAttempt by remember {mutableIntStateOf(0)}
         var chatScreenUnavailable by remember {mutableStateOf(false)}
         var chatMenuOpen by rememberSaveable {mutableStateOf(false)}
@@ -215,7 +221,7 @@ class MainActivity : ComponentActivity() {
         val submittedTokens=remember {linkedSetOf<String>()}
         var imageStudioStatus by rememberSaveable {mutableStateOf("")}
         val requested by requestedTab.collectAsState()
-        LaunchedEffect(requested){requested?.let {tab=it;requestedTab.value=null}}
+        LaunchedEffect(requested){requested?.let {openPanel(it);requestedTab.value=null}}
         val state by status.collectAsState()
         val chat=app.runs
         val selectedThreadId by chat.selectedThreadId.collectAsState()
@@ -273,7 +279,7 @@ class MainActivity : ComponentActivity() {
                     Text("대화를 열지 못했어요.",style=MaterialTheme.typography.titleMedium)
                     Text("다시 열어 보고, 계속 안 되면 앱을 종료한 뒤 다시 실행해 주세요.")
                     TextButton(onClick={chatScreenAttempt++;chatScreenUnavailable=false}){Text("다시 열기")}
-                    TextButton(onClick={tab=4}){Text("설정")}
+                    TextButton(onClick={openPanel(4)}){Text("설정")}
                 }
             }else if(tab==0){
                 val runForRoom=steerRunId?.takeIf{steerThreadId==composerThreadId}
@@ -358,7 +364,7 @@ class MainActivity : ComponentActivity() {
                             "openOffice"->chat.openFixedOfficeRooms()
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
                             "attach"->{val room=roomThreads.firstOrNull{it.id==composerThreadId};if(room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}}
-                            "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else tab=when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4}}
+                            "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})}
                             "collabRefresh"->collaboration.refresh(payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "collabSend"->collaboration.post(payload.getValue("clientMessageId").jsonPrimitive.content,payload.getValue("text").jsonPrimitive.content,payload.getValue("recipient").jsonPrimitive.content,payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&it.role=="assistant"})chat.copyMessage(id)}
@@ -383,18 +389,25 @@ class MainActivity : ComponentActivity() {
                 })}
             }
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
-                Row(Modifier.fillMaxWidth().height(56.dp),verticalAlignment=Alignment.CenterVertically) {
-                    TextButton(onClick={if(tab in setOf(4,7,10)){tab=0;refreshVisibleHistory()}else tab=4}){Text(if(tab in setOf(4,7,10))"‹ 대화"else"‹ 설정")}
-                    Text(listOf("","답변 방식","기억과 작업","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자·일정 분석","웹·쇼핑 검색","프로젝트")[tab],style=MaterialTheme.typography.titleMedium)
+                val returnsToSettings=panelFromSettings || (tab==4 && settingsSection!=0)
+                fun returnToParent(){
+                    if(returnsToSettings)openPanel(4)
+                    else {openPanel(0);refreshVisibleHistory()}
+                }
+                androidx.activity.compose.BackHandler {returnToParent()}
+                Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
+                    TextButton(onClick=::returnToParent){Text(if(returnsToSettings)"‹ 설정"else"‹ 대화")}
+                    val title=if(tab==4)listOf("설정","자동으로 할 일","앱과 PC 연결","앱 업데이트와 권한")[settingsSection]
+                        else listOf("","답변 방식과 음성 인식","기억과 할 일","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
+                    Text(title,style=MaterialTheme.typography.titleMedium)
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state
                 if(panelStatus.isNotBlank())Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
-                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen{tab=it};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
+                when(tab){1->ModelsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->ExtensionsScreen(settingsSection,chatScreenUnavailable,{settingsSection=it}){openPanel(it,fromSettings=true)};5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
             }
         }
-        if(chatMenuOpen)AlertDialog(onDismissRequest={chatMenuOpen=false}, title={Text("대화 메뉴")}, text={Column {
+        if(chatMenuOpen)AlertDialog(onDismissRequest={chatMenuOpen=false}, title={Text("대화 관리")}, text={Column {
             TextButton(onClick={chatMenuOpen=false;chatManagerOpen=true}){Text("대화와 프로젝트 관리")}
-            TextButton(onClick={chatMenuOpen=false;tab=6}){Text("이전 대화 찾기")}
             TextButton(onClick={chatMenuOpen=false;queueOpen=true}){Text("대기 중인 요청")}
             TextButton(onClick={chatMenuOpen=false;goalEditorThreadId=composerThreadId}){Text("이 대화의 목표")}
             TextButton(onClick={chatMenuOpen=false;skillLibraryOpen=true}){Text("도움 기능")}
@@ -428,7 +441,7 @@ class MainActivity : ComponentActivity() {
             androidx.compose.ui.window.Dialog(onDismissRequest={chatManagerOpen=false}){
                 Surface(shape=MaterialTheme.shapes.large,modifier=Modifier.fillMaxHeight(0.9f)){
                     ChatNavigator(navigation,onDismiss={chatManagerOpen=false},
-                        onOpenImages={chatManagerOpen=false;tab=7},onOpenSettings={chatManagerOpen=false;tab=4})
+                        onOpenImages={chatManagerOpen=false;openPanel(7)},onOpenSettings={chatManagerOpen=false;openPanel(4)})
                 }
             }
         }
@@ -596,26 +609,32 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    @Composable private fun ColumnScope.ExtensionsScreen(onOpen:(Int)->Unit) {
-        var section by rememberSaveable {mutableIntStateOf(0)}
+    @Composable private fun ColumnScope.ExtensionsScreen(section:Int,showChatRecoveryLinks:Boolean,onSection:(Int)->Unit,onOpen:(Int)->Unit) {
         val assistantBusy by app.runs.busy.collectAsState()
         val imageWork by app.imageStudio.state.collectAsState()
-        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("일반","자동 작업","앱 연결","업데이트").forEachIndexed {index,label->FilterChip(section==index,onClick={section=index},label={Text(label)})}}
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(section==0){
-                items(listOf("답변 방식" to 1,"기억과 할 일" to 2,"파일 작업" to 3,"대화 기록" to 6,"연결된 자료" to 5,"문자와 일정" to 8,"검색 기록" to 9)){(label,destination)->OutlinedButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}}
+                items(listOf("앱과 PC 연결" to 2,"자동으로 할 일" to 1,"앱 업데이트와 권한" to 3)){(label,destination)->
+                    OutlinedButton(onClick={onSection(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}
+                }
+                items(listOf("답변 방식과 음성 인식" to 1,"기억과 할 일" to 2,"연결된 자료" to 5,"문자와 일정" to 8,"검색 기록" to 9)){(label,destination)->
+                    TextButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}
+                }
+                if(showChatRecoveryLinks)items(listOf("파일 작업" to 3,"대화 기록" to 6)){(label,destination)->
+                    TextButton(onClick={onOpen(destination)},modifier=Modifier.fillMaxWidth()){Text(label)}
+                }
             }
             if(section==1)item {AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})}
             if(section==1)item {CallFollowUpPanel(app,{status.value=it}){threadId->app.runs.selectThread(threadId);onOpen(0)}}
             if(section==2)item {com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}}
             if(section==2)item {com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}}
-            if(section==2)item {OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))},modifier=Modifier.fillMaxWidth()){Text("Google·메일·문서 앱 연결 설정")}}
+            if(section==2)item {OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))},modifier=Modifier.fillMaxWidth()){Text("Google·메일·문서 연결")}}
             if(section==2)item {PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),
                 loadQaLessons=app.repository.chat::remoteQaLessons){status.value=it}}
             if(section==3){
             item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
             item {ExtensionInspectionPanel{status.value=it}}
-            item {val scope=rememberCoroutineScope();OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("반복 작업 허용 초기화")}}
+            item {val scope=rememberCoroutineScope();OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("저장한 도구 허용 해제")}}
             }
             item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName} · ${Build.MODEL}",style=MaterialTheme.typography.bodySmall)}
         }

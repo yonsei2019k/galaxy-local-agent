@@ -217,6 +217,7 @@ svg { width: 20px; height: 20px; flex: none; }
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   height: 100%;
+  overflow-y: auto;
   padding: calc(18px + env(safe-area-inset-top)) 16px calc(13px + env(safe-area-inset-bottom));
 }
 .sidebar-brand { display: flex; align-items: center; justify-content: space-between; padding-inline: 5px 0; min-height: 46px; }
@@ -272,6 +273,20 @@ svg { width: 20px; height: 20px; flex: none; }
 .sidebar-row[aria-current="page"] svg { color: var(--accent); }
 .sidebar-row:disabled { color: var(--muted); }
 .utility-nav { display: grid; align-content: end; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+.more-menu summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  padding-inline: 11px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.more-menu summary svg { width: 17px; height: 17px; }
+.more-menu[open] summary svg { transform: rotate(180deg); }
+.more-menu .sidebar-row { width: 100%; }
+.sidebar-content:has(.more-menu[open]) { grid-template-rows: auto auto auto auto; align-content: start; }
 
 /* Conversation -------------------------------------------------------------------------------------- */
 .conversation-wrap { display: grid; position: relative; min-height: 0; min-width: 0; }
@@ -594,4 +609,9 @@ svg { width: 20px; height: 20px; flex: none; }
   .rename-thread { position: relative; width: 36px; padding: 0; font-size: 0; }
   .rename-thread::before { content: "✎"; font-size: 17px; line-height: 1; color: currentColor; }
   .rename-thread::after { content: ""; position: absolute; inset: -4px; }  /* 44px hit area */
+}
+
+@media (max-height: 670px) {
+  .mobile-sidebar .sidebar-content { grid-template-rows: auto auto auto auto; align-content: start; }
+  .mobile-sidebar .new-thread { margin-block: 10px 14px; }
 }

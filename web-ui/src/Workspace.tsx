@@ -6,11 +6,9 @@ import { BrandMark } from './Conversation'
 import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 
-const panels: { panel: Panel; label: string; icon: IconName }[] = [
+const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'collab', label: '협업방', icon: 'group' },
   { panel: 'images', label: '이미지 만들기', icon: 'image' },
-  { panel: 'tools', label: '파일 작업', icon: 'tools' },
-  { panel: 'history', label: '대화 기록', icon: 'history' },
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
 
@@ -47,16 +45,27 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
         ))}</ul> : snapshot?.ready && <p className="no-threads">대화가 없습니다.</p>}
       </nav>
       <nav className="utility-nav" aria-label="앱 메뉴">
-        <button type="button" className="sidebar-row" disabled={!enabled} onClick={onOpenOffice}>
-          <Icon name="group" /><span>사무실</span>
-        </button>
-        {panels.map(({ panel, label, icon }) => (
+        {shortcuts.map(({ panel, label, icon }) => (
           <button key={panel} type="button" className="sidebar-row" disabled={!enabled}
             aria-current={panel === 'collab' && collaborationOpen ? 'page' : undefined} onClick={() => onNavigate(panel)}>
             <Icon name={icon} /><span>{label}</span>
           </button>
         ))}
-        <button type="button" className="sidebar-row" disabled={!enabled} onClick={onChatMenu}><Icon name="chat" /><span>대화 메뉴</span></button>
+        <details className="more-menu">
+          <summary><Icon name="down" />더 보기</summary>
+          <button type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate('history')}>
+            <Icon name="history" /><span>대화 기록</span>
+          </button>
+          <button type="button" className="sidebar-row" disabled={!enabled} onClick={onChatMenu}>
+            <Icon name="chat" /><span>대화 관리</span>
+          </button>
+          <button type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate('tools')}>
+            <Icon name="tools" /><span>파일 작업</span>
+          </button>
+          <button type="button" className="sidebar-row" disabled={!enabled} onClick={onOpenOffice}>
+            <Icon name="group" /><span>사무실</span>
+          </button>
+        </details>
       </nav>
     </div>
   )
@@ -110,10 +119,10 @@ export function Header({ snapshot, enabled, onMenu, onSelectModel, onRename }: {
       </div>
       <div className="model-group">
         {activeLabel && <span className="active-model" title={`실행 중인 모델 ${activeLabel}`}><span />{activeLabel}</span>}
-        <label className="model-control" title={`다음 요청 모델 ${selectedLabel}`}>
+        <label className="model-control" title={`다음 답변 방식 ${selectedLabel}`}>
           <Icon name="chip" />
           <select value={nextModel?.id ?? ''} disabled={!enabled || !snapshot?.models.length}
-            aria-label="다음 요청 모델" onChange={event => onSelectModel(event.currentTarget.value)}>
+            aria-label="다음 답변 방식" onChange={event => onSelectModel(event.currentTarget.value)}>
             {!nextModel && <option value="" disabled>{selectedLabel}</option>}
             {snapshot?.models.map(model => <option key={model.id} value={model.id}>{model.id === nextModel?.id ? selectedLabel : model.label}</option>)}
           </select>
