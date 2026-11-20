@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.first
 import com.user.localagent.scheduling.ReminderScheduler
 import com.user.localagent.automation.AssistantNotificationListener
 import com.user.localagent.integrations.MessengerInbox
+import com.user.localagent.web.PublicWebClient
+import com.user.localagent.web.PublicPageReadException
+import com.user.localagent.web.PublicPageReadReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,7 +54,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val recipients=RecipientEvidence(ownerRequest.orEmpty())
     fun recipientChoices(call:ToolCall)=recipients.choices(call)
     fun approveRecipient(call:ToolCall,selected:String)=recipients.approve(call,selected)
-    private val publicWeb by lazy {com.user.localagent.web.PublicWebClient()}
+    private val publicWeb by lazy {PublicWebClient()}
     private val scholarly by lazy {com.user.localagent.web.ScholarlyApiClient()}
     private val bundledSkills by lazy {com.user.localagent.skills.BundledSkillStore(context)}
     private val requestConnectionHub by lazy {connectionHubOverride?:com.user.localagent.connections.ConnectionHub.get(context)}
@@ -211,10 +214,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                     val data=checkNotNull(researchWeb){"웹 검색 연결이 필요합니다."}.invoke(call)
                     check(Json.parseToJsonElement(data).jsonObject["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."};data
                 }
-                "read_webpage"->{
-                    val page=publicWeb.fetchPage(call.s("url"))
-                    buildJsonObject {put("url",page.url);put("title",page.title);put("fetchedAt",page.fetchedAt);put("untrustedSourceData",true);put("text",page.text.take(4000));put("truncated",page.text.length>4000)}.toString()
-                }
+                "read_webpage" -> return@withContext publicWeb.readToolResult(call.id, call.s("url"))
                 "search_conversation_history"->{
                     val query=call.s("query");val page=repository.messagePage(limit=call.i("limit",10),query=query)
                     scoped("ziphap_assistant_conversations","bounded_message_excerpts",buildJsonObject {
@@ -403,4 +403,38 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     }
 }
 
-
+/** Read-only tool output and audit summary from the same observation. */
+internal suspend fun PublicWebClient.readToolResult(id: String, url: String): ToolResult {
+    return try {
+        val page = fetchPage(url)
+        if (page.text.isBlank() && page.offers.isEmpty()) {
+            throw PublicPageReadException(PublicPageReadReason.NO_READABLE_CONTENT)
+        }
+        val content = buildJsonObject {
+            put("url", page.url)
+            put("title", page.title)
+            put("fetchedAt", page.fetchedAt)
+            put("untrustedSourceData", true)
+            put("text", page.text.take(4000))
+            put("truncated", page.text.length > 4000)
+            if (page.offers.isNotEmpty()) {
+                put("offers", buildJsonArray {
+                    page.offers.take(6).forEach { offer ->
+                        add(buildJsonObject {
+                            put("price", offer.price)
+                            put("currency", offer.currency)
+                            put("availability", offer.availability?.take(100))
+                            put("priceSource", offer.priceSource)
+                        })
+                    }
+                })
+                put("offersTruncated", page.offers.size > 6)
+            }
+        }.toString()
+        ToolResult(id, true, content, VerificationState.VERIFIED, "공개 페이지에서 읽을 수 있는 자료 확인")
+    } catch (error: Exception) {
+        val reason = PublicPageReadReason.from(error)
+        val auditCode = (error as? PublicPageReadException)?.auditCode ?: reason.name
+        ToolResult(id, false, reason.userMessage, VerificationState.FAILED, auditCode, effectNotApplied = true)
+    }
+}

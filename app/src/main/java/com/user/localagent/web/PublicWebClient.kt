@@ -1,25 +1,31 @@
 package com.user.localagent.web
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.net.IDN
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.net.UnknownHostException
 import java.nio.charset.Charset
 import java.time.Instant
 import java.util.Locale
 import java.util.zip.GZIPInputStream
+import java.util.zip.ZipException
 import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -30,6 +36,44 @@ data class WebPage(val url:String,val title:String,val text:String,val offers:Li
 data class PublicWebResponse(val statusCode:Int,val finalUrl:String,val contentType:String,val body:ByteArray)
 fun interface PublicWebTransport {suspend fun get(url:String,maxBytes:Int):PublicWebResponse}
 class UnsafePublicWebUrlException:IllegalArgumentException("공개 HTTPS 주소만 허용됩니다.")
+
+internal enum class PublicPageReadReason(val userMessage: String) {
+    URL_REJECTED("공개 HTTPS 주소만 허용됩니다."),
+    HTTP_STATUS("사이트가 페이지 읽기 요청에 정상적으로 응답하지 않았습니다."),
+    TIMEOUT("사이트 응답을 기다리는 시간이 초과됐습니다."),
+    DNS("사이트 주소를 확인하지 못했습니다."),
+    TLS("사이트에 안전하게 연결하지 못했습니다."),
+    CONNECTION("사이트와 연결하는 중 문제가 생겼습니다."),
+    UNSUPPORTED_CONTENT("읽을 수 있는 공개 텍스트 페이지가 아닙니다."),
+    ACCESS_CHALLENGE("이 사이트는 접근 확인이 필요합니다. 브라우저에서 확인해주세요."),
+    BODY_LIMIT("페이지 용량 상한 초과"),
+    NO_READABLE_CONTENT("사이트에서 읽을 수 있는 본문을 찾지 못했습니다."),
+    RESPONSE_ERROR("사이트 응답을 읽지 못했습니다.");
+
+    companion object {
+        fun from(error: Throwable): PublicPageReadReason {
+            if (error is CancellationException) throw error
+            if (error is PublicPageReadException) return error.reason
+            return when (error) {
+                is UnsafePublicWebUrlException -> URL_REJECTED
+                is SocketTimeoutException -> TIMEOUT
+                is UnknownHostException -> DNS
+                is SSLException -> TLS
+                is ZipException -> RESPONSE_ERROR
+                is IOException -> CONNECTION
+                else -> RESPONSE_ERROR
+            }
+        }
+    }
+}
+
+internal class PublicPageReadException(
+    val reason: PublicPageReadReason,
+    status: Int? = null
+) : IllegalStateException(reason.userMessage) {
+    val auditCode: String = status?.takeIf { reason == PublicPageReadReason.HTTP_STATUS && it in 100..599 }
+        ?.let { "${reason.name}_$it" } ?: reason.name
+}
 
 /** Public, unauthenticated reading only. Returned content is untrusted data, never agent instructions.
  * Search endpoints are public website interfaces with no availability/coverage/lowest-price guarantee.
@@ -192,16 +236,18 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
         PublicWebSafety.requireHttps(url)
         val response=transport.get(url,MAX_BYTES)
         PublicWebSafety.requireHttps(response.finalUrl)
-        check(response.statusCode==200){"공개 페이지 HTTP ${response.statusCode}. 로그인·결제·CAPTCHA를 우회하지 않습니다."}
-        check(response.body.size<=MAX_BYTES){"페이지 용량 상한 초과"}
+        if (response.statusCode != 200) throw PublicPageReadException(PublicPageReadReason.HTTP_STATUS, response.statusCode)
+        if (response.body.size > MAX_BYTES) throw PublicPageReadException(PublicPageReadReason.BODY_LIMIT)
         val type=response.contentType.substringBefore(';').trim().lowercase(Locale.ROOT)
-        require(type.startsWith("text/")||type in setOf("application/xhtml+xml","application/json","application/ld+json")){"읽을 수 있는 공개 텍스트 페이지가 아닙니다."}
+        if (!type.startsWith("text/") && type !in setOf("application/xhtml+xml", "application/json", "application/ld+json")) {
+            throw PublicPageReadException(PublicPageReadReason.UNSUPPORTED_CONTENT)
+        }
         val html=decode(response)
-        check(!isChallenge(html)){"이 사이트는 접근 확인 또는 CAPTCHA가 필요합니다. 브라우저에서 확인해주세요."}
+        if (isChallenge(html)) throw PublicPageReadException(PublicPageReadReason.ACCESS_CHALLENGE)
         val stamp=now().toString()
         val title=Regex("(?is)<title\\b[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)?.let {plain(it,300)}.orEmpty()
         val text=plain(html,MAX_TEXT)
-        return WebPage(response.finalUrl,title,text,extractOffers(html,response.finalUrl,stamp),stamp)
+        return WebPage(response.finalUrl, title, text, extractOffers(html, response.finalUrl, stamp), stamp)
     }
 
     private fun parseRss(body:String,stamp:String):List<WebSearchResult> {
@@ -343,7 +389,11 @@ class PinnedPublicHttpsTransport(private val resolve:(String)->List<InetAddress>
                         check(redirect<3){"웹 이동 횟수 상한 초과"}
                         target=PublicWebSafety.requireHttps(target.resolve(headers["location"]?:error("이동 주소 없음")).toString())
                     }else {
-                        val length=headers["content-length"]?.let {it.toLongOrNull()?.also {n->require(n in 0..maxBytes.toLong()){"페이지 용량 상한 초과"}}?:error("잘못된 페이지 길이")}
+                        val length = headers["content-length"]?.let { rawLength ->
+                            val declaredBytes = rawLength.toLongOrNull() ?: error("잘못된 페이지 길이")
+                            if (declaredBytes !in 0..maxBytes.toLong()) throw PublicPageReadException(PublicPageReadReason.BODY_LIMIT)
+                            declaredBytes
+                        }
                         val encoding=headers["transfer-encoding"]?.lowercase(Locale.ROOT)
                         require(encoding==null||encoding=="chunked"){"지원하지 않는 전송 인코딩"}
                         require(encoding==null||length==null){"모호한 HTTP 프레이밍"}
@@ -352,7 +402,13 @@ class PinnedPublicHttpsTransport(private val resolve:(String)->List<InetAddress>
                         require(compression==null||compression in setOf("identity","gzip")){"지원하지 않는 콘텐츠 인코딩"}
                         val bodyInput=if(compression=="gzip")GZIPInputStream(framed)else framed
                         val output=ByteArrayOutputStream();val buffer=ByteArray(16*1024)
-                        while(true){currentCoroutineContext().ensureActive();val count=bodyInput.read(buffer);if(count<0)break;require(output.size()+count<=maxBytes){"페이지 용량 상한 초과"};output.write(buffer,0,count)}
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val count = bodyInput.read(buffer)
+                            if (count < 0) break
+                            if (output.size() + count > maxBytes) throw PublicPageReadException(PublicPageReadReason.BODY_LIMIT)
+                            output.write(buffer, 0, count)
+                        }
                         if(length!=null&&compression!="gzip")require(output.size().toLong()==length){"불완전한 HTTP 본문"}
                         return@withContext PublicWebResponse(status,target.toString(),headers["content-type"].orEmpty(),output.toByteArray())
                     }
@@ -376,7 +432,9 @@ class PinnedPublicHttpsTransport(private val resolve:(String)->List<InetAddress>
                 if(needsCrLf)require(line(input,2).isEmpty()){"잘못된 청크 경계"}
                 val size=line(input,100).substringBefore(';').trim()
                 require(size.matches(Regex("[0-9a-fA-F]{1,8}"))){"잘못된 청크 길이"}
-                remaining=size.toLong(16);total+=remaining;require(total<=limit){"페이지 용량 상한 초과"}
+                remaining = size.toLong(16)
+                total += remaining
+                if (total > limit) throw PublicPageReadException(PublicPageReadReason.BODY_LIMIT)
                 if(remaining==0L){ended=true;return -1};needsCrLf=true
             }
             val count=input.read(buffer,offset,minOf(length.toLong(),remaining).toInt());require(count>0){"불완전한 청크"};remaining-=count;return count

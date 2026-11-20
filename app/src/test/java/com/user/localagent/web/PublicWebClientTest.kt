@@ -1,5 +1,8 @@
 package com.user.localagent.web
 
+import com.user.localagent.core.VerificationState
+import com.user.localagent.tools.readToolResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -143,6 +146,74 @@ class PublicWebClientTest {
         assertEquals("2030-01-03",page.offers.single().validThrough)
         assertEquals("https://example.com/product",page.offers.single().sourceUrl)
         assertFalse(page.text.contains("shippingDetails"))
+    }
+
+    @Test fun pageFailuresDistinguishHttpChallengeMediaAndEmptyBody() = runBlocking {
+        val url = "https://example.com/public"
+        suspend fun auditCode(response: PublicWebResponse): String {
+            val failure = runCatching { client { _, _ -> response }.fetchPage(url) }.exceptionOrNull()
+            return (failure as PublicPageReadException).auditCode
+        }
+        assertEquals("HTTP_STATUS_403", auditCode(response(url, "Forbidden").copy(statusCode = 403)))
+        assertEquals("HTTP_STATUS", auditCode(response(url, "").copy(statusCode = 999)))
+        assertEquals("UNSUPPORTED_CONTENT", auditCode(response(url, "data", "application/octet-stream")))
+        assertEquals("ACCESS_CHALLENGE", auditCode(response(url, "<html>Verify that you are human</html>")))
+        val emptyPage = client { _, _ -> response(url, "<html><!-- no text --><script>loadContent()</script></html>") }
+        assertTrue(emptyPage.fetchPage(url).text.isBlank())
+        val result = emptyPage.readToolResult("empty", url)
+        assertFalse(result.success)
+        assertEquals(VerificationState.FAILED, result.verification)
+        assertEquals("NO_READABLE_CONTENT", result.verificationSummary)
+        assertTrue(result.effectNotApplied)
+    }
+
+    @Test fun anOfferOnlyPageRemainsUsableForStructuredPriceResearch() = runBlocking {
+        val web = client { url, _ -> response(url, """
+            <script type="application/ld+json">
+            {"@type":"Product","offers":{"@type":"Offer","price":"2500","priceCurrency":"KRW"}}
+            </script>
+        """.trimIndent()) }
+        val page = web.fetchPage("https://example.com/product")
+        assertTrue(page.text.isBlank())
+        assertEquals("2500", page.offers.single().price)
+        val result = web.readToolResult("offer", page.url)
+        assertTrue(result.success)
+        assertEquals(VerificationState.VERIFIED, result.verification)
+        val body = Json.parseToJsonElement(result.content).jsonObject
+        val offer = body.getValue("offers").jsonArray.single().jsonObject
+        assertEquals("2500", offer.getValue("price").jsonPrimitive.content)
+        assertEquals("KRW", offer.getValue("currency").jsonPrimitive.content)
+        assertEquals(page.url, body.getValue("url").jsonPrimitive.content)
+        assertTrue(body.getValue("untrustedSourceData").jsonPrimitive.boolean)
+    }
+
+    @Test fun pageTransportDiagnosticsUseOnlyFixedCodes() = runBlocking {
+        val detail = "https://example.com/?private=synthetic"
+        val failures = mapOf(
+            java.net.SocketTimeoutException(detail) to PublicPageReadReason.TIMEOUT,
+            java.net.UnknownHostException(detail) to PublicPageReadReason.DNS,
+            javax.net.ssl.SSLException(detail) to PublicPageReadReason.TLS,
+            java.io.IOException(detail) to PublicPageReadReason.CONNECTION,
+            java.util.zip.ZipException(detail) to PublicPageReadReason.RESPONSE_ERROR,
+            UnsafePublicWebUrlException() to PublicPageReadReason.URL_REJECTED,
+            IllegalArgumentException(detail) to PublicPageReadReason.RESPONSE_ERROR
+        )
+        for ((exception, expected) in failures) {
+            val actual = PublicPageReadReason.from(exception)
+            assertEquals(expected, actual)
+            assertFalse(actual.userMessage.contains(detail))
+            val result = client { _, _ -> throw exception }.readToolResult("failed", "https://example.com/public")
+            assertEquals(expected.name, result.verificationSummary)
+            assertEquals(expected.userMessage, result.content)
+            assertTrue(result.effectNotApplied)
+        }
+    }
+
+    @Test fun pageReadToolPropagatesCancellation() = runBlocking {
+        val cancellation = CancellationException("cancelled")
+        val web = client { _, _ -> throw cancellation }
+        val failure = runCatching { web.readToolResult("cancelled", "https://example.com/public") }.exceptionOrNull()
+        assertSame(cancellation, failure)
     }
 
     @Test fun pageTextAndByteLimitsAreEnforced()=runBlocking {
