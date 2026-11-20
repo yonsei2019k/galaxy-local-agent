@@ -1474,6 +1474,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
             },recordActual={entry->
                 check(actual.put(entry.proposal.callId,entry)==null)
+                if(entry.withheldFromCloud&&entry.proposal.tool in ExternalAgentContract.PUBLIC_WEB_READS)
+                    FailureLog.record(context,"cloud_public_read",null,"PUBLIC_READ_WITHHELD")
                 // Same as the local path: a handed-off Intent stops the run before the model can repeat it.
                 if(entry.result.success&&com.user.localagent.core.PreparedHandoff.pendingEffect(entry.proposal.tool,entry.result.verification))preparedSeen=true
                 check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})

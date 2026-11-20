@@ -2,6 +2,7 @@ package com.user.localagent.externalagent
 
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolResult
+import com.user.localagent.core.VerificationState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,6 +40,7 @@ interface ExternalAgentClient {
 class PhoneAgentExecution internal constructor(
     val parentRunId:String,val projectBinding:String,val authorityRevision:Long,
     val proposal:ExternalAgentProposal,val result:ToolResult,
+    internal val withheldFromCloud:Boolean=false,
 ) {
     override fun toString()="PhoneAgentExecution(actual phone executor observation)"
 }
@@ -154,19 +156,20 @@ class ExternalAgentController(
     }
     private suspend fun send(entry:Entry):Pump {
         val result=checkNotNull(entry.result)
+        val kind=com.user.localagent.core.ConversationPrivacy.matchKind(result.content)
+        val outgoing=if(kind==null)result else publicResultForCloud(entry.proposal.tool,result)
         if(!entry.recorded){
             // Preserve an actual effect even if cancellation arrives after execute returned.
             withContext(NonCancellable){withTimeout(10_000){
-                recordActual(PhoneAgentExecution(capture.parentRunId,capture.projectBinding,capture.authorityRevision,entry.proposal,result))
+                recordActual(PhoneAgentExecution(capture.parentRunId,capture.projectBinding,capture.authorityRevision,
+                    entry.proposal,result,withheldFromCloud=kind!=null&&outgoing?.success!=true))
             }}
             entry.recorded=true
         }
         fence()
         require(result.id==entry.proposal.callId&&result.content.toByteArray(Charsets.UTF_8).size<=ExternalAgentContract.MAX_RESULT_BYTES){"BRIDGE_RESULT_BOUND"}
-        val kind=com.user.localagent.core.ConversationPrivacy.matchKind(result.content)
-        val outgoing=if(kind==null)result else CloudPublicSearchProjection.from(entry.proposal.tool,result)
-            ?:throw PrivateResultWithheld(kind)
-        val ack=client.report(entry.proposal,outgoing,checkNotNull(session).revision)
+        val report=outgoing?:throw PrivateResultWithheld(checkNotNull(kind))
+        val ack=client.report(entry.proposal,report,checkNotNull(session).revision)
         require(ack.callId==entry.proposal.callId&&ack.sequence==entry.proposal.sequence){"BRIDGE_RESULT_ACK"}
         accept(ack.snapshot)
         entry.reported=true;pending=null
@@ -176,6 +179,17 @@ class ExternalAgentController(
             else->Phase.CANCELLED
         }
         return Pump.REPORTED_CACHED
+    }
+
+    private fun publicResultForCloud(tool:String,result:ToolResult):ToolResult? {
+        if(tool !in ExternalAgentContract.PUBLIC_WEB_READS || !com.user.localagent.core.ToolReadPolicy.isReadOnly(tool))return null
+        val settled=(result.success&&result.verification==VerificationState.VERIFIED) ||
+            (!result.success&&result.verification==VerificationState.FAILED&&result.effectNotApplied)
+        if(!settled)return null
+        return CloudPublicSearchProjection.from(tool,result)?:ToolResult(
+            result.id,false,
+            "이 공개 자료는 개인정보 보호 확인을 통과하지 못해 사용할 수 없습니다. 기존 허용 도구로 다른 공개 출처를 확인하거나 이미 확인한 자료만 답변에 사용하세요.",
+            VerificationState.FAILED,"PUBLIC_READ_WITHHELD",effectNotApplied=true)
     }
     suspend fun pumpOnce():Pump=gate.withLock {
         check(phase in setOf(Phase.ACTIVE,Phase.RESULT_PENDING)){"BRIDGE_NOT_ACTIVE"}

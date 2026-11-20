@@ -120,7 +120,8 @@ object ExternalAgentContract {
      * PREPARED hand-offs pause the run. The PC broker accepts at most 128 tools per session.
      */
     val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys
-    val PUBLIC_RESEARCH_PHONE_TOOLS = setOf("search_web", "read_webpage", "search_shopping",
+    internal val PUBLIC_WEB_READS = setOf("search_web", "read_webpage", "search_shopping")
+    val PUBLIC_RESEARCH_PHONE_TOOLS = PUBLIC_WEB_READS + setOf(
         "search_youtube_videos", "get_current_datetime", "calculate", "date_calculate") +
         com.user.localagent.core.EvidenceToolCatalog.names
     val PC_TOOLS:Set<String> = setOf("pc_inspect_workspace","pc_read_file")

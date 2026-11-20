@@ -23,7 +23,7 @@ object ExternalAgentPhoneCompletion {
         require(names("phoneToolsRequiringLocalEvidence").let{it.size==it.toSet().size&&it.toSet()==plan.requiredTools})
         val calls=evidence.getValue("phoneCalls").jsonArray.map{it.jsonObject}
         require(calls.size==actual.size&&actual.map{it.proposal.callId}.distinct().size==actual.size)
-        require(plan.requiredTools.all{name->actual.any{it.proposal.tool==name&&it.result.success&&!it.result.effectNotApplied&&
+        require(plan.requiredTools.all{name->actual.any{it.proposal.tool==name&&!it.withheldFromCloud&&it.result.success&&!it.result.effectNotApplied&&
             (it.result.verification==com.user.localagent.core.VerificationState.VERIFIED||
                 com.user.localagent.core.PreparedHandoff.opensScreenOnly(name)&&it.result.verification==com.user.localagent.core.VerificationState.PREPARED)}})
         calls.forEachIndexed{index,row->

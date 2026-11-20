@@ -1,3 +1,9 @@
+## 2026-11-21 — Keep a public research session open when a result must stay on the phone
+
+For a settled read_webpage, search_web or search_shopping result blocked at the privacy gate, first use the existing safe public search projection when available. If no projection is usable, keep the original local observation and send a fixed failed-read status so the same cloud session can continue using its approved tools and existing budget. The cloud completion gate cannot count a withheld observation as proof. Only a fixed status is added to local diagnostics. Unresolved effects and other tool results retain their existing privacy handling.
+
+The focused JVM suites passed 35 cases. Release lint and assembly passed. Signed local APK 2037 retained the signer and permissions and passed the alignment and static package checks. SHA-256 4b5966906d9ff2af6151ce0cb5288d61cc9246870216d6c402e3097a87616e15. Installation was skipped because the phone image generation service was active and the paired worker was busy. No device timing or real-model result is claimed for this candidate.
+
 ## 2026-11-20 — Continue public research when a search row triggers the privacy gate
 
 The phone still records the original verified observation locally. When the existing privacy gate would withhold a built-in public web search result, the controller can submit a partial projection of the actual public hits. Only bounded titles, excerpts, timestamps and exact public HTTPS source URLs may remain. The query and provider errors stay local. A sensitive field is omitted, and a source without a safe title and URL is omitted. Query-bearing, encoded and fragment-bearing URLs are omitted from the projection. At least one safe observed source is required, and the whole outgoing projection must pass the existing privacy gate again. Private and non-search tools cannot use this path. Cancellation, tool authority, and result acknowledgement continue through the existing controller.

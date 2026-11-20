@@ -115,6 +115,36 @@ class ExternalAgentControllerTest {
             "https://example.com/routes", "https://example.com/%66ixture"))))
     }
 
+    @Test fun aFullyWithheldPublicReadLeavesTheCloudSessionOpen() = runBlocking {
+        val capture = capture(setOf("read_webpage"))
+        val broker = Broker()
+        val original = ToolResult(callId, true, "문의 fixture@example.invalid", VerificationState.VERIFIED)
+        val local = mutableListOf<PhoneAgentExecution>()
+        val controller = ExternalAgentController(capture, broker, { live(capture) }, { original }, { local += it }, { 1 })
+        controller.start()
+        broker.offer(proposal(capture, "read_webpage", buildJsonObject { put("url", "https://example.com") }))
+        assertEquals(ExternalAgentController.Pump.EXECUTED, controller.pumpOnce())
+        assertSame(original, local.single().result)
+        assertTrue(local.single().withheldFromCloud)
+        val reported = broker.reported.single()
+        assertFalse(reported.success)
+        assertTrue(reported.effectNotApplied)
+        assertEquals(VerificationState.FAILED, reported.verification)
+        assertFalse(reported.content.contains("fixture@example.invalid"))
+        assertEquals(ExternalAgentController.Phase.ACTIVE, controller.phase)
+    }
+
+    @Test fun unsettledPublicReadRemainsUnverified() = runBlocking {
+        val capture = capture(setOf("read_webpage"))
+        val broker = Broker()
+        val original = ToolResult(callId, false, "fixture@example.invalid", VerificationState.UNVERIFIED)
+        val controller = ExternalAgentController(capture, broker, { live(capture) }, { original }, {}, { 1 })
+        controller.start()
+        broker.offer(proposal(capture, "read_webpage", buildJsonObject { put("url", "https://example.com") }))
+        assertTrue(runCatching { controller.pumpOnce() }.exceptionOrNull() is PrivateResultWithheld)
+        assertEquals(0, broker.reports)
+    }
+
     @Test fun claimedPhoneCallbackIsTheOnlyReceiptSourceAndDuplicatePollNeverExecutesAgain()=runBlocking {
         val c=capture();val b=Broker();val receipts=mutableListOf<PhoneAgentExecution>();var executions=0
         val result=ToolResult(callId,true,"actual synthetic clock",VerificationState.VERIFIED)

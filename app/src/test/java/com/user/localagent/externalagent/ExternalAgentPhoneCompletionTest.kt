@@ -14,8 +14,8 @@ class ExternalAgentPhoneCompletionTest {
         capture.requestDigest,"기기 시각 확인",listOf("get_current_datetime"),emptyList())
     private val proposal=ExternalAgentProposal("10000000-0000-4000-8000-000000000002",1,"get_current_datetime",buildJsonObject{},
         capture.requestDigest,capture.projectBinding,capture.authorityRevision)
-    private fun actual(result:ToolResult=ToolResult(proposal.callId,true,"synthetic clock",VerificationState.VERIFIED))=
-        PhoneAgentExecution(capture.parentRunId,capture.projectBinding,capture.authorityRevision,proposal,result)
+    private fun actual(result:ToolResult=ToolResult(proposal.callId,true,"synthetic clock",VerificationState.VERIFIED),withheld:Boolean=false)=
+        PhoneAgentExecution(capture.parentRunId,capture.projectBinding,capture.authorityRevision,proposal,result,withheld)
     private fun evidence():JsonObject=buildJsonObject {
         put("sessionId",sid);put("parentRunId",capture.parentRunId);put("revision",4);put("state","ACTIVE")
         put("projectBinding",capture.projectBinding);put("authorityRevision",3);put("requestDigest",capture.requestDigest)
@@ -35,6 +35,9 @@ class ExternalAgentPhoneCompletionTest {
         assertTrue(ExternalAgentPhoneCompletion.matches(capture,plan,evidence(),listOf(actual()),sid))
         assertFalse(ExternalAgentPhoneCompletion.matches(capture,plan,evidence(),emptyList(),sid))
         assertFalse(ExternalAgentPhoneCompletion.matches(capture,plan,evidence(),listOf(actual()),proposal.callId))
+    }
+    @Test fun privateLocalObservationCannotProveCloudCompletion(){
+        assertFalse(ExternalAgentPhoneCompletion.matches(capture,plan,evidence(),listOf(actual(withheld=true)),sid))
     }
     @Test fun serverCompletedCannotReplaceFailedPreparedOrUnverifiedPhoneEffect(){
         listOf(VerificationState.FAILED,VerificationState.PREPARED,VerificationState.UNVERIFIED).forEach{state->
