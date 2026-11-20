@@ -1,6 +1,7 @@
 package com.user.localagent.externalagent
 
 import java.util.UUID
+import uniffi.ziphap_android.nativeContextPartner
 import uniffi.ziphap_android.nativeOlderTurnByteLimits
 import kotlinx.serialization.json.*
 
@@ -57,16 +58,24 @@ object CloudConversationContext {
 
         if(eligibleTurns.isNotEmpty()){
             val newest=eligibleTurns.lastIndex
-            val earlier=(newest-1 downTo 0)
-            val partner=earlier.firstOrNull {
-                eligibleTurns[it].role!=eligibleTurns[newest].role&&eligibleTurns[it].binding.runId==eligibleTurns[newest].binding.runId
-            }?:earlier.firstOrNull{eligibleTurns[it].role!=eligibleTurns[newest].role}
+            val latestRun = eligibleTurns[newest].binding.runId
+            val returningToPausedRequest = task?.binding?.runId == latestRun &&
+                (task.status == "paused" || task.status == "interrupted")
+            val partner = if (newest == 0) null else nativeContextPartner(
+                eligibleTurns.map { it.role == "user" },
+                eligibleTurns.map { it.binding.runId == latestRun },
+                returningToPausedRequest,
+            )?.toInt()
             val priority=listOfNotNull(partner,newest).sorted()
-            // Even JSON-escaped text fits at these minima; task identity/status/uncertainty is reserved too.
+            // On return to adjacent owner instructions, preserve the full latest wire excerpt first.
+            val ownerPair = partner != null && eligibleTurns[partner].role == "user" && eligibleTurns[newest].role == "user"
+            fun priorityRow(index: Int, limit: Int) = turnJson(eligibleTurns[index],
+                if (ownerPair && index == newest) MAX_TURN_CHARS else limit)
+            // Even one maximally escaped owner excerpt plus its partner minimum and task minima fits.
             val turnLimit=largestFitting(MIN_TURN_CHARS,MAX_TURN_CHARS){limit->
-                fits(priority.map{turnJson(eligibleTurns[it],limit)})
+                fits(priority.map{priorityRow(it,limit)})
             }
-            priority.forEach{selected[it]=turnJson(eligibleTurns[it],turnLimit)}
+            priority.forEach{selected[it]=priorityRow(it,turnLimit)}
             val older = eligibleTurns.indices.reversed().asSequence()
                 .filterNot(selected::containsKey)
                 .take(MAX_TURNS - selected.size)

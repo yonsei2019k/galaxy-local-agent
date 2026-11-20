@@ -21,6 +21,15 @@ pub fn native_public_page_interstitial(title: String, text: String) -> bool {
 
 mod screen_snapshot;
 
+#[uniffi::export]
+pub fn native_context_partner(
+    is_owner: Vec<bool>,
+    same_run_as_newest: Vec<bool>,
+    returning_to_paused_request: bool,
+) -> Option<u32> {
+    ziphap_core::context_partner(&is_owner, &same_run_as_newest, returning_to_paused_request)
+}
+
 #[derive(uniffi::Enum)]
 pub enum NativePhoneVerification {
     Verified,

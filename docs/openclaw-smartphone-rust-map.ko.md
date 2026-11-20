@@ -33,3 +33,11 @@ Codex가 경로 조사, 문제 재현, Rust 구현과 회귀를 맡습니다. Cl
 집합에서 확인한 격차는 최근 문맥을 전송할 때 남은 바이트의 사용 방식이다. 기준 `828db25`에서 최신 질문과 답변이 각각 한글 1,500자이면, 그 앞 메시지의 끝에 정정이 있어도 1,500자 발췌 전체가 들어가지 않아 해당 메시지가 빠졌다. 변경 후에는 기기에서 출처와 권한이 확인된 메시지만 대상으로 삼는다. 최신 대화와 이전 작업 상태를 먼저 예약하고, Rust가 남은 바이트를 최신순으로 배정한다. 마지막 메시지는 최소 발췌가 들어가는 경우에만 앞뒤 원문과 생략 표시, 원래 실행 ID를 포함한다. 이전 작업의 미확인 효과 표시와 8개 메시지·직렬화된 UTF-8 12,000바이트 상한을 유지한다.
 
 운영 진입점은 `ChatRunCoordinator.captureCloudContext` → `CloudConversationContext.build` → UniFFI `nativeOlderTurnByteLimits` → `ziphap-core/src/context_budget.rs`이다. Rust에는 예약 바이트, 메시지 수, 후보 JSON의 크기만 전달한다. 서버 전송 전에 Kotlin에서 최종 JSON 크기를 다시 확인한다. 단말·실제 구독 모델에서의 회상 정확도와 토큰 비용은 후속 검증 항목이다.
+
+### 대화 복귀 시 연달아 남은 사용자 지시
+
+후속 조사 시점의 공식 커밋 `dacf5604e46997f146e58b2f088bb3d3340b89fc`에서 OpenClaw는 선택한 세션 분기의 순서와 압축 경계에 따라 요약과 보존 메시지를 복구한다. 이전 요약을 갱신하는 프롬프트에는 사용자 조건, 진행 중인 일, 차단 사항과 다음 단계가 따로 있다. [세션 문맥 복구](https://github.com/openclaw/openclaw/blob/dacf5604e46997f146e58b2f088bb3d3340b89fc/packages/agent-core/src/harness/session/session.ts), [압축 체크포인트 프롬프트](https://github.com/openclaw/openclaw/blob/dacf5604e46997f146e58b2f088bb3d3340b89fc/packages/agent-core/src/harness/compaction/summary-checkpoint-prompt.ts)
+
+집합의 `ChatStore.enqueueUserRun`은 요청을 저장할 때 해당 답변 자리를 만든다. 본문이 생기기 전에 멈추면 클라우드 문맥에는 사용자 행만 남는다. `15c3bfe`에서 오래된 답변 뒤에 남은 작업을 적은 요청과 그 조건을 고친 요청이 있고 마지막 요청이 일시정지되면, 문맥 선택기가 과거 답변을 정정과 먼저 묶었다. 한글 합성 대화에서 최신 정정은 남았지만 바로 앞 요청 가운데의 검산 조건이 생략됐다.
+
+이 경우 Rust는 최신 요청과 같은 실행에 속한 답변을 먼저 찾는다. 그런 답변이 없고, 최신 요청에 결합된 체크포인트가 `paused` 또는 `interrupted`이며 직전 적격 메시지도 사용자 지시라면, 다른 실행의 옛 답변보다 그 사용자 지시를 먼저 예약한다. Android는 최신 지시를 메시지별 상한까지 먼저 보존하고, 남은 예산 안에서 앞선 지시를 담는다. 두 행은 각각 원래 실행 ID를 유지한다. 이 선택은 다음 모델 입력에만 적용된다.

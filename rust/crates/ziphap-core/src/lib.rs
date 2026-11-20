@@ -16,7 +16,7 @@ mod run;
 mod scheduler;
 mod types;
 
-pub use context_budget::older_turn_byte_limits;
+pub use context_budget::{context_partner, older_turn_byte_limits};
 pub use grant::*;
 pub use goal_budget::*;
 pub use journal::*;

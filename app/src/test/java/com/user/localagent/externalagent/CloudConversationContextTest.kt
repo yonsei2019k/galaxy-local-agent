@@ -228,6 +228,54 @@ class CloudConversationContextTest {
         assertEquals(expected, build(listOf(older) + pair))
     }
 
+    @Test fun returningToAnUnansweredCorrectionKeepsThePriorOwnerChecklist() {
+        val remaining = "가".repeat(700) + "남은 작업은 표의 두 번째 합계 검산" + "나".repeat(700)
+        val correction = "다".repeat(1400) + "정정해서 수요일 자료만 사용"
+        val history = listOf(
+            turn(1), turn(1, "assistant", "라".repeat(1500)),
+            turn(2, text = remaining), turn(2, "assistant", ""),
+            turn(3, text = correction), turn(3, "assistant", ""),
+        )
+        for (status in listOf("paused", "interrupted")) {
+            val result = checkNotNull(build(history, task(3, status, unknown = null, owner = correction)))
+            val owners = turns(result).filter { it.getValue("role").jsonPrimitive.content == "user" }
+            assertEquals(listOf(remaining, correction), owners.takeLast(2).map { it.getValue("text").jsonPrimitive.content })
+            assertEquals(listOf(binding(2).runId, binding(3).runId), owners.takeLast(2).map { it.getValue("sourceRunId").jsonPrimitive.content })
+            assertEquals(status, previous(result).getValue("status").jsonPrimitive.content)
+            assertTrue(previous(result).getValue("unresolvedEffects").jsonPrimitive.boolean)
+            assertTrue(result.toString().toByteArray().size <= CloudConversationContext.MAX_UTF8_BYTES)
+        }
+    }
+
+    @Test fun unrelatedCheckpointCannotGiveEarlierOwnerTextResumePriority() {
+        val olderOwner = "가".repeat(710) + "가운데 조건" + "나".repeat(710)
+        val oldAnswer = "라".repeat(1500)
+        val latest = turn(3, text = "다".repeat(1450))
+        val history = listOf(turn(1), turn(1, "assistant", oldAnswer), turn(2, text = olderOwner), latest)
+        for (other in listOf(task(2, "paused"), task(3, "completed"), task(3, "cancelled"))) {
+            val rows = turns(checkNotNull(build(history, other)))
+            assertEquals(oldAnswer, rows.single { it.getValue("role").jsonPrimitive.content == "assistant" }.getValue("text").jsonPrimitive.content)
+            assertFalse(rows.any { it.getValue("text").jsonPrimitive.content == olderOwner })
+        }
+        val excluded = turn(2, text = olderOwner).copy(binding = binding(2).copy(pcRevision = 10))
+        val result = checkNotNull(build(listOf(history[0], history[1], excluded, latest), task(3, "paused")))
+        assertFalse(turns(result).any { it.getValue("sourceRunId").jsonPrimitive.content == binding(2).runId })
+    }
+
+    @Test fun escapedOlderInstructionCannotShrinkTheNewestCorrectionOnReturn() {
+        val older = "이전 시작" + "\u0001".repeat(1400) + "남은 확인"
+        val latest = "정정 시작" + "\u0002".repeat(1450) + "마지막 조건"
+        val rows = listOf(turn(1), turn(1, "assistant", "확인"), turn(2, text = older), turn(3, text = latest))
+        val result = checkNotNull(build(rows, task(3, "paused", unknown = true,
+            owner = latest, goal = "\u0003".repeat(2000))))
+        val selected = turns(result)
+        assertEquals(latest, selected.last().getValue("text").jsonPrimitive.content)
+        val boundary = selected.single { it.getValue("sourceRunId").jsonPrimitive.content == binding(2).runId }
+        val excerpt = boundary.getValue("text").jsonPrimitive.content
+        assertTrue(excerpt.startsWith("이전 시작") && excerpt.contains("생략") && excerpt.endsWith("남은 확인"))
+        assertTrue(result.toString().toByteArray().size <= CloudConversationContext.MAX_UTF8_BYTES)
+    }
+
     private fun assertWellFormed(value:String){
         value.forEachIndexed{index,char->
             if(char.isHighSurrogate())assertTrue(index+1<value.length&&value[index+1].isLowSurrogate())

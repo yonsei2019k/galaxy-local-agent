@@ -30,9 +30,64 @@ pub fn older_turn_byte_limits(
     limits
 }
 
+/// Choose a second history row to reserve with the newest eligible message.
+/// A same-run exchange wins. On return to a paused, unanswered owner request,
+/// adjacent owner instructions precede an answer from a different run.
+pub fn context_partner(
+    is_owner: &[bool],
+    same_run_as_newest: &[bool],
+    returning_to_paused_request: bool,
+) -> Option<u32> {
+    let newest = is_owner.len().checked_sub(1)?;
+    if same_run_as_newest.len() != is_owner.len() || !same_run_as_newest[newest] {
+        return None;
+    }
+    let opposite = |i: &usize| is_owner[*i] != is_owner[newest];
+    let mut earlier = (0..newest).rev();
+    let same_run = earlier
+        .clone()
+        .find(|i| same_run_as_newest[*i] && opposite(i));
+    let partner = same_run.or_else(|| {
+        let fallback = earlier.find(opposite)?;
+        let previous = newest - 1;
+        if returning_to_paused_request && is_owner[newest] && is_owner[previous] {
+            Some(previous)
+        } else {
+            Some(fallback)
+        }
+    })?;
+    u32::try_from(partner).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_owner_keeps_the_adjacent_owner_before_an_unrelated_reply() {
+        let roles = [true, false, true, true];
+        let runs = [false, false, false, true];
+        assert_eq!(context_partner(&roles, &runs, true), Some(2));
+        assert_eq!(context_partner(&roles, &runs, false), Some(1));
+        assert_eq!(
+            context_partner(&roles, &[false, true, false, true], true),
+            Some(1)
+        );
+        assert_eq!(
+            context_partner(&[true, true, false], &[true, false, true], true),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn no_partner_is_invented_from_missing_or_inconsistent_metadata() {
+        assert_eq!(context_partner(&[], &[], true), None);
+        assert_eq!(context_partner(&[true], &[true], true), None);
+        assert_eq!(context_partner(&[true, true], &[false, true], true), None);
+        assert_eq!(context_partner(&[false, false], &[false, true], true), None);
+        assert_eq!(context_partner(&[true, false], &[true], true), None);
+        assert_eq!(context_partner(&[true, false], &[true, false], true), None);
+    }
 
     #[test]
     fn fills_newer_rows_before_the_boundary_and_charges_each_comma() {
