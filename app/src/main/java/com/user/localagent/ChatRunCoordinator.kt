@@ -542,7 +542,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val imageOnly=snapshot.isNotEmpty() && snapshot.all {it.mimeType.startsWith("image/")}
             val selection=if(model=="auto" && remoteAuthority==null && app.repository.chat.awaitingPrivateReply(threadId,thread.activeBranchId))
                 com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION else model
-            val resolvedModel=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(selection,ExternalAgentSettings.MODEL_ID,text,imageOnly)
+            val resolvedModel=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(
+                selection,ExternalAgentSettings.MODEL_ID,text,imageOnly,
+                allowCloudPersonalData=mode!=AgentWorkMode.RESEARCH.wireName&&externalAuthority.allowsPersonalData)
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,resolvedModel,thinking,runId=reservedRunId,
                 expectedPreviousRunId=previousRunId,remoteTestThreadRevision=remoteThreadRevision,
                 beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
@@ -884,8 +886,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if(!prepareGoalAutopilotHold(request))return@launch
                 val privateLocal = request.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION ||
                     (request.attachments.isNotEmpty() && request.attachments.all {it.mimeType.startsWith("image/")}) ||
-                    com.user.localagent.core.ConversationPrivacy.sensitiveText(request.text) ||
-                    request.goal?.let {com.user.localagent.core.ConversationPrivacy.sensitiveText(it.toJson().toString())}==true
+                    !cloudPersonalDataAllowed(request) && (com.user.localagent.core.ConversationPrivacy.sensitiveText(request.text) ||
+                        request.goal?.let {com.user.localagent.core.ConversationPrivacy.sensitiveText(it.toJson().toString())}==true)
                 if(privateLocal && (request.modelId==ExternalAgentSettings.MODEL_ID || request.allowCloudText)){
                     publishActionFinal(request,emptySet(),"개인 자료가 포함된 요청을 대화에 보존했습니다. 개인정보 · 로컬로 다시 보내면 기기나 페어링 PC에서 처리합니다.",true,"local_privacy_required")
                     return@launch
@@ -1347,8 +1349,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
-    /** Only source-bound, previously cloud-authorized text from this branch can leave the phone. */
-    private suspend fun captureCloudContext(request:QueuedChatRequest):JsonObject? {
+    private fun cloudPersonalDataAllowed(request:QueuedChatRequest):Boolean =
+        request.allowExternalAgent && request.modelId==ExternalAgentSettings.MODEL_ID &&
+            request.mode!=AgentWorkMode.RESEARCH.wireName &&
+            ExternalAgentSettings.get(context).capture().permitsPersonalData(request.externalAgentRevision)
+
+    /** Automatic context still requires the original source run to have the same cloud grant. */
+    private suspend fun captureCloudContext(request:QueuedChatRequest,allowCloudPersonalData:Boolean):JsonObject? {
         fun binding(value:QueuedChatRequest)=CloudConversationContext.Binding(value.runId,value.threadId,value.branchId,
             value.projectId,value.externalAgentRevision,value.capturedPcRevision,value.modelId,value.allowExternalAgent,value.mode)
         val chat=app.repository.chat
@@ -1369,13 +1376,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 (message.role=="user"&&(source.userMessageId!=message.id||source.text!=message.text)))continue
             val sourceBinding=binding(source)
             if(!CloudConversationContext.isEligible(currentBinding,sourceBinding) ||
-                com.user.localagent.core.ConversationPrivacy.sensitiveText(source.text) ||
-                com.user.localagent.core.ConversationPrivacy.sensitiveText(message.text))continue
+                !allowCloudPersonalData && (com.user.localagent.core.ConversationPrivacy.sensitiveText(source.text) ||
+                    com.user.localagent.core.ConversationPrivacy.sensitiveText(message.text)))continue
             turns+=CloudConversationContext.Turn(sourceBinding,message.role,message.text,sourceConfirmed=true)
             val payload=runCatching{Json.parseToJsonElement(run.contextJson).jsonObject}.getOrNull()?:continue
             val uncertain=goalNativeEffectsUnresolved(run,app.repository.chat.accessScope(source.threadId).scopeKey,true)
             val goal=(payload["externalAgentPlan"] as? JsonObject)?.get("goal")?.jsonPrimitive?.contentOrNull.orEmpty()
-            if(!com.user.localagent.core.ConversationPrivacy.sensitiveText(goal))
+            if(allowCloudPersonalData||!com.user.localagent.core.ConversationPrivacy.sensitiveText(goal))
                 previous=CloudConversationContext.PreviousTask(sourceBinding,run.status,source.text,goal,uncertain,sourceConfirmed=true)
         }
         return CloudConversationContext.build(currentBinding,turns,previous)
@@ -1416,9 +1423,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         check(tools.isNotEmpty()){"현재 프로젝트에서 사용할 클라우드 휴대폰 도구가 없습니다."}
         val scope=app.repository.chat.accessScope(request.threadId)
         val binding=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scope.scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
+        val allowCloudPersonalData=cloudPersonalDataAllowed(request)
         val capture=ExternalAgentCapture(request.runId,request.threadId,request.branchId,request.projectId,binding,
             request.externalAgentRevision,ExternalAgentContract.sha(request.text),tools,true,expiresAfterMs=360_000,
-            pcWorkspaceProfile="phone-only",requirePlan=true)
+            pcWorkspaceProfile="phone-only",requirePlan=true,allowCloudPersonalData=allowCloudPersonalData)
         var plan:ExternalAgentPlan?=null
         var privatePlan=false
         var preparedSeen=false
@@ -1496,7 +1504,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
                 check(authority().permits(capture))
-                privatePlan=com.user.localagent.core.ConversationPrivacy.needsPrivateSource(proposed.requiredTools)
+                privatePlan=!allowCloudPersonalData&&com.user.localagent.core.ConversationPrivacy.needsPrivateSource(proposed.requiredTools)
                 if(privatePlan || "save_note" in proposed.requiredTools&&"search_notes" !in proposed.requiredTools)false else {
                     plan=proposed;requestAuthorizedTools=proposed.requiredTools.intersect(tools)
                     checkNotNull(requestTools).bindAvailableTools(requestAuthorizedTools)
@@ -1526,7 +1534,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             controller.start().also{bridgeSessionId=it.sessionId}
             status.value="클라우드 모델이 요청을 해석하고 있습니다."
             check(authority().permits(capture))
-            val conversationContext=if(publicResearch)null else captureCloudContext(request)
+            val conversationContext=if(publicResearch)null else captureCloudContext(request,allowCloudPersonalData)
             check(authority().permits(capture))
             val storedContext=checkNotNull(app.repository.chat.run(request.runId))
             val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject

@@ -158,7 +158,7 @@ class ExternalAgentController(
     }
     private suspend fun send(entry:Entry):Pump {
         val result=checkNotNull(entry.result)
-        val kind=com.user.localagent.core.ConversationPrivacy.matchKind(result.content)
+        val kind=if(capture.allowCloudPersonalData)null else com.user.localagent.core.ConversationPrivacy.matchKind(result.content)
         val outgoing=if(kind==null)result else publicResultForCloud(entry.proposal.tool,result)
         if(!entry.recorded){
             // Preserve an actual effect even if cancellation arrives after execute returned.

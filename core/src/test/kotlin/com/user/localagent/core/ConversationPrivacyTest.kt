@@ -32,6 +32,15 @@ class ConversationPrivacyTest {
         assertEquals(ConversationPrivacy.LOCAL_SELECTION,ConversationPrivacy.modelForNewRequest(ConversationPrivacy.LOCAL_SELECTION,cloud,"확인해줘",false))
     }
 
+    @Test fun expandedCloudGrantAllowsPersonalInputWhileExplicitLocalSelectionsStayLocal(){
+        val text="내 연락처 fixture@example.invalid"
+        assertEquals(cloud,ConversationPrivacy.modelForNewRequest("auto",cloud,text,false,true))
+        assertEquals(cloud,ConversationPrivacy.modelForNewRequest(cloud,cloud,text,false,true))
+        assertEquals(ConversationPrivacy.LOCAL_SELECTION,
+            ConversationPrivacy.modelForNewRequest(ConversationPrivacy.LOCAL_SELECTION,cloud,text,false,true))
+        assertEquals(ConversationPrivacy.LOCAL_SELECTION,ConversationPrivacy.modelForNewRequest("auto",cloud,text,true,true))
+    }
+
     @Test fun theSelectedSourceCanRequireAHandoffBeforeTheFirstRead(){
         assertTrue(ConversationPrivacy.needsPrivateSource(setOf("search_contacts","calculate")))
         assertTrue(ConversationPrivacy.needsPrivateSource(setOf("patch_note")))

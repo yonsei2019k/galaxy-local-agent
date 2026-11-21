@@ -25,10 +25,10 @@ internal class SettingsAssistantRunner(context: Context, private val app: AppCon
     private val external = ExternalAgentSettings.get(context)
 
     suspend fun ask(question: String, clarification: Pair<String, String>?): SettingsReply {
-        if (ConversationPrivacy.sensitiveText(question)) {
+        val grant = external.capture()
+        if (!grant.allowsPersonalData && ConversationPrivacy.sensitiveText(question)) {
             return SettingsReply("개인정보와 계정 관련 설정은 이 기기의 설정 화면에서 확인할 수 있어요.", SettingsLink.PRIVACY)
         }
-        val grant = external.capture()
         if (!grant.enabled || pc.snapshot() == null) {
             return SettingsReply(
                 "설정 대화를 쓰려면 연결된 PC와 Codex 사용 허용이 필요해요. 수동 설정에서는 음성, 이미지, 연결과 권한을 바로 바꿀 수 있어요.",
@@ -44,7 +44,7 @@ internal class SettingsAssistantRunner(context: Context, private val app: AppCon
         val availableVoice = AsrCatalog.modelIds.filter(app.models::asrReady).toMutableList()
         if (app.models.deviceAsrStatus.value.available && asr.language != "auto") availableVoice.add(AsrCatalog.DEVICE_MODEL)
         val prior = clarification
-            ?.takeUnless { ConversationPrivacy.sensitiveText(it.first) || ConversationPrivacy.sensitiveText(it.second) }
+            ?.takeUnless { !grant.allowsPersonalData && (ConversationPrivacy.sensitiveText(it.first) || ConversationPrivacy.sensitiveText(it.second)) }
             ?.let { JsonArray(listOf(JsonPrimitive(it.first), JsonPrimitive(it.second))).toString() } ?: "null"
         val request = """
             Act only as the ZipHap settings assistant. Reply in plain Korean for a nontechnical user.
@@ -63,12 +63,13 @@ internal class SettingsAssistantRunner(context: Context, private val app: AppCon
             For a valid suggestion, finish with reported_done. For follow-up questions ask the user directly.
             ${JsonPrimitive(question)}
         """.trimIndent()
-        check(!ConversationPrivacy.sensitiveText(request))
+        check(grant.allowsPersonalData || !ConversationPrivacy.sensitiveText(request))
         val id = UUID.randomUUID().toString()
         val tools = setOf(SettingsProposal.TOOL)
         val capture = ExternalAgentCapture(
             id, id, id, null, "settings:$id", grant.revision, ExternalAgentContract.sha(request),
             tools, allowExternalAgent = true, expiresAfterMs = 100_000, pcWorkspaceProfile = "phone-only", requirePlan = true,
+            allowCloudPersonalData = grant.allowsPersonalData,
         )
         fun live(): Boolean = external.capture() == grant && pc.captureTextAuthority().revision == pcRevision &&
             !app.runs.busy.value && !app.imageStudio.state.value.running

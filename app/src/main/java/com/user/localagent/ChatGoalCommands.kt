@@ -65,7 +65,8 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
     val pcSettings=PcComputeSettings.get(context)
     val pcAuthority=pcSettings.captureTextAuthority()
     val externalAuthority=ExternalAgentSettings.get(context).capture()
-    val model=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(selectedModel,ExternalAgentSettings.MODEL_ID,goal.toJson().toString(),false)
+    val model=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(selectedModel,ExternalAgentSettings.MODEL_ID,
+        goal.toJson().toString(),false,allowCloudPersonalData=externalAuthority.allowsPersonalData)
     scope.launch {
         try {
             val access=app.repository.chat.accessScope(threadId)

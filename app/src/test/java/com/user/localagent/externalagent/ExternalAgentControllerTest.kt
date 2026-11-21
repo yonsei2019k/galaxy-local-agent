@@ -11,8 +11,8 @@ class ExternalAgentControllerTest {
     private val owner="00000000-0000-4000-8000-000000000001"
     private val sessionId="00000000-0000-4000-8000-000000000002"
     private val callId="00000000-0000-4000-8000-000000000003"
-    private fun capture(tools:Set<String> = setOf("get_current_datetime"),allowed:Boolean=true,ttl:Long=1000)=ExternalAgentCapture(
-        owner,"thread","branch","project","workspace",7,"a".repeat(64),tools,allowed,ttl)
+    private fun capture(tools:Set<String> = setOf("get_current_datetime"),allowed:Boolean=true,ttl:Long=1000,personalData:Boolean=false)=ExternalAgentCapture(
+        owner,"thread","branch","project","workspace",7,"a".repeat(64),tools,allowed,ttl,allowCloudPersonalData=personalData)
     private fun live(c:ExternalAgentCapture)=ExternalAgentLiveAuthority(c.parentRunId,c.threadId,c.branchId,c.projectId,
         c.projectBinding,c.authorityRevision,c.allowExternalAgent,c.phoneTools)
     private fun proposal(c:ExternalAgentCapture,tool:String="get_current_datetime",args:JsonObject=buildJsonObject {})=
@@ -73,6 +73,32 @@ class ExternalAgentControllerTest {
         assertEquals("PRIVATE_RESULT_WITHHELD", withheld.message)
         assertSame(result,receipts.single().result)
         assertEquals(0,b.reports)
+    }
+
+    @Test fun expandedConsentAppliesOnlyToItsOwnCapturedRevision(){
+        val legacy=ExternalAgentSettings.readAuthority(7,true,2)
+        assertTrue(legacy.enabled)
+        assertFalse(legacy.permitsPersonalData(7))
+        val expanded=ExternalAgentSettings.readAuthority(8,true,ExternalAgentSettings.CONSENT_SCOPE)
+        assertTrue(expanded.permitsPersonalData(8))
+        assertFalse(expanded.permitsPersonalData(7))
+        assertFalse(expanded.permitsPersonalData(null))
+        assertFalse(ExternalAgentSettings.readAuthority(8,false,ExternalAgentSettings.CONSENT_SCOPE).permitsPersonalData(8))
+    }
+
+    @Test fun authorizedPersonalToolResultsAreReportedThroughTheSameBoundSession()=runBlocking {
+        val c=capture(setOf("search_memories"),personalData=true)
+        val b=Broker()
+        val receipts=mutableListOf<PhoneAgentExecution>()
+        val result=ToolResult(callId,true,"연락처 fixture@example.invalid",VerificationState.VERIFIED)
+        val controller=ExternalAgentController(c,b,{live(c)},{result},{receipts+=it},{1})
+        controller.start()
+        b.offer(proposal(c,"search_memories"))
+        controller.pumpOnce()
+        assertSame(result,receipts.single().result)
+        assertFalse(receipts.single().withheldFromCloud)
+        assertEquals(listOf(result),b.reported)
+        assertFalse(c.registration().containsKey("allowCloudPersonalData"))
     }
 
     @Test fun publicLookupContinuesWithSafeSourcesAndKeepsOriginalLocally() = runBlocking {

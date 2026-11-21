@@ -13,7 +13,6 @@ import android.widget.TextView
 import com.user.localagent.compute.PcComputeSettings
 import com.user.localagent.compute.PcConnection
 import com.user.localagent.compute.PcTransport
-import com.user.localagent.core.ConversationPrivacy
 import com.user.localagent.externalagent.ExternalAgentContract
 import java.security.MessageDigest
 import java.util.UUID
@@ -132,10 +131,6 @@ class PcOpenClawActivity : Activity() {
         val text = request.text.toString().trim()
         if (text.isEmpty() || text.toByteArray(Charsets.UTF_8).size > 4000) {
             status.text = "요청을 입력해 주세요. 최대 4,000바이트입니다."
-            return
-        }
-        if (ConversationPrivacy.sensitiveText(text)) {
-            status.text = "자격 증명이 포함된 요청은 PC 에이전트로 보내지 않습니다."
             return
         }
         runAction {

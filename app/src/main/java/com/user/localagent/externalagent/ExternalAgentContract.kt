@@ -14,12 +14,14 @@ class ExternalAgentCapture(
     phoneTools:Set<String>,val allowExternalAgent:Boolean=false,
     val expiresAfterMs:Long=300_000,val pcWorkspaceProfile:String="qa",
     val requirePlan:Boolean=false,
+    internal val allowCloudPersonalData:Boolean=false,
 ) {
     val phoneTools:Set<String> = Collections.unmodifiableSet(phoneTools.toSet())
     private val settingsAssistant = this.phoneTools == setOf(SettingsProposal.TOOL) &&
         projectId == null && projectBinding == "settings:$parentRunId" && pcWorkspaceProfile == "phone-only" && requirePlan
     val pcTools:Set<String> get()=if(pcWorkspaceProfile=="phone-only")emptySet()else ExternalAgentContract.PC_TOOLS
     init {
+        require(!allowCloudPersonalData||allowExternalAgent)
         ExternalAgentContract.uuid(parentRunId)
         listOfNotNull(threadId,branchId,projectId,projectBinding).forEach { ExternalAgentContract.bounded(it,256) }
         require(authorityRevision>=0&&requestDigest.matches(Regex("[a-f0-9]{64}")))

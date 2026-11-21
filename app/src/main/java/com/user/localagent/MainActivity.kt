@@ -180,7 +180,7 @@ class MainActivity : ComponentActivity() {
         }
         if(id==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID){
             if(!com.user.localagent.compute.PcComputeSettings.get(this).state.value.paired){status.value="설정에서 개인 PC를 먼저 연결해주세요.";return}
-            if(!com.user.localagent.externalagent.ExternalAgentSettings.get(this).capture().enabled){externalAgentConsentThread.value=threadId;return}
+            if(!com.user.localagent.externalagent.ExternalAgentSettings.get(this).capture().allowsPersonalData){externalAgentConsentThread.value=threadId;return}
             app.runs.chooseModel(id,threadId);status.value="다음 요청에서 클라우드 모델이 승인된 휴대폰 도구를 사용합니다.";return
         }
         if(id!="auto" && id!=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION){status.value="일반 업무는 Codex, 개인 자료는 개인정보 · 로컬을 선택해주세요.";return}

@@ -28,8 +28,8 @@ object ConversationPrivacy {
             it in setOf("save_note","update_note","delete_note","save_memory","delete_memory")
     }
 
-    fun modelForNewRequest(selection:String,cloud:String,text:String,imageOnly:Boolean):String {
-        if(selection==LOCAL_SELECTION || imageOnly || sensitiveText(text))
+    fun modelForNewRequest(selection:String,cloud:String,text:String,imageOnly:Boolean,allowCloudPersonalData:Boolean=false):String {
+        if(selection==LOCAL_SELECTION || imageOnly || !allowCloudPersonalData && sensitiveText(text))
             return if(selection=="auto" || selection==cloud) LOCAL_SELECTION else selection
         // An existing explicit device-model preference is never consent to export text.
         return if(selection=="auto") cloud else selection
