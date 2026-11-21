@@ -33,7 +33,7 @@ pub fn older_turn_byte_limits(
 /// Choose a second history row to reserve with the newest eligible message.
 /// A same-run exchange wins. On return to a paused, unanswered owner request,
 /// adjacent owner instructions precede an answer from a different run.
-/// A cross-run fallback is reserved only within the newest eligible turn window.
+/// Partners come from the newest eligible turn window.
 pub fn context_partner(
     is_owner: &[bool],
     same_run_as_newest: &[bool],
@@ -44,7 +44,7 @@ pub fn context_partner(
         return None;
     }
     let opposite = |i: &usize| is_owner[*i] != is_owner[newest];
-    let mut earlier = (0..newest).rev();
+    let mut earlier = (0..newest).rev().take(MAX_TURNS - 1);
     let same_run = earlier
         .clone()
         .find(|i| same_run_as_newest[*i] && opposite(i));
@@ -54,7 +54,7 @@ pub fn context_partner(
         if returning_to_paused_request && is_owner[newest] && is_owner[previous] {
             Some(previous)
         } else {
-            (newest - fallback < MAX_TURNS).then_some(fallback)
+            Some(fallback)
         }
     })?;
     u32::try_from(partner).ok()
@@ -63,6 +63,23 @@ pub fn context_partner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_partner_does_not_displace_in_window_fallback() {
+        let roles = [false, false, true, true, true, true, true, true, true];
+        let runs = [true, false, false, false, false, false, false, false, true];
+        assert_eq!(context_partner(&roles, &runs, false), Some(1));
+        assert_eq!(context_partner(&roles, &runs, true), Some(7));
+    }
+
+    #[test]
+    fn stale_cross_run_reply_cannot_reserve_adjacent_paused_owner() {
+        let roles = [false, true, true, true, true, true, true, true, true];
+        let runs = [false, false, false, false, false, false, false, false, true];
+        assert_eq!(context_partner(&roles, &runs, false), None);
+        assert_eq!(context_partner(&roles[1..], &runs[1..], true), None);
+        assert_eq!(context_partner(&roles, &runs, true), None);
+    }
 
     #[test]
     fn paused_owner_keeps_the_adjacent_owner_before_an_unrelated_reply() {
