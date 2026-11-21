@@ -40,6 +40,10 @@ internal class ChatWorkTraceSession private constructor(
             stage(WorkTraceCode.PLAN_READY,summary,WorkSummarySource.MODEL_PLAN)
         }
     }
+    suspend fun publicDecision(explanation:String?){
+        val text=explanation?.let(WorkTraceCodec::redactPublicExplanation)?.takeIf{it.isNotBlank()}?:return
+        stage(WorkTraceCode.DECISION_EXPLAINED,text,WorkSummarySource.MODEL_PLAN)
+    }
     suspend fun closeProgress(){
         val job=synchronized(progressLock){progressClosed=true;progress.close();progressJob}
         job?.join()
@@ -54,7 +58,7 @@ internal class ChatWorkTraceSession private constructor(
     suspend fun stage(code:WorkTraceCode,summary:String?=null,source:WorkSummarySource=WorkSummarySource.HOST,count:Int?=null){
         val kind=when(code){
             WorkTraceCode.RUN_STARTED,WorkTraceCode.RUN_FINISHED,WorkTraceCode.RUN_INTERRUPTED->WorkTraceKind.RUN
-            WorkTraceCode.SEMANTIC_STARTED->WorkTraceKind.RATIONALE
+            WorkTraceCode.SEMANTIC_STARTED,WorkTraceCode.DECISION_EXPLAINED->WorkTraceKind.RATIONALE
             WorkTraceCode.PLAN_READY->WorkTraceKind.PLAN
             WorkTraceCode.CONTEXT_READY->WorkTraceKind.CONTEXT
             WorkTraceCode.INFERENCE_STARTED,WorkTraceCode.INFERENCE_FINISHED->WorkTraceKind.INFERENCE

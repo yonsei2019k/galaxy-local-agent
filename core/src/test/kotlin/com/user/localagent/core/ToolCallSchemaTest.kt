@@ -13,8 +13,9 @@ class ToolCallSchemaTest {
         assertEquals(listOf("create_document","save_note"),branches.map {property(it,"tool").getValue("enum").jsonArray.single().jsonPrimitive.content})
         branches.forEach {branch->
             assertFalse(branch.getValue("additionalProperties").jsonPrimitive.boolean)
-            assertEquals(setOf("type","tool","arguments"),branch.getValue("properties").jsonObject.keys)
+            assertEquals(setOf("type","tool","arguments","publicExplanation"),branch.getValue("properties").jsonObject.keys)
             assertEquals(setOf("type","tool","arguments"),branch.getValue("required").jsonArray.map {it.jsonPrimitive.content}.toSet())
+            assertEquals(220,property(branch,"publicExplanation").getValue("maxLength").jsonPrimitive.int)
             assertEquals("tool_call",property(branch,"type").getValue("enum").jsonArray.single().jsonPrimitive.content)
         }
     }

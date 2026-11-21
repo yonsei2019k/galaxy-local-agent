@@ -11,7 +11,7 @@ import java.security.MessageDigest
 // User-visible work metadata; no hidden reasoning, source bodies or tool authority.
 enum class WorkTraceKind { RATIONALE, PLAN, CONTEXT, INFERENCE, APPROVAL, TOOL, VERIFICATION, FILE, ANSWER, RUN }
 enum class WorkTraceCode {
-    RUN_STARTED, SEMANTIC_STARTED, PLAN_READY, CONTEXT_READY, INFERENCE_STARTED, INFERENCE_FINISHED,
+    RUN_STARTED, SEMANTIC_STARTED, PLAN_READY, DECISION_EXPLAINED, CONTEXT_READY, INFERENCE_STARTED, INFERENCE_FINISHED,
     APPROVAL_WAITING, APPROVAL_ACCEPTED, APPROVAL_DECLINED, TOOL_STARTED, TOOL_RESULT,
     VERIFICATION_RECORDED, FILE_CHANGE, ANSWER_STARTED, ANSWER_FINISHED, ANSWER_PAUSED,
     RUN_FINISHED, RUN_INTERRUPTED,
@@ -188,7 +188,7 @@ object WorkTraceCodec {
     fun prepare(event:WorkTraceDraft):WorkTraceDraft {
         require(identity.matches(event.operationKey))
         val requiredKind=when(event.code){
-            WorkTraceCode.SEMANTIC_STARTED->WorkTraceKind.RATIONALE
+            WorkTraceCode.SEMANTIC_STARTED,WorkTraceCode.DECISION_EXPLAINED->WorkTraceKind.RATIONALE
             WorkTraceCode.PLAN_READY->WorkTraceKind.PLAN
             WorkTraceCode.CONTEXT_READY->WorkTraceKind.CONTEXT
             WorkTraceCode.INFERENCE_STARTED,WorkTraceCode.INFERENCE_FINISHED->WorkTraceKind.INFERENCE
@@ -200,7 +200,7 @@ object WorkTraceCodec {
             else->WorkTraceKind.RUN
         }
         require(event.kind==requiredKind)
-        require(event.summarySource!=WorkSummarySource.MODEL_PLAN||event.code==WorkTraceCode.PLAN_READY)
+        require(event.summarySource!=WorkSummarySource.MODEL_PLAN||event.code in setOf(WorkTraceCode.PLAN_READY,WorkTraceCode.DECISION_EXPLAINED))
         require(event.summarySource!=WorkSummarySource.USER_GOAL||event.code in setOf(WorkTraceCode.PLAN_READY,WorkTraceCode.RUN_STARTED))
         event.toolName?.let{require(Regex("[a-z][a-z0-9_]{0,79}").matches(it)&&it in com.user.localagent.core.ToolRegistry.definitions)};event.invocationId?.let{require(identity.matches(it))}
         listOf(event.argsHash,event.scopeHash).filterNotNull().forEach{require(sha.matches(it))}

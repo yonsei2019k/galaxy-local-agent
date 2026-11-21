@@ -6,7 +6,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.util.UUID
 
-data class ToolCall(val id:String,val name:String,val arguments:JsonObject)
+data class ToolCall(val id:String,val name:String,val arguments:JsonObject,val publicExplanation:String?=null)
 data class ToolResult(val id:String,val success:Boolean,val content:String,val verification:VerificationState=VerificationState.UNVERIFIED,val verificationSummary:String="",val effectNotApplied:Boolean=false,
     val screenReadEvidence:ScreenReadEvidence?=null){
     init {require(!effectNotApplied||!success&&verification==VerificationState.FAILED)}
@@ -115,7 +115,7 @@ object ToolRegistry {
         rejectDuplicateKeys(raw)
         val obj=Json.parseToJsonElement(raw) as? JsonObject?:error("도구 요청은 JSON 객체여야 합니다.")
         val envelope=obj.containsKey("type")
-        val allowed=if(envelope)setOf("type","id","tool","arguments") else setOf("id","name","arguments")
+        val allowed=if(envelope)setOf("type","id","tool","arguments","publicExplanation") else setOf("id","name","arguments")
         require(obj.keys.all {it in allowed}){"허용되지 않은 도구 요청 필드입니다."}
         if(envelope) require(obj["type"]?.jsonPrimitive?.content=="tool_call"){"허용되지 않은 요청 유형입니다."}
         val nameValue=obj[if(envelope)"tool" else "name"] as? JsonPrimitive?:error("도구 이름이 없습니다.")
@@ -123,7 +123,10 @@ object ToolRegistry {
         val id=obj["id"]?.let {require(it is JsonPrimitive && it.isString);it.content}?:UUID.randomUUID().toString()
         require(id.isNotBlank() && id.length<=100)
         val args=obj["arguments"] as? JsonObject?:error("arguments는 JSON 객체여야 합니다.")
-        return validate(ToolCall(id,nameValue.content,args))
+        // This optional display text is separate from both tool arguments and authorization.
+        val explanation=(obj["publicExplanation"] as? JsonPrimitive)?.takeIf{it.isString}
+            ?.content?.trim()?.takeIf{it.isNotEmpty()&&it.length<=220&&'\u0000' !in it}
+        return validate(ToolCall(id,nameValue.content,args,explanation))
     }
     fun validate(call:ToolCall):ToolCall {
         val definition=definitions[call.name]?:error("허용되지 않은 도구입니다: ${call.name}")

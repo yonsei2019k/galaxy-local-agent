@@ -73,6 +73,20 @@ class DirectNextActionProtocolTest {
         rejected("""{"name":"read_note","arguments":{"id":"qa","scope":"team","expectedUpdatedAt":"7"}}""")
     }
 
+    @Test fun publicExplanationIsOptionalAndDoesNotBecomeAToolArgument(){
+        val explanation="같은 이름의 메모 중 어느 것을 바꿀지 확인하려고 원문을 읽겠습니다."
+        val tool=Json.parseToJsonElement(read).jsonObject
+        fun parse(extra:JsonElement)= (DirectNextActionProtocol.parse(
+            JsonObject(tool+("publicExplanation" to extra)).toString(),notes
+        ) as DirectNextActionProtocol.Decision.Tool).call
+        val original=ToolRegistry.parseAndValidate(read)
+        val explained=parse(JsonPrimitive(explanation))
+        assertEquals(explanation,explained.publicExplanation)
+        assertEquals(original,explained.copy(publicExplanation=null))
+        assertEquals(original,parse(JsonPrimitive(7)))
+        assertEquals(original,parse(JsonPrimitive("x".repeat(221))))
+    }
+
     @Test fun clarificationKeepsExistingQuestionValidationAndTrimming(){
         val raw="""{"type":"clarification","question":"  어느 날짜인가요? 😀  "}"""
         assertEquals(NextActionQuestion.parse(raw),(DirectNextActionProtocol.parse(raw,notes) as DirectNextActionProtocol.Decision.Clarification).question)

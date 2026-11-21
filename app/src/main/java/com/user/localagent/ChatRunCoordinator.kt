@@ -1233,8 +1233,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 if(retry!=null){query=retry;return@roundStep}
                                 complete=true;return@roundStep
                             }
-                            traceDecision(call.name,round,remainingRequired)
-                            val result=try {runGoalBoundTool(call,taskGoal)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
+                            workTraceSession?.publicDecision(call.publicExplanation)
+                            val result=try {runGoalBoundTool(call.copy(publicExplanation=null),taskGoal)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
                             if(call.name in setOf(GoalToolCatalog.START,GoalToolCatalog.RESUME)&&result.success&&result.verification==VerificationState.VERIFIED&&
                                 TaskHarness.decide(taskGoal,requestSteps,requestedFinish=true) is HarnessDecision.Finish) {
                                 answer("목표에 연결된 작업 한 건을 대기열에 저장했습니다. 이어서 같은 대화에서 진행합니다. 목표 자체의 완료는 확인 후 판단합니다.")
@@ -2167,11 +2167,6 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestSteps.any {it.evidence.state==VerificationState.PREPARED}->"준비됨 · 외부 완료 확인 대기"
         requestSteps.isNotEmpty()->"실행 결과 검증됨 · 로컬 처리"
         else->"생성 종료 · 로컬 처리"
-    }
-    private suspend fun traceDecision(tool:String,round:Int,remaining:Set<String>){
-        val last=requestSteps.lastOrNull()
-        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.PLAN_READY,
-            com.user.localagent.core.DecisionStepSummary.beforeTool(tool,round,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS,remaining,last?.tool,last?.evidence?.state))
     }
     private suspend fun pauseForTruncatedTool(request:QueuedChatRequest){
         answer("작업 요청을 끝까지 만들지 못해 실행하지 않았습니다. 요청을 더 작게 나누어 다시 보내주세요.")

@@ -353,10 +353,10 @@ private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelCh
 }
 
 private fun toolDomainLabel(domain:String)=when(domain){"messages"->"문자·메신저";"calendar"->"일정·알림";"documents"->"문서";"projects"->"프로젝트 파일";"images"->"이미지";"notes"->"메모";"memory"->"개인 기억";"audio"->"녹음";"web"->"웹·쇼핑";else->"기본 도구"}
-private fun toolLabel(name:String)=when(name){
+internal fun toolLabel(name:String)=when(name){
     "get_current_datetime"->"현재 날짜·시간";"list_project_files"->"프로젝트 파일 목록";"read_project_file"->"프로젝트 파일 읽기";"write_project_file"->"프로젝트 파일 저장"
     "create_document"->"문서 파일 만들기";"search_web"->"공개 웹 검색";"search_shopping"->"상품·가격 검색";"read_webpage"->"웹페이지 읽기";"generate_image"->"로컬 이미지 생성"
-    "search_conversation_history"->"비서 대화 기록 검색";"list_imported_conversations"->"가져온 대화 목록";"search_conversation_imports"->"가져온 대화 검색";"get_sms_summary"->"문자 조회·요약"
+    "search_conversation_history"->"집합 대화 기록 조회";"list_imported_conversations"->"가져온 대화 목록";"search_conversation_imports"->"가져온 대화 검색";"get_sms_summary"->"문자 조회·요약";"analyze_sms"->"문자 내용 분석"
     "get_call_log_summary"->"통화 내역 조회";"list_audio_recordings"->"녹음 파일 목록";"search_audio_transcripts"->"녹음 전사 검색";"list_calendar_events"->"일정 조회";"prepare_calendar_event"->"일정 작성"
     "create_reminder"->"리마인더 생성";"create_alarm"->"알람 생성";"save_note"->"메모 저장";"search_notes"->"메모 검색";"search_contacts"->"연락처 검색";"prepare_sms"->"문자 초안 작성";"prepare_email"->"이메일 초안 작성"
     "open_map"->"지도 열기";"open_url"->"웹페이지 열기";"save_memory"->"개인 기억 저장";"search_memories"->"개인 기억 검색";"delete_memory"->"개인 기억 삭제";"update_note"->"메모 수정";"update_reminder"->"리마인더 수정"

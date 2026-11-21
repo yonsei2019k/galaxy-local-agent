@@ -20,6 +20,7 @@ object ToolCallSchema {
                     put("type",buildJsonObject {put("type","string");put("enum",buildJsonArray {add("tool_call")})})
                     put("tool",buildJsonObject {put("type","string");put("enum",buildJsonArray {add(name)})})
                     put("arguments",arguments(name,definitions.getValue(name),ownerRequest,projectWrites))
+                    put("publicExplanation",buildJsonObject {put("type","string");put("maxLength",220)})
                 })
                 put("required",buildJsonArray {add("type");add("tool");add("arguments")})
             })}})

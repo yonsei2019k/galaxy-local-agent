@@ -47,6 +47,22 @@ class ChatWorkActivityControllerTest {
         assertEquals(5L,activity.totalEvents);assertFalse(activity.hasOlder)
     }
 
+    @Test fun publicReasonAndPlanStayVisibleWithoutLegacyCountersOrInferenceTelemetry(){
+        val actual=run()
+        val events=listOf(
+            WorkTraceDraft("plan",WorkTraceKind.PLAN,WorkTraceCode.PLAN_READY,
+                publicSummary="지난 약속을 확인해 가능한 시간을 비교하겠습니다.",summarySource=WorkSummarySource.MODEL_PLAN),
+            WorkTraceDraft("legacy",WorkTraceKind.PLAN,WorkTraceCode.PLAN_READY,publicSummary="단계 14/36 · 선택: list_calendar_events"),
+            WorkTraceDraft("inference",WorkTraceKind.INFERENCE,WorkTraceCode.INFERENCE_STARTED,publicSummary="모델 E4B · 문맥 8192"),
+            WorkTraceCodec.prepare(WorkTraceDraft("choice",WorkTraceKind.RATIONALE,WorkTraceCode.DECISION_EXPLAINED,
+                publicSummary="겹치는 일정이 있는지 먼저 보고 가능한 시간을 고르겠습니다.",summarySource=WorkSummarySource.MODEL_PLAN)),
+        ).mapIndexed{index,event->trace(actual,index+1L,event)}
+        val activity=project(actual,events).getValue("assistant-a")
+        assertEquals(listOf("요청을 이렇게 이해했어요","이 방법을 고른 이유"),activity.events.map{it.label})
+        assertEquals("겹치는 일정이 있는지 먼저 보고 가능한 시간을 고르겠습니다.",activity.events.last().detail)
+        assertEquals(4L,activity.totalEvents)
+    }
+
     @Test fun interruptedStartIsUnverifiedAndReservedQueuedAssistantHasActivityBeforeTokens(){
         val interrupted=run("interrupted")
         val start=trace(interrupted,1,WorkTraceDraft("start",WorkTraceKind.TOOL,WorkTraceCode.TOOL_STARTED,"save_note","call-a",argsHash="1".repeat(64),scopeHash="2".repeat(64)))
