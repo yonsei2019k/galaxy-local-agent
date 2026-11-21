@@ -111,6 +111,7 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
     val worker=executionForRun(runId)
     if(worker!=null&&worker!==this){worker.steer(text,runId,threadId);return}
     scope.launch {
+        var ownsHandoff=false
         try{
             if(activeRunId!=runId||activeThreadId!=threadId){
                 val retained=preserveUnappliedInstruction(app.repository,threadId,text)
@@ -120,12 +121,25 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
             }
             val original=app.repository.chat.run(runId)?:error("원래 작업을 찾을 수 없습니다.")
             val originalRequest=QueuedChatRequest.fromJson(original.contextJson)
-            val running=requestJob
-            pendingSteerRunId=runId
+            val running=queueMutation.withLock {
+                val job=requestJob
+                if(activeRunId!=runId||activeThreadId!=threadId||job?.isActive!=true||pendingSteerRunId!=null){
+                    return@withLock null
+                }
+                pendingSteerRunId=runId
+                ownsHandoff=true
+                job
+            }
+            if(running==null){
+                val retained=preserveUnappliedInstruction(app.repository,threadId,text)
+                status.value=if(retained)"이미 넘어가는 작업에 중복 적용하지 않고 추가 지시를 대화에 보존했어요."
+                    else "원래 대화가 삭제되어 추가 지시를 저장하지 못했어요."
+                return@launch
+            }
             approval.value?.takeIf {it.runId==runId}?.decision?.complete(false)
-            if(!toolInFlight){executionEngine.cancel();running?.cancel(CancellationException("사용자 추가 지시"))}
+            if(!toolInFlight){executionEngine.cancel();running.cancel(CancellationException("사용자 추가 지시"))}
             status.value="현재 실행 결과를 보존한 뒤 추가 지시를 적용합니다."
-            running?.join()
+            running.join()
             // The running mutation's NonCancellable checkpoint may have committed after the dialog opened.
             val finalRun=checkNotNull(app.repository.chat.run(runId))
             val finalRequest=QueuedChatRequest.fromJson(finalRun.contextJson)
@@ -177,7 +191,11 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                 false->"원래 대화가 삭제되어 추가 지시를 적용하거나 다시 만들지 않았습니다."
                 null->"추가 지시를 적용하지 못했습니다. 대화 기록 저장도 확인하지 못했습니다."
             }
-        }finally{if(pendingSteerRunId==runId)pendingSteerRunId=null}
+        }finally{
+            if(ownsHandoff)withContext(NonCancellable){
+                queueMutation.withLock {if(pendingSteerRunId==runId)pendingSteerRunId=null}
+            }
+        }
     }
 }
 

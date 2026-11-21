@@ -891,7 +891,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     return@launch
                 }
                 if(!privateLocal && (request.modelId!=ExternalAgentSettings.MODEL_ID || !request.allowExternalAgent)){
-                    publishActionFinal(request,emptySet(),"일반 업무는 클라우드 모델로 처리합니다. 요청을 보존했습니다. 모델 선택에서 Codex 연결을 확인해주세요.",true,"cloud_model_required")
+                    val recovery=if(request.modelId==ExternalAgentSettings.MODEL_ID)
+                        "이 요청에 클라우드 사용 동의가 확인되지 않아 대화에 보존했어요. 일반 업무는 모델 메뉴에서 Codex를 연결한 뒤 새로 보내고, 내 기억을 확인하려면 개인정보 · 로컬을 선택해 보내주세요."
+                    else "이 요청을 대화에 보존했어요. 모델 메뉴에서 일반 업무는 Codex, 내 기억이나 개인 자료는 개인정보 · 로컬을 선택해 새로 보내주세요."
+                    publishActionFinal(request,emptySet(),recovery,true,"cloud_model_required")
                     return@launch
                 }
                 val requestProgress=makeRequestProgress(request,workTraceSession)

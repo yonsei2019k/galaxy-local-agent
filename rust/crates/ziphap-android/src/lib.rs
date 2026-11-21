@@ -204,7 +204,7 @@ impl NativeRunJournal {
         for event in c.events {
             match (&event.kind,event.sequence){
                 (EventKind::Created,1)|(EventKind::Started,2)=>{},
-                (EventKind::ToolStarted{effect_id,tool},n) if n>2&&replay_flight.is_none()=>{
+                (EventKind::ToolStarted{effect_id,tool},n) if n>2&&!replay_uncertain&&replay_flight.is_none()=>{
                     if !replay_calls.insert(effect_id.clone()){return Err(EngineError::Rejected)}
                     replay_flight=Some((effect_id.clone(),tool.clone()));
                 },
@@ -327,6 +327,23 @@ mod tests {
         assert!(events.contains("uncertain"));
         assert!(!events.contains("completed"));
     }
+    #[test]
+    fn restore_rejects_new_dispatch_after_uncertainty_marker() {
+        let ledger = native();
+        ledger.begin_call(binding(), "first".into(), "read_note".into(), 101).unwrap();
+        ledger.finish_call("first".into(), "VERIFIED".into(), false, 102).unwrap();
+        ledger.begin_call(binding(), "second".into(), "read_note".into(), 104).unwrap();
+        ledger.finish_call("second".into(), "VERIFIED".into(), false, 105).unwrap();
+        let mut checkpoint: Checkpoint = serde_json::from_str(&ledger.checkpoint().unwrap()).unwrap();
+        checkpoint.closed = true;
+        for event in &mut checkpoint.events[4..] {
+            event.sequence += 1;
+        }
+        checkpoint.events.insert(4, RunEvent { sequence: 5, timestamp_ms: 103, kind: EventKind::Uncertain });
+        let serialized = serde_json::to_string(&checkpoint).unwrap();
+        assert!(NativeRunJournal::restore(binding(), serialized).is_err());
+    }
+
     #[test] fn restart_preserves_inflight_uncertainty_and_exact_binding() {
         let n=native();n.begin_call(binding(),"one".into(),"save_note".into(),101).unwrap();
         let checkpoint=n.checkpoint().unwrap();
