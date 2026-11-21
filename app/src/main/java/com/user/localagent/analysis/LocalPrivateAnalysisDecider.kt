@@ -47,7 +47,7 @@ class LocalPrivateAnalysisDecider(
             if(repair)appendLine("The previous response failed validation. Make a fresh shorter complete object with fewer concise findings and exact quotes; do not repeat rejected text.")
             appendLine("Output schema: $schema")
         }
-        val maximumOutput=if(selectOverview)256 else 1024
+        val maximumOutput=if(selectOverview)256 else chosen.options.maxOutputTokens
         var options=chosen.options.privateAnalysisOptions(maximumOutput)
         try {
             return withTimeout(600_000) {

@@ -27,6 +27,12 @@ internal enum class PairedPcTextProfileDescriptor(
         com.user.localagent.core.GemmaImagePreparation.hashes.getValue("gemma-e4b"),
         "PC · Gemma E4B",
     ),
+    GEMMA_E2B_LEARNING_V1(
+        "paired-pc-gemma-e2b-learning-v1",
+        "gemma-e2b",
+        com.user.localagent.core.GemmaImagePreparation.hashes.getValue("gemma-e2b"),
+        "PC · Gemma E2B (기억 분석)",
+    ),
     FAST_4B_V1(
         PairedPcFast4BProfile.SELECTION_ID,
         PairedPcFast4BProfile.MODEL_ID,
@@ -40,7 +46,7 @@ internal enum class PairedPcTextProfileDescriptor(
     val supportsQwenThinking: Boolean get() = this == LEGACY_V1 || this == FAST_4B_V1
 
     fun requireRunnable() {
-        if (this != GEMMA_E4B_V1)
+        if (this != GEMMA_E4B_V1 && this != GEMMA_E2B_LEARNING_V1)
             throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_MODEL_RETIRED)
     }
 
@@ -49,7 +55,7 @@ internal enum class PairedPcTextProfileDescriptor(
             if (selectionId == "auto") LEGACY_V1 else forExplicitSelection(selectionId)
 
         fun forExplicitSelection(selectionId: String?): PairedPcTextProfileDescriptor? =
-            entries.firstOrNull { it.selectionId == selectionId }
+            entries.firstOrNull { it != GEMMA_E2B_LEARNING_V1 && it.selectionId == selectionId }
 
         fun forModelAlias(modelId: String?): PairedPcTextProfileDescriptor? =
             entries.firstOrNull { it.modelId == modelId }

@@ -558,11 +558,10 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
             ?: throw CallPipelineFailure("BACKGROUND_QWEN_ASR_UNAVAILABLE")
         val model = app.models.models.value.single { it.id == choice.modelId && it.verified }
         val projector = app.models.models.value.single { it.id == model.id + "-mmproj" && it.verified }
-        val chosen = app.orchestration.choose("통화 녹음의 후속 일정과 메모 및 이메일 제안 분석", explicitDeep = true)
-            ?: throw CallPipelineFailure("TEXT_MODEL_UNAVAILABLE")
-        val localText = (chosen.model as? com.user.localagent.models.LocalWeight)?.installed
-            ?: throw CallPipelineFailure("TEXT_LOCAL_MODEL_REQUIRED")
-        require(localText.runtime in setOf("gguf", "litertlm"))
+        val localText = app.models.models.value.singleOrNull {
+            it.id == "gemma-e2b" && it.verified && it.runtime in setOf("gguf", "litertlm") &&
+                java.io.File(it.path).isFile
+        } ?: throw CallPipelineFailure("TEXT_MODEL_UNAVAILABLE")
         return CallAsrPin(model, projector, choice.language, if (model.id == "asr-qwen-17b") 2 else 4) to localText
     }
 

@@ -85,7 +85,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
             CallFollowUpReadiness.SOURCE_NOT_SELECTED->"삼성 전화의 통화 녹음 폴더를 선택해주세요."
             CallFollowUpReadiness.REQUIRES_SOURCE_ACCESS->"녹음 폴더 접근을 다시 연결해주세요."
             CallFollowUpReadiness.REQUIRES_PHONE_PERMISSION->"통화 종료 감지 권한이 필요합니다."
-            CallFollowUpReadiness.MODEL_UNAVAILABLE->if(modelDetail=="TEXT_MODEL_UNAVAILABLE")"모델 관리에서 로컬 대화 모델을 준비해주세요."else"자동 분석용 Qwen 음성 모델과 인코더를 모델 관리에서 준비해주세요."
+            CallFollowUpReadiness.MODEL_UNAVAILABLE->if(modelDetail=="TEXT_MODEL_UNAVAILABLE")"모델 관리에서 가벼운 Gemma E2B 대화 모델을 준비해주세요."else"자동 분석용 Qwen 음성 모델과 인코더를 모델 관리에서 준비해주세요."
             CallFollowUpReadiness.DEFERRED_DEVICE_STATE->"다른 작업·통화·발열·전원 상태가 안정되면 이어갑니다."
             CallFollowUpReadiness.SOURCE_REVIEW_REQUIRED->"녹음 파일 또는 폴더 상태를 확인해주세요."
             CallFollowUpReadiness.READY->"새 녹음 대기 · 저장 완료 확인 후 분석"

@@ -60,4 +60,16 @@ class PairedPcTextProfilesTest {
             assertFalse(profile.matchesModelIdentity(null, profile.modelSha256))
         }
     }
+    @Test fun memoryProfileRequiresAnAlreadyAuthorizedTargetAndIsNotSelectableInChat() {
+        val conversation = checkNotNull(com.user.localagent.models.PairedPcText.forRequest(
+            "paired-pc-gemma-e4b-v1", capturedRevision = 9, allowCloudText = false, currentRevision = 9, paired = true))
+        val memory = conversation.forMemoryAnalysis()
+        assertEquals(conversation.authorizationRevision, memory.authorizationRevision)
+        assertNull(PairedPcTextProfileDescriptor.forSelection(memory.id))
+        assertEquals("gemma-e2b", memory.profile.modelId)
+        assertEquals(com.user.localagent.core.GemmaImagePreparation.hashes.getValue("gemma-e2b"), memory.profile.modelSha256)
+        assertFalse(memory.profile.supportsQwenThinking)
+        memory.profile.requireRunnable()
+        assertEquals("gemma-e4b", conversation.profile.modelId)
+    }
 }

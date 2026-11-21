@@ -60,9 +60,13 @@ class PrivateAnalysisExecutor(
         val expected=when(call.name){"analyze_sms"->PrivateEvidenceKind.SMS;"analyze_audio_transcript"->PrivateEvidenceKind.AUDIO_TRANSCRIPT;else->PrivateEvidenceKind.IMPORTED_CONVERSATION}
         require(snapshot.coreSource.ref.kind==expected&&snapshot.coreSource.ref.scopeId==scopeId){"이 분석 도구에 맞는 현재 범위의 원문이 필요합니다."}
         val question=previous?.question?:call.arguments.getValue("question").jsonPrimitive.content
-        val chosen=choose(question)?:error("검증된 분석 모델을 선택해야 합니다.")
+        val original=choose(question)?:error("검증된 분석 모델을 선택해야 합니다.")
+        val target=(requestEngine as? com.user.localagent.inference.AutomaticComputeEngine)
+            ?.memoryAnalysisTarget(original.model,previous?.modelSha256)?:original.model
+        val outputBudget=if(previous==null)768 else 1024
+        val chosen=original.copy(model=target,options=original.options.privateAnalysisOptions(outputBudget))
         // The same request facade owns this preparation and the existing compute lease/teardown.
-        val analysisModel=requestEngine.preparePrivateAnalysis(chosen.model,chosen.options.privateAnalysisOptions(1024))
+        val analysisModel=requestEngine.preparePrivateAnalysis(chosen.model,chosen.options)
         val skill=skills.read(if(expected==PrivateEvidenceKind.AUDIO_TRANSCRIPT)"recording-analysis"else"message-analysis")
         val workflow=PrivateRecordAnalysisWorkflow(LocalPrivateAnalysisDecider(app,chosen,skill,snapshot,requestEngine=requestEngine,analysisModel=analysisModel),journal)
         val locator=snapshot.metadata.getValue("sourceLocator").jsonObject
