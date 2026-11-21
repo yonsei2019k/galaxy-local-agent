@@ -44,7 +44,8 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
                     capturedAllowTools=caller.allowTools,capturedMode=caller.mode,capturedPcDataBinding=caller.pcDataBinding,
                     capturedPcRevision=caller.capturedPcRevision,allowCloudText=caller.allowCloudText,
                     capturedAllowExternalAgent=caller.allowExternalAgent,capturedExternalAgentRevision=caller.externalAgentRevision,
-                    capturedKakaoReadBinding=caller.kakaoReadBinding,capturedPcImageRecoveryAllowed=caller.pcImageRecoveryAllowed)
+                    capturedKakaoReadBinding=caller.kakaoReadBinding,capturedPcImageRecoveryAllowed=caller.pcImageRecoveryAllowed,
+                    capturedPcTextDefault=caller.capturedPcTextDefault)
             }
             GoalLifecycleAction.PAUSE,GoalLifecycleAction.CLEAR,GoalLifecycleAction.UPDATE -> null
         }
@@ -59,7 +60,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
     capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId),capturedPcRevision:Long?=null,allowCloudText:Boolean=false,
     capturedAllowExternalAgent:Boolean=false,capturedExternalAgentRevision:Long?=null,
     capturedKakaoReadBinding:String?=null,capturedPcImageRecoveryAllowed:Boolean=false,
-    nextSegment:GoalSegmentDecision.Continue?=null):GoalLifecycleReceipt {
+    nextSegment:GoalSegmentDecision.Continue?=null,capturedPcTextDefault:String?=null):GoalLifecycleReceipt {
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
     val ownedContexts=linkedSetOf<String>()
@@ -113,7 +114,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText,
                     allowExternalAgent=capturedAllowExternalAgent,externalAgentRevision=capturedExternalAgentRevision,
                     kakaoReadBinding=capturedKakaoReadBinding,pcImageRecoveryAllowed=capturedPcImageRecoveryAllowed,
-                    goalSegment=segment,goalLedger=priorLedger).also {request->
+                    goalSegment=segment,goalLedger=priorLedger,capturedPcTextDefault=capturedPcTextDefault).also {request->
                         parent?.let {requireSameGoalAuthority(QueuedChatRequest.fromJson(it.contextJson),request)}
                         // Historical data cannot cross a changed cloud consent/model/branch boundary.
                         sources.forEach {
@@ -192,7 +193,8 @@ internal suspend fun ChatRunCoordinator.queueNextGoalSegment(access:ChatAccessSc
         ownerInstruction=request.text,capturedAllowTools=request.allowTools,capturedMode=request.mode,capturedPcDataBinding=request.pcDataBinding,
         capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
         capturedAllowExternalAgent=request.allowExternalAgent,capturedExternalAgentRevision=request.externalAgentRevision,
-        capturedKakaoReadBinding=request.kakaoReadBinding,capturedPcImageRecoveryAllowed=request.pcImageRecoveryAllowed,nextSegment=next)
+        capturedKakaoReadBinding=request.kakaoReadBinding,capturedPcImageRecoveryAllowed=request.pcImageRecoveryAllowed,nextSegment=next,
+        capturedPcTextDefault=request.capturedPcTextDefault)
 }
 
 /** Locks protect selection/CAS, but neither lock is held while waiting for a running job. */

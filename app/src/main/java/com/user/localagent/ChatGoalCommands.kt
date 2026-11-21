@@ -75,10 +75,15 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
             val binding=app.workspaceFor(access.projectId).bindingFingerprint()
             val prepared=saveUiGoalGuarded(access,goal)
             goalMutation.withLock {
+                val previousRun=prepared.linkedRunIds.lastOrNull()
+                val pcTextDefault=if(previousRun==null)
+                    com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId
+                else QueuedChatRequest.fromJson(checkNotNull(app.repository.chat.run(previousRun)).contextJson).capturedPcTextDefault
                 queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),
                     capturedPcRevision=pcAuthority.revision,allowCloudText=false,
                     capturedAllowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,
-                    capturedExternalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null)
+                    capturedExternalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null,
+                    capturedPcTextDefault=pcTextDefault)
                 if(selectedThreadId.value==threadId&&selectedProjectId.value==goal.projectId.orEmpty()){
                     runMode.value=ConversationSubmissionPolicy.newRequestMode().wireName
                 }

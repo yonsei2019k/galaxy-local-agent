@@ -21,6 +21,12 @@ internal enum class PairedPcTextProfileDescriptor(
         PairedPcTextProfile.MODEL_SHA256,
         PairedPcTextProfile.TITLE,
     ),
+    GEMMA_E4B_V1(
+        "paired-pc-gemma-e4b-v1",
+        "gemma-e4b",
+        com.user.localagent.core.GemmaImagePreparation.hashes.getValue("gemma-e4b"),
+        "PC · Gemma E4B",
+    ),
     FAST_4B_V1(
         PairedPcFast4BProfile.SELECTION_ID,
         PairedPcFast4BProfile.MODEL_ID,
@@ -31,32 +37,30 @@ internal enum class PairedPcTextProfileDescriptor(
     fun matchesModelIdentity(actualModelId: String?, actualModelSha256: String?): Boolean =
         actualModelId == modelId && actualModelSha256 == modelSha256
 
+    val supportsQwenThinking: Boolean get() = this == LEGACY_V1 || this == FAST_4B_V1
+
     companion object {
         fun forSelection(selectionId: String?): PairedPcTextProfileDescriptor? =
             if (selectionId == "auto") LEGACY_V1 else forExplicitSelection(selectionId)
 
         fun forExplicitSelection(selectionId: String?): PairedPcTextProfileDescriptor? =
-            when (selectionId) {
-                PairedPcTextProfile.SELECTION_ID -> LEGACY_V1
-                PairedPcFast4BProfile.SELECTION_ID -> FAST_4B_V1
-                else -> null
-            }
+            entries.firstOrNull { it.selectionId == selectionId }
 
         fun forModelAlias(modelId: String?): PairedPcTextProfileDescriptor? =
-            when (modelId) {
-                PairedPcTextProfile.MODEL_ID -> LEGACY_V1
-                PairedPcFast4BProfile.MODEL_ID -> FAST_4B_V1
-                else -> null
-            }
+            entries.firstOrNull { it.modelId == modelId }
+
+        fun resolveRequestSelection(selectionId: String, capturedDefault: String?): String =
+            if (selectionId == "auto" || selectionId == com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION)
+                capturedDefault ?: "auto" else selectionId
     }
 }
 
-/** Fence the newly introduced 4B route without reinterpreting legacy non-4B snapshots. */
+/** Keep newer profiles bound to the original selection without reinterpreting legacy snapshots. */
 internal object PairedPcContinuationProfileGuard {
     fun compatible(requestSelectionId: String, continuationSelectionId: String): Boolean {
         val original = PairedPcTextProfileDescriptor.forSelection(requestSelectionId)
         val continued = PairedPcTextProfileDescriptor.forExplicitSelection(continuationSelectionId)
-        val fast = PairedPcTextProfileDescriptor.FAST_4B_V1
-        return if (original == fast || continued == fast) original != null && original == continued else true
+        val boundProfiles = setOf(PairedPcTextProfileDescriptor.FAST_4B_V1, PairedPcTextProfileDescriptor.GEMMA_E4B_V1)
+        return if (original in boundProfiles || continued in boundProfiles) original == continued else true
     }
 }

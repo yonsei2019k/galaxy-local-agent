@@ -149,7 +149,8 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                     checkNotNull(currentCoroutineContext()[Job]),ownerInstruction=updated,capturedAllowTools=request.allowTools,capturedMode=request.mode,
                     capturedPcDataBinding=request.pcDataBinding,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
                     capturedAllowExternalAgent=request.allowExternalAgent,capturedExternalAgentRevision=request.externalAgentRevision,
-                    capturedKakaoReadBinding=request.kakaoReadBinding,capturedPcImageRecoveryAllowed=request.pcImageRecoveryAllowed)
+                    capturedKakaoReadBinding=request.kakaoReadBinding,capturedPcImageRecoveryAllowed=request.pcImageRecoveryAllowed,
+                    capturedPcTextDefault=request.capturedPcTextDefault)
             }else queueMutation.withLock {
             var submitted:QueuedChatRequest?=null
             val readbackFrom=com.user.localagent.core.RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,app.repository.chat.accessScope(threadId).scopeKey,request.workspaceBinding)
@@ -158,6 +159,7 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
                     allowTools=request.allowTools,mode=request.mode,previousSteps=steps,workspaceBinding=request.workspaceBinding,goal=request.goal,
                     pcDataBinding=request.pcDataBinding,kakaoReadBinding=request.kakaoReadBinding,pcImageRecoveryAllowed=request.pcImageRecoveryAllowed,capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
                     allowExternalAgent=request.allowExternalAgent,externalAgentRevision=request.externalAgentRevision,
+                    capturedPcTextDefault=request.capturedPcTextDefault,
                     readbackObligations=request.readbackObligations?.let {state->
                         com.user.localagent.core.RequiredReadbackObligations.carry(state,readbackFrom,readbackFrom.copy(runId=newRun.id),request.previousSteps,steps,steps.indices.associateWith {it})
                     }).also {submitted=it}.toJson()

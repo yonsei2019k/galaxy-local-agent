@@ -548,7 +548,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
                 QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
                     allowExternalAgent=resolvedModel==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(resolvedModel==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null,
-                    cloudReadOnlyModes=resolvedModel==ExternalAgentSettings.MODEL_ID && externalAuthority.enabled).also {submitted=it}.toJson()
+                    cloudReadOnlyModes=resolvedModel==ExternalAgentSettings.MODEL_ID && externalAuthority.enabled,
+                    capturedPcTextDefault=com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -641,7 +642,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val worker=try {
                         val requestHub=workerConnectionHubFactory?.invoke(request)?:requestConnectionHub
                         val engine=workerEngineFactory?.invoke(request)?:com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=request.runId,
-                            beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText)
+                            beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
+                            capturedPcTextDefault=request.capturedPcTextDefault)
                         ChatRunCoordinator(context,app,ChatRequestWorkerBinding(this@ChatRunCoordinator,request,engine),
                             inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,requestConnectionHub=requestHub,externalIntentLauncher=externalIntentLauncher)
                     }catch(cancel:CancellationException){throw cancel}
@@ -1983,7 +1985,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             current.revision,settings.snapshot()!=null,request.thinking)
     }
     private fun continuationTarget(request:QueuedChatRequest,selectionId:String):InferenceModelTarget {
-        if(!com.user.localagent.models.PairedPcContinuationProfileGuard.compatible(request.modelId,selectionId))
+        val original=com.user.localagent.models.PairedPcTextProfileDescriptor.resolveRequestSelection(request.modelId,request.capturedPcTextDefault)
+        if(!com.user.localagent.models.PairedPcContinuationProfileGuard.compatible(original,selectionId))
             throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_MODEL_SELECTION_CHANGED)
         if(com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(selectionId)!=null)
             return pairedTextChoice(request,selectionId)?.model
@@ -1994,7 +1997,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     private suspend fun chooseInference(request:QueuedChatRequest):ChosenInference? {
         inferenceChoiceOverride?.let {return it(request)}
-        val selection=if(request.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION)"auto" else request.modelId
+        val selection=com.user.localagent.models.PairedPcTextProfileDescriptor.resolveRequestSelection(request.modelId,request.capturedPcTextDefault)
         pairedTextChoice(request,selection)?.let{return it}
         if(selection=="auto")executionOrchestration.choose(request.text,request.thinking)?.let {return it}
         // Local/helper selection retains actual phone-file validation; it is not a PC load receipt.

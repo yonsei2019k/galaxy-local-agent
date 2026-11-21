@@ -167,7 +167,8 @@ private fun requireGoalParentRow(request:QueuedChatRequest,row:ChatRunRecord) {
 internal fun requireSameGoalAuthority(original:QueuedChatRequest,next:QueuedChatRequest) {
     check(original.threadId==next.threadId&&original.projectId==next.projectId&&original.branchId==next.branchId&&original.modelId==next.modelId&&
         original.thinking==next.thinking&&(!next.allowTools||original.allowTools)&&original.mode==next.mode&&original.workspaceBinding==next.workspaceBinding&&
-        original.pcDataBinding==next.pcDataBinding&&original.capturedPcRevision==next.capturedPcRevision&&original.allowCloudText==next.allowCloudText&&
+        original.pcDataBinding==next.pcDataBinding&&original.capturedPcRevision==next.capturedPcRevision&&
+        original.capturedPcTextDefault==next.capturedPcTextDefault&&original.allowCloudText==next.allowCloudText&&
         original.allowExternalAgent==next.allowExternalAgent&&original.externalAgentRevision==next.externalAgentRevision&&
         original.kakaoReadBinding==next.kakaoReadBinding&&original.pcImageRecoveryAllowed==next.pcImageRecoveryAllowed) {"이전 목표 실행의 권한·모델·자료 연결을 확대하거나 변경하지 않았습니다."}
     original.goalSegment?.let {before->next.goalSegment?.let {after->

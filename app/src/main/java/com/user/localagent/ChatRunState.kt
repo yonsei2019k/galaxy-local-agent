@@ -24,6 +24,7 @@ data class QueuedChatRequest(
     val goalSegment:GoalSegmentBinding?=null,
     val goalLedger:List<GoalLedgerEntry> = emptyList(),
     val cloudReadOnlyModes:Boolean=false,
+    val capturedPcTextDefault:String?=null,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -32,6 +33,8 @@ data class QueuedChatRequest(
         pcDataBinding?.let {require(it.matches(Regex("[a-f0-9]{64}"))){"PC 자료 선택의 고정 버전이 올바르지 않습니다."}}
         kakaoReadBinding?.let {require(runCatching{java.util.UUID.fromString(it).toString()==it}.getOrDefault(false))}
         require(capturedPcRevision==null||capturedPcRevision>=0)
+        require(capturedPcTextDefault==null || capturedPcRevision!=null &&
+            capturedPcTextDefault==com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId)
         require(!allowCloudText||capturedPcRevision!=null){"클라우드 사용은 현재 요청에 캡처한 명시 권한이 필요합니다."}
         require(!cloudReadOnlyModes || allowExternalAgent && modelId==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)
         require(externalAgentRevision==null||externalAgentRevision>=0)
@@ -58,6 +61,7 @@ data class QueuedChatRequest(
         put("kakaoReadBinding",kakaoReadBinding)
         put("pcImageRecoveryAllowed",pcImageRecoveryAllowed)
         put("capturedPcRevision",capturedPcRevision);put("allowCloudText",allowCloudText)
+        capturedPcTextDefault?.let {put("capturedPcTextDefault",it)}
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -90,7 +94,8 @@ data class QueuedChatRequest(
                 o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long},
                 o["goalSegment"]?.let {GoalSegmentBinding.parse(it.jsonObject)},
                 o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList(),
-                o["cloudReadOnlyModes"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false)
+                o["cloudReadOnlyModes"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
+                o["capturedPcTextDefault"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.user.localagent.inference
 
 import com.user.localagent.models.PairedPcTextProfile
+import com.user.localagent.models.PairedPcTextProfileDescriptor
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -63,5 +64,17 @@ class PcExplicitThinkingContractTest {
     @Test fun falseCannotBeReinterpretedAsLegacyAutomaticThinking() {
         assertFalse(matches(changed(receipt(),"appliedThinking",JsonPrimitive(true))))
         assertFalse(matches(changed(receipt(),"legacyMayReopen",JsonPrimitive(true))))
+    }
+
+    @Test fun gemmaReceiptKeepsItsHashAndNeverReportsQwenReasoningAllowance() {
+        val gemma=PairedPcTextProfileDescriptor.GEMMA_E4B_V1
+        val actual=JsonObject(receipt(cap=2048)+mapOf(
+            "modelId" to JsonPrimitive(gemma.modelId),"modelSha256" to JsonPrimitive(gemma.modelSha256),
+            "requestedThinking" to JsonPrimitive(true)))
+        assertTrue(pcThinkingReceiptMatches(actual,id,gemma.modelId,2048,8192,true,false))
+        assertFalse(pcThinkingReceiptMatches(changed(actual,"modelSha256",JsonPrimitive(PairedPcTextProfile.MODEL_SHA256)),
+            id,gemma.modelId,2048,8192,true,false))
+        assertFalse(pcThinkingReceiptMatches(changed(actual,"appliedThinking",JsonPrimitive(true)),
+            id,gemma.modelId,2048,8192,true,false))
     }
 }

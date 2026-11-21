@@ -26,7 +26,7 @@ internal fun pcThinkingWireSupported(health:JsonObject?):Boolean {
     val strict=value["strictThinkingBool"] as? JsonPrimitive?:return false
     return !version.isString&&version.intOrNull==1&&!strict.isString&&strict.booleanOrNull==true
 }
-/** A new comparison profile requires the authenticated v1 wire contract; legacy compatibility is unchanged. */
+/** Explicit newer profiles require the authenticated v1 wire contract. */
 internal fun pcTextProfileWireSupported(target:com.user.localagent.models.PairedPcText,health:JsonObject?):Boolean =
     target.profile==com.user.localagent.models.PairedPcTextProfileDescriptor.LEGACY_V1 || pcThinkingWireSupported(health)
 
@@ -36,7 +36,7 @@ internal fun pcThinkingReceiptMatches(receipt:JsonObject,id:String,model:String,
     fun flag(key:String)=(receipt[key] as? JsonPrimitive)?.takeUnless{it.isString}?.booleanOrNull
     fun text(key:String)=(receipt[key] as? JsonPrimitive)?.takeIf{it.isString}?.content
     val profile=com.user.localagent.models.PairedPcTextProfileDescriptor.forModelAlias(model)
-    val effective=thinking&&profile!=null&&!hasSchema&&cap>512
+    val effective=thinking&&profile?.supportsQwenThinking==true&&!hasSchema&&cap>512
     val extra=if(effective)900 else 0
     val hash=text("preparedInputSha256");val modelSha=text("modelSha256")
     return integer("wireVersion")==1&&text("requestId")==id&&text("modelId")==model&&
@@ -50,8 +50,10 @@ internal fun pcThinkingReceiptMatches(receipt:JsonObject,id:String,model:String,
 /** The paired PC computes text only. Request state, authority and persistence stay on the phone. */
 class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null,
     private val textAuthority:PcTextAuthority=PcTextAuthority(0),
-    private val targetCapturedPcRevision:Long?=null):InferenceEngine,PairedPcTextLoader {
+    private val targetCapturedPcRevision:Long?=null,
+    capturedPcTextDefault:String?=null):InferenceEngine,PairedPcTextLoader {
     private val context=context.applicationContext
+    private val capturedDefaultProfile=com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(capturedPcTextDefault)
     private val transport=PcTransport(this.context)
     private val mutex=Mutex()
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
@@ -118,8 +120,10 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             status.value="Claude 사용 · 내용이 Anthropic으로 전송됩니다";metrics.value=null;generation.value=null
             return@withLock
         }
-        val requestedModel=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.modelId(file.name)else PC_TEXT_MODEL
-        val requestedSha=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.hashes.getValue(requestedModel).take(16)else PC_TEXT_SHA_PREFIX
+        val requestedModel=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.modelId(file.name)
+            else capturedDefaultProfile?.modelId ?: PC_TEXT_MODEL
+        val requestedSha=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.hashes.getValue(requestedModel).take(16)
+            else capturedDefaultProfile?.modelSha256 ?: PC_TEXT_SHA_PREFIX
         val body=buildJsonObject{put("modelId",requestedModel);put("modelShaPrefix",requestedSha);put("contextSize",options.contextSize)}
         // Every decision round calls load; when the PC reports this owner's identical model resident, skip the load round trip.
         if(PcResidency.reusable(transport.lastHealth,requestedModel,requestedSha,options.contextSize)){

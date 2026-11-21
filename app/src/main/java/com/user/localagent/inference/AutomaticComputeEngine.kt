@@ -30,8 +30,8 @@ class AutomaticComputeEngine internal constructor(
     private val analysisPcTarget: (() -> PairedPcText?)? = null,
 ) : ComputeExecutionEngine, PairedPcTextLoader, AnalysisModelPreparation {
     constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {},
-        capturedPcRevision:Long?=null,allowCloudText:Boolean=false) :
-        this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText), ownerRunId, beforePhoneLoad)
+        capturedPcRevision:Long?=null,allowCloudText:Boolean=false,capturedPcTextDefault:String?=null) :
+        this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText,capturedPcTextDefault), ownerRunId, beforePhoneLoad)
     private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit) :
         this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = true, analysisPcTarget = parts.analysisPcTarget)
 
@@ -300,7 +300,7 @@ class AutomaticComputeEngine internal constructor(
     companion object {
         /** Bounded below the 90 s planning load budget so the owner sees "PC busy", not a timeout. */
         const val PC_LEASE_WAIT_MS = 15_000L
-        private fun components(context: Context, owner: String?,capturedPcRevision:Long?,allowCloudText:Boolean): Components {
+        private fun components(context: Context, owner: String?,capturedPcRevision:Long?,allowCloudText:Boolean,capturedPcTextDefault:String?): Components {
             val settings = PcComputeSettings.get(context)
             val original = settings.snapshot()
             val authority=PcTextAuthority(capturedPcRevision?:settings.authorizationRevision,allowCloudText)
@@ -310,13 +310,14 @@ class AutomaticComputeEngine internal constructor(
                     candidate.certificateSha256 == original.certificateSha256 && settings.snapshot()?.let {
                         it.serverId == original.serverId && it.token == original.token && it.certificateSha256 == original.certificateSha256
                     } == true
-            val pc = PcInferenceEngine(context, ::samePair, owner,authority,targetCapturedPcRevision=capturedPcRevision)
+            val pc = PcInferenceEngine(context, ::samePair, owner,authority,targetCapturedPcRevision=capturedPcRevision,
+                capturedPcTextDefault=capturedPcTextDefault)
             return Components(LocalInferenceEngine(context), pc,
                 eligible = { _, _ -> settings.snapshot()?.let(::samePair) == true },
                 preflight = pc::preflight, report = settings::report,
                 externalPcAuthority = { settings.snapshot()?.let(::samePair) == true },
                 analysisPcTarget = {
-                    PairedPcText.forRequest("auto", capturedPcRevision, allowCloudText,
+                    PairedPcText.forRequest(capturedPcTextDefault ?: "auto", capturedPcRevision, allowCloudText,
                         settings.authorizationRevision, settings.snapshot()?.let(::samePair) == true)
                 })
         }
