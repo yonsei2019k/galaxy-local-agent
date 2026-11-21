@@ -75,6 +75,7 @@
         <activity android:name=".connections.ConnectionsActivity" android:exported="false" />
         <activity android:name=".connections.CoupangReviewActivity" android:exported="false"
             android:process=":coupang_review" />
+        <activity android:name=".connections.PcOpenClawActivity" android:exported="false" />
         <activity android:name=".connections.SharedSourceActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

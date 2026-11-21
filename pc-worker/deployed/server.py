@@ -14,6 +14,7 @@ from owned_engines import OwnedEngines,OwnershipMismatch,RequestNotActive,Comput
 from pairing import Pairing
 from agent_bridge import AgentBridge,BridgeError
 from agent_provider_supervisor import AgentProviderSupervisor,load_config as load_agent_provider
+from pc_openclaw_agent import PcAgentError,PcOpenClawAgent,load_config as load_pc_openclaw
 from provider_conversation_context import ConversationContextError,MAX_CONTEXT_BYTES,validate_conversation_context
 from pathlib import Path
 from collab_bridge import CollabBridge,load_config as load_collab_config
@@ -39,6 +40,8 @@ def resident(header):
  except Exception:return {'llmResident':None}
 def note(path,status,error):
  # Session locators, tool data and capabilities never enter the persistent request log.
+ if path.startswith('/v1/pc-agent/'):
+  path='/v1/pc-agent'
  if path.startswith('/v1/agent/'):
   if status in (200,201) and not error:return
   path='/v1/agent'
@@ -88,6 +91,7 @@ try:
  AGENT_BRIDGE=AgentBridge(workspace_profiles=agent_workspace_profiles(),private_roots=(HOME,TOOLS,Path(LOG).parent,private_coordination))
 except (BridgeError,OSError,RuntimeError):AGENT_BRIDGE=AgentBridge(workspace_profiles={})
 AGENT_PROVIDER=AgentProviderSupervisor(AGENT_BRIDGE,load_agent_provider(HOME))
+PC_OPENCLAW=PcOpenClawAgent(load_pc_openclaw(HOME))
 ENGINE=RecoveryEngines(hashlib.sha256(TOKEN.encode()).hexdigest());PAIRING=Pairing(CONFIG)
 from media_engine import MediaEngine
 from engines import gpu_busy
@@ -143,6 +147,15 @@ class Handler(BaseHTTPRequestHandler):
   owners=self.headers.get_all('X-ZipHap-Compute-Owner',[])
   if len(owners)>1:raise ValueError('DUPLICATE_OWNER')
   owner=owner_value(owners[0] if owners else None)
+  if path.startswith('/v1/pc-agent/'):
+   if (self.headers.get_all('X-ZipHap-Agent-Capability',[]) or
+       self.headers.get_all('X-ZipHap-Phone-Capability',[])):
+    self.reply({'error':'PC_AGENT_PAIR_ONLY'},403);return
+   try:
+    status,value=PC_OPENCLAW.dispatch(self.command,path,owner,self.body)
+    self.reply(value,status)
+   except PcAgentError as error:self.reply({'error':error.code},error.status)
+   return
   if path=='/v1/control/agent-bootstrap':
    # Private host IPC, not a remote phone/MCP capability-minting endpoint.
    if self.command!='POST' or self.client_address[0]!='127.0.0.1':self.reply({'error':'LOCAL_CONTROL_ONLY'},403);return

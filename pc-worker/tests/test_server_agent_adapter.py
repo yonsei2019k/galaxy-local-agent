@@ -18,6 +18,7 @@ from agent_provider_supervisor import AgentProviderSupervisor
 from codex_agent_provider import AgentReport
 from provider_conversation_context import ConversationContextError,MAX_CONTEXT_BYTES,validate_conversation_context
 from test_provider_conversation_context import fixture as context_fixture
+from pc_openclaw_agent import PcAgentError
 
 SOURCE=Path(__file__).parents[1]/"deployed/server.py"
 OWNER="00000000-0000-0000-0000-000000000001"
@@ -38,13 +39,35 @@ def subject():
     namespace=dict(BaseHTTPRequestHandler=object,re=re,json=json,uuid=uuid,Path=Path,AGENT_BRIDGE=bridge,
         BridgeError=BridgeError,ConversationContextError=ConversationContextError,MAX_CONTEXT_BYTES=MAX_CONTEXT_BYTES,
         validate_conversation_context=validate_conversation_context,
-        AGENT_PROVIDER=mock.Mock(),owner_value=owner,LOG_LOCK=threading.Lock(),LOG_LIMIT=2097152,LOG="fixture.log",
+        AGENT_PROVIDER=mock.Mock(),PC_OPENCLAW=mock.Mock(),PcAgentError=PcAgentError,owner_value=owner,LOG_LOCK=threading.Lock(),LOG_LIMIT=2097152,LOG="fixture.log",
         time=types.SimpleNamespace(strftime=lambda _:"synthetic-time"))
     exec(compile(ast.Module(body=selected,type_ignores=[]),str(SOURCE),"exec"),namespace)
     return namespace,bridge
 
 
 class ServerAgentAdapterTests(unittest.TestCase):
+    def test_pc_agent_start_requires_pairing_and_rejects_delegated_capabilities(self):
+        path = "/v1/pc-agent/jobs"
+        for authorized, header, expected in (
+            (False, None, 401),
+            (True, "X-ZipHap-Agent-Capability", 403),
+            (True, "X-ZipHap-Phone-Capability", 403),
+            (True, None, 202),
+        ):
+            with self.subTest(authorized=authorized, header=header):
+                ns, bridge, call, response, _ = self.make(path, authorized=authorized)
+                if header:
+                    call.headers.add_header(header, CAP)
+                agent = ns["PC_OPENCLAW"]
+                agent.dispatch.return_value = (202, {"state": "RUNNING"})
+                ns["Handler"].dispatch(call)
+                self.assertEqual(response[0][0], expected)
+                if expected == 202:
+                    agent.dispatch.assert_called_once_with("POST", path, OWNER, call.body)
+                else:
+                    agent.dispatch.assert_not_called()
+                bridge.dispatch_authenticated.assert_not_called()
+
     def test_provider_progress_is_returned_only_to_opted_in_phone_builds(self):
         for opt_in in (False,True):
             ns,b,c,response,_=self.make("/v1/agent/sessions/"+SESSION+"/launch",body={"ownerRequest":"synthetic"})

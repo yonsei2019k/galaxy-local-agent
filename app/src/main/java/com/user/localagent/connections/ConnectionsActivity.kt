@@ -67,6 +67,7 @@ class ConnectionsActivity:Activity() {
         button("PC 연결 파일 등록") {startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE),PC_PAIR_REQUEST)}
         root.addView(CheckBox(this).apply {text="등록한 PC의 분석·NotebookLM 도구 사용 허용";isChecked=hub.pc.enabled();setOnCheckedChangeListener {_,checked->hub.pc.allow(checked)}})
         button("PC 도구 실제 연결 확인") {run {output.text=hub.pc.verify()}}
+        button("PC 집합 에이전트 제어") { startActivity(Intent(this, PcOpenClawActivity::class.java)) }
         button("현재 대화의 분석 파일 선택") {startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),DATA_REQUEST)}
         button("선택한 파일의 표·통계 확인") {run {val result=hub.pc.execute(ToolCall(java.util.UUID.randomUUID().toString(),"analyze_selected_data",buildJsonObject {put("mode","statistics")}));output.text=result.content}}
         button("NotebookLM 노트북 목록 조회") {run {val result=hub.pc.execute(ToolCall(java.util.UUID.randomUUID().toString(),"list_notebooklm_notebooks",buildJsonObject {}));output.text=result.content}}
