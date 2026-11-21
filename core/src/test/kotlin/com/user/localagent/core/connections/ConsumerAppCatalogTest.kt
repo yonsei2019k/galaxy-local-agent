@@ -7,8 +7,8 @@ import org.junit.Test
 
 class ConsumerAppCatalogTest {
     private fun call(name:String,vararg args:Pair<String,String>)=ToolCall("consumer-test",name,buildJsonObject {args.forEach {(key,value)->put(key,value)}})
-    @Test fun allNineFixedAppToolsAreRegistered() {
-        assertEquals(9,ConsumerAppCatalog.names.size)
+    @Test fun allFixedAppToolsAreRegistered() {
+        assertEquals(10,ConsumerAppCatalog.names.size)
         assertTrue(ToolRegistry.definitions.keys.containsAll(ConsumerAppCatalog.names))
         assertEquals(ConsumerAppCatalog.names,ConsumerAppCatalog.appForTool.keys)
         assertTrue(ConsumerAppCatalog.definitions.all {it.risk==Risk.LOW})

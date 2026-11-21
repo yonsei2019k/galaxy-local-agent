@@ -90,6 +90,7 @@ class ConnectionsActivity:Activity() {
         button("넷플릭스 열기") {consumerAction("open_netflix")}
         button("입력한 작품을 넷플릭스에서 찾기") {consumerAction("search_netflix",true)}
         button("쿠팡 열기") {consumerAction("open_coupang")}
+        button("쿠팡 구매후기 준비") {startActivity(Intent(this, CoupangReviewActivity::class.java))}
         button("입력한 상품을 쿠팡에서 찾기") {consumerAction("search_coupang",true)}
         button("쿠팡이츠 열기") {consumerAction("open_coupang_eats")}
         label("NotebookLM에 자료 전달",19f)

@@ -13,6 +13,9 @@ class ConsumerApps(private val context:Context) {
     }.toSet()
     fun prepare(call:ToolCall):Intent {
         val target=ConsumerAppCatalog.target(call)
+        if (call.name == com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL) {
+            return Intent(context, CoupangReviewActivity::class.java)
+        }
         if(target.uri==null)return context.packageManager.getLaunchIntentForPackage(target.app.packageName)
             ?:error("${target.app.label} 앱이 설치되어 있는지 확인해주세요.")
         val uri=Uri.parse(target.uri)

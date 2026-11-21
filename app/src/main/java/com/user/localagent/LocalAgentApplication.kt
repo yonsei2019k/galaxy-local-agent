@@ -10,6 +10,10 @@ open class LocalAgentApplication : Application() {
     private val maintenance=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     override fun onCreate() {
         super.onCreate()
+        if (getProcessName() == "$packageName:coupang_review") {
+            android.webkit.WebView.setDataDirectorySuffix("coupang_review")
+            return
+        }
         if (!startAssistantBackgroundWork) return
         com.user.localagent.updates.UpdateManager(this).apply {setBusy(false);schedule()}
         container.callFollowUp.restore()
