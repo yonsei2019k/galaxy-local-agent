@@ -282,7 +282,7 @@ fun ChatWorkspace(
     }
 
     ModalNavigationDrawer(drawerState=drawerState,gesturesEnabled=navigation!=null,drawerContent={
-        navigation?.let{nav->ChatNavigator(nav.copy(modelChoices=nav.modelChoices.ifEmpty{models.filter{it.verified&&it.runtime in setOf("litertlm","gguf")}.map{UiModelChoice(it.id,shortModelLabel(it))}}),onDismiss={scope.launch{drawerState.close()}},onOpenImages={navigate(7)},onOpenSettings={navigate(4)})}
+        navigation?.let{nav->ChatNavigator(nav.copy(modelChoices=nav.modelChoices.ifEmpty{models.filter{it.id!="gemma-e2b"&&it.verified&&it.runtime in setOf("litertlm","gguf")}.map{UiModelChoice(it.id,shortModelLabel(it))}}),onDismiss={scope.launch{drawerState.close()}},onOpenImages={navigate(7)},onOpenSettings={navigate(4)})}
     }) {
     Column(
         modifier.fillMaxSize().background(ZipHapColors.Background)
