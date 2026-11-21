@@ -17,6 +17,7 @@ open class LocalAgentApplication : Application() {
         if (!startAssistantBackgroundWork) return
         com.user.localagent.updates.UpdateManager(this).apply {setBusy(false);schedule()}
         container.callFollowUp.restore()
+        maintenance.launch {container.knowledgeIngestion.schedule()}
         com.user.localagent.analysis.AnalysisMemoryWorker.enqueue(this)
         container.remoteTests.start(maintenance)
         maintenance.launch {runCatching {com.user.localagent.audio.AudioChunkDecoder.cleanupOrphanedSessions(this@LocalAgentApplication)}}

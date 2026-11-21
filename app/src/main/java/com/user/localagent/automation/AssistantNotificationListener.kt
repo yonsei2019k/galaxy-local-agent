@@ -7,10 +7,33 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
+import com.user.localagent.LocalAgentApplication
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 
 /** Counts opted-in notification events and forwards only per-app-consented messages to the session inbox. */
 class AssistantNotificationListener : NotificationListenerService() {
+    private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
+    private val kakao=Channel<StatusBarNotification>(64)
+    override fun onCreate() {
+        super.onCreate()
+        val learning=(application as? LocalAgentApplication)?.container?.knowledgeIngestion?:return
+        scope.launch {
+            for(event in kakao)try {learning.captureKakaoNotification(event)}
+            catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){learning.recordKakaoCaptureGap()}
+        }
+    }
+    override fun onDestroy() {
+        kakao.close()
+        scope.cancel()
+        super.onDestroy()
+    }
     override fun onNotificationPosted(notification: StatusBarNotification) {
+        if(notification.packageName=="com.kakao.talk"){
+            val learning=(application as? LocalAgentApplication)?.container?.knowledgeIngestion
+            if(learning?.canCaptureKakao()==true&&!kakao.trySend(notification).isSuccess)learning.recordKakaoCaptureGap()
+        }
         // Separate explicitly enabled encrypted backlog; no reply actions are retained here.
         com.user.localagent.briefing.BriefingSources.enqueue(this,notification)
         runCatching {com.user.localagent.integrations.MessengerInbox.receive(this,notification)}

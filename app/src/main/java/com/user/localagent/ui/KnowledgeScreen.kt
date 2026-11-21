@@ -103,7 +103,17 @@ import kotlinx.coroutines.*
         item {Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Column(Modifier.weight(1f)){Text("자동 기억 정리",style=MaterialTheme.typography.titleMedium);Text("직접 알려준 사실과 연결한 자료의 관찰을 구분해 폰 안에 저장",style=MaterialTheme.typography.bodySmall)}
             Switch(checked=learning.enabled,enabled=!working,onCheckedChange={enabled->execute {learning=app.knowledgeIngestion.setEnabled(enabled);onStatus(if(enabled)"자동 기억 정리를 켰습니다."else"자동 기억 정리를 중단했습니다.")}})
-        };Text("백그라운드 정리는 충전·대기 중에 실행합니다. 모델 가중치를 재학습하는 기능은 아닙니다.",style=MaterialTheme.typography.bodySmall)
+        }
+        if(learning.enabled)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+            Column(Modifier.weight(1f)){
+                Text("새벽에 자료 기억하기",style=MaterialTheme.typography.titleMedium)
+                Text("새벽 3시 이후 충전·대기 중, 접근을 허용한 문자와 카톡 알림, 가져온 대화, 저장된 녹음 전사의 주제를 기억에 저장합니다.",style=MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked=learning.nightlyEnabled,enabled=!working,onCheckedChange={enabled->execute {
+                learning=app.knowledgeIngestion.setNightlyEnabled(enabled)
+                onStatus(if(enabled)"새벽 기억 정리를 예약했습니다."else"새벽 기억 정리를 껐습니다.")
+            }})
+        }
         OutlinedButton(enabled=learning.enabled&&!working,onClick={execute {val report=app.knowledgeIngestion.scanNow(manual=true,maxSources=200);learning=app.knowledgeIngestion.state();onStatus("자료 ${report.processedSources}건의 기억 정리를 확인했습니다.${if(report.hasMore)" 나머지는 이어서 처리합니다."else""}");if(report.hasMore)app.knowledgeIngestion.requestInitialScan()}}){Text("연결한 자료 지금 정리")}}
         item {Text("기억과 사용자 프로필",style=MaterialTheme.typography.titleLarge)
             Text("확인된 기본 프로필과 현재 요청에 관련된 기억만 대화에 사용합니다. 관찰은 추론으로 구분하며, 제안은 확정 전까지 사실로 사용하지 않습니다.",style=MaterialTheme.typography.bodySmall)}
