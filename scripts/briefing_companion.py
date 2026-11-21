@@ -3,7 +3,12 @@
 Run from a private directory with a private JSON config; never place configuration or results in Git.
 This is the product's analysis runtime, not a coding agent or another Codex chat.
 """
-import argparse, base64, ctypes, datetime, hashlib, json, os, pathlib, re, subprocess, tempfile, time
+import argparse, base64, ctypes, datetime, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, time
+
+runtime_dir = pathlib.Path(__file__).resolve().parent
+if not (runtime_dir / "model_orchestration.py").is_file():
+    sys.path.insert(0, str(runtime_dir.parent / "pc-worker" / "deployed"))
+from model_orchestration import briefing_profile, model_catalog, model_flags, skill_body, subscription_environment
 
 EVENT_PROPERTIES = {
     **{k: {"type": "string"} for k in ("title", "quote", "reason", "location", "kind", "recipient", "deliveryMethod")},
@@ -139,9 +144,11 @@ class Companion:
             schema = root / "schema.json"
             output = root / "result.json"
             instructions = root / "instructions.txt"
-            instructions.write_text(INSTRUCTION, encoding="utf-8")
+            instructions.write_text(skill_body() + "\n\n" + INSTRUCTION, encoding="utf-8")
             schema.write_text(json.dumps(SCHEMA), encoding="utf-8")
             args = [self.cfg["codex"], "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "--color", "never", "--output-schema", str(schema), "-o", str(output), "-C", str(root)]
+            profile = briefing_profile(model_catalog(self.cfg["codex"]), len(batch["records"]), len(recent))
+            args += model_flags(profile)
             for feature in ("shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use", "memories", "multi_agent", "code_mode", "code_mode_host"):
                 args += ["--disable", feature]
             args += ["-c", 'web_search="disabled"', "-c", "project_doc_max_bytes=0", "-c", "bundled_skills.enabled=false",
@@ -150,7 +157,7 @@ class Companion:
             if skill_paths:
                 args[-1:-1] = ["-c", "skills.config=[" + ",".join('{path=' + json.dumps(str(p)) + ',enabled=false}' for p in skill_paths) + "]"]
             prompt = json.dumps({**batch, "recent": recent}, ensure_ascii=False)
-            clean_env = {k:v for k,v in os.environ.items() if k not in ("OPENAI_API_KEY", "CODEX_API_KEY")}
+            clean_env = subscription_environment()
             result = subprocess.run(args, input=prompt.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=900, creationflags=0x08000000, env=clean_env)
             if result.returncode or not output.exists():
                 raise RuntimeError("analysis_failed_no_source_ack")

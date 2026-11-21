@@ -49,7 +49,7 @@ def load_config(home):
             return None
         return ProviderConfig(Path(data["executable"]), data["executableSha256"], Path(data["python"]),
                               Path(data["mcpScript"]), data["mcpScriptSha256"], Path(data["runtimeDirectory"]),
-                              Path(data["workspace"]), data.get("model"))
+                              Path(data["workspace"]), data.get("model"), orchestrate=True)
     except (OSError, ValueError, UnicodeError, TypeError):
         return None
 
@@ -220,6 +220,8 @@ class AgentProviderSupervisor:
                 kwargs["progress"] = lambda value: self._progress(child, value)
             if conversation_context is not None and self._supports_keyword("conversation_context", variadic=False):
                 kwargs["conversation_context"] = conversation_context
+            if self._supports_keyword("allowed_tools", variadic=False):
+                kwargs["allowed_tools"] = child.tool_names
             total_calls = total_ms = 0
             for attempt in range(2):
                 started = time.monotonic()

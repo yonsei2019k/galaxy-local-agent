@@ -20,6 +20,8 @@ import signal
 from provider_conversation_context import (ConversationContextError, provider_input,
                                            validate_conversation_context)
 
+from model_orchestration import agent_profile, model_catalog, model_flags, skill_body, subscription_environment
+
 BOOTSTRAP_ENV = "ZIPHAP_DEVICE_BRIDGE_BOOTSTRAP"
 MAX_LINE = 256 * 1024
 MAX_OUTPUT = 8 * 1024 * 1024
@@ -186,6 +188,7 @@ class ProviderConfig:
     runtime_directory: Path
     workspace: Path
     model: str | None = None
+    orchestrate: bool = False
 
 
 @dataclass(frozen=True)
@@ -198,7 +201,7 @@ class AgentReport:
     mcp_calls: int
 
 
-def build_launch(config, bootstrap, instructions, schema, external_allowed=False):
+def build_launch(config, bootstrap, instructions, schema, external_allowed=False, *, allowed_tools=(), read_recovery=None):
     if external_allowed is not True:
         raise ProviderError("EXTERNAL_AGENT_NOT_ALLOWED")
     if type(bootstrap) is not dict or set(bootstrap) != {"sessionId", "parentRunId", "agentCapability", "revision"}:
@@ -246,9 +249,10 @@ def build_launch(config, bootstrap, instructions, schema, external_allowed=False
         if not isinstance(config.model, str) or not 1 <= len(config.model) <= 100 or any(c.isspace() for c in config.model):
             raise ProviderError("PROVIDER_CONFIGURATION")
         args += ["--model", config.model]
+    elif config.orchestrate:
+        args += model_flags(agent_profile(model_catalog(executable), allowed_tools, read_recovery))
     args.append("-")
-    environment = {k: v for k, v in os.environ.items() if k not in
-                   ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", BOOTSTRAP_ENV)}
+    environment = subscription_environment()
     environment[BOOTSTRAP_ENV] = secret  # Child only; never arguments, global settings or model content.
     return args, environment
 
@@ -265,7 +269,7 @@ def _parse(raw):
 
 
 def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=None, timeout=300, progress=None, observe_tool=None,
-        conversation_context=None, read_recovery=None):
+        conversation_context=None, read_recovery=None, allowed_tools=()):
     """Blocking owned child. Caller revokes broker authority when this fails/cancels.
 
     No shell command is composed. A stopped child is not a phone cancel ACK.
@@ -334,9 +338,14 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
                                   "A public web lookup known to have had no effect may be retried once. "
                                   "If the same lookup fails again or is skipped, change the query or source, "
                                   "or finish with the verified evidence already available.")
+        if config.orchestrate and external_allowed is True:
+            instructions_text += "\n\n" + skill_body()
         instructions.write_text(instructions_text, encoding="utf-8")
         schema.write_text(json.dumps(FINAL_SCHEMA), encoding="utf-8")
-        args, environment = build_launch(config, bootstrap, instructions, schema, external_allowed)
+        args, environment = build_launch(config, bootstrap, instructions, schema, external_allowed,
+                                         allowed_tools=allowed_tools, read_recovery=read_recovery)
+        if stop.is_set():
+            raise ProviderError("PROVIDER_CANCELLED")
         readers_stop = threading.Event()
         threads = []
         tree = None

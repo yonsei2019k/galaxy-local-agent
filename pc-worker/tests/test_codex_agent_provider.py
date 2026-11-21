@@ -87,6 +87,20 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("private synthetic answer",repr(report))
         self.assertEqual({self.exe,self.script},set(self.root.iterdir()))
 
+    def test_routed_launch_passes_supported_model_and_effort_without_new_scope(self):
+        from dataclasses import replace
+        config = replace(self.config, orchestrate=True)
+        catalog = {"gpt-6.1-terra": {"medium"}, "gpt-6.2-sol": {"medium"}}
+        with mock.patch.object(p, "model_catalog", return_value=catalog), \
+                mock.patch.object(p.subprocess, "Popen", return_value=Process(self.events())) as launched:
+            p.run(config, self.bootstrap, "synthetic request", external_allowed=True,
+                  allowed_tools={"plan_task", "read_screen"})
+        args = launched.call_args.args[0]
+        self.assertEqual("gpt-6.1-terra", args[args.index("--model") + 1])
+        self.assertIn('model_reasoning_effort="medium"', args)
+        self.assertEqual("read-only", args[args.index("--sandbox") + 1])
+        self.assertNotIn("synthetic request", args)
+
     def test_recovery_observations_stay_in_stdin_separate_from_owner_authority(self):
         process = Process(self.events())
         process.stdin = RecordedStdin()

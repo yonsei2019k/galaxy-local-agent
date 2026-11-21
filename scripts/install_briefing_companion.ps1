@@ -13,6 +13,11 @@ $configuration=@{adb=$connection.adb;target=$connection.target;deviceIdentitySha
 $configFile=Join-Path $destination 'config.json'
 $configuration|ConvertTo-Json|Set-Content -LiteralPath $configFile -Encoding utf8
 $runtime=Join-Path $destination 'briefing_companion.py'
+$providerAssets = Join-Path (Split-Path -Parent $PSScriptRoot) 'pc-worker\deployed'
+$orchestrationSkill = Join-Path $destination 'skills\model-orchestration'
+New-Item -ItemType Directory -Force -Path $orchestrationSkill | Out-Null
+Copy-Item -LiteralPath (Join-Path $providerAssets 'skills\model-orchestration\SKILL.md') -Destination $orchestrationSkill
+Copy-Item -LiteralPath (Join-Path $providerAssets 'model_orchestration.py') -Destination $destination
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'briefing_companion.py') -Destination $runtime
 $pythonWindowless=Join-Path (Split-Path -Parent $PythonExe) 'pythonw.exe'
 if(!(Test-Path -LiteralPath $pythonWindowless)){throw 'A windowless Python runtime is required'}
