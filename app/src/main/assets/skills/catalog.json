@@ -213,7 +213,7 @@
       "category": "assistant",
       "version": "2",
       "asset": "skills/email/SKILL.md",
-      "sha256": "82eeccec22962e0eaa162e9aa713558ec5114ec7d059bce51b2a5f88aca78433",
+      "sha256": "c75421b48a3e0f226329ab8985c92dd63ca77832362baa46d7878a014da3e683",
       "tools": [
         "prepare_email",
         "search_gmail_messages",
@@ -541,7 +541,7 @@
       "category": "analysis",
       "version": "2",
       "asset": "skills/recording-analysis/SKILL.md",
-      "sha256": "eccc514ba89ed79c082d1ddac247c98768980a5e6d78093e785d4d8c699c25d8",
+      "sha256": "a4a9f05c537ebd88e3dfde3af6978be49bb0907d95fc5ef80b309aaded6e40b5",
       "tools": [
         "list_analysis_sources",
         "list_audio_recordings",
