@@ -183,6 +183,20 @@ class CloudConversationContextTest {
         assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
     }
 
+    @Test fun crossRunFallbackCannotClipTheNewestOwnerCorrection() {
+        val reply = "H" + "\u0001".repeat(1498) + "T"
+        val correction = "가".repeat(749) + "정정" + "나".repeat(749)
+        val result = checkNotNull(build(listOf(turn(1, "assistant", reply), turn(2, text = correction))))
+        val rows = turns(result)
+        assertEquals(listOf("assistant", "user"), rows.map { it.getValue("role").jsonPrimitive.content })
+        assertEquals(listOf(binding(1).runId, binding(2).runId), rows.map { it.getValue("sourceRunId").jsonPrimitive.content })
+        assertEquals(correction, rows.last().getValue("text").jsonPrimitive.content)
+        val excerpt = rows.first().getValue("text").jsonPrimitive.content
+        assertTrue(excerpt.startsWith("H") && excerpt.contains("생략") && excerpt.endsWith("T"))
+        assertTrue(excerpt.length < reply.length)
+        assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
+    }
+
     @Test fun headAndTailClippingKeepsLiteralLateCorrectionWithoutInventingMeaning(){
         val original="원래 요청: 서울역\n"+"자료 ".repeat(2000)+"\n정정: 부산역만 검색, 예약 금지"
         val result=checkNotNull(build(listOf(turn(1,text=original))))

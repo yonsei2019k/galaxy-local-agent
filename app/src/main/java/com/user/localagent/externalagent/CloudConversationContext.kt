@@ -67,10 +67,14 @@ object CloudConversationContext {
                 returningToPausedRequest,
             )?.toInt()
             val priority=listOfNotNull(partner,newest).sorted()
-            // Keep the latest row at its wire limit for an adjacent owner pair or a same-run reply.
+            // Keep the latest row at its wire limit for an adjacent owner pair, a same-run reply,
+            // or an owner correction paired with an earlier reply from another run.
             val earlier = partner?.let { eligibleTurns[it] }
-            val prioritizeNewest = earlier?.role == "user" &&
-                (eligibleTurns[newest].role == "user" || earlier.binding.runId == latestRun)
+            val newestIsOwner = eligibleTurns[newest].role == "user"
+            val prioritizeNewest = earlier != null && (
+                (earlier.role == "user" && (newestIsOwner || earlier.binding.runId == latestRun)) ||
+                (earlier.role == "assistant" && newestIsOwner && earlier.binding.runId != latestRun)
+            )
             fun priorityRow(index: Int, limit: Int) = turnJson(eligibleTurns[index],
                 if (prioritizeNewest && index == newest) MAX_TURN_CHARS else limit)
             // One maximally escaped row plus the partner and task minima fits.
