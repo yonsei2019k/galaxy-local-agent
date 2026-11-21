@@ -101,18 +101,8 @@ import kotlinx.coroutines.*
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=24.dp)){
         item {PlanningLearningPanel(app,onStatus,onHistoryChanged)}
         item {Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-            Column(Modifier.weight(1f)){Text("자동 기억 정리",style=MaterialTheme.typography.titleMedium);Text("직접 알려준 사실과 연결한 자료의 관찰을 구분해 폰 안에 저장",style=MaterialTheme.typography.bodySmall)}
+            Column(Modifier.weight(1f)){Text("자동 기억 정리",style=MaterialTheme.typography.titleMedium);Text("문자와 카톡·메일 알림에서 근거가 있는 내용을 기억합니다. 통화 기록과 사용 정보 접근을 허용한 앱의 사용 시각도 폰에 저장합니다.",style=MaterialTheme.typography.bodySmall)}
             Switch(checked=learning.enabled,enabled=!working,onCheckedChange={enabled->execute {learning=app.knowledgeIngestion.setEnabled(enabled);onStatus(if(enabled)"자동 기억 정리를 켰습니다."else"자동 기억 정리를 중단했습니다.")}})
-        }
-        if(learning.enabled)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-            Column(Modifier.weight(1f)){
-                Text("새벽에 자료 기억하기",style=MaterialTheme.typography.titleMedium)
-                Text("새벽 3시 이후 충전·대기 중, 접근을 허용한 문자와 카톡 알림, 가져온 대화, 저장된 녹음 전사에서 근거가 있는 일정·할 일·변경 등을 기억합니다.",style=MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked=learning.nightlyEnabled,enabled=!working,onCheckedChange={enabled->execute {
-                learning=app.knowledgeIngestion.setNightlyEnabled(enabled)
-                onStatus(if(enabled)"새벽 기억 정리를 예약했습니다."else"새벽 기억 정리를 껐습니다.")
-            }})
         }
         OutlinedButton(enabled=learning.enabled&&!working,onClick={execute {
             val report=app.knowledgeIngestion.scanConnectedNow {
@@ -124,7 +114,7 @@ import kotlinx.coroutines.*
                 "learning_model_unavailable"->"자료는 보존했습니다. 모델 관리에서 Qwen 4B를 준비하면 이어서 분석합니다."
                 "learning_pending_evidence"->"근거를 확인하지 못한 구간은 보류했습니다. 다음 실행에서 이어갑니다."
                 "sms_permission_missing"->"문자 접근 권한이 없어 문자는 건너뛰었습니다."
-                "nightly_kakao_capture_partial"->"일부 카톡 알림을 확보하지 못했습니다."
+                "notification_capture_partial"->"일부 카톡 또는 메일 알림을 확보하지 못했습니다."
                 "source_or_generation_changed","deferred_device_state","disabled"->"자료나 기기 상태를 확인한 뒤 다시 눌러주세요."
                 else->if(report.hasMore)"다시 누르면 저장 지점부터 이어집니다."else""
             }

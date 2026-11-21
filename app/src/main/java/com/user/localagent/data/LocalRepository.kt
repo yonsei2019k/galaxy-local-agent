@@ -266,7 +266,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val legacy=if(!includeCore)mutableListOf()else searchMemories(query,3).filter {it.text !in existingValues&&permitted("legacy_memory",it.text)&&graph.allowed("approved_memory",it.id)}.take(2).toMutableList()
         fun claim(item:KnowledgeClaim)=buildJsonObject {
             put("value",item.value.take(240));put("status",item.status);put("sourceKind",item.sourceKind.take(32))
-            if ("record_semantic" in item.tags) {
+            if ("record_semantic" in item.tags || "device_activity" in item.tags) {
                 put("observedAtMillis", item.updatedAt)
                 item.tags.firstOrNull { it in setOf("stated", "changed", "cancelled", "uncertain") }?.let { put("recordState", it) }
             }
@@ -952,8 +952,3 @@ private object DatabaseProvider {
         return raw
     }
 }
-
-
-
-
-
