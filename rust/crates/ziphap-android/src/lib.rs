@@ -244,10 +244,11 @@ impl NativeRunJournal {
     }
 
     /// Metadata from the actual Android executor only; never invoke with a provider's success report.
-    /// This deliberately cannot create a Completed event or grant permission.
+    /// A closed journal can retain the receipt for its original in-flight call.
+    /// This does not reopen dispatch, clear closure uncertainty, or complete the task.
     pub fn finish_call(&self, call_id: String, verification: String, effect_not_applied: bool,now_ms: u64) -> Result<(), EngineError> {
         let mut s = self.state.lock().map_err(|_| EngineError::Unavailable)?;
-        if s.closed || s.in_flight.as_ref() != Some(&call_id) { return Err(EngineError::Rejected); }
+        if s.in_flight.as_ref() != Some(&call_id) { return Err(EngineError::Rejected); }
         let tool=s.in_flight_tool.as_deref().ok_or(EngineError::Rejected)?;
         let pending_owner=verification=="PREPARED"&&!opens_screen(tool);
         let state = match verification.as_str() {
@@ -306,6 +307,25 @@ mod tests {
         n.finish_call("one".into(), "VERIFIED".into(), false, 400_000).unwrap();
         assert!(n.begin_call(binding(), "two".into(), "save_note".into(), 400_001).is_err());
         assert!(n.events(0).unwrap().contains("verified"));
+    }
+    #[test]
+    fn closed_checkpoint_accepts_only_the_original_pending_receipt() {
+        let journal = native();
+        journal.begin_call(binding(), "pending".into(), "save_note".into(), 101).unwrap();
+        journal.close(102).unwrap();
+        let restored = NativeRunJournal::restore(binding(), journal.checkpoint().unwrap()).unwrap();
+        assert!(restored.finish_call("foreign".into(), "VERIFIED".into(), false, 103).is_err());
+        assert!(restored.begin_call(binding(), "new".into(), "save_note".into(), 103).is_err());
+
+        restored.finish_call("pending".into(), "VERIFIED".into(), false, 104).unwrap();
+        assert!(restored.finish_call("pending".into(), "VERIFIED".into(), false, 105).is_err());
+        restored.close(106).unwrap();
+        let sealed = NativeRunJournal::restore(binding(), restored.checkpoint().unwrap()).unwrap();
+        assert!(sealed.begin_call(binding(), "new".into(), "save_note".into(), 107).is_err());
+        let events = sealed.events(0).unwrap();
+        assert!(events.contains("verified"));
+        assert!(events.contains("uncertain"));
+        assert!(!events.contains("completed"));
     }
     #[test] fn restart_preserves_inflight_uncertainty_and_exact_binding() {
         let n=native();n.begin_call(binding(),"one".into(),"save_note".into(),101).unwrap();
