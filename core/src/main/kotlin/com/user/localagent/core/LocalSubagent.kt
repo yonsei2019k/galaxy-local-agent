@@ -10,7 +10,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -144,35 +143,56 @@ class LocalSubagentLoop(
     private fun parse(raw:String,tools:Set<String>):Decision {
         val text=raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val root=runCatching{Json.parseToJsonElement(text).jsonObject}.getOrNull()?:return Decision.Invalid("JSON 객체가 아님")
-        val action=runCatching{root["action"]?.jsonPrimitive?.content}.getOrNull()
-        return when(action) {
-            "final"->{
-                val answer=runCatching{root["answer"]?.jsonPrimitive?.content}.getOrNull()
-                if(answer.isNullOrBlank())Decision.Invalid("final에 answer가 없음") else Decision.Final(answer)
+        return when(root.string("action")) {
+            "final" -> {
+                val answer = root.string("answer")
+                if (root.keys != setOf("action", "answer") || answer.isNullOrBlank()) {
+                    Decision.Invalid("final에는 비어 있지 않은 문자열 answer가 필요합니다.")
+                } else Decision.Final(answer)
             }
-            "tool"->{
-                val name=runCatching{root["tool"]?.jsonPrimitive?.content}.getOrNull()
-                val arguments=root["arguments"]?.let{runCatching{it.jsonObject}.getOrNull()}?:if(root["arguments"]==null)JsonObject(emptyMap()) else return Decision.Invalid("arguments가 객체가 아님")
-                if(name==null||name !in tools)Decision.Invalid("허용되지 않은 도구: ${name?.take(80)}") else Decision.Call(name,arguments)
+            "tool" -> {
+                if (root.keys.any { it !in setOf("action", "tool", "arguments") }) {
+                    return Decision.Invalid("tool 응답에 다른 동작의 필드가 있습니다.")
+                }
+                val name = root.string("tool")
+                val arguments = when (val value = root["arguments"]) {
+                    null -> JsonObject(emptyMap())
+                    is JsonObject -> value
+                    else -> return Decision.Invalid("arguments가 객체가 아님")
+                }
+                if (name == null || name !in tools) {
+                    Decision.Invalid("허용되지 않은 도구: ${name?.take(80)}")
+                } else Decision.Call(name, arguments)
             }
-            else->Decision.Invalid("action이 tool/final이 아님")
+            else -> Decision.Invalid("action이 tool/final이 아님")
         }
     }
 
+    private fun JsonObject.string(key: String): String? =
+        (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     companion object {
-        /** Outer evidence: VERIFIED only when the sub-agent finished on at least one verified observation. */
         fun toolResult(callId:String,outcome:LocalSubagentOutcome):ToolResult {
-            val verified=outcome.steps.count{it.state==VerificationState.VERIFIED}
-            val failed=outcome.steps.count{it.state==VerificationState.FAILED}
+            val verified = outcome.steps.count { it.state == VerificationState.VERIFIED }
+            val unresolved = outcome.steps.size - verified
+            val complete = outcome.completed && verified > 0 && unresolved == 0
+            val status = when {
+                complete -> "completed"
+                verified > 0 -> "partial"
+                else -> "incomplete"
+            }
             val content=buildJsonObject {
-                put("status",if(outcome.completed)"completed" else "incomplete")
+                put("status",status)
                 if(outcome.completed)put("answer",outcome.answer)
                 if(outcome.reason.isNotEmpty())put("reason",outcome.reason)
                 put("evidence",JsonArray(outcome.steps.map{step->buildJsonObject{put("tool",step.tool);put("state",step.state.name);put("summary",step.summary)}}))
                 put("note","answer is the sub-agent's model summary; only the evidence entries were observed by the host.")
             }.toString()
             return when {
-                outcome.completed&&verified>0->ToolResult(callId,true,content,VerificationState.VERIFIED,"하위 에이전트가 읽기 결과 ${verified}건(실패 ${failed}건)을 근거로 답했습니다. 답변 문장은 모델 요약입니다.")
+                complete -> ToolResult(callId, true, content, VerificationState.VERIFIED,
+                    "하위 에이전트가 읽기 결과 ${verified}건을 확인했습니다. 답변 문장은 모델 요약입니다.")
+                outcome.completed && verified > 0 -> ToolResult(callId, false, content, VerificationState.UNVERIFIED,
+                    "읽기 결과 ${verified}건을 확인했고 ${unresolved}건은 확인하지 못했습니다.")
                 outcome.completed->ToolResult(callId,false,content,VerificationState.FAILED,"하위 에이전트 답변에 확인된 도구 근거가 없습니다.",effectNotApplied=true)
                 else->ToolResult(callId,false,content,VerificationState.FAILED,outcome.reason,effectNotApplied=true)
             }

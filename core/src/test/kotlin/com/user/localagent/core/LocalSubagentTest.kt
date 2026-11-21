@@ -120,6 +120,39 @@ class LocalSubagentTest {
         }
     }
 
+    @Test fun mixedObservationsRemainPartialAfterFinal()=runTest {
+        for(state in listOf(VerificationState.FAILED,VerificationState.PREPARED,VerificationState.UNVERIFIED)) {
+            val next="""{"action":"tool","tool":"list_reminders","arguments":{}}"""
+            val f=Fixture(listOf(toolCall,next,final("둘 다 확인했습니다"))){call->
+                if(call.name=="get_current_datetime")verified(call)
+                else ToolResult(call.id,false,"합성 미확인",state)
+            }
+            val outcome=f.loop.run("두 자료 확인",tools+"list_reminders","p")
+            val result=LocalSubagentLoop.toolResult("c1",outcome)
+            val body=Json.parseToJsonElement(result.content).jsonObject
+            assertFalse(result.success)
+            assertEquals(VerificationState.UNVERIFIED,result.verification)
+            assertEquals("partial",body.getValue("status").jsonPrimitive.content)
+            assertEquals(2,body.getValue("evidence").jsonArray.size)
+        }
+    }
+
+    @Test fun nonStringFinalFieldsAreRejected()=runTest {
+        for(value in listOf("42","true","null")) {
+            val invalid="""{"action":"final","answer":$value}"""
+            val f=Fixture(listOf(invalid,invalid)){verified(it)}
+            assertFalse(f.loop.run("작업",tools,"p").completed)
+            assertTrue(f.executed.isEmpty())
+        }
+    }
+
+    @Test fun mixedActionFieldsAreRejectedBeforeHostCall()=runTest {
+        val invalid="""{"action":"tool","tool":"get_current_datetime","answer":"완료"}"""
+        val f=Fixture(listOf(invalid,invalid,final("검정용"))){verified(it)}
+        assertFalse(f.loop.run("작업",tools,"p").completed)
+        assertTrue(f.executed.isEmpty())
+    }
+
     @Test fun cancellationPropagates() {
         val f=Fixture(listOf(toolCall,final("x"))){throw CancellationException("synthetic cancel")}
         assertThrows(CancellationException::class.java){kotlinx.coroutines.runBlocking{f.loop.run("작업",tools,"p")}}
