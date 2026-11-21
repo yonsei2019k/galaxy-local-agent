@@ -19,7 +19,9 @@ import kotlinx.coroutines.delay
 /** React is packaged offline. Remote websites never share this WebView or its native UI message bridge. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUnavailable:()->Unit,modifier:Modifier=Modifier){
+internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUnavailable:()->Unit,modifier:Modifier=Modifier,
+    onFirstReady:()->Unit={}){
+    val firstReady by rememberUpdatedState(onFirstReady)
     val command by rememberUpdatedState(onCommand)
     val unavailable by rememberUpdatedState(onUnavailable)
     val currentSnapshot by rememberUpdatedState(snapshot)
@@ -79,7 +81,10 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                 WebViewCompat.addWebMessageListener(this,"ziphapNative",setOf("https://appassets.androidplatform.net")){view,message,origin,mainFrame,_->
                     if(mainFrame&&origin==Uri.parse("https://appassets.androidplatform.net")){
                         ReactBridgePolicy.parse(message.data.orEmpty())?.let{value->
-                            if(value.action=="ready"){ready=true;publish(view)} else command(value)
+                            if(value.action=="ready"){
+                                if(!ready){ready=true;firstReady()}
+                                publish(view)
+                            } else command(value)
                         }
                     }
                 }

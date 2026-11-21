@@ -59,6 +59,8 @@ import java.time.ZoneId
 import java.util.UUID
 import com.user.localagent.ui.*
 
+private val launchIntroClaimed = java.util.concurrent.atomic.AtomicBoolean(false)
+
 private val Background = ZipHapColors.DeepNavy
 private val Panel = ZipHapColors.NavySurface
 private val Accent = ZipHapColors.Periwinkle
@@ -122,11 +124,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var launchIntroPending by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         folderProjectId=savedInstanceState?.getString("folder-project-id")
         savedInstanceState?.let {saved->saved.getString("attachment-thread-id")?.let {id->saved.getString("attachment-branch-id")?.let {branch->attachmentScope=Triple(id,saved.getLong("attachment-thread-revision"),branch)}}}
         if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10)
+        launchIntroPending = savedInstanceState == null && intent.action == Intent.ACTION_MAIN &&
+            intent.hasCategory(Intent.CATEGORY_LAUNCHER) && requestedTab.value == 0 &&
+            launchIntroClaimed.compareAndSet(false,true)
         val lightBars=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
         enableEdgeToEdge(lightBars,lightBars)
         WindowCompat.getInsetsController(window,window.decorView).apply {isAppearanceLightStatusBars=true;isAppearanceLightNavigationBars=true}
@@ -341,7 +348,9 @@ class MainActivity : ComponentActivity() {
                             })}
                     })
                 }.toString()
-                key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={chatScreenUnavailable=true},modifier=Modifier.fillMaxSize().padding(padding).imePadding(),onCommand={command->
+                Box(Modifier.fillMaxSize().padding(padding).imePadding()){
+                key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={launchIntroPending=false;chatScreenUnavailable=true},
+                    onFirstReady={launchIntroPending=false},modifier=Modifier.fillMaxSize(),onCommand={command->
                     val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
                     if(sameRoom){
                         val payload=command.payload
@@ -395,6 +404,8 @@ class MainActivity : ComponentActivity() {
                         status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
                 })}
+                if(launchIntroPending) LaunchIntro(Modifier.matchParentSize())
+                }
             }
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {
                 val returnsToSettings=panelFromSettings || (tab==4 && settingsPage!=SettingsPage.HOME)
