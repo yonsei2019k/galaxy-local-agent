@@ -32,6 +32,18 @@ fn identifier(value: &str) -> bool {
         })
 }
 
+// The canary prompts, rather than the model's own plan, define the required observations.
+fn required_tools(case: &str) -> Option<&'static [(&'static str, usize)]> {
+    match case {
+        "date" => Some(&[("get_current_datetime", 1)]),
+        "contacts" => Some(&[("search_contacts", 1)]),
+        "calendar" => Some(&[("list_calendar_events", 1)]),
+        "calculator" => Some(&[("screen_action", 5), ("read_screen", 1)]),
+        "browser" => Some(&[("open_app_browser_page", 1), ("read_app_browser_page", 1)]),
+        _ => None,
+    }
+}
+
 fn classify(row: &Value) -> Outcome {
     let status = row["status"].as_str();
     let waited = row["waitedForOwner"].as_bool();
@@ -58,30 +70,22 @@ fn classify(row: &Value) -> Outcome {
     let Some(steps) = row["steps"].as_array() else {
         return Outcome::Invalid;
     };
-    let plan = match row.get("planTools") {
-        Some(Value::Null) => return Outcome::Unverified,
-        Some(Value::Array(plan)) => plan,
-        _ => return Outcome::Invalid,
-    };
-    let verified: BTreeSet<_> = steps
-        .iter()
-        .filter(|step| step["state"] == "VERIFIED")
-        .filter_map(|step| step["tool"].as_str().filter(|name| identifier(name)))
-        .collect();
-    if plan
-        .iter()
-        .any(|name| !name.as_str().is_some_and(identifier))
-    {
+    let Some(required) = row["case"].as_str().and_then(required_tools) else {
         return Outcome::Invalid;
+    };
+    let mut verified = BTreeMap::new();
+    for step in steps {
+        let Some(tool) = step["tool"].as_str().filter(|name| identifier(name)) else {
+            return Outcome::Unverified;
+        };
+        if step["state"] != "VERIFIED" {
+            return Outcome::Unverified;
+        }
+        *verified.entry(tool).or_insert(0usize) += 1;
     }
-    if !plan.is_empty()
-        && !verified.is_empty()
-        && steps.iter().all(|step| {
-            step["state"] == "VERIFIED" && step["tool"].as_str().is_some_and(identifier)
-        })
-        && plan
-            .iter()
-            .all(|name| name.as_str().is_some_and(|tool| verified.contains(tool)))
+    if required
+        .iter()
+        .all(|(tool, count)| verified.get(tool).is_some_and(|actual| actual >= count))
     {
         Outcome::Verified
     } else {
@@ -138,10 +142,7 @@ fn compare<'a>(
     let known_gap_matched = declared_gap
         && baseline.is_some_and(|evidence| evidence.cleanup_confirmed)
         && previous == Some(current)
-        && matches!(
-            current,
-            Outcome::Failed | Outcome::Unverified | Outcome::WaitingOwner
-        );
+        && matches!(current, Outcome::Failed | Outcome::Unverified);
     Comparison {
         case,
         baseline: previous,
@@ -163,7 +164,7 @@ struct Report<'a> {
 fn requested_cases(value: &str) -> Result<BTreeSet<&str>, &'static str> {
     let mut cases = BTreeSet::new();
     for id in value.split(',') {
-        if !identifier(id) || !cases.insert(id) {
+        if required_tools(id).is_none() || !cases.insert(id) {
             return Err("invalid or repeated expected case ID");
         }
     }
@@ -239,21 +240,21 @@ mod tests {
     fn completed() -> Value {
         json!({
             "case": "calendar", "status": "completed", "waitedForOwner": false,
-            "projectRemoved": true, "planTools": ["read_calendar"],
-            "steps": [{"tool": "read_calendar", "state": "VERIFIED", "summary": "private"}],
+            "projectRemoved": true, "planTools": ["list_calendar_events"],
+            "steps": [{"tool": "list_calendar_events", "state": "VERIFIED", "summary": "private"}],
             "answer": "private", "receipt": "private"
         })
     }
 
     #[test]
-    fn requires_declared_and_verified_work() {
+    fn requires_host_defined_tool_even_if_model_claims_success() {
         let mut row = completed();
         assert_eq!(classify(&row), Outcome::Verified);
         row["planTools"] = Value::Null;
+        assert_eq!(classify(&row), Outcome::Verified);
+        row["planTools"] = json!(["get_current_datetime"]);
+        row["steps"][0]["tool"] = json!("get_current_datetime");
         assert_eq!(classify(&row), Outcome::Unverified);
-        row["planTools"] = json!(["read_calendar", "check_source"]);
-        assert_eq!(classify(&row), Outcome::Unverified);
-        row["planTools"] = json!(["read_calendar"]);
         row["steps"][0]["tool"] = Value::Null;
         assert_eq!(classify(&row), Outcome::Unverified);
     }
@@ -271,6 +272,25 @@ mod tests {
         };
         assert!(!compare("calendar", None, Some(&pending), false).passed);
         assert!(!compare("calendar", None, Some(&pending), true).passed);
+        assert!(!compare("calendar", Some(&pending), Some(&pending), true).passed);
+    }
+
+    #[test]
+    fn requires_all_expected_calculator_interactions() {
+        let mut row = completed();
+        row["case"] = json!("calculator");
+        let steps = row["steps"].as_array_mut().unwrap();
+        steps.clear();
+        steps.push(json!({"tool": "read_screen", "state": "VERIFIED"}));
+        for _ in 0..4 {
+            steps.push(json!({"tool": "screen_action", "state": "VERIFIED"}));
+        }
+        assert_eq!(classify(&row), Outcome::Unverified);
+        row["steps"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"tool": "screen_action", "state": "VERIFIED"}));
+        assert_eq!(classify(&row), Outcome::Verified);
     }
 
     #[test]
