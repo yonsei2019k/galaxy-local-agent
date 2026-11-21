@@ -31,12 +31,13 @@ RESTART_POLICY = "RAM_ONLY_RESTART_REVOKES"
 # Fixed host contracts, never inferred from names, model prose or page contents.
 PUBLIC_WEB_READS = frozenset({"read_webpage", "search_web", "search_shopping"})
 FAILED_READS_HAVE_NO_EFFECT = PUBLIC_WEB_READS | {"read_screen"}
+OWNER_RECALL_READS = frozenset({"search_memories", "search_conversation_history", "read_analysis_evidence"})
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
 MAX_REJECTED_CALLS = 6
 # Rejections caused by the model's call content (never values) count toward the pre-execution cap.
 _COUNTED_REJECTIONS = frozenset({"TOOL_NOT_OFFERED", "PRIVATE_IMAGE_WORKROOM", "PLAN_TOOL_NOT_SELECTED",
-                                 "ARGUMENT_OBJECT", "BROWSER_RECOVERY_READ_ONLY", "WORKSPACE_PROFILE"})
+                                 "ARGUMENT_OBJECT", "BROWSER_RECOVERY_READ_ONLY", "RECALL_RECOVERY_READ_ONLY", "WORKSPACE_PROFILE"})
 MAX_TTL_MS = 900_000
 PHONE_LEASE_MS = 30_000
 MAX_ARGUMENT_BYTES = 32_768
@@ -338,6 +339,7 @@ class _Session:
     require_plan: bool = False
     plan: dict | None = field(default=None, repr=False)
     browser_recovery_tools: frozenset[str] | None = None
+    recall_recovery_tools: frozenset[str] | None = None
     finalize_reads_only: bool = False
     rejected_calls: int = 0
 
@@ -620,10 +622,15 @@ class AgentBridge:
                     session.browser_recovery_tools = frozenset({"read_app_browser_page"})
                     return {"planAccepted": True, "acceptedTools": ["read_app_browser_page"],
                             "browserOpened": True, "failedReads": [], "observedReads": []}
-            reads = FAILED_READS_HAVE_NO_EFFECT | {"calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
+            reads = FAILED_READS_HAVE_NO_EFFECT | OWNER_RECALL_READS | {
+                "calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
             if (not session.require_plan or not plan or plan["state"] != "ACCEPTED"
                     or not plan["requiredTools"] or not set(plan["requiredTools"]) <= reads | {"patch_note", "screen_action"}
                     or session.active):
+                return None
+            required = set(plan["requiredTools"])
+            recall_plan = bool(required & OWNER_RECALL_READS)
+            if recall_plan and (session.profile != "phone-only" or not required <= reads):
                 return None
             failed, observed, verified_tools = [], [], set()
             for call in session.calls.values():
@@ -656,7 +663,26 @@ class AgentBridge:
                 context["observationsOmitted"] = len(context["observedReads"]) < len(observed)
                 session.finalize_reads_only = True
                 return copy.deepcopy(context)
-            if all_required_reads_verified or settled_only or session.finalize_reads_only or out_of_calls:
+            if all_required_reads_verified or session.finalize_reads_only or out_of_calls:
+                return None
+            if recall_plan:
+                # A recovery provider sees only phone-delivered receipts. It can finish
+                # the unfulfilled tools in the same accepted read-only plan.
+                remaining = [name for name in plan["requiredTools"] if name not in verified_tools]
+                if session.recall_recovery_tools is not None or (settled_only and not observed):
+                    return None
+                context = {"planAccepted": True, "acceptedTools": remaining, "failedReads": failed,
+                           "observedReads": [], "observationsOmitted": False}
+                for entry in reversed(observed):
+                    context["observedReads"].insert(0, entry)
+                    if len(canonical(context)) > 16384:
+                        context["observedReads"].pop(0)
+                context["observationsOmitted"] = len(context["observedReads"]) < len(observed)
+                if len(canonical(context)) > 16384:
+                    return None
+                session.recall_recovery_tools = frozenset(remaining)
+                return copy.deepcopy(context)
+            if settled_only:
                 return None
             context = {"planAccepted": True, "acceptedTools": plan["requiredTools"], "failedReads": failed, "observedReads": observed}
             return copy.deepcopy(context) if len(canonical(context)) <= 16384 else None
@@ -759,6 +785,8 @@ class AgentBridge:
                         _require(not s.finalize_reads_only, "RECOVERY_FINAL_ANSWER_ONLY", 403)
                         if s.browser_recovery_tools is not None:
                             _require(tool in s.browser_recovery_tools, "BROWSER_RECOVERY_READ_ONLY", 403)
+                        if s.recall_recovery_tools is not None:
+                            _require(tool in s.recall_recovery_tools, "RECALL_RECOVERY_READ_ONLY", 403)
                         _require(tool in s.tools, "TOOL_NOT_OFFERED", 403)
                         _require(not tool.startswith("pc_") or s.profile in self._profiles,
                                  "WORKSPACE_PROFILE", 403)

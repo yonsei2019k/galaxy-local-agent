@@ -518,6 +518,39 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
         self.assertEqual(409, self.propose("screen_action")[1][0])
 
+    def test_owner_recall_recovers_only_the_missing_approved_read(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        self.grant["pcWorkspaceProfile"] = "phone-only"
+        memory, history = "search_memories", "search_conversation_history"
+        for name in (memory, history):
+            self.grant["phoneTools"].append(clock_tool() | {"name": name})
+        self._register()
+        self.accept(self.plan([memory, history]))
+        first, _ = self.propose(memory)
+        _, ack = self.claim(first)
+        self.post_result(first, ack)
+        recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertEqual([history], recovery["acceptedTools"])
+        self.assertEqual([memory], [item["tool"] for item in recovery["observedReads"]])
+        self.assertEqual(403, self.propose(memory)[1][0])
+        self.assertEqual(200, self.propose(memory, cid=first["callId"])[1][0])
+        second, response = self.propose(history)
+        self.assertEqual(202, response[0])
+        _, ack = self.claim(second)
+        self.post_result(second, ack)
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+
+    def test_owner_recall_does_not_recover_with_mutation(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        self.grant["pcWorkspaceProfile"] = "phone-only"
+        self.grant["phoneTools"].append(clock_tool() | {"name": "search_memories"})
+        self.grant["phoneTools"].append(clock_tool() | {"name": "patch_note"})
+        self._register()
+        self.accept(self.plan(["search_memories", "patch_note"]))
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+
     def test_browser_recovery_observes_the_page_and_prevents_a_second_navigation(self):
         self.owner = uid()
         self.grant["parentRunId"] = self.owner
