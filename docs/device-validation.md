@@ -1,5 +1,9 @@
 # Device validation
 
+## 2045 bundled ZipHAP launch intro
+
+The signed 2045 APK contains the supplied byte-identical, uncompressed H.264 intro and WebP poster. Release lint and core JVM (1,015) passed. Updated the idle ZipHap app from 2044 with the original signer. Package version and installed base APK SHA-256 matched 34e5145d8e7f080989b663090df66479ed5fb339c110d18cee37e3c106ab2b85. The phone was being used in another app, so the foreground launcher test, first displayed video frame, and reduced-motion fallback remain unobserved on the device.
+
 ## 2044 consolidated conversation, evidence and Image Studio candidate
 
 The idle phone was updated from 2043 to the signed 2044, with the same package and signer. The installed base APK matched SHA-256 64d13460f2d4842a5fdf87d640f35ae0ed25e641df9625393511d7dad89bbdf3. Release lint, core JVM 1,015, Android focused JVM 51 and four Rust context tests passed. The installation did not launch the app or act on an existing image or conversation.
