@@ -1,5 +1,9 @@
 # Device validation
 
+## 2046 saved staff titles and sidebar layout candidate
+
+Installed signed 2046 over 2045. The package version and installed base APK matched SHA-256 3dba99e69a25c843fe7008c59531b71a8a094b1341c132a0ea0612a7f91f7e92. Mandatory release lint and 1,015 core JVM tests passed. React tests passed (39), and the 2045 embedded UI was compared with the new UI in Chrome at 320×460, 320×568 and 393×700 using a synthetic bridge. The real device launched and exposed the chat menu action. The device switched to another app before drawer verification, so no staff title was written on the real device and restart durability was not exercised in this run.
+
 ## 2045 bundled ZipHAP launch intro
 
 The signed 2045 APK contains the supplied byte-identical, uncompressed H.264 intro and WebP poster. Release lint and core JVM (1,015) passed. Updated the idle ZipHap app from 2044 with the original signer. Package version and installed base APK SHA-256 matched 34e5145d8e7f080989b663090df66479ed5fb339c110d18cee37e3c106ab2b85. The phone was being used in another app, so the foreground launcher test, first displayed video frame, and reduced-motion fallback remain unobserved on the device.
