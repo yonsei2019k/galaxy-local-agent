@@ -31,7 +31,11 @@ RESTART_POLICY = "RAM_ONLY_RESTART_REVOKES"
 # Fixed host contracts, never inferred from names, model prose or page contents.
 PUBLIC_WEB_READS = frozenset({"read_webpage", "search_web", "search_shopping"})
 FAILED_READS_HAVE_NO_EFFECT = PUBLIC_WEB_READS | {"read_screen"}
-OWNER_RECALL_READS = frozenset({"search_memories", "search_conversation_history", "read_analysis_evidence"})
+OWNER_RECALL_READS = frozenset({
+    "search_memories", "search_conversation_history", "read_analysis_evidence",
+    "list_analysis_sources", "search_conversation_imports", "get_sms_summary",
+    "list_messenger_notifications", "search_gmail_messages", "read_gmail_message",
+})
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
 MAX_REJECTED_CALLS = 6
