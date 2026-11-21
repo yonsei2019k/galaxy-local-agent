@@ -17,17 +17,19 @@ class PairedPcTargetSelectionTest {
     private fun invalid(block:()->Unit) {
         try { block();fail("Expected invalid receipt") }catch(_:IllegalArgumentException){}
     }
-    @Test fun autoUsesLogicalTargetWithoutAnyInstalledModel() {
-        val choice=checkNotNull(RequestInferenceSelection.pairedText("auto",7,false,7,true,false))
+    @Test fun e4bUsesLogicalTargetWithoutAnyInstalledPhoneModel() {
+        val profile=PairedPcTextProfileDescriptor.GEMMA_E4B_V1
+        val choice=checkNotNull(RequestInferenceSelection.pairedText(profile.selectionId,7,false,7,true,false))
         assertTrue(choice.model is PairedPcText)
         assertFalse(choice.model is LocalWeight)
-        assertEquals(PairedPcTextProfile.SELECTION_ID,choice.model.id)
+        assertEquals(profile.selectionId,choice.model.id)
         assertEquals(8192,choice.options.contextSize)
     }
-    @Test fun explicitPairedSelectionUsesTheSameHostProfile() {
-        val choice=checkNotNull(RequestInferenceSelection.pairedText(PairedPcTextProfile.SELECTION_ID,7,false,7,true,true))
-        assertEquals(PairedPcTextProfile.TITLE,choice.model.title)
-        assertTrue(choice.options.thinking)
+    @Test fun retiredAutoAndExplicitNineBFailBeforeReturningAnExecutionChoice() {
+        for(id in listOf("auto",PairedPcTextProfile.SELECTION_ID))
+            missing(InferencePrerequisiteReason.PC_MODEL_RETIRED) {
+                RequestInferenceSelection.pairedText(id,7,false,7,true,true)
+            }
     }
     @Test fun legacyAutoDoesNotAcquireCurrentPairing() {
         assertNull(RequestInferenceSelection.pairedText("auto",null,false,7,true,false))

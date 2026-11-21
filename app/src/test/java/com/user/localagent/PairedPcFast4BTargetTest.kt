@@ -1,6 +1,5 @@
 package com.user.localagent
 
-import com.user.localagent.inference.InferenceOptions
 import com.user.localagent.models.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -23,14 +22,11 @@ class PairedPcFast4BTargetTest {
         catch (error: InferencePrerequisiteMissing) { assertEquals(reason, error.reason) }
     }
 
-    @Test fun explicitFastSelectionUsesTypedPcTargetWithTheExistingOutputOptions() {
-        val chosen = checkNotNull(RequestInferenceSelection.pairedText(fastId, 17, false, 17, true, false))
-        assertTrue(chosen.model is PairedPcText)
-        assertFalse(chosen.model is LocalWeight)
-        assertEquals(fastId, chosen.model.id)
-        assertEquals(InferenceOptions(contextSize = 8192, backend = "CPU", thinking = false, maxOutputTokens = 768), chosen.options)
-        assertEquals(2048, checkNotNull(RequestInferenceSelection.pairedText(fastId, 17, false, 17, true, true)).options.maxOutputTokens)
-        assertEquals("paired-pc-text-v1", checkNotNull(RequestInferenceSelection.pairedText("auto", 17, false, 17, true, false)).model.id)
+    @Test fun storedFastIdentityRemainsReadableButCannotReturnAnExecutionChoice() {
+        assertEquals(fastId, target().id)
+        for(thinking in listOf(false,true)) missing(InferencePrerequisiteReason.PC_MODEL_RETIRED) {
+            RequestInferenceSelection.pairedText(fastId, 17, false, 17, true, thinking)
+        }
     }
 
     @Test fun newProfileRequiresOriginalPairingAndCannotAcquireCloudAuthority() {

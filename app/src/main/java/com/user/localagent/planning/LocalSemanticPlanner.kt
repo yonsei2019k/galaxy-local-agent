@@ -226,6 +226,8 @@ class LocalSemanticPlanner internal constructor(
             throw cancel
         } catch (failure: SemanticPlanningException) {
             throw failure
+        } catch (failure: com.user.localagent.models.InferencePrerequisiteMissing) {
+            throw failure
         } catch (failure: Exception) {
             requestEngine.cancel()
             currentCoroutineContext().ensureActive()

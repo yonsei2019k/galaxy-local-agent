@@ -13,8 +13,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 
-private const val PC_TEXT_MODEL="pc-text"
-private const val PC_TEXT_SHA_PREFIX="03b74727a860a563"
 private const val PC_CLAUDE_MODEL="claude"
 
 data class PcCleanupEvidence(val operation:String,val requestId:String?,val cleanupComplete:Boolean?,val acknowledged:Boolean)
@@ -51,9 +49,8 @@ internal fun pcThinkingReceiptMatches(receipt:JsonObject,id:String,model:String,
 class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnection)->Boolean={true},private val computeOwner:String?=null,
     private val textAuthority:PcTextAuthority=PcTextAuthority(0),
     private val targetCapturedPcRevision:Long?=null,
-    capturedPcTextDefault:String?=null):InferenceEngine,PairedPcTextLoader {
+    private val capturedPcTextDefault:String?=null):InferenceEngine,PairedPcTextLoader {
     private val context=context.applicationContext
-    private val capturedDefaultProfile=com.user.localagent.models.PairedPcTextProfileDescriptor.forExplicitSelection(capturedPcTextDefault)
     private val transport=PcTransport(this.context)
     private val mutex=Mutex()
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
@@ -103,6 +100,10 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
         // The PC owns the engine choice; the phone path only labels the request and picks the Gemma helper.
         val file=File(path).canonicalFile
         require(file.parentFile==File(context.filesDir,"models").canonicalFile){"휴대폰 모델 폴더 밖의 모델 경로는 사용하지 않습니다."}
+        val usesCloudText=textAuthority.usesCloudText(options)
+        val directTextProfile=if(!options.audioEnabled&&!options.visionEnabled&&!options.imagePreparation&&!usesCloudText)
+            com.user.localagent.models.PairedPcTextProfileDescriptor.directTextProfile(capturedPcTextDefault,computeOwner!=null||targetCapturedPcRevision!=null)
+            else null
         // Health is always checked: it also picks the reachable endpoint (home LAN or Tailscale).
         val connection=transport.available(computeOwner,waitForRestart=true)?:throw PcUnavailable()
         requireAuthority(connection)
@@ -115,15 +116,15 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
             status.value="PC 계산 준비됨";metrics.value=null;generation.value=null
             return@withLock
         }
-        if(textAuthority.usesCloudText(options)){
+        if(usesCloudText){
             config=connection;alias=PC_CLAUDE_MODEL;this@PcInferenceEngine.options=options;this@PcInferenceEngine.path=file.path;structured=true
             status.value="Claude 사용 · 내용이 Anthropic으로 전송됩니다";metrics.value=null;generation.value=null
             return@withLock
         }
         val requestedModel=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.modelId(file.name)
-            else capturedDefaultProfile?.modelId ?: PC_TEXT_MODEL
+            else checkNotNull(directTextProfile).modelId
         val requestedSha=if(options.imagePreparation)com.user.localagent.core.GemmaImagePreparation.hashes.getValue(requestedModel).take(16)
-            else capturedDefaultProfile?.modelSha256 ?: PC_TEXT_SHA_PREFIX
+            else checkNotNull(directTextProfile).modelSha256
         val body=buildJsonObject{put("modelId",requestedModel);put("modelShaPrefix",requestedSha);put("contextSize",options.contextSize)}
         // Every decision round calls load; when the PC reports this owner's identical model resident, skip the load round trip.
         if(PcResidency.reusable(transport.lastHealth,requestedModel,requestedSha,options.contextSize)){
@@ -150,10 +151,10 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
                 !textAuthority.allowCloudText){"원래 요청에 캡처한 로컬 PC 사용 권한이 필요합니다."}
             require(!options.audioEnabled&&!options.visionEnabled&&!options.imagePreparation&&!options.deviceOnly)
             require(options.contextSize in setOf(4096,8192))
+            val profile=target.profile.also {it.requireRunnable()}
             beginLoadEpoch();structured=false
             val connection=transport.available(computeOwner,waitForRestart=true)?:throw PcUnavailable()
             requireAuthority(connection)
-            val profile=target.profile
             if(!pcTextProfileWireSupported(target,transport.lastHealth))
                 throw com.user.localagent.models.InferencePrerequisiteMissing(
                     com.user.localagent.models.InferencePrerequisiteReason.PC_PROFILE_CONTRACT_UNAVAILABLE)

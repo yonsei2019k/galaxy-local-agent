@@ -39,6 +39,11 @@ internal enum class PairedPcTextProfileDescriptor(
 
     val supportsQwenThinking: Boolean get() = this == LEGACY_V1 || this == FAST_4B_V1
 
+    fun requireRunnable() {
+        if (this != GEMMA_E4B_V1)
+            throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_MODEL_RETIRED)
+    }
+
     companion object {
         fun forSelection(selectionId: String?): PairedPcTextProfileDescriptor? =
             if (selectionId == "auto") LEGACY_V1 else forExplicitSelection(selectionId)
@@ -52,6 +57,11 @@ internal enum class PairedPcTextProfileDescriptor(
         fun resolveRequestSelection(selectionId: String, capturedDefault: String?): String =
             if (selectionId == "auto" || selectionId == com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION)
                 capturedDefault ?: "auto" else selectionId
+
+        fun directTextProfile(capturedDefault: String?, requestOwned: Boolean): PairedPcTextProfileDescriptor {
+            val profile = if (requestOwned) forSelection(capturedDefault ?: "auto") else GEMMA_E4B_V1
+            return checkNotNull(profile).also { it.requireRunnable() }
+        }
     }
 }
 

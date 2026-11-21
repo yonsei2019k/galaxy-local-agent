@@ -23,9 +23,11 @@ class PairedPcFast4BQueueSnapshotTest {
             assertFalse(restored.allowTools)
             assertFalse(restored.allowCloudText)
             assertEquals("plan", restored.mode)
-            val chosen = checkNotNull(RequestInferenceSelection.pairedText(restored.modelId,
-                restored.capturedPcRevision, restored.allowCloudText, 17, true, restored.thinking))
-            assertEquals(if (id == fast) fast else legacy, chosen.model.id)
+            val failure=assertThrows(InferencePrerequisiteMissing::class.java) {
+                RequestInferenceSelection.pairedText(restored.modelId,restored.capturedPcRevision,
+                    restored.allowCloudText,17,true,restored.thinking)
+            }
+            assertEquals(InferencePrerequisiteReason.PC_MODEL_RETIRED,failure.reason)
         }
     }
 

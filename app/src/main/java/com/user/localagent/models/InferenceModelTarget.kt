@@ -63,6 +63,7 @@ enum class InferencePrerequisiteReason(val code: String, val notice: String) {
     PC_AUTHORITY_CHANGED("inference_pc_authority_changed", "요청 이후 PC 사용 권한이 바뀌어 실행하지 않았습니다. 현재 설정을 확인한 뒤 새로 요청해주세요."),
     PC_LOADER_UNAVAILABLE("inference_pc_loader_unavailable", "이 실행 경로에는 PC 텍스트 모델 준비 기능이 연결되지 않았습니다."),
     PC_PROFILE_CONTRACT_UNAVAILABLE("inference_pc_profile_contract_unavailable", "선택한 PC 모델의 생성 설정 확인 기능이 준비되지 않았습니다. PC 작업기를 업데이트한 뒤 다시 요청해주세요."),
+    PC_MODEL_RETIRED("inference_pc_model_retired", "이 요청에 지정된 PC 모델은 삭제되었습니다. 원래 요청과 확인 기록은 대화에 보존돼 있습니다. 처음부터 처리하려면 개인정보 · 로컬에서 E4B로 새 요청을 보내주세요."),
     PC_MODEL_SELECTION_CHANGED("inference_pc_model_selection_changed", "원래 요청과 이어쓰기의 모델이 달라 실행하지 않았습니다. 사용할 모델을 확인한 뒤 새로 요청해주세요."),
     PC_ANALYSIS_PROVENANCE_UNAVAILABLE("inference_pc_analysis_provenance_unavailable", "이 분석 경로는 실제 PC 모델의 검증 기록 연결이 준비되지 않아 분석을 실행하지 않았습니다.");
 }
@@ -74,6 +75,7 @@ object RequestInferenceSelection {
     fun pairedText(selectionId: String, capturedRevision: Long?, allowCloudText: Boolean,
                    currentRevision: Long, paired: Boolean, thinking: Boolean): ChosenInference? {
         val target = PairedPcText.forRequest(selectionId, capturedRevision, allowCloudText, currentRevision, paired) ?: return null
+        target.profile.requireRunnable()
         return ChosenInference(target, com.user.localagent.inference.InferenceOptions(contextSize = 8192,
             backend = "CPU", thinking = thinking, maxOutputTokens = if (thinking) 2048 else 768), "원래 요청의 로컬 PC 텍스트 선택")
     }

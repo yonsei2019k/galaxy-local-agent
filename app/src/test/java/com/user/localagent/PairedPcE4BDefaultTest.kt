@@ -22,13 +22,26 @@ class PairedPcE4BDefaultTest {
         val fresh=request.copy(capturedPcTextDefault=gemma.selectionId)
         val restored=QueuedChatRequest.fromJson(fresh.toJson())
         assertEquals(gemma,target(restored)?.profile)
-        assertEquals(PairedPcTextProfileDescriptor.LEGACY_V1,target(QueuedChatRequest.fromJson(request.toJson()))?.profile)
-        assertEquals(PairedPcTextProfileDescriptor.LEGACY_V1,target(fresh.copy(modelId=PairedPcTextProfile.SELECTION_ID))?.profile)
-        assertEquals(PairedPcTextProfileDescriptor.FAST_4B_V1,target(fresh.copy(modelId=PairedPcFast4BProfile.SELECTION_ID))?.profile)
+        for(retired in listOf(QueuedChatRequest.fromJson(request.toJson()),fresh.copy(modelId=PairedPcTextProfile.SELECTION_ID),
+            fresh.copy(modelId=PairedPcFast4BProfile.SELECTION_ID))) {
+            assertEquals(InferencePrerequisiteReason.PC_MODEL_RETIRED,
+                assertThrows(InferencePrerequisiteMissing::class.java) {target(retired)}.reason)
+        }
         assertNull(target(fresh.copy(allowCloudText=true)))
         requireSameGoalAuthority(fresh,restored)
         assertThrows(IllegalStateException::class.java) {requireSameGoalAuthority(request,restored)}
         assertThrows(IllegalArgumentException::class.java) {fresh.copy(capturedPcRevision=null)}
+    }
+
+    @Test fun directLoadUsesGemmaOnlyForNewOrIndependentWork() {
+        val profiles=PairedPcTextProfileDescriptor
+        assertEquals(gemma,profiles.directTextProfile(null,false))
+        assertEquals(gemma,profiles.directTextProfile(gemma.selectionId,true))
+        for(retired in listOf(null,PairedPcTextProfile.SELECTION_ID,PairedPcFast4BProfile.SELECTION_ID)) {
+            assertEquals(InferencePrerequisiteReason.PC_MODEL_RETIRED,assertThrows(InferencePrerequisiteMissing::class.java) {
+                profiles.directTextProfile(retired,true)
+            }.reason)
+        }
     }
 
     @Test fun unavailablePairAndRevokedRevisionPreserveThePrerequisiteFailure() {
