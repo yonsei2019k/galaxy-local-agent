@@ -15,45 +15,23 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * The ZipHap app's own browser. One WebView for the whole process: the owner logs in to sites on the
- * in-app browser screen, and the agent reuses those cookies on this phone only. The agent's page snapshot,
- * policy and approval handshake match the PC browser (pc-worker/deployed/browser_agent.py) so the same tool
- * code drives both. Page content is untrusted data; nothing here is logged.
+ * in-app browser screen, and the agent reuses those cookies on this phone only. It shares the tool schema
+ * and policy with the PC browser and binds actions to the current document and reviewed controls.
+ * Page content is untrusted data; nothing here is logged.
  */
 class AppWebAgent private constructor(private val context:Context) {
     companion object {
         @Volatile private var instance:AppWebAgent?=null
         fun get(context:Context)=instance?:synchronized(this){instance?:AppWebAgent(context.applicationContext).also{instance=it}}
-        private const val MAX_TEXT=12000
-        private const val MAX_ELEMENTS=120
-        val SNAPSHOT_JS="""(() => {
-  const MAX_ELEMENTS = $MAX_ELEMENTS, MAX_TEXT = $MAX_TEXT;
-  document.querySelectorAll('[data-ziphap-ref]').forEach(e => e.removeAttribute('data-ziphap-ref'));
-  const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
-    return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none' && r.bottom > 0 && r.top < innerHeight * 3; };
-  const label = e => (e.getAttribute('aria-label') || (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') || e.innerText || e.value && e.type !== 'password' && e.type !== 'hidden' && e.value || e.placeholder || e.title || e.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  const selector = 'a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=option],[onclick],[contenteditable=true]';
-  const out = []; let n = 0;
-  for (const e of document.querySelectorAll(selector)) {
-    if (out.length >= MAX_ELEMENTS) break;
-    if (!visible(e)) continue;
-    const ref = 'e' + (++n); e.setAttribute('data-ziphap-ref', ref);
-    const item = {ref, tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || '', type: (e.getAttribute('type') || '').toLowerCase(),
-      label: label(e), name: e.name || '', id: e.id || '', placeholder: e.placeholder || '', autocomplete: e.autocomplete || '',
-      disabled: !!e.disabled, editable: e.isContentEditable || ['input','textarea','select'].includes(e.tagName.toLowerCase())};
-    if (e.tagName === 'SELECT') item.options = Array.from(e.options).slice(0, 30).map(o => o.text.trim().slice(0, 60));
-    out.push(item);
-  }
-  const text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, MAX_TEXT);
-  return {url: location.href, title: document.title.slice(0, 200), text, elements: out,
-          truncated: (document.body ? document.body.innerText.length : 0) > MAX_TEXT || out.length >= MAX_ELEMENTS};
-})()"""
+        private fun token()=ByteArray(16).also{SecureRandom().nextBytes(it)}.joinToString(""){"%02x".format(it)}
     }
 
     private val mutex=kotlinx.coroutines.sync.Mutex()
     private var webView:WebView?=null
     private var loading=false
     private var snapshot:Pair<String,Map<String,JsonObject>>?=null
-    private var pending:Triple<String,String,String>?=null // approvalId, snapshotId, ref
+    private val domKey="ziphapBrowser"+token()
+    private val domScript by lazy {context.assets.open("app-web-agent.js").bufferedReader().use{it.readText()}}
     private val agentActive=MutableStateFlow(false)
     /** True while the agent is driving the page; the browser screen shows it and blocks owner input meanwhile. */
     val active:StateFlow<Boolean> get()=agentActive
@@ -119,8 +97,13 @@ class AppWebAgent private constructor(private val context:Context) {
         e["editable"]?.jsonPrimitive?.booleanOrNull==true)
     private fun JsonObject.s(key:String)=this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
 
+    private suspend fun dom(request:JsonObject):JsonObject? = eval("($domScript)($request)") as? JsonObject
+
     private suspend fun readPage():JsonObject {
-        val value=eval(SNAPSHOT_JS) as? JsonObject?:return fail("PAGE_UNREADABLE")
+        snapshot=null
+        val id=token()
+        val value=dom(buildJsonObject{put("key",domKey);put("action","observe");put("snapshotId",id)})
+            ?:return fail("PAGE_UNREADABLE")
         val url=value.s("url")
         if(!WebAgentPolicy.urlAllowed(url)){snapshot=null;return buildJsonObject{put("url","");put("blocked",true);put("message","이 페이지는 브라우저 에이전트가 읽지 않습니다.")}}
         val raw=value["elements"]?.jsonArray.orEmpty().map{it.jsonObject}
@@ -135,7 +118,6 @@ class AppWebAgent private constructor(private val context:Context) {
                 json["options"]?.let{put("options",it)}
             }
         }
-        val id=WebAgentPolicy.signature(url,parsed)
         snapshot=id to elements.associateBy{it.s("ref")}
         val login=parsed.any{it.type=="password"}
         return buildJsonObject{
@@ -150,72 +132,68 @@ class AppWebAgent private constructor(private val context:Context) {
 
     suspend fun open(url:String):JsonObject = guarded{
         if(!WebAgentPolicy.urlAllowed(url))return@guarded fail("URL_NOT_ALLOWED")
-        pending=null;blockedNavigation.value=null
+        snapshot=null;blockedNavigation.value=null
         view().loadUrl(url);settle();readPage()
     }
     suspend fun read():JsonObject = guarded{readPage()}
 
-    suspend fun act(arguments:JsonObject):JsonObject = guarded{
+    suspend fun act(arguments:JsonObject,approvedSnapshot:String?):JsonObject = guarded{
         val action=arguments.s("action")
         val current=snapshot
         if(current==null||current.first!=arguments.s("snapshotId"))return@guarded fail("SNAPSHOT_STALE")
-        // The page must still be the one the caller read.
-        val fresh=eval(SNAPSHOT_JS) as? JsonObject
-        val freshId=fresh?.let{v->WebAgentPolicy.signature(v.s("url"),v["elements"]?.jsonArray.orEmpty().map{element(it.jsonObject)})}
-        if(freshId!=current.first){snapshot=null;return@guarded fail("SNAPSHOT_STALE")}
         val ref=arguments.s("ref")
-        val target=if(action in setOf("click","type","select","press_enter"))current.second[ref]?.takeIf{it["disabled"]?.jsonPrimitive?.booleanOrNull!=true}
+        val target=if(action in setOf("click","type","select","press_enter"))current.second[ref]
+            ?.takeIf{it["disabled"]?.jsonPrimitive?.booleanOrNull!=true}
             ?:return@guarded fail("ELEMENT_UNAVAILABLE") else null
-        val selector="document.querySelector('[data-ziphap-ref=\"$ref\"]')"
         val text=arguments.s("text")
-        blockedNavigation.value=null
         when(action){
-            "click"->{
-                if(target!!["needsApproval"]?.jsonPrimitive?.booleanOrNull==true){
-                    val token=arguments.s("approvalId")
-                    val waiting=pending
-                    if(token.isEmpty()){
-                        val id=ByteArray(16).also{SecureRandom().nextBytes(it)}.joinToString(""){"%02x".format(it)}
-                        pending=Triple(id,current.first,ref)
-                        return@guarded buildJsonObject{put("status","approval_required");put("approvalId",id);put("control",target.s("label"));put("url",fresh!!.s("url"))}
-                    }
-                    if(waiting==null||waiting.first!=token||waiting.second!=current.first||waiting.third!=ref)return@guarded fail("APPROVAL_MISMATCH")
-                    pending=null
-                }
-                eval("(() => { const e = $selector; if (!e) return false; e.scrollIntoView({block:'center'}); e.click(); return true; })()")
-            }
-            "type"->{
-                if(target!!["editable"]?.jsonPrimitive?.booleanOrNull!=true||target["sensitive"]?.jsonPrimitive?.booleanOrNull==true)return@guarded fail("FIELD_NOT_ALLOWED")
-                if(!WebAgentPolicy.safeText(text))return@guarded fail("TEXT_NOT_ALLOWED")
-                val value=JsonPrimitive(text).toString()
-                // Native value setter + input/change events so framework-controlled inputs see the change.
-                eval("(() => { const e = $selector; e.scrollIntoView({block:'center'}); e.focus(); " +
-                    "const proto = e instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; " +
-                    "const set = Object.getOwnPropertyDescriptor(proto, 'value'); if (e.isContentEditable) e.innerText = $value; else set.set.call(e, $value); " +
-                    "e.dispatchEvent(new Event('input', {bubbles:true})); e.dispatchEvent(new Event('change', {bubbles:true})); return true; })()")
+            "click","back"->Unit
+            "type","press_enter"->{
+                if(target!!["editable"]?.jsonPrimitive?.booleanOrNull!=true||
+                    target["sensitive"]?.jsonPrimitive?.booleanOrNull==true)return@guarded fail("FIELD_NOT_ALLOWED")
+                if(action=="type"&&!WebAgentPolicy.safeText(text))return@guarded fail("TEXT_NOT_ALLOWED")
             }
             "select"->{
                 val options=target!!["options"]?.jsonArray?.map{it.jsonPrimitive.content}.orEmpty()
                 if(target.s("tag")!="select"||text !in options)return@guarded fail("OPTION_UNKNOWN")
-                val value=JsonPrimitive(text).toString()
-                eval("(() => { const e = $selector; const o = Array.from(e.options).find(o => o.text.trim().slice(0,60) === $value); e.value = o.value; e.dispatchEvent(new Event('change', {bubbles:true})); return true; })()")
             }
-            "press_enter"->{
-                if(target!!["editable"]?.jsonPrimitive?.booleanOrNull!=true||target["sensitive"]?.jsonPrimitive?.booleanOrNull==true)return@guarded fail("FIELD_NOT_ALLOWED")
-                eval("(() => { const e = $selector; e.focus(); for (const t of ['keydown','keypress','keyup']) e.dispatchEvent(new KeyboardEvent(t, {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true})); " +
-                    "if (e.form && !e.form.querySelector('[type=submit]')) e.form.requestSubmit(); return true; })()")
-            }
-            "scroll"->{
-                val step=when(arguments.s("direction").ifEmpty{"down"}){"down"->700;"up"->-700;else->return@guarded fail("DIRECTION_UNKNOWN")}
-                eval("window.scrollBy(0, $step)")
-            }
-            "back"->view().goBack()
+            "scroll"->if(arguments.s("direction").ifEmpty{"down"} !in setOf("up","down"))
+                return@guarded fail("DIRECTION_UNKNOWN")
             else->return@guarded fail("ACTION_UNKNOWN")
         }
-        settle()
-        val page=readPage()
-        JsonObject(page+mapOf("performed" to buildJsonObject{put("action",action);put("ref",ref);put("control",target?.s("label"))},
-            "evidence" to JsonPrimitive("동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.")))
+        val needsApproval=when(action){
+            "click"->target?.get("needsApproval")?.jsonPrimitive?.booleanOrNull==true
+            "type","press_enter"->!WebAgentPolicy.isSearchField(element(checkNotNull(target)))
+            else->false
+        }
+        if((needsApproval||approvedSnapshot!=null)&&approvedSnapshot!=current.first)
+            return@guarded fail("APPROVAL_MISMATCH")
+
+        // Only the current renderer evaluation can attest a refusal before dispatch.
+        snapshot=null
+        blockedNavigation.value=null
+        try {
+            val result=dom(buildJsonObject {
+                put("key",domKey);put("action",action);put("snapshotId",current.first)
+                put("ref",ref);put("text",text);put("direction",arguments.s("direction"))
+                put("needsApproval",needsApproval);put("approvedSnapshot",approvedSnapshot)
+            })
+            val refusal=result?.s("error")
+            if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"))
+                return@guarded fail(checkNotNull(refusal))
+            if(result?.get("performed")!=JsonPrimitive(true))return@guarded fail("ACTION_OUTCOME_UNKNOWN")
+            settle()
+            val page=readPage()
+            if(page["error"]!=null)return@guarded fail("ACTION_OUTCOME_UNKNOWN")
+            JsonObject(page+mapOf("performed" to buildJsonObject{put("action",action);put("ref",ref);put("control",target?.s("label"))},
+                "evidence" to JsonPrimitive("동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.")))
+        }catch(timeout:TimeoutCancellationException){
+            fail("ACTION_OUTCOME_UNKNOWN")
+        }catch(cancel:CancellationException){
+            throw cancel
+        }catch(error:Exception){
+            fail("ACTION_OUTCOME_UNKNOWN")
+        }
     }
 
     /** Serialises agent access on the main thread and marks the browser as agent-driven meanwhile. */

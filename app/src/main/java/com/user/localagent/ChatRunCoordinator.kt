@@ -2779,7 +2779,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val allowed=try { deferred.await() } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
-            if(action.call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION)
+            if(action.call.name in setOf(com.user.localagent.core.ScreenControlToolCatalog.ACTION,
+                    com.user.localagent.core.AppBrowserToolCatalog.ACTION))
                 approvedScreenSnapshot=action.call.arguments.getValue("snapshotId").jsonPrimitive.content
             noteOwnerAccepted=call.name=="patch_note"
             check(app.repository.chat.run(action.runId)?.let {it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true){"실행 대상이 변경되어 이전 승인을 적용하지 않았습니다."}

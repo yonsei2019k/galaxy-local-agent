@@ -1,0 +1,140 @@
+function (request) {
+  "use strict";
+
+  const ownerDocument = document;
+  const selector = 'a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=option],[onclick],[contenteditable=true]';
+  const maxElements = 120;
+  const maxText = 12000;
+  const fail = error => ({error});
+  const textOf = e => (e.getAttribute('aria-label') ||
+    (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') ||
+    e.innerText || (e.value && e.type !== 'password' && e.type !== 'hidden' && e.value) ||
+    e.placeholder || e.title || e.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const visible = e => {
+    const r = e.getBoundingClientRect();
+    const s = getComputedStyle(e);
+    return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none' &&
+      r.bottom > 0 && r.top < innerHeight * 3;
+  };
+
+  const describe = (node, ref) => {
+    const tag = node.tagName.toLowerCase();
+    const form = node.form || null;
+    const options = tag === 'select' ? Array.from(node.options).slice(0, 30) : [];
+    const item = {
+      ref, tag, role: node.getAttribute('role') || '', type: (node.getAttribute('type') || '').toLowerCase(),
+      label: textOf(node), name: node.name || '', id: node.id || '', placeholder: node.placeholder || '',
+      autocomplete: node.autocomplete || '', disabled: !!node.disabled || node.matches(':disabled,[aria-disabled=true]'),
+      editable: node.isContentEditable || ['input','textarea','select'].includes(tag),
+    };
+    if (tag === 'select') item.options = options.map(o => o.text.trim().slice(0, 60));
+    // These action destinations and option values stay in the renderer and never enter the tool result.
+    const binding = JSON.stringify([item, node.href, node.target, node.type, node.formAction, node.formMethod,
+      node.formTarget, form && [form.action, form.method, form.target],
+      options.map(o => [o.value, o.matches(':disabled')])]);
+    return {node, form, options, item, binding};
+  };
+
+  const page = () => {
+    const text = document.body ? document.body.innerText : '';
+    return {
+      url: location.href, title: document.title.slice(0, 200),
+      text: text.replace(/\n{3,}/g, '\n\n').slice(0, maxText), truncated: text.length > maxText,
+    };
+  };
+
+  const collect = () => {
+    const controls = [];
+    for (const node of document.querySelectorAll(selector)) {
+      if (visible(node)) controls.push(describe(node, 'e' + (controls.length + 1)));
+      if (controls.length === maxElements) break;
+    }
+    return {page: page(), controls};
+  };
+
+  const sameControl = (a, b) => a.node === b.node && a.form === b.form && a.binding === b.binding &&
+    a.options.length === b.options.length && a.options.every((node, i) => node === b.options[i]);
+
+  if (!Object.prototype.hasOwnProperty.call(ownerDocument, request.key)) {
+    if (request.action !== 'observe') return fail('SNAPSHOT_STALE');
+    let observed;
+    const dispatch = input => {
+      if (input.action === 'observe') {
+        observed = {id: input.snapshotId, ...collect()};
+        return {...observed.page, elements: observed.controls.map(e => e.item),
+          truncated: observed.page.truncated || observed.controls.length === maxElements};
+      }
+      const expected = observed;
+      if (!expected || expected.id !== input.snapshotId) return fail('SNAPSHOT_STALE');
+      observed = null;
+      if ((input.needsApproval || input.approvedSnapshot !== null) && input.approvedSnapshot !== expected.id)
+        return fail('APPROVAL_MISMATCH');
+      const current = collect();
+      const pageBinding = JSON.stringify(expected.page);
+      if (document !== ownerDocument || JSON.stringify(current.page) !== pageBinding ||
+          expected.controls.length !== current.controls.length ||
+          !expected.controls.every((control, i) => sameControl(control, current.controls[i])))
+        return fail('SNAPSHOT_STALE');
+
+      if (input.action === 'scroll') {
+        window.scrollBy(0, input.direction === 'up' ? -700 : 700);
+        return {performed: true};
+      }
+      if (input.action === 'back') {
+        history.back();
+        return {performed: true};
+      }
+
+      const control = expected.controls.find(e => e.item.ref === input.ref);
+      if (!control || control.item.disabled) return fail('ELEMENT_UNAVAILABLE');
+      const e = control.node;
+      // Scrolling or focusing can synchronously invoke page code. Recheck before dispatch as well.
+      const stillCurrent = () => document === ownerDocument && e.getRootNode() === ownerDocument &&
+        e.matches(selector) && visible(e) && JSON.stringify(page()) === pageBinding &&
+        sameControl(control, describe(e, input.ref));
+      switch (input.action) {
+        case 'click':
+          e.scrollIntoView({block:'center'});
+          if (!stillCurrent()) return fail('SNAPSHOT_STALE');
+          e.click();
+          break;
+        case 'type': {
+          e.scrollIntoView({block:'center'});
+          e.focus();
+          if (!stillCurrent()) return fail('SNAPSHOT_STALE');
+          if (e.isContentEditable) e.innerText = input.text;
+          else {
+            const proto = e instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            Object.getOwnPropertyDescriptor(proto, 'value').set.call(e, input.text);
+          }
+          e.dispatchEvent(new Event('input', {bubbles:true}));
+          e.dispatchEvent(new Event('change', {bubbles:true}));
+          break;
+        }
+        case 'select': {
+          const index = control.item.options.indexOf(input.text);
+          if (index < 0 || control.options[index].matches(':disabled')) return fail('OPTION_UNKNOWN');
+          e.selectedIndex = index;
+          e.dispatchEvent(new Event('change', {bubbles:true}));
+          break;
+        }
+        case 'press_enter':
+          e.focus();
+          if (!stillCurrent()) return fail('SNAPSHOT_STALE');
+          for (const event of ['keydown','keypress','keyup'])
+            e.dispatchEvent(new KeyboardEvent(event, {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true}));
+          if (control.form && !control.form.querySelector('[type=submit]')) {
+            // A key listener may already have executed. A changed form cannot receive a fallback submission.
+            if (!stillCurrent()) return fail('ACTION_OUTCOME_UNKNOWN');
+            control.form.requestSubmit();
+          }
+          break;
+        default:
+          return fail('ACTION_UNKNOWN');
+      }
+      return {performed: true};
+    };
+    Object.defineProperty(ownerDocument, request.key, {value: dispatch});
+  }
+  return ownerDocument[request.key](request);
+}

@@ -23,10 +23,12 @@ typealias BrowserBackend = suspend (operation:String,body:JsonObject)->JsonObjec
 /**
  * One instance per request executor and browser: remembers the last page snapshot so owner approval names the
  * real control. Irreversible clicks and typing outside search boxes need the owner; the browser itself refuses
- * login/card/OTP fields and requires a one-time approval token for irreversible clicks.
+ * login/card/OTP fields. PC actions use a one-time approval token. In-app actions use the
+ * snapshot ID attached to the owner's approval.
  */
 class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where:String,private val enabled:()->Boolean,private val backend:BrowserBackend) {
     companion object {
+        private const val APP_APPROVED_SNAPSHOT="approvedAppSnapshot"
         fun pc(context:Context)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
             val transport=PcTransport(context)
             val config=transport.available(waitForRestart=true)?:error("PC에 연결하지 못했습니다. 집 밖이면 휴대폰의 Tailscale을 켜주세요.")
@@ -37,7 +39,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             when(operation){
                 "open"->web.open(body.getValue("url").jsonPrimitive.content)
                 "read"->web.read()
-                else->web.act(body)
+                else->web.act(body,body[APP_APPROVED_SNAPSHOT]?.jsonPrimitive?.contentOrNull)
             }
         }
     }
@@ -67,23 +69,37 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         return needs to review
     }
 
-    suspend fun execute(call:ToolCall):ToolResult {
+    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
         val (operation,body)=when(call.name){
             catalog.open->"open" to buildJsonObject{put("url",call.arguments.getValue("url"))}
             catalog.read->"read" to buildJsonObject{}
-            else->"act" to JsonObject(call.arguments)
+            else->{
+                val arguments=if(catalog==AppBrowserToolCatalog){
+                    val modelArguments=call.arguments-APP_APPROVED_SNAPSHOT
+                    if(approvedSnapshot==null)modelArguments else modelArguments+(APP_APPROVED_SNAPSHOT to JsonPrimitive(approvedSnapshot))
+                }else call.arguments
+                "act" to JsonObject(arguments)
+            }
         }
         var result=backend(operation,body)
         // The owner already approved this exact control against the same snapshot; confirm it to the browser once.
         if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required"&&call.name==catalog.action){
-            val approval=result.getValue("approvalId").jsonPrimitive.content
-            require(Regex("[0-9a-f]{32}").matches(approval))
-            result=backend(operation,JsonObject(call.arguments+("approvalId" to JsonPrimitive(approval))))
+            if(catalog==AppBrowserToolCatalog)result=buildJsonObject{put("error","APPROVAL_MISMATCH")}
+            else{
+                val approval=result.getValue("approvalId").jsonPrimitive.content
+                require(Regex("[0-9a-f]{32}").matches(approval))
+                result=backend(operation,JsonObject(call.arguments+("approvalId" to JsonPrimitive(approval))))
+            }
         }
         val error=result["error"]?.jsonPrimitive?.contentOrNull
         if(error!=null){
+            if(catalog==AppBrowserToolCatalog&&error=="ACTION_OUTCOME_UNKNOWN"){
+                last=null
+                return ToolResult(call.id,false,buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),
+                    VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
+            }
             if(error=="SNAPSHOT_STALE")last=null
             return ToolResult(call.id,false,buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
         }
@@ -99,6 +115,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "APPROVAL_MISMATCH"->"승인한 대상과 현재 페이지가 다릅니다. 다시 읽고 다시 요청하세요."
         "ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"->"그 요소를 사용할 수 없습니다. 다시 읽어 ref와 선택지를 확인하세요."
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
+        "ACTION_OUTCOME_UNKNOWN"->"동작이 실행됐는지 확인되지 않았습니다. 다시 실행하기 전에 페이지에서 결과를 확인하세요."
         else->"브라우저 요청이 거부됐습니다."
     }
 
