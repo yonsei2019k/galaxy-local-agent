@@ -46,7 +46,7 @@ object ToolCapabilityCatalog {
                 ScreenControlToolCatalog.READ,ScreenControlToolCatalog.ACTION->"screen_control_access"
                 else->null
             }
-            val handler=consumer?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url"->"browser";else->null}
+            val handler=consumer?.takeUnless {tool.name==com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL}?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url"->"browser";else->null}
             val model=when(tool.name){"generate_image"->"image";"transcribe_recording"->"asr_file";in PrivateAnalysisToolCatalog.analysisNames->"text";else->null}
             val messenger=tool.name in setOf("list_messenger_notifications","reply_messenger_notification")
             val state=when {

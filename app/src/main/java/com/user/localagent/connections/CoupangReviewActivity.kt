@@ -21,6 +21,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import com.user.localagent.core.connections.CoupangReviewEvidence as Evidence
 import org.json.JSONObject
 import kotlin.math.roundToInt
@@ -32,7 +39,8 @@ class CoupangReviewActivity : ComponentActivity() {
     private val reviewRows = linkedMapOf<Evidence.Variant, Observation>()
     private var pageRevision = 0
     private var capturePending = false
-    private var chooserTarget: String? = null
+    private var scan: Job? = null
+    private var chooserTarget: Pair<String, Int>? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var web: WebView
     private lateinit var status: TextView
@@ -41,7 +49,8 @@ class CoupangReviewActivity : ComponentActivity() {
     private val choosePhoto = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val callback = fileCallback
         fileCallback = null
-        val samePage = chooserTarget == web.url && web.url?.let(::reviewUploadPage) == true
+        val current = if (::web.isInitialized) web.url else null
+        val samePage = current != null && chooserTarget == (current to pageRevision) && reviewUploadPage(current)
         chooserTarget = null
         callback?.onReceiveValue(uri?.takeIf {
             samePage && it.scheme == "content" && runCatching {
@@ -68,13 +77,19 @@ class CoupangReviewActivity : ComponentActivity() {
         text("쿠팡 구매후기").textSize = 22f
         text("집합 앱 안에서 직접 로그인하세요. 조회한 상품 정보는 이 화면에만 표시됩니다.")
         val navigation = LinearLayout(this).also(root::addView)
-        button(navigation, "주문목록") { web.loadUrl(Evidence.ORDERS) }
-        button(navigation, "미작성 후기") { web.loadUrl(Evidence.REVIEWABLE) }
-        button(navigation, "뒤로") { if (web.canGoBack()) web.goBack() }
+        button(navigation, "주문목록") { open(Evidence.ORDERS) }
+        button(navigation, "미작성 후기") { open(Evidence.REVIEWABLE) }
+        button(navigation, "뒤로") { scan?.cancel(); if (web.canGoBack()) web.goBack() }
 
         val actions = LinearLayout(this).also(root::addView)
         button(actions, "현재 목록 확인") { capture() }
         button(actions, "대조 결과") { showResults() }
+        val scanActions = LinearLayout(this).also(root::addView)
+        button(scanActions, "목록 이어서 확인") { startScan() }
+        button(scanActions, "확인 중지") {
+            scan?.cancel()
+            status.text = "확인을 중지했습니다. 지금까지 확인한 상품을 볼 수 있습니다."
+        }
         status = text("주문목록과 미작성 후기 화면에서 각각 현재 목록을 확인하세요.")
 
         web = WebView(this).apply {
@@ -91,7 +106,13 @@ class CoupangReviewActivity : ComponentActivity() {
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                     pageRevision++
-                    if (url == null || !Evidence.navigationAllowed(url)) view.stopLoading()
+                    if (url == null || !Evidence.navigationAllowed(url)) {
+                        view.stopLoading()
+                    } else if (Uri.parse(url).host == "login.coupang.com") {
+                        orderRows.clear()
+                        reviewRows.clear()
+                        status.text = "쿠팡에 직접 로그인한 뒤 주문과 리뷰 목록을 다시 확인해 주세요."
+                    }
                 }
             }
             webChromeClient = object : WebChromeClient() {
@@ -99,8 +120,9 @@ class CoupangReviewActivity : ComponentActivity() {
                     webView: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams,
                 ): Boolean {
                     val current = webView.url
+                    val explicitTypes = params.acceptTypes.filter(String::isNotBlank)
                     if (current == null || !reviewUploadPage(current) || params.mode != FileChooserParams.MODE_OPEN ||
-                        params.acceptTypes.none { it.startsWith("image/") || it in IMAGE_EXTENSIONS }
+                        explicitTypes.isNotEmpty() && explicitTypes.none { it.startsWith("image/") || it in IMAGE_EXTENSIONS }
                     ) {
                         callback.onReceiveValue(null)
                         return true
@@ -109,7 +131,7 @@ class CoupangReviewActivity : ComponentActivity() {
                         callback.onReceiveValue(null)
                         return true
                     }
-                    chooserTarget = current
+                    chooserTarget = current to pageRevision
                     fileCallback = callback
                     choosePhoto.launch("image/*")
                     return true
@@ -128,7 +150,7 @@ class CoupangReviewActivity : ComponentActivity() {
     }
 
     private fun capture() {
-        if (capturePending) return
+        if (capturePending || scan?.isActive == true) return
         val current = web.url.orEmpty()
         val page = Evidence.page(current)
         if (page == null) {
@@ -145,13 +167,89 @@ class CoupangReviewActivity : ComponentActivity() {
         }
     }
 
+    private fun open(url: String) {
+        scan?.cancel()
+        web.loadUrl(url)
+    }
+
+    private suspend fun evaluate(script: String): String? = suspendCancellableCoroutine { pending ->
+        web.evaluateJavascript(script) { value ->
+            if (pending.isActive) pending.resume(value)
+        }
+    }
+
+    private fun startScan() {
+        if (capturePending || scan?.isActive == true) return
+        val url = web.url ?: return
+        val page = Evidence.page(url)
+        if (page == null) {
+            status.text = "공식 주문목록 또는 미작성 후기 목록을 먼저 열어 주세요."
+            return
+        }
+        scan = lifecycleScope.launch {
+            status.text = "이 화면에서 볼 수 있는 상품을 확인 중입니다."
+            val result = withTimeoutOrNull(90_000) { scanListing(url, page) }
+            status.text = result ?: "확인 시간에 도달했습니다. 확인한 상품은 대조 결과에 남아 있습니다."
+        }
+    }
+
+    private suspend fun scanListing(initial: String, page: Evidence.Page): String {
+        var expected = initial
+        var expectedRevision = pageRevision
+        repeat(180) {
+            val data = evaluate(CAPTURE_JS)?.takeIf { it.length <= 180_000 }
+                ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                ?: return "목록을 읽지 못했습니다. 화면을 다시 확인해 주세요."
+            if (web.url != expected || data.optString("url") != expected || pageRevision != expectedRevision) {
+                return "화면이 바뀌어 확인을 중지했습니다."
+            }
+            if (data.optBoolean("blocked")) return "쿠팡 화면에서 직접 로그인하거나 인증해 주세요."
+            if (!data.optBoolean("ready")) {
+                delay(450)
+                return@repeat
+            }
+            status.text = runCatching { recordPage(data, expected, page) }.getOrNull()
+                ?: return "페이지의 상품 정보를 확인하지 못했습니다."
+            if (data.optBoolean("limited")) return "현재 화면의 확인 한도에 도달했습니다. 다음 위치에서 이어서 확인해 주세요."
+            if (!data.optBoolean("bottom")) {
+                evaluate("window.scrollBy(0, Math.max(1, Math.floor(innerHeight * .72))); true")
+                delay(400)
+                return@repeat
+            }
+            val next = Evidence.nextPage(expected, data.optString("next"))
+                ?: return "현재 페이지의 끝까지 확인했습니다. 쿠팡 목록에서 다음 페이지가 있는지 확인해 주세요."
+            val previousRevision = pageRevision
+            web.loadUrl(next)
+            val arrived = withTimeoutOrNull(12_000) {
+                while (web.url != next || pageRevision == previousRevision) {
+                    if (pageRevision != previousRevision && web.url?.let(Evidence::page) != page) {
+                        return@withTimeoutOrNull false
+                    }
+                    delay(250)
+                }
+                true
+            }
+            if (arrived != true) return "다음 페이지를 확인하지 못했습니다. 현재까지 확인한 상품을 표시합니다."
+            expected = next
+            expectedRevision = pageRevision
+            delay(450)
+        }
+        return "한 번에 확인할 수 있는 범위에 도달했습니다. 현재 위치에서 이어서 확인해 주세요."
+    }
+
     private fun recordPage(raw: String, current: String, page: Evidence.Page): String {
         require(raw.length <= 180_000)
-        val data = JSONObject(raw)
+        return recordPage(JSONObject(raw), current, page)
+    }
+
+    private fun recordPage(data: JSONObject, current: String, page: Evidence.Page): String {
         require(data.getString("url") == current)
         if (data.getBoolean("blocked")) return "로그인이나 인증이 필요합니다."
         val target = if (page == Evidence.Page.ORDERS) orderRows else reviewRows
         val rows = data.getJSONArray("links")
+        if (rows.length() == 0 && data.getInt("uncertain") == 0) {
+            return "현재 화면에 대조할 상품이 없습니다. 목록이나 다른 페이지를 확인해 주세요."
+        }
         var unresolved = data.getInt("uncertain")
         var limit = data.getBoolean("limited")
         for (index in 0 until rows.length()) {
@@ -192,7 +290,7 @@ class CoupangReviewActivity : ComponentActivity() {
             label(title.ifBlank { "옵션이 일치하는 상품" })
             button(results, "공식 상품 사진 확인") {
                 dialog.dismiss()
-                web.loadUrl(variant.url)
+                open(variant.url)
             }
             button(results, "사용 경험으로 후기 준비") { showDraft(title) }
         }
@@ -234,7 +332,7 @@ class CoupangReviewActivity : ComponentActivity() {
             }
             val clip = ClipData.newPlainText("쿠팡 후기 초안", draft)
             clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
-            getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+            requireNotNull(getSystemService(ClipboardManager::class.java)).setPrimaryClip(clip)
             status.text = "초안을 복사했습니다. 미작성 후기 목록에서 같은 상품·옵션을 확인하고 직접 붙여넣어 주세요."
             dialog.dismiss()
         }
@@ -249,6 +347,11 @@ class CoupangReviewActivity : ComponentActivity() {
             text = title
             setOnClickListener { click() }
         })
+    }
+
+    override fun onStop() {
+        scan?.cancel()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -296,12 +399,20 @@ class CoupangReviewActivity : ComponentActivity() {
               let visited = 0;
               if (!blocked) for (const link of document.querySelectorAll('a[href]')) {
                 if (!product(link.href) || !visible(link)) continue;
+                const rect = link.getBoundingClientRect();
+                if (rect.bottom <= 0 || rect.top >= innerHeight) continue;
                 if (++visited > 120) { limited = true; break; }
                 if (!rowEvidence(link)) { uncertain++; continue; }
                 const title = link.innerText || link.querySelector('img')?.alt || '';
                 links.push({href: link.href.slice(0, 500), title: normalize(title).slice(0, 160)});
               }
-              return {url, blocked, limited, uncertain, links};
+              const nextLinks = Array.from(document.querySelectorAll('a[href]'))
+                .filter(a => visible(a) && (a.rel === 'next' || /^(다음|다음 페이지)$/.test(normalize(a.innerText || a.getAttribute('aria-label') || ''))))
+                .map(a => a.href);
+              const next = [...new Set(nextLinks)];
+              const bottom = window.scrollY + innerHeight >= document.documentElement.scrollHeight - 5;
+              return {url, blocked, limited, uncertain, links, bottom, next: next.length === 1 ? next[0] : '',
+                ready: document.readyState === 'complete'};
             })()
         """.trimIndent()
     }

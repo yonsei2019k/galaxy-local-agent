@@ -27,6 +27,15 @@ class CoupangReviewEvidenceTest {
         assertNull(evidence.page("https://my.coupang.com:444/productreview/reviewable"))
     }
 
+    @Test fun paginationOnlyAdvancesTheObservedOfficialListing() {
+        val base = CoupangReviewEvidence.REVIEWABLE
+        assertEquals("$base?page=2", CoupangReviewEvidence.nextPage(base, "$base?page=2"))
+        assertNull(CoupangReviewEvidence.nextPage(base, "$base?page=2&action=write"))
+        assertNull(CoupangReviewEvidence.nextPage(base, "$base?page=3"))
+        assertNull(CoupangReviewEvidence.nextPage("$base?page=2", "$base?page=2"))
+        assertNull(CoupangReviewEvidence.nextPage(base, CoupangReviewEvidence.ORDERS + "?page=2"))
+    }
+
     @Test fun crossOriginCredentialsAndActionUrlsCannotBecomeEvidence() {
         val evidence = CoupangReviewEvidence
         assertFalse(evidence.navigationAllowed("https://www.coupang.com.evil.test/vp/products/101"))

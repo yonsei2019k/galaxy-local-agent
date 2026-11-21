@@ -1,5 +1,9 @@
 # Device validation
 
+## 2047 on-phone Coupang review workspace candidate
+
+Installed signed 2047 over the verified signed 2046 with matching package and signer. The installed base APK SHA-256 was `394bf5576d509c25e89de410f1208ee58d6fe9c33f20d1169a19e049855d99ec`. Core JVM 1,019 and mandatory release lint passed. Four synthetic DOM cases exercised the capture script. The installed app and its conversation menu opened. The app moved out of the foreground during settings navigation, before opening the Coupang workspace. No actual login, purchase-history collection, photo upload, or posting was exercised.
+
 ## 2046 saved staff titles and sidebar layout candidate
 
 Installed signed 2046 over 2045. The package version and installed base APK matched SHA-256 3dba99e69a25c843fe7008c59531b71a8a094b1341c132a0ea0612a7f91f7e92. Mandatory release lint and 1,015 core JVM tests passed. React tests passed (39), and the 2045 embedded UI was compared with the new UI in Chrome at 320×460, 320×568 and 393×700 using a synthetic bridge. The real device launched and exposed the chat menu action. The device switched to another app before drawer verification, so no staff title was written on the real device and restart durability was not exercised in this run.
