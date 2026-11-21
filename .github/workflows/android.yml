@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  # Workflow run 27 publishes code 2049, above the installed local 2048 build.
+  RELEASE_VERSION_OFFSET: 2022
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
@@ -14,14 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
-      RELEASE_VERSION_NAME: 0.1.${{ github.run_number }}
       RUSTUP_TOOLCHAIN: 1.97.0
       CARGO_BUILD_JOBS: 2
       ZIPHAP_PYTHON: python
     steps:
       - name: Set monotonic version code
-        # Above historical local1090; this workflow's run number remains monotonic.
-        run: printf 'RELEASE_VERSION_CODE=%s\n' "$((2000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+        run: |
+          code=$((RELEASE_VERSION_OFFSET + GITHUB_RUN_NUMBER))
+          printf 'RELEASE_VERSION_CODE=%s\nRELEASE_VERSION_NAME=0.1.%s\n' "$code" "$((code - 2000))" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
@@ -52,6 +55,7 @@ jobs:
           python -c 'import cryptography; assert cryptography.__version__ == "50.0.2"'
           python -m unittest discover -s pc-worker/tests -p 'test_*provider*.py'
           python -m unittest discover -s pc-worker/tests -p 'test_server_agent_adapter.py'
+          python -m unittest discover -s pc-worker/tests -p 'test_pc_openclaw_agent.py'
           python -m unittest discover -s pc-worker/tests -p 'test_private_image_workspace.py'
           python -m unittest discover -s pc-worker/tests -p 'test_public_read_recovery.py'
           python -m unittest discover -s pc-worker/tests -p 'test_remote_test.py'
@@ -75,6 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/build-react-ui.py --self-test
+          node --test scripts/tests/test_app_web_agent.cjs
           python scripts/build-react-ui.py --ci-tests
       - name: Install pinned Android SDK
         shell: bash
@@ -106,11 +111,11 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    env:
-      RELEASE_VERSION_NAME: 0.1.${{ github.run_number }}
     steps:
       - name: Set monotonic version code
-        run: printf 'RELEASE_VERSION_CODE=%s\n' "$((2000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+        run: |
+          code=$((RELEASE_VERSION_OFFSET + GITHUB_RUN_NUMBER))
+          printf 'RELEASE_VERSION_CODE=%s\nRELEASE_VERSION_NAME=0.1.%s\n' "$code" "$((code - 2000))" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false

@@ -24,3 +24,5 @@ Local developer tools and signing material are outside this public repository. T
 ## Local LLM delegation (optional MCP)
 
 Use the paired local model for authorized private data and image work. Ordinary development, summarization, and rewriting use the active cloud agent. Keep owner data local during private diagnostics and give the phone priority on its paired worker.
+
+Every ZipHap work chat must report changes that affect packaging, installation, or deployment to the main `집합에이전트` chat and write one durable report per change in the canonical checkout's ignored `.local/coordination/release-intake/reports/`. Read the intake procedure in `docs/automatic-updates.ko.md`. The packaging owner freezes the release inputs before building, carries later reports into the next version, and reconciles integration, signed build, publication, and device installation evidence before closing reports.
