@@ -1,3 +1,9 @@
+## 2026-11-21 — 번들 스킬 카탈로그 해시 불일치 수정 (Claude 스킬 증류)
+
+- OpenClaw 스킬 경로(목록은 이름·설명만, 본문은 읽기 도구로 지연 로드, frontmatter 이름 기준)와 대조하다가, 실제 커밋된 `email`과 `recording-analysis`의 SKILL.md가 `catalog.json`의 SHA-256과 다른 것을 찾았다. 빌드 1019(acd10c1) 이후 두 스킬은 `BundledSkillStore.read`에서 해시 불일치로 거부된다. 따라서 `PrivateAnalysisExecutor`의 녹음 분석과 `read_skill("email")`은 지침을 읽지 못한다. 본문은 그대로 두고, 카탈로그의 두 해시만 현재 본문 값으로 바꿨다.
+- 새 JVM 시험 `BundledSkillAssetIntegrityTest`를 추가했다. 실제 자산 디렉터리를 운영 저장소 검사로 읽고, 다음 조건을 확인한다. 카탈로그에 있는 모든 스킬을 읽을 수 있어야 하고, frontmatter의 `name`과 `version`이 카탈로그와 같아야 하며, 카탈로그에 없는 SKILL.md가 없어야 한다. 수정 전에는 두 스킬의 해시 불일치로 실패했다. 수정 후 `skills.*`·`analysis.*` 집중 149건이 실패·오류·건너뜀 없이 통과했다.
+- 남은 항목: `research/SKILL.md`는 카탈로그에 없다. `LocalResearchWorkflow`의 `EngineResearchActionDecider`와 로컬 조사 작성기가 해시·크기 검증 없이 이 파일을 직접 읽는다. 크기 상한은 10,000자이거나 아예 없다. 이번에는 동작을 바꾸지 않고 시험의 명시적 예외로만 남겼다. 카탈로그 등록 또는 `evidence-research` 전환은 통합 결정이다. 전체 릴리스 빌드와 기기 확인은 하지 않았다.
+
 ## Bridge retry evidence and isolated simulation exceptions
 
 The Android client records when an existing safe retry is scheduled, with operation and next attempt number. A propagated socket timeout captures the controller phase, broker status, pending call state, sequence, last observed provider state and elapsed time before cleanup. Retry limits, pairing, authority and mutation behavior are unchanged. Kotlin regressions confirmed a recovered GET, no retry of an uncertain claim, and the authenticated provider-busy recovery path.
