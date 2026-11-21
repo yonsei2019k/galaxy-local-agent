@@ -143,18 +143,6 @@ class PcInferenceEngine(context:Context,private val authorityMatches:(PcConnecti
         status.value="PC 계산 준비됨 · $requestedModel";metrics.value=null;generation.value=null
     }}
 
-    internal suspend fun advertisesMemoryAnalysisTarget(target:com.user.localagent.models.PairedPcText):Boolean =
-        withContext(Dispatchers.IO){mutex.withLock {
-            if(computeOwner==null||targetCapturedPcRevision!=target.authorizationRevision||
-                textAuthority.revision!=target.authorizationRevision||textAuthority.allowCloudText)return@withLock false
-            val connection=transport.available(computeOwner)?:return@withLock false
-            requireAuthority(connection)
-            val health=transport.lastHealth
-            val advertised=health?.get("llm_models") as? JsonObject
-            pcTextProfileWireSupported(target,health)&&
-                (advertised?.get(target.profile.modelId) as? JsonPrimitive)?.contentOrNull==target.profile.modelSha256
-        }}
-
     /** A logical target never fabricates a phone path or inherits current global pairing authority. */
     override suspend fun loadPairedPcText(target:com.user.localagent.models.PairedPcText,options:InferenceOptions):com.user.localagent.models.PairedPcLoadReceipt =
         withContext(Dispatchers.IO){mutex.withLock {

@@ -36,10 +36,6 @@ class PairedPcText private constructor(
     override fun requireSelectable() { check(authorizationRevision >= 0) }
     override fun toString() = "PairedPcText(host logical profile)"
 
-    internal fun forMemoryAnalysis() =
-        PairedPcText(authorizationRevision, PairedPcTextProfileDescriptor.GEMMA_E2B_LEARNING_V1)
-
-
     companion object {
         /** Inputs come from the captured request and current host settings, never model output. */
         fun forRequest(selectionId: String, capturedRevision: Long?, allowCloudText: Boolean,

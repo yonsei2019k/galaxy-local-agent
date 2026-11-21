@@ -148,17 +148,6 @@ class AutomaticComputeEngine internal constructor(
         receipt
     }
 
-    /** Select before any source is sent. A stored analysis always keeps the originally bound model hash. */
-    internal suspend fun memoryAnalysisTarget(selected:InferenceModelTarget,previousSha256:String?):InferenceModelTarget {
-        if(selected !is PairedPcText||!pcOnly||!externalPcAuthority())return selected
-        val lightweight=selected.forMemoryAnalysis()
-        if(previousSha256!=null)return if(previousSha256==lightweight.profile.modelSha256)lightweight else selected
-        val supports=try {(pc as? PcInferenceEngine)?.advertisesMemoryAnalysisTarget(lightweight)==true}
-        catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){false}
-        return if(supports)lightweight else selected
-    }
-
     /** Uses the existing typed loader's mutex/lease. Do not nest that load inside this mutex. */
     override suspend fun prepareAnalysisModel(target: InferenceModelTarget, options: InferenceOptions): PreparedAnalysisModel {
         requirePrivateAnalysisText(target, options)

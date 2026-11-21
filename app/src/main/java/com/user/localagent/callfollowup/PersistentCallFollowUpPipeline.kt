@@ -559,7 +559,7 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
         val model = app.models.models.value.single { it.id == choice.modelId && it.verified }
         val projector = app.models.models.value.single { it.id == model.id + "-mmproj" && it.verified }
         val localText = app.models.models.value.singleOrNull {
-            it.id == "gemma-e2b" && it.verified && it.runtime in setOf("gguf", "litertlm") &&
+            it.id == "gemma-e4b" && it.verified && it.runtime in setOf("gguf", "litertlm") &&
                 java.io.File(it.path).isFile
         } ?: throw CallPipelineFailure("TEXT_MODEL_UNAVAILABLE")
         return CallAsrPin(model, projector, choice.language, if (model.id == "asr-qwen-17b") 2 else 4) to localText
