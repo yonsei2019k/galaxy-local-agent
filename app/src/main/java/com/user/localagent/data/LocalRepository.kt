@@ -203,7 +203,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         if(project.settings.memoryMode=="off")return buildJsonObject {put("type","local_owner_knowledge_context");put("untrustedData",true);put("coreProfile",buildJsonArray{});put("relevantKnowledge",buildJsonArray{})}.toString()
         return LocalRepository(database,ChatAccessScope("",projectId,"project:$projectId",project.settings.useOwnerMemory)).ownerProfileContext(query)
     }
-    suspend fun ownerProfileContext(query:String):String {
+    suspend fun ownerProfileContext(query:String,includeCore:Boolean=true):String {
         require(query.length<=6000&&'\u0000' !in query)
         if(access?.memoryEnabled==false)return "{\"type\":\"local_owner_knowledge_context\",\"untrustedData\":true,\"coreProfile\":[],\"relevantKnowledge\":[]}"
         val emailQuery=Regex("(?i)메일|이메일|email|계정|\\baccount\\b").containsMatchIn(query)
@@ -218,7 +218,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
             val genericContact=Regex("(?i)contact|연락").containsMatchIn(predicate)
             return (!email||emailQuery)&&(!phone||phoneQuery)&&(!address||addressQuery)&&(!genericContact||emailQuery||phoneQuery||addressQuery)
         }
-        val candidates=chatDao.accessibleKnowledge(scopeKey,access?.useOwnerMemory?:true).map(::displayKnowledge).filter {claim->
+        val candidates=if(!includeCore)emptyList()else chatDao.accessibleKnowledge(scopeKey,access?.useOwnerMemory?:true).map(::displayKnowledge).filter {claim->
             claim.status=="confirmed"&&("core" in claim.tags||claim.subject=="owner"&&Regex("^(?:preferred_name|name|display_name|occupation|profession|job|workplace|organization|role|family|spouse|partner|children|children_count|child|son|daughter|response_preference|response_style|language|preference|communication_preference)(?:[._].*)?$").matches(claim.predicate))&&permitted(claim.predicate,claim.value)
         }.sortedWith(compareBy<KnowledgeClaim> {when {it.predicate in setOf("preferred_name","name","display_name")->0;it.predicate in setOf("family.size","family_size","family.children","children_count","family.children_count","children.count")->1;Regex("family|children|child|spouse|partner|son|daughter|가족|자녀|배우자").containsMatchIn(it.predicate)->2;else->3}}.thenByDescending {it.updatedAt}).take(16)
         val family=candidates.filter {Regex("family|children|child|spouse|partner|son|daughter|가족|자녀|배우자").containsMatchIn(it.predicate)}.take(4)
@@ -226,9 +226,9 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val core=(family+preference+candidates).distinctBy {it.id}.take(8).toMutableList()
         val relevant=retrieveKnowledge(query.take(2000),5).filter {item->core.none {it.id==item.id}&&permitted(item.predicate,item.value)}.take(4).toMutableList()
         val existingValues=(core+relevant).map {it.value}.toSet()
-        val legacy=searchMemories(query,3).filter {it.text !in existingValues&&permitted("legacy_memory",it.text)&&graph.allowed("approved_memory",it.id)}.take(2).toMutableList()
+        val legacy=if(!includeCore)mutableListOf()else searchMemories(query,3).filter {it.text !in existingValues&&permitted("legacy_memory",it.text)&&graph.allowed("approved_memory",it.id)}.take(2).toMutableList()
         fun claim(item:KnowledgeClaim)=buildJsonObject {
-            put("subject",item.subject.take(48));put("predicate",item.predicate.take(64));put("value",item.value.take(140))
+            put("subject",item.subject.take(48));item.objectSubject?.let {put("relatedSubject",it.take(48))};put("predicate",item.predicate.take(64));put("value",item.value.take(140))
             put("status",item.status);put("confidence",item.confidence);put("sourceKind",item.sourceKind.take(32))
         }
         fun render()=buildJsonObject {
@@ -393,10 +393,14 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     suspend fun searchNotes(query:String)=chatDao.searchNotes(scopeKey,query.take(500),50)
     suspend fun searchUserNotes(query:String,scope:String="",limit:Int=5)=chatDao.searchUserNotes(scopeKey,query.take(500),scope.takeIf {it.isNotBlank()}.orEmpty(),com.user.localagent.core.InternalNoteCollections.protected.toList(),limit.coerceIn(1,5))
     suspend fun latestNote(collection:String):NoteRecord? {require(collection.length<=80);return chatDao.searchNotes(scopeKey,"",2000).firstOrNull {it.collection==collection}}
+    internal suspend fun saveApprovedMemory(text:String,kind:String):MemoryRecord {
+        require(approvedMemoryKind(kind)){"기억 유형은 사실, 선호 또는 정정이어야 합니다."}
+        return saveMemory(text,kind)
+    }
     suspend fun saveMemory(text:String,kind:String="fact",sourceMessageId:String?=null):MemoryRecord {
         require(text.isNotBlank()&&text.length<=4000);require(kind.isNotBlank()&&kind.length<=80)
         return database.withTransaction {
-            verifyScopeLive()
+            check(memoryAccessEnabled()){"이 대화에서는 기억 저장이 꺼져 있습니다."}
             val previous=chatDao.recentMemories(scopeKey).firstOrNull {it.text==text}
             val record=when {
                 previous==null->MemoryRecord(text=text,kind=kind,sourceMessageId=sourceMessageId).also {dao.memory(it)}
@@ -433,14 +437,21 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     /** Bounded lexical retrieval, not embeddings or generated semantic search. */
     suspend fun searchMemories(query:String,limit:Int=5):List<MemoryRecord> = withContext(Dispatchers.Default) {
         val literal=query.trim().take(500)
-        if(literal.isBlank())return@withContext emptyList()
         val maximum=limit.coerceIn(1,5)
-        val accessible=chatDao.recentMemories(scopeKey)
-        val exact=accessible.filter {it.text.contains(literal,ignoreCase=true)&&it.kind.lowercase(java.util.Locale.ROOT) !in setOf("proposed","draft","rejected")}.take(maximum)
+        val accessible=database.withTransaction {
+            if(!memoryAccessEnabled())return@withTransaction emptyList()
+            val own=chatDao.recentMemories(scopeKey)
+            if(scopeKey!="owner"&&access?.useOwnerMemory==true)
+                (own+chatDao.recentMemories("owner")).sortedByDescending {it.updatedAt}
+            else own
+        }
+        val approved=accessible.filter {approvedMemoryKind(it.kind)}
+        if(literal.isBlank())return@withContext approved.take(maximum)
+        val exact=approved.filter {it.text.contains(literal,ignoreCase=true)}.take(maximum)
         if(exact.isNotEmpty())return@withContext exact
         val queryTokens=lexicalTokens(literal)
         val queryPairs=characterPairs(literal)
-        accessible.asSequence().filter {approvedMemoryKind(it.kind)}.mapNotNull {memory ->
+        approved.asSequence().mapNotNull {memory ->
             val tokens=lexicalTokens(memory.text)
             val pairs=characterPairs(memory.text)
             val tokenOverlap=queryTokens.intersect(tokens).size
@@ -730,6 +741,12 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val thread=chat.thread(scope.threadId)?:error("삭제된 대화방에는 자료를 저장하지 않습니다.")
         check(thread.projectId==scope.projectId&&thread.revision==scope.threadRevision){"대화방·프로젝트가 변경되었습니다. 요청을 다시 시작해 주세요."}
     }}
+    private suspend fun memoryAccessEnabled():Boolean {
+        access?.takeIf{it.threadId.isNotBlank()}?.let{scope->
+            check(chat.accessScope(scope.threadId)==scope){"기억 사용 범위가 변경되었습니다. 요청을 다시 시작해 주세요."}
+        }
+        return access?.memoryEnabled!=false
+    }
     private suspend fun bindResource(kind:String,id:String,sourceMessageId:String?=null){
         val resolved=sourceMessageId?.let {resolveKnowledgeScope(it)}?:scopeKey
         if(resolved!="owner")chatDao.sourceScope(SourceScopeRecord(kind,id,resolved,access?.threadId))
@@ -764,11 +781,20 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val aliases=mapOf("가족" to "family spouse children","아이" to "children","직업" to "occupation profession job","이름" to "name preferred_name","메일" to "email work_email","선호" to "preference response_preference")
         val expanded=normalized+" "+aliases.filterKeys {it in normalized}.values.joinToString(" ")
         val tokens=lexicalTokens(expanded);val pairs=characterPairs(normalized)
-        val all=chatDao.accessibleKnowledge(key,includeOwner).map(::displayKnowledge)
-        val scored=all.mapNotNull {claim->val text="${claim.subject} ${claim.predicate} ${claim.value}";val overlap=tokens.intersect(lexicalTokens(text)).size;val paired=pairs.intersect(characterPairs(text)).size
-            if(overlap==0&&paired<2)null else claim to (overlap*5+paired)}.sortedWith(compareByDescending<Pair<KnowledgeClaim,Int>> {it.second}.thenByDescending {it.first.status=="confirmed"}.thenByDescending {it.first.updatedAt}).map {it.first}
-        val neighbors=scored.take(3).mapNotNull {it.objectSubject}.toSet()
-        return (scored+all.filter {it.subject in neighbors}).distinctBy {it.id}.take(limit)
+        val indexedTerms=graph.queryTerms(expanded)
+        if(indexedTerms.isEmpty())return emptyList()
+        val matches=chatDao.matchingKnowledge(indexedTerms,key,includeOwner)
+        val scored=matches.mapNotNull {claim->
+            val readable=displayKnowledge(claim)
+            val text="${readable.subject} ${readable.predicate} ${readable.value} ${readable.tags.joinToString(" ")}"
+            val overlap=tokens.intersect(lexicalTokens(text)).size
+            val paired=pairs.intersect(characterPairs(text)).size
+            if(overlap==0&&paired<2)null else claim to (overlap*5+paired)
+        }.sortedWith(compareByDescending<Pair<KnowledgeClaim,Int>> {it.second}
+            .thenByDescending {it.first.status=="confirmed"}.thenByDescending {it.first.updatedAt}).map {it.first}
+        val subjects=scored.take(3).mapNotNull {it.objectSubject}.distinct()
+        val related=if(subjects.isEmpty())emptyList()else chatDao.relatedKnowledge(subjects,key,includeOwner,limit)
+        return (scored+related).distinctBy {it.id}.take(limit).map(::displayKnowledge)
     }
     private fun escapeLike(value:String)=value.replace("!","!!").replace("%","!%").replace("_","!_")
     private fun approvedMemoryKind(kind:String)=kind.lowercase(java.util.Locale.ROOT) in setOf("fact","preference","correction","approved","approved_fact","approved_preference","approved_correction")

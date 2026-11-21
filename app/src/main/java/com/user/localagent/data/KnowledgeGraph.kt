@@ -177,8 +177,14 @@ internal class KnowledgeStore(private val database:LocalDatabase) {
         return input.copy(subject=subject,predicate=predicate,value=input.value.trim(),status=status,confidence=confidence,sourceKind=sourceKind,sourceId=sourceId,
             updatedAt=input.updatedAt.coerceIn(0,now+300_000),tags=input.tags.map(::key).distinct(),objectSubject=objectSubject,identityKey=hash(identity))
     }
-    private fun terms(claim:KnowledgeClaim)=queryTerms(listOf(claim.subject,claim.predicate,claim.value,claim.objectSubject.orEmpty(),claim.tags.joinToString(" ")).joinToString(" ")).take(160)
-    private fun queryTerms(value:String):List<String> {
+    private fun terms(claim:KnowledgeClaim):List<String> {
+        val category = if ("legacy_memory" in claim.tags) "" else claim.predicate
+        val fields = listOf(category, claim.tags.joinToString(" "),
+            claim.subject.substringAfter('|'), claim.objectSubject.orEmpty().substringAfter('|'))
+        val labels = fields.flatMap(::queryTerms).distinct().take(32)
+        return (labels + queryTerms(claim.value)).distinct().take(160)
+    }
+    internal fun queryTerms(value:String):List<String> {
         val normalized=Normalizer.normalize(value.lowercase(Locale.ROOT),Normalizer.Form.NFKC).take(5000)
         val tokens=normalized.split(Regex("[^\\p{L}\\p{N}]+" )).filter {it.length in 1..80}.take(80)
         val compact=normalized.filter {it.isLetterOrDigit()}.take(600)

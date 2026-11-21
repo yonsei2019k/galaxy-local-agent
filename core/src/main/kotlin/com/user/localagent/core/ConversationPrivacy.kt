@@ -24,7 +24,8 @@ object ConversationPrivacy {
     fun sensitiveText(text:String):Boolean = matchKind(text) != null
 
     fun needsPrivateSource(tools:Set<String>):Boolean = tools.any {
-        SemanticRequestPlanning.accessesPrivateRecords(it) || it in setOf("save_note","update_note","delete_note")
+        SemanticRequestPlanning.accessesPrivateRecords(it) ||
+            it in setOf("save_note","update_note","delete_note","save_memory","delete_memory")
     }
 
     fun modelForNewRequest(selection:String,cloud:String,text:String,imageOnly:Boolean):String {

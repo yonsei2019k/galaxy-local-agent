@@ -236,8 +236,29 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "search_audio_transcripts"->searchAudioTranscripts(call)
                 "save_note"->{require(call.s("scope","default") !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};val content=resolveOwnerText(call).s("content");val note=repository.saveNote(call.s("title","메모"),content,call.s("scope","default"));check(repository.getNote(note.id)==note){"메모 저장 후 재조회가 일치하지 않습니다."};noteMutationReceipt(note)}
                 "search_notes"->searchNotesBounded(call)
-                "save_memory"->{val memory=repository.saveMemory(call.s("content"),call.s("kind","fact"));check(repository.getMemory(memory.id)==memory){"기억 저장 후 재조회가 일치하지 않습니다."};"승인한 기억 저장·재조회 확인 · id=${memory.id}"}
-                "search_memories"->repository.searchMemories(call.s("query"),call.i("limit",5)).joinToString("\n"){"${it.id} | ${it.text}"}.ifBlank {"관련 기억이 없습니다."}
+                "save_memory"->{val memory=repository.saveApprovedMemory(call.s("content"),call.s("kind","fact"));check(repository.getMemory(memory.id)==memory){"기억 저장 후 재조회가 일치하지 않습니다."};"승인한 기억 저장·재조회 확인 · id=${memory.id}"}
+                "search_memories"->{
+                    val query=call.s("query")
+                    val limit=call.i("limit",5).coerceIn(1,5)
+                    val memoryContext=Json.parseToJsonElement(repository.ownerProfileContext(query,includeCore=query.isBlank())).jsonObject
+                    val graphFacts=memoryContext[if(query.isBlank())"coreProfile" else "relevantKnowledge"]
+                        ?.jsonArray.orEmpty().take(limit)
+                    val values=graphFacts.mapNotNull {it.jsonObject["value"]?.jsonPrimitive?.contentOrNull}.toSet()
+                    val memories=repository.searchMemories(query,limit).filter {it.text !in values}
+                        .take(limit-graphFacts.size)
+                    if(graphFacts.isEmpty()&&memories.isEmpty())"관련 기억이 없습니다."
+                    else buildJsonObject {
+                        put("untrustedData",true)
+                        put("facts",JsonArray(graphFacts))
+                        put("memories",buildJsonArray {memories.forEach {memory->
+                            add(buildJsonObject {
+                                put("id",memory.id)
+                                put("kind",memory.kind)
+                                put("text",memory.text.take(240))
+                            })
+                        }})
+                    }.toString()
+                }
                 "delete_memory"->{repository.forgetMemory(call.s("id"));check(repository.getMemory(call.s("id"))==null){"기억 삭제 후에도 레코드가 남아 있습니다."};"기억과 연결된 원문·요약 삭제 확인"}
                 "create_reminder"->{val at=OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis()){ "과거 시각입니다." };val record=repository.saveReminder(call.s("title"),at,call.s("scope","default"));val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 저장 또는 예약 큐 재조회를 확인하지 못했습니다. 중복 생성 전 기존 작업을 확인해주세요."};reminderMutationReceipt(record,scheduled.message)}
                 "update_note"->{val old=repository.getNote(call.s("id"))?:error("메모를 찾을 수 없습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};require(old.collection==call.s("scope")){"메모 범위가 일치하지 않습니다."};val updated=repository.saveNote(call.s("title",old.title),call.s("content"),old.collection,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==updated){"메모 수정 후 재조회가 일치하지 않습니다."};noteMutationReceipt(updated)}

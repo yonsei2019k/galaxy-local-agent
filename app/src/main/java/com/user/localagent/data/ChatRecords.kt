@@ -138,6 +138,21 @@ class ChatConverters {
     @Query("SELECT * FROM knowledge_scopes WHERE claimId=:id") suspend fun knowledgeScope(id:String):KnowledgeScopeRecord?
     @Query("SELECT c.* FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id WHERE (s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey ORDER BY c.updatedAt DESC LIMIT 1000") fun knowledge(scopeKey:String,includeOwner:Boolean):Flow<List<KnowledgeClaim>>
     @Query("SELECT c.* FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id WHERE ((s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey) AND c.status IN ('confirmed','observed') ORDER BY c.updatedAt DESC LIMIT 1000") suspend fun accessibleKnowledge(scopeKey:String,includeOwner:Boolean):List<KnowledgeClaim>
+    @Query("""
+        SELECT c.* FROM knowledge_terms t JOIN knowledge_claims c ON c.id=t.claimId
+        LEFT JOIN knowledge_scopes s ON s.claimId=c.id
+        WHERE t.term IN (:terms) AND ((s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey)
+          AND c.status IN ('confirmed','observed')
+        GROUP BY c.id
+        ORDER BY COUNT(*) DESC, CASE c.status WHEN 'confirmed' THEN 0 ELSE 1 END, c.updatedAt DESC, c.id
+        LIMIT 40
+    """) suspend fun matchingKnowledge(terms:List<String>,scopeKey:String,includeOwner:Boolean):List<KnowledgeClaim>
+    @Query("""
+        SELECT c.* FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id
+        WHERE c.subject IN (:subjects) AND ((s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey)
+          AND c.status IN ('confirmed','observed')
+        ORDER BY CASE c.status WHEN 'confirmed' THEN 0 ELSE 1 END,c.updatedAt DESC,c.id LIMIT :limit
+    """) suspend fun relatedKnowledge(subjects:List<String>,scopeKey:String,includeOwner:Boolean,limit:Int):List<KnowledgeClaim>
     @Query("SELECT c.* FROM knowledge_claims c JOIN knowledge_scopes s ON s.claimId=c.id WHERE s.scopeKey=:scopeKey") suspend fun scopeClaims(scopeKey:String):List<KnowledgeClaim>
     @Query("SELECT n.* FROM notes n LEFT JOIN source_scopes s ON s.resourceKind='note' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun notes(scopeKey:String):Flow<List<NoteRecord>>
     @Query("SELECT n.* FROM memories n LEFT JOIN source_scopes s ON s.resourceKind='memory' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun memories(scopeKey:String):Flow<List<MemoryRecord>>

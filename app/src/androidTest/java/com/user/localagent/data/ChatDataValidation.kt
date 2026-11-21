@@ -224,6 +224,46 @@ class ChatDataValidation {
         assertTrue(runCatching{repo.chat.deleteProject(doomed.id)}.isFailure)
     }}
 
+    @Test fun memoryOverviewReadsOnlyApprovedMemoriesInThePermittedScope()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val first=repo.chat.createProject("Synthetic memory scope")
+        val second=repo.chat.createProject("Synthetic unrelated scope")
+        val thread=repo.chat.createThread(first.id)
+        val otherThread=repo.chat.createThread(second.id)
+        val scoped=repo.forThread(thread.id)
+        val owner=repo.saveMemory("QA owner likes short answers","preference")
+        val own=scoped.saveMemory("QA project needs Monday updates","fact")
+        val other=repo.forThread(otherThread.id).saveMemory("QA other project","fact")
+        val proposed=scoped.saveMemory("QA inference without approval","proposed")
+        assertTrue(runCatching {scoped.saveApprovedMemory("QA invalid tool kind","proposed")}.isFailure)
+        val visible=scoped.searchMemories("").map{it.id}.toSet()
+        assertEquals(setOf(owner.id,own.id),visible)
+        assertFalse(other.id in visible);assertFalse(proposed.id in visible)
+        assertEquals(owner.id,scoped.searchMemories("short answers").single().id)
+        repo.chat.updateProject(first.id,settings=first.settings.copy(useOwnerMemory=false))
+        assertTrue(runCatching{scoped.searchMemories("")}.isFailure)
+        assertEquals(listOf(own.id),repo.forThread(thread.id).searchMemories("").map{it.id})
+        repo.chat.updateProject(first.id,settings=first.settings.copy(memoryMode="off"))
+        val disabled=repo.forThread(thread.id)
+        assertTrue(disabled.searchMemories("").isEmpty())
+        assertTrue(runCatching{disabled.saveMemory("QA disabled attempt")}.isFailure)
+    }}
+
+    @Test fun indexedGraphRecallFollowsOnlyEdgesWithTheSameScopedEntity()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val project=repo.chat.createProject("Synthetic graph scope")
+        val scoped=repo.forThread(repo.chat.createThread(project.id).id)
+        val edge=scoped.saveKnowledgeClaim(KnowledgeClaim(predicate="member",value="QZG-72381",
+            status="confirmed",sourceKind="owner_approved",sourceId="qa-scoped-edge",objectSubject="person.shared"))
+        val related=scoped.saveKnowledgeClaim(KnowledgeClaim(subject="person.shared",predicate="location",
+            value="Campus-N9",status="confirmed",sourceKind="owner_approved",sourceId="qa-scoped-neighbor"))
+        val owner=repo.saveKnowledgeClaim(KnowledgeClaim(subject="person.shared",predicate="location",
+            value="Terminal-W8",status="confirmed",sourceKind="owner_approved",sourceId="qa-owner-neighbor"))
+        val recalled=scoped.retrieveKnowledge("QZG-72381")
+        assertEquals(listOf(edge.id,related.id),recalled.map {it.id})
+        assertEquals("person.shared",recalled.first().objectSubject)
+        assertTrue(recalled.none {it.id==owner.id})
+        assertTrue(scoped.ownerProfileContext("QZG-72381").contains("Campus-N9"))
+    }}
+
     @Test fun deletedRoomCannotReceiveDraftMessageOrRun()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val t=repo.chat.createThread();repo.chat.deleteThread(t.id)
         assertNull(repo.chat.thread(t.id))
