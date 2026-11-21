@@ -130,7 +130,8 @@ object ExternalAgentContract {
      * through runTool: project/mode policy, recipient choice, owner approval and the effect guard.
      * PREPARED hand-offs pause the run. The PC broker accepts at most 128 tools per session.
      */
-    val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys
+    /** The on-device sub-agent reuses the local engine; cloud runs use their own provider sub-agents instead. */
+    val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys-com.user.localagent.core.LocalSubagentToolCatalog.names
     internal val PUBLIC_WEB_READS = setOf("search_web", "read_webpage", "search_shopping")
     val PUBLIC_RESEARCH_PHONE_TOOLS = PUBLIC_WEB_READS + setOf(
         "search_youtube_videos", "get_current_datetime", "calculate", "date_calculate") +

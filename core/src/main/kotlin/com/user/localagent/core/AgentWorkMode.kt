@@ -43,6 +43,8 @@ object AgentWorkModePolicy {
         if(toolName in OfficeToolCatalog.names)return toolName in ToolRegistry.definitions
         if(toolName in contextReadTools)return true // Context only; ToolRegistry still validates actual registration.
         if(toolName !in ToolRegistry.definitions)return false
+        // The sub-agent itself only reads; its inner tools are filtered with this same policy by the host.
+        if(toolName in LocalSubagentToolCatalog.names)return true
         if(mode==AgentWorkMode.ACT||mode==AgentWorkMode.DEBUG)return true
         if(mode==AgentWorkMode.RESEARCH)return toolName in publicReadTools
         if(toolName in localReadTools||toolName in PrivateAnalysisToolCatalog.privateReadNames)return true

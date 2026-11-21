@@ -30,10 +30,10 @@ class AutomaticComputeEngine internal constructor(
     private val analysisPcTarget: (() -> PairedPcText?)? = null,
 ) : ComputeExecutionEngine, PairedPcTextLoader, AnalysisModelPreparation {
     constructor(context: Context, ownerRunId: String? = null, beforePhoneLoad: suspend () -> Unit = {},
-        capturedPcRevision:Long?=null,allowCloudText:Boolean=false,capturedPcTextDefault:String?=null) :
-        this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText,capturedPcTextDefault), ownerRunId, beforePhoneLoad)
-    private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit) :
-        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = true, analysisPcTarget = parts.analysisPcTarget)
+        capturedPcRevision:Long?=null,allowCloudText:Boolean=false,capturedPcTextDefault:String?=null,phoneTextOnly:Boolean=false) :
+        this(components(context.applicationContext, ownerRunId,capturedPcRevision,allowCloudText,capturedPcTextDefault), ownerRunId, beforePhoneLoad, phoneTextOnly)
+    private constructor(parts: Components, ownerRunId: String?, beforePhoneLoad: suspend () -> Unit, phoneTextOnly:Boolean) :
+        this(parts.local, parts.pc, parts.eligible, parts.preflight, parts.report, ownerRunId, RuntimeGate.compute, beforePhoneLoad, parts.externalPcAuthority, pcOnly = !phoneTextOnly, analysisPcTarget = parts.analysisPcTarget)
 
     private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -108,7 +108,7 @@ class AutomaticComputeEngine internal constructor(
             bindPcOrBusy()
             pc.load(path, options); snapshot(); return@withLock
         }
-        if (ownerRunId != null && !phoneOverflowPinned && eligibleForPc(path, options) && System.currentTimeMillis() >= retryAfter) {
+        if (ownerRunId != null && !phoneOverflowPinned && !options.deviceOnly && eligibleForPc(path, options) && System.currentTimeMillis() >= retryAfter) {
             try {
                 if (!pcPreflight()) throw PcUnavailable()
                 currentCoroutineContext().ensureActive()
@@ -151,6 +151,11 @@ class AutomaticComputeEngine internal constructor(
     /** Uses the existing typed loader's mutex/lease. Do not nest that load inside this mutex. */
     override suspend fun prepareAnalysisModel(target: InferenceModelTarget, options: InferenceOptions): PreparedAnalysisModel {
         requirePrivateAnalysisText(target, options)
+        if (options.deviceOnly && !pcOnly) {
+            val weight = target as? LocalWeight ?: throw InferencePrerequisiteMissing(InferencePrerequisiteReason.MODEL_SELECTION_MISSING)
+            load(weight.installed.path, options)
+            return PreparedAnalysisModel.verifiedLocal(local as LocalInferenceEngine, weight, options)
+        }
         require(!options.deviceOnly) { "휴대전화 전용 작업을 PC 분석으로 바꾸지 않습니다." }
         val owner = ownerRunId?.takeIf { it.isNotBlank() }
             ?: throw InferencePrerequisiteMissing(InferencePrerequisiteReason.ORIGINAL_PC_AUTHORITY_MISSING)

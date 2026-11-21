@@ -106,7 +106,7 @@ object ToolRegistry {
         def("delete_reminder",Risk.HIGH,"id" to text(max=100)),
         def("list_messenger_notifications",Risk.LOW,"packageName" to text(max=80),"limit" to Argument("integer",false)),
         def("reply_messenger_notification",Risk.HIGH,"id" to text(max=100),"message" to text(max=2000))
-    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ScreenControlToolCatalog.definitions+PcBrowserToolCatalog.definitions+AppBrowserToolCatalog.definitions+ProjectStorageToolCatalog.definitions+NoteReadPatchToolCatalog.definitions).let { entries ->
+    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ScreenControlToolCatalog.definitions+PcBrowserToolCatalog.definitions+AppBrowserToolCatalog.definitions+ProjectStorageToolCatalog.definitions+NoteReadPatchToolCatalog.definitions+LocalSubagentToolCatalog.definitions).let { entries ->
         require(entries.map {it.name}.distinct().size==entries.size){"도구 이름이 중복됩니다."}
         entries.associateBy {it.name}
     }
@@ -179,6 +179,7 @@ object ToolRegistry {
         if(call.name=="prepare_email") require(call.arguments.getValue("to").jsonPrimitive.content.matches(Regex("[^\\s@,;]+@[^\\s@,;]+\\.[^\\s@,;]+"))){"받는 주소 형식 오류"}
         if(call.name in OfficeToolCatalog.names)OfficeToolCatalog.validate(call)
         if(call.name in GoalToolCatalog.names)GoalToolCatalog.validate(call)
+        if(call.name in LocalSubagentToolCatalog.names)LocalSubagentToolCatalog.validate(call)
         if(call.name in NoteReadPatchToolCatalog.names)NoteReadPatchToolCatalog.validate(call)
         if(call.name in ProjectStorageToolCatalog.names)ProjectStorageToolCatalog.validate(call)
         if(call.name in EvidenceToolCatalog.names)EvidenceToolCatalog.validate(call)

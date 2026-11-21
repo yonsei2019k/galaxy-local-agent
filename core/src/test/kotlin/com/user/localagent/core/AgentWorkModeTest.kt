@@ -33,7 +33,7 @@ class AgentWorkModeTest {
     }
     @Test fun researchIsPublicOnlyAndCannotReadPhoneAccountsProjectsOrMemory(){
         val allowed=AgentWorkModePolicy.filterTools(AgentWorkMode.RESEARCH,ToolRegistry.definitions.keys+setOf("list_skills","read_skill"))
-        assertEquals(setOf("get_current_datetime","search_web","search_shopping","read_webpage","search_youtube_videos","list_skills","read_skill","calculate","date_calculate","find_free_time","search_publications","verify_reference"),allowed)
+        assertEquals(setOf("get_current_datetime","search_web","search_shopping","read_webpage","search_youtube_videos","list_skills","read_skill","calculate","date_calculate","find_free_time","search_publications","verify_reference","run_subagent"),allowed)
         for(name in listOf("read_project_file","search_memories","get_sms_summary","read_gmail_message","query_notebooklm"))assertFalse(AgentWorkModePolicy.allows(AgentWorkMode.RESEARCH,name))
     }
     @Test fun skillInstructionsRemainContextReadsAcrossModesAndDoNotInventReferenceTool(){

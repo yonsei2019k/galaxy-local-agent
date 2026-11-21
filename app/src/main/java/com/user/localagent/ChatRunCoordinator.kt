@@ -646,7 +646,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val requestHub=workerConnectionHubFactory?.invoke(request)?:requestConnectionHub
                         val engine=workerEngineFactory?.invoke(request)?:com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=request.runId,
                             beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
-                            capturedPcTextDefault=request.capturedPcTextDefault)
+                            capturedPcTextDefault=request.capturedPcTextDefault,phoneTextOnly=usesFreshPhoneText(request))
                         ChatRunCoordinator(context,app,ChatRequestWorkerBinding(this@ChatRunCoordinator,request,engine),
                             inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,requestConnectionHub=requestHub,externalIntentLauncher=externalIntentLauncher)
                     }catch(cancel:CancellationException){throw cancel}
@@ -945,7 +945,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 catch(cancel:CancellationException){throw cancel}
                 catch(_:Exception){runCatching {recordAudit("knowledge_capture",false,"직접 대화의 기억 저장 검증 실패")}}
                 val disabledTools=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
-                val offeredTools=AgentWorkModePolicy.filterTools(workMode,ToolRegistry.definitions.keys-disabledTools)
+                val deviceExcluded=if(usesFreshPhoneText(request))emptySet()else com.user.localagent.core.LocalSubagentToolCatalog.names
+                val offeredTools=AgentWorkModePolicy.filterTools(workMode,ToolRegistry.definitions.keys-disabledTools-deviceExcluded)
                 requestTools?.bindAvailableTools(if(request.allowTools)offeredTools else emptySet())
                 val semanticOfferedTools=offeredTools-SkillToolCatalog.names
                 val semanticChoice=if(request.allowTools)chooseInference(request)?.withPcContext()else null
@@ -2010,6 +2011,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     private suspend fun chooseInference(request:QueuedChatRequest):ChosenInference? {
         inferenceChoiceOverride?.let {return it(request)}
+        if(usesFreshPhoneText(request)){
+            app.models.refresh()
+            val model=app.models.models.value.firstOrNull {it.id=="qwen-4b"&&it.verified&&it.runtime=="gguf"}?:return null
+            return ChosenInference(model,InferenceOptions(contextSize=4096,backend="CPU",thinking=false,deviceOnly=true,maxOutputTokens=768),"기기에 설치한 Qwen 4B")
+        }
         val selection=com.user.localagent.models.PairedPcTextProfileDescriptor.resolveRequestSelection(request.modelId,request.capturedPcTextDefault)
         pairedTextChoice(request,selection)?.let{return it}
         if(com.user.localagent.models.GemmaMediaCatalog.imageOnly(selection))
@@ -2656,7 +2662,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     /** Comparison switch: skip the semantic preplan; the model picks each next action. Tool boundaries stay enforced. */
     private fun directNextActionLoop()=context.getSharedPreferences("chat-preferences",0).getBoolean("direct-next-action",false)
-    private fun com.user.localagent.models.ChosenInference.withPcContext()=copy(options=options.copy(contextSize=8192))
+    private fun com.user.localagent.models.ChosenInference.withPcContext()=
+        if(options.deviceOnly)this else copy(options=options.copy(contextSize=8192))
+    private fun usesFreshPhoneText(request:QueuedChatRequest):Boolean =
+        request.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION&&
+            request.capturedPcTextDefault==null&&!request.allowCloudText&&!request.allowExternalAgent&&
+            request.continuation?.modelId.let { it==null||it=="qwen-4b" }
     private suspend fun publishCheckedAnswer(request:QueuedChatRequest,required:Set<String>,raw:String,written:WrittenAnswer,blockedReason:String?){
         val final=if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,blockedReason)else blockedReason?:raw.ifBlank{"모델이 빈 답변을 반환했습니다."}
         if(written.messageId==null)answer(final)else lines.value+=ChatLine(written.messageId,"assistant",written.text)
@@ -2775,13 +2786,67 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             requireGoalLedgerAllowsCall(request,taskGoal,call,requestSteps.toList())
         }
     }
-    private suspend fun performTool(call:ToolCall,targetConfirmed:Boolean=false):ToolResult {
+    /** Nesting guard: a sub-agent never starts another sub-agent. */
+    private var localSubagentActive=false
+    /**
+     * Read-only nested loop on the already loaded local engine, run sequentially after the outer generation finished.
+     * Every inner call re-enters [runTool], so goal fences, mode policy, disabled tools, budgets, duplicate checks,
+     * cancellation and evidence recording stay identical to the outer loop.
+     */
+    private suspend fun performLocalSubagent(call:ToolCall,traceAttempt:ChatWorkTraceSession.Attempt?):ToolResult {
+        val request=checkNotNull(activeRequest)
+        check(!localSubagentActive){"하위 에이전트 안에서는 다른 하위 에이전트를 시작할 수 없습니다."}
+        val engine=executionEngine
+        check(engine.computeLocation.value==com.user.localagent.compute.ComputeResource.PHONE&&engine.residentModelPath!=null){"하위 에이전트는 휴대폰에 올라간 로컬 모델이 있을 때만 실행합니다."}
+        val mode=AgentWorkMode.parse(request.mode)
+        val disabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+        val available=ToolRegistry.definitions.keys.filterTo(linkedSetOf()){AgentWorkModePolicy.allows(mode,it)&&it !in disabled}
+        val tools=com.user.localagent.core.LocalSubagentToolCatalog.innerTools(call.arguments["tools"]?.jsonPrimitive?.content,available)
+        check(tools.isNotEmpty()){"하위 에이전트에 줄 수 있는 읽기 도구가 없습니다."}
+        val task=call.arguments.getValue("task").jsonPrimitive.content
+        traceAttempt?.let{workTraceSession?.start(it)}
+        val previousStatus=status.value
+        localSubagentActive=true
+        val outcome=try {
+            status.value="하위 에이전트 작업 중"
+            com.user.localagent.core.LocalSubagentLoop(
+                generate={system,user,schema->
+                    val text=StringBuilder()
+                    val events=if(engine.supportsStructuredOutput)engine.generateStructuredEvents(user,system,schema) else engine.generateChatEvents(user,system)
+                    var complete=false
+                    events.collect{event->when(event){
+                        is com.user.localagent.inference.GenerationEvent.Delta->{check(text.length+event.text.length<=8192);text.append(event.text)}
+                        is com.user.localagent.inference.GenerationEvent.Finished->complete=event.summary.reason==com.user.localagent.inference.GenerationStopReason.EOG&&!event.summary.mayBeTruncated
+                    }}
+                    check(complete){"하위 답변이 끝까지 생성되지 않았습니다."}
+                    text.toString()
+                },
+                // runTool clears toolInFlight in its finally; the outer sub-agent call is still in flight.
+                execute={inner->try{runTool(inner)}finally{toolInFlight=true}},
+            ).run(task,tools,call.id.take(80))
+        } finally {
+            localSubagentActive=false
+            status.value=previousStatus
+        }
+        val observed=com.user.localagent.core.LocalSubagentLoop.toolResult(call.id,outcome)
+        withContext(NonCancellable){
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
+            if(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET)
+                requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
+            val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
+            recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
+            persistStepEvidence()
+        }
+        return observed
+    }
+
         ToolRegistry.validate(call)
         enforceGoalToolFence(checkNotNull(activeRequest),call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
         val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
         val traceAttempt=workTraceSession?.attempt(call)
+        if(call.name in com.user.localagent.core.LocalSubagentToolCatalog.names)return performLocalSubagent(call,traceAttempt)
         val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}
         val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
         val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
