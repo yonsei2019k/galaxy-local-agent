@@ -61,15 +61,24 @@ object CloudConversationContext {
             val latestRun = eligibleTurns[newest].binding.runId
             val returningToPausedRequest = task?.binding?.runId == latestRun &&
                 (task.status == "paused" || task.status == "interrupted")
-            val partner = if (newest == 0) null else nativeContextPartner(
+            val candidatePartner = if (newest == 0) null else nativeContextPartner(
                 eligibleTurns.map { it.role == "user" },
                 eligibleTurns.map { it.binding.runId == latestRun },
                 returningToPausedRequest,
             )?.toInt()
+            val newestIsOwner = eligibleTurns[newest].role == "user"
+            val recentOwner = eligibleTurns.getOrNull(newest - 1)?.takeIf {it.role=="user"}
+            val partner = candidatePartner?.takeUnless {index->
+                val earlier=eligibleTurns[index]
+                // Let the ordinary newest-first allocator place a cross-run reply if reserving it
+                // at full length would displace the more recent owner instruction.
+                task==null && newestIsOwner && recentOwner!=null && index<newest-1 &&
+                    earlier.role=="assistant" && earlier.binding.runId!=latestRun &&
+                    !fits(listOf(earlier,recentOwner,eligibleTurns[newest]).map {turnJson(it,MAX_TURN_CHARS)})
+            }
             val priority=listOfNotNull(partner,newest).sorted()
             // Keep the newest selected reply or correction at its wire limit before shrinking its partner.
             val earlier = partner?.let { eligibleTurns[it] }
-            val newestIsOwner = eligibleTurns[newest].role == "user"
             val prioritizeNewest = earlier != null && (
                 earlier.role == "user" ||
                 (earlier.role == "assistant" && newestIsOwner && earlier.binding.runId != latestRun)

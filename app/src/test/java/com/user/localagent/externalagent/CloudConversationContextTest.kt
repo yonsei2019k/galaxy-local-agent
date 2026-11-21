@@ -210,6 +210,30 @@ class CloudConversationContextTest {
         assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
     }
 
+    @Test fun crossRunReplyLeavesRoomForTheMoreRecentOwnerInstruction() {
+        val instruction = "가".repeat(746) + "부산만 검색" + "나".repeat(746)
+        val newest = "문".repeat(1500)
+        val result = checkNotNull(build(listOf(
+            turn(1, "assistant", "\u0001".repeat(1500)),
+            turn(2, text=instruction),
+            turn(3, text=newest),
+        )))
+        val rows = turns(result)
+        val ownerRows = rows.filter { it.getValue("role").jsonPrimitive.content=="user" }
+        assertEquals(listOf(instruction,newest),ownerRows.map { it.getValue("text").jsonPrimitive.content })
+        assertTrue(result.toString().toByteArray(Charsets.UTF_8).size <= CloudConversationContext.MAX_UTF8_BYTES)
+    }
+
+    @Test fun crossRunReplyCanRemainWhenAllThreeTurnsFit() {
+        val result = checkNotNull(build(listOf(
+            turn(1, "assistant", "확인할 자료가 남아 있습니다."),
+            turn(2, text="부산만 검색해줘."),
+            turn(3, text="가격도 확인해줘."),
+        )))
+        assertEquals(listOf(binding(1).runId,binding(2).runId,binding(3).runId),
+            turns(result).map {it.getValue("sourceRunId").jsonPrimitive.content})
+    }
+
     @Test fun headAndTailClippingKeepsLiteralLateCorrectionWithoutInventingMeaning(){
         val original="원래 요청: 서울역\n"+"자료 ".repeat(2000)+"\n정정: 부산역만 검색, 예약 금지"
         val result=checkNotNull(build(listOf(turn(1,text=original))))
