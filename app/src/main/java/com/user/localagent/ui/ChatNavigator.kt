@@ -165,11 +165,8 @@ fun ChatNavigator(
             Text("ZipHap.Agent", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             IconButton(onClick = onDismiss, modifier = Modifier.semantics { contentDescription = "대화 목록 닫기" }) { Text("×", style = MaterialTheme.typography.headlineSmall) }
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TextButton(onClick = {
-                navigation.selectedProjectId?.let(actions.onNewThread)
-                onDismiss()
-            }, enabled = navigation.selectedProjectId != null, modifier = Modifier.weight(1f).testTag("new_thread")) { Text("＋ 새 대화") }
+        // The owner removed the drawer-wide "new conversation" button; each project row keeps its own "+".
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { projectEditorId = "" }, modifier = Modifier.testTag("new_project")) { Text("새 프로젝트") }
         }
         OutlinedTextField(

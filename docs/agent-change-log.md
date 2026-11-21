@@ -1,3 +1,8 @@
+## 2026-11-21 — 대화 서랍의 전체 '＋ 새 대화' 버튼 제거 (소유자 지시)
+
+- 소유자 결정에 따라 `ChatNavigator` 서랍 상단의 '＋ 새 대화' 버튼(testTag `new_thread`)을 지웠다. 새 대화는 프로젝트 행의 '＋'로 계속 만든다. 서랍이 없을 때만 쓰는 예비 드롭다운의 '새 대화' 항목은 유일한 생성 경로라 유지했다.
+- 검증: 코어 JVM 994건, android-runtime skills·ui 110건 통과, `:app:compileReleaseKotlin` 성공. 기기 확인은 CI 배포 설치 뒤 별도.
+
 ## 2026-11-21 — 번들 스킬 카탈로그 해시 불일치 수정 (Claude 스킬 증류)
 
 - OpenClaw 스킬 경로(목록은 이름·설명만, 본문은 읽기 도구로 지연 로드, frontmatter 이름 기준)와 대조하다가, 실제 커밋된 `email`과 `recording-analysis`의 SKILL.md가 `catalog.json`의 SHA-256과 다른 것을 찾았다. 빌드 1019(acd10c1) 이후 두 스킬은 `BundledSkillStore.read`에서 해시 불일치로 거부된다. 따라서 `PrivateAnalysisExecutor`의 녹음 분석과 `read_skill("email")`은 지침을 읽지 못한다. 본문은 그대로 두고, 카탈로그의 두 해시만 현재 본문 값으로 바꿨다.
