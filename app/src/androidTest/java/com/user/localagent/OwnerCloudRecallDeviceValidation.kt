@@ -31,11 +31,24 @@ class OwnerCloudRecallDeviceValidation {
         var archivedAnalyses = 0
         var chairArchivedAnalyses = 0
         var scopesWithArchives = 0
+        var finishedArchives = 0
+        var otherScopeIndexedFindings = 0
         for (thread in scopes) {
-            val archived = app.repository.forThread(thread.id).notes.first().count { archive ->
+            val repository = app.repository.forThread(thread.id)
+            val archiveNotes = repository.notes.first().filter { archive ->
                 archive.collection == "private-analysis" && archive.title == "개인 자료 분석 진행"
             }
-            if (archived > 0) scopesWithArchives++
+            val archived = archiveNotes.size
+            if (archived > 0) {
+                scopesWithArchives++
+                finishedArchives += archiveNotes.count { archive ->
+                    val metadata = runCatching { Json.parseToJsonElement(archive.body).jsonObject }.getOrNull()
+                    metadata?.get("sourceExhausted")?.jsonPrimitive?.booleanOrNull == true
+                }
+                if (thread.id != chair.id && (thread.projectId == null || thread.projectId != chair.projectId)) {
+                    otherScopeIndexedFindings += repository.knowledge.first().count { it.sourceKind == "analysis_finding" }
+                }
+            }
             archivedAnalyses += archived
             if (thread.id == chair.id || thread.projectId != null && thread.projectId == chair.projectId) {
                 chairArchivedAnalyses = archived
@@ -45,10 +58,17 @@ class OwnerCloudRecallDeviceValidation {
             put("archivedAnalysesInLiveScopes", archivedAnalyses)
             put("chairArchivedAnalyses", chairArchivedAnalyses)
             put("scopesWithArchives", scopesWithArchives)
+            put("finishedArchives", finishedArchives)
+            put("otherScopeIndexedFindings", otherScopeIndexedFindings)
             put("found", followup != null)
             if (followup != null) {
                 val ctx = Json.parseToJsonElement(followup.contextJson).jsonObject
                 put("status", followup.status)
+                val response = store.assistantForRun(followup.id)?.let { store.fullMessageText(it.id) }.orEmpty()
+                val namedSources = listOf("문자", "메일", "카톡").count(response::contains)
+                val limitationWords = listOf("확인되지", "확인하지 못", "확인할 수 없", "찾지 못", "근거가 없", "범위", "자료가 없", "조회하지").any(response::contains)
+                put("namedSourceCount", namedSources)
+                put("containsSourceLimitationLanguage", namedSources > 0 && limitationWords)
                 put("code", followup.errorCode?.takeIf { it.matches(Regex("[A-Za-z0-9_]{1,100}")) })
                 val planned = ctx["externalAgentPlan"]?.jsonObject?.get("requiredTools")?.jsonArray.orEmpty()
                 put("plannedTools", JsonArray(planned.filter { it.jsonPrimitive.content.matches(Regex("[a-z_]{1,100}")) }))

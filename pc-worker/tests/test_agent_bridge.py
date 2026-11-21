@@ -541,6 +541,23 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.post_result(second, ack)
         self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
 
+    def test_archived_source_recovery_preserves_only_verified_receipts(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        self.grant["pcWorkspaceProfile"] = "phone-only"
+        history, archive = "search_conversation_history", "list_analysis_sources"
+        for name in (history, archive):
+            self.grant["phoneTools"].append(clock_tool() | {"name": name})
+        self._register()
+        self.accept(self.plan([history, archive]))
+        previous, _ = self.propose(history)
+        _, ack = self.claim(previous)
+        self.post_result(previous, ack)
+        context = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertEqual([archive], context["acceptedTools"])
+        self.assertEqual([history], [item["tool"] for item in context["observedReads"]])
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+
     def test_owner_recall_does_not_recover_with_mutation(self):
         self.owner = uid()
         self.grant["parentRunId"] = self.owner
