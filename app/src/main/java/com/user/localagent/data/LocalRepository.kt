@@ -59,7 +59,7 @@ data class ToolAuditMetadataRecord(val id:String,val name:String,val success:Boo
     suspend fun knowledgeMessages(afterAt:Long?,afterId:String?,limit:Int):List<MessageRecord>
     @Query("SELECT m.* FROM messages m JOIN chat_branch_messages b ON b.messageId=m.id WHERE m.threadId=:threadId AND b.branchId=:branchId AND m.role='user' AND m.originMessageId IS NULL AND (:afterAt IS NULL OR m.createdAt>:afterAt OR (m.createdAt=:afterAt AND m.id>:afterId)) ORDER BY m.createdAt ASC,m.id ASC LIMIT :limit")
     suspend fun scopedKnowledgeMessages(threadId:String,branchId:String,afterAt:Long?,afterId:String?,limit:Int):List<MessageRecord>
-    @Query("SELECT * FROM notes WHERE collection IN ('imported-chats','sms-schedule-candidates','audio-transcripts','native-sms') AND (updatedAt>:afterAt OR (updatedAt=:afterAt AND id>:afterId)) ORDER BY updatedAt ASC,id ASC LIMIT :limit")
+    @Query("SELECT * FROM notes WHERE collection IN ('imported-chats','sms-schedule-candidates','audio-transcripts','rawaudio-transcripts','native-sms') AND (updatedAt>:afterAt OR (updatedAt=:afterAt AND id>:afterId)) ORDER BY updatedAt ASC,id ASC LIMIT :limit")
     suspend fun knowledgeNotes(afterAt:Long,afterId:String,limit:Int):List<NoteRecord>
     @Query("SELECT COUNT(*) FROM messages WHERE :query='' OR instr(lower(text),lower(:query))>0")
     suspend fun messageCount(query:String):Long
@@ -180,6 +180,23 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         if(resolved!="owner")chatDao.knowledgeScope(KnowledgeScopeRecord(result.id,resolved))
         displayKnowledge(result)
     }
+    internal suspend fun connectedLearningChecked(version: String): Boolean =
+        database.knowledgeDao().metaValue("connected_learning_v1.$version") == 1L
+
+    /** Claims, source validity, readback and ACK share one transaction. */
+    internal suspend fun saveConnectedLearning(version: String, claims: List<KnowledgeClaim>, epoch: Long,
+        authorized: suspend () -> Boolean): Int = database.withTransaction {
+        if (connectedLearningChecked(version)) return@withTransaction 0
+        check(knowledgeEpoch() == epoch && authorized())
+        for (claim in claims) {
+            val stored = saveKnowledgeClaim(claim, epoch)
+            check(getKnowledge(stored.id)?.let { it.sourceId == claim.sourceId && it.sourceExcerpt == claim.sourceExcerpt } == true)
+        }
+        check(authorized())
+        database.knowledgeDao().meta(KnowledgeMeta("connected_learning_v1.$version", 1))
+        claims.size
+    }
+
     suspend fun getKnowledge(id:String):KnowledgeClaim?=graph.get(id)?.takeIf {knowledgeAccessible(it.id)}?.let(::displayKnowledge)
     suspend fun getMessage(id:String):MessageRecord? {require(id.length in 1..100);return dao.messageById(id)?.takeIf {access==null||it.threadId==access.threadId}?.let {it.copy(text=chat.fullMessageText(it.id))}}
     suspend fun retrieveKnowledge(query:String,limit:Int=5):List<KnowledgeClaim> = scopedKnowledge(query,scopeKey,access?.useOwnerMemory?:true,limit)
@@ -248,7 +265,11 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val existingValues=(core+relevant).map {it.value}.toSet()
         val legacy=if(!includeCore)mutableListOf()else searchMemories(query,3).filter {it.text !in existingValues&&permitted("legacy_memory",it.text)&&graph.allowed("approved_memory",it.id)}.take(2).toMutableList()
         fun claim(item:KnowledgeClaim)=buildJsonObject {
-            put("value",item.value.take(140));put("status",item.status);put("sourceKind",item.sourceKind.take(32))
+            put("value",item.value.take(240));put("status",item.status);put("sourceKind",item.sourceKind.take(32))
+            if ("record_semantic" in item.tags) {
+                put("observedAtMillis", item.updatedAt)
+                item.tags.firstOrNull { it in setOf("stated", "changed", "cancelled", "uncertain") }?.let { put("recordState", it) }
+            }
             if(item.sourceKind=="analysis_finding"){
                 put("analysisId",item.subject.removePrefix("analysis."))
                 put("evidenceId",item.predicate.removePrefix("analysis_finding."))
@@ -872,7 +893,8 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     private suspend fun scopedKnowledge(query:String,key:String,includeOwner:Boolean,limit:Int):List<KnowledgeClaim> {
         require(query.length<=2000&&limit in 1..10&&'\u0000' !in query)
         val normalized=query.lowercase(java.util.Locale.ROOT)
-        val aliases=mapOf("가족" to "family spouse children","아이" to "children","직업" to "occupation profession job","이름" to "name preferred_name","메일" to "email work_email","선호" to "preference response_preference")
+        val aliases=mapOf("가족" to "family spouse children","아이" to "children","직업" to "occupation profession job","이름" to "name preferred_name","메일" to "email work_email","선호" to "preference response_preference",
+            "약속" to "일정 예약 appointment","답장" to "회신 할일 task","바뀐" to "변경 changed","취소" to "cancelled")
         val expanded=normalized+" "+aliases.filterKeys {it in normalized}.values.joinToString(" ")
         val tokens=lexicalTokens(expanded);val pairs=characterPairs(normalized)
         val indexedTerms=graph.queryTerms(expanded)
@@ -890,7 +912,10 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
             .thenByDescending {it.first.status=="confirmed"}.thenByDescending {it.first.updatedAt}).map {it.first}
         val subjects=scored.take(3).mapNotNull {it.objectSubject}.distinct()
         val related=if(subjects.isEmpty())emptyList()else chatDao.relatedKnowledge(subjects,key,includeOwner,limit)
-        return (scored+related).distinctBy {it.id}.take(limit).map(::displayKnowledge)
+        val laterChanges=related.filter {candidate->"record_semantic" in candidate.tags&&
+            candidate.tags.any {it=="changed"||it=="cancelled"}&&
+            scored.take(2).any {earlier->earlier.objectSubject==candidate.objectSubject&&earlier.updatedAt<candidate.updatedAt}}
+        return (laterChanges.take(1)+scored+related).distinctBy {it.id}.take(limit).map(::displayKnowledge)
     }
     private fun escapeLike(value:String)=value.replace("!","!!").replace("%","!%").replace("_","!_")
     private fun approvedMemoryKind(kind:String)=kind.lowercase(java.util.Locale.ROOT) in setOf("fact","preference","correction","approved","approved_fact","approved_preference","approved_correction")

@@ -22,6 +22,11 @@ pub fn native_public_page_interstitial(title: String, text: String) -> bool {
 mod screen_snapshot;
 
 #[uniffi::export]
+pub fn native_record_evidence_matches(source: String, quote: String, label: String) -> bool {
+    ziphap_core::record_evidence_matches(&source, &quote, &label)
+}
+
+#[uniffi::export]
 pub fn native_context_partner(
     is_owner: Vec<bool>,
     same_run_as_newest: Vec<bool>,

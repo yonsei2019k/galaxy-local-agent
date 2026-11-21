@@ -107,7 +107,7 @@ import kotlinx.coroutines.*
         if(learning.enabled)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Column(Modifier.weight(1f)){
                 Text("새벽에 자료 기억하기",style=MaterialTheme.typography.titleMedium)
-                Text("새벽 3시 이후 충전·대기 중, 접근을 허용한 문자와 카톡 알림, 가져온 대화, 저장된 녹음 전사의 주제를 기억에 저장합니다.",style=MaterialTheme.typography.bodySmall)
+                Text("새벽 3시 이후 충전·대기 중, 접근을 허용한 문자와 카톡 알림, 가져온 대화, 저장된 녹음 전사에서 근거가 있는 일정·할 일·변경 등을 기억합니다.",style=MaterialTheme.typography.bodySmall)
             }
             Switch(checked=learning.nightlyEnabled,enabled=!working,onCheckedChange={enabled->execute {
                 learning=app.knowledgeIngestion.setNightlyEnabled(enabled)
@@ -116,17 +116,19 @@ import kotlinx.coroutines.*
         }
         OutlinedButton(enabled=learning.enabled&&!working,onClick={execute {
             val report=app.knowledgeIngestion.scanConnectedNow {
-                onStatus("자료 ${it.processedSources}건 확인 · 기억 ${it.savedClaims}건 저장")
+                onStatus("자료 ${it.processedSources}건 확인 · ${it.analyzedSegments}구간 분석 · 근거 기록 ${it.evidenceRecords}건 저장")
             }
             learning=app.knowledgeIngestion.state()
             val detail=when(report.status){
-                "busy"->"다른 기억 정리가 실행 중입니다."
+                "busy","learning_device_busy"->"다른 작업이 끝나면 기억 정리를 이어갈 수 있습니다."
+                "learning_model_unavailable"->"자료는 보존했습니다. 모델 관리에서 Qwen 4B를 준비하면 이어서 분석합니다."
+                "learning_pending_evidence"->"근거를 확인하지 못한 구간은 보류했습니다. 다음 실행에서 이어갑니다."
                 "sms_permission_missing"->"문자 접근 권한이 없어 문자는 건너뛰었습니다."
                 "nightly_kakao_capture_partial"->"일부 카톡 알림을 확보하지 못했습니다."
                 "source_or_generation_changed","deferred_device_state","disabled"->"자료나 기기 상태를 확인한 뒤 다시 눌러주세요."
                 else->if(report.hasMore)"다시 누르면 저장 지점부터 이어집니다."else""
             }
-            onStatus("자료 ${report.processedSources}건 확인 · 기억 ${report.savedClaims}건 저장. $detail".trim())
+            onStatus("자료 ${report.processedSources}건 확인 · ${report.analyzedSegments}구간 분석 · 근거 기록 ${report.evidenceRecords}건 저장. $detail".trim())
         }}){Text("연결한 자료 지금 정리")}}
         item {Text("기억과 사용자 프로필",style=MaterialTheme.typography.titleLarge)
             Text("확인된 기본 프로필과 현재 요청에 관련된 기억만 대화에 사용합니다. 관찰은 추론으로 구분하며, 제안은 확정 전까지 사실로 사용하지 않습니다.",style=MaterialTheme.typography.bodySmall)}

@@ -238,7 +238,7 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
         store.update(initial.queueId, initial.epoch) { it.copy(status = "TRANSCRIBING", errorCode = null) } ?: return
         if (initial.asr.model.id !in AsrCatalog.modelIds || initial.asr.projector == null)
             throw CallPipelineFailure("BACKGROUND_ASR_MODEL_REQUIRED")
-        val engine: InferenceEngine = com.user.localagent.inference.PcInferenceEngine(context)
+        val engine: InferenceEngine = com.user.localagent.inference.LocalInferenceEngine(context)
         withOwnedEngine(initial, engine) {
             var loaded = false; var count = 0
             val started = SystemClock.elapsedRealtime()
@@ -333,7 +333,7 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
             check(saved.transcriptSha256 == source.transcriptSha256 && saved.modelSha256 == initial.textModel.sha256 && saved.analysisContractSha256 == contract)
             saved.raw
         } else {
-            val engine: InferenceEngine = com.user.localagent.inference.PcInferenceEngine(context)
+            val engine: InferenceEngine = com.user.localagent.inference.LocalInferenceEngine(context)
             withOwnedEngine(initial, engine) { coroutineScope {
                 val system = mapSystem(index)
                 val schema = CallFollowUpModelContract.modelDraftSchema.toString()
