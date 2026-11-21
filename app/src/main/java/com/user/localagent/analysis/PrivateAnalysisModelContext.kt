@@ -120,6 +120,20 @@ object PrivateAnalysisModelContext {
                 })
                 if(sourceRows!=null) {put("sources",sourceRows);count("catalogEntries")?.let {put("catalogEntries",it)};put("catalogPreviewPartial",sourceRows.size<(root["sources"] as JsonArray).size||flag("hasMore")?.booleanOrNull==true)}
                 if(analysisRows!=null) {put("analyses",analysisRows);put("analysesPreviewPartial",analysisRows.size<(root["analyses"] as JsonArray).size||flag("analysesMayHaveMore")?.booleanOrNull==true)}
+                (root["savedReports"] as? JsonArray)?.let {reports->
+                    put("savedReports",buildJsonArray {
+                        reports.take(1).forEach {item->
+                            val report=item as? JsonObject?:return@forEach
+                            add(buildJsonObject {
+                                put("sourceType","historical_saved_analysis_report")
+                                put("originalSourceReverified",false)
+                                report.string("coverage")?.let {put("coverage",clip(it,80))}
+                                report.string("findingsExcerpt")?.let {put("findingsExcerpt",clip(it,textLimit))}
+                            })
+                        }
+                    })
+                    if(reports.size>1)shortened=true
+                }
                 root.string("transcriptId")?.takeIf(UUID::matches)?.let {put("transcriptId",it)}
                 root.string("nextTool")?.takeIf {it=="analyze_audio_transcript"}?.let {put("nextTool",it)}
                 listOf("timestampPrecision","completionScope").forEach {key->root.string(key)?.let {put(key,clip(it,80))}}

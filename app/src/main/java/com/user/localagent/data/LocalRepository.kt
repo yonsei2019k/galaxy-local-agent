@@ -9,6 +9,7 @@ import com.user.localagent.core.CapabilityPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
@@ -295,6 +296,22 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         }
         verifyScopeLive();val page=matched.take(limit)
         MessagePage(page,if(matched.size>limit)page.last().let {MessageCursor(it.createdAt,it.id)}else null)
+    }
+    /** Existing host-published private reports are discoverable only through their original live conversation. */
+    internal suspend fun analysisReportMessages():List<MessageRecord> {
+        val scope=checkNotNull(access)
+        val binding=checkNotNull(historyBinding())
+        val candidates=messagePage(limit=20,query="저장한 분석 근거와 상세 결과를 열 수 있습니다.").messages
+        val authorized=candidates.filter {message->
+            if(message.role!="assistant"||message.runId==null)return@filter false
+            val run=chat.run(message.runId)?:return@filter false
+            run.threadId==binding.first&&run.branchId==binding.second&&run.projectId==scope.projectId&&
+                chat.toolRunsForThread(binding.first,run.id).first().any {audit->
+                    audit.success&&audit.name in com.user.localagent.core.PrivateAnalysisToolCatalog.analysisNames
+                }
+        }
+        check(historyBinding()==binding)
+        return authorized
     }
     suspend fun messageCount(query:String=""):Long=withContext(Dispatchers.IO) {
         require(query.length<=500 && '\u0000' !in query);val binding=historyBinding()

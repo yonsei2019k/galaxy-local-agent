@@ -53,5 +53,7 @@ class PrivateAnalysisToolCatalogTest {
         for(kind in listOf("sms","audio_transcript","conversation_import"))PrivateAnalysisToolCatalog.validate(call("list_analysis_sources","kind" to JsonPrimitive(kind),"limit" to JsonPrimitive(50)))
         rejected(call("list_analysis_sources","kind" to JsonPrimitive("all_phone_private_databases")))
         rejected(call("list_analysis_sources","limit" to JsonPrimitive(51)))
+        PrivateAnalysisToolCatalog.validate(call("list_analysis_sources","includeSavedReports" to JsonPrimitive(true)))
+        rejected(call("list_analysis_sources","includeSavedReports" to JsonPrimitive("true")))
     }
 }

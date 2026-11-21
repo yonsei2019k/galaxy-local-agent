@@ -9,8 +9,8 @@ object PrivateAnalysisToolCatalog {
     private val resume=mapOf("analysisId" to text(false),"expectedProcessedChunks" to Argument("integer",false),"question" to text(false,2000),"maxChunks" to Argument("integer",false))
     val analysisNames=setOf("analyze_sms","analyze_audio_transcript","analyze_conversation_import")
     val definitions=listOf(
-        ToolDefinition("list_analysis_sources",Risk.LOW,mapOf("kind" to text(false,32),"limit" to Argument("integer",false)),
-            "List bounded metadata and actual source IDs for scoped imported conversations, saved audio transcripts and SMS snapshot capabilities. kind: sms/audio_transcript/conversation_import. Listing is not content analysis and grants no extra access."),
+        ToolDefinition("list_analysis_sources",Risk.LOW,mapOf("kind" to text(false,32),"limit" to Argument("integer",false),"includeSavedReports" to Argument("boolean",false)),
+            "List bounded metadata and actual source IDs for scoped imported conversations, saved audio transcripts and SMS snapshot capabilities. kind: sms/audio_transcript/conversation_import. For a question about previously saved analysis files, set includeSavedReports=true to get bounded report excerpts from this conversation. Historic report excerpts are not a new source verification. Listing grants no extra access."),
         ToolDefinition("analyze_sms",Risk.LOW,resume+mapOf("start" to text(false,80),"end" to text(false,80)),
             "Analyze a user-requested SMS question using an immutable snapshot of Android-permitted message bodies, not five recent excerpts. New analysis requires question; optional start/end are explicit ISO offsets (end exclusive). Resume with analysisId and expectedProcessedChunks from the actual result. Bounded chunk extraction retains exact source quotations and processed coverage in encrypted checkpoints. No MMS, messenger DB, sending, calendar writes. Stored findings can be searched locally under their original scope and remain separate from confirmed owner facts.",3_600_000),
         ToolDefinition("analyze_audio_transcript",Risk.LOW,resume+mapOf("transcriptId" to text(false)),
@@ -33,6 +33,7 @@ object PrivateAnalysisToolCatalog {
             if(value!=null)when(spec.type) {
                 "string"->require(value is JsonPrimitive&&value.isString&&value.content.isNotBlank()&&value.content.length<=spec.maxLength&&'\u0000' !in value.content){"분석 문자열 형식 또는 길이 오류"}
                 "integer"->require(value is JsonPrimitive&&!value.isString&&value.intOrNull!=null){"분석 정수 인자가 필요합니다."}
+                "boolean"->require(value is JsonPrimitive&&!value.isString&&value.booleanOrNull!=null){"분석 참·거짓 인자가 필요합니다."}
             }
         }
         fun string(key:String)=call.arguments[key]?.jsonPrimitive?.content

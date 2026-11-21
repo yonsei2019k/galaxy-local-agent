@@ -38,6 +38,23 @@ class PrivateAnalysisModelContextTest {
         return Json.parseToJsonElement(text).jsonObject
     }
 
+    @Test fun historicalFileExcerptIsPreservedWithoutClaimingSourceVerification() {
+        val source=buildJsonObject {
+            put("savedReports",buildJsonArray {
+                repeat(3){add(buildJsonObject {
+                    put("coverage","처리: 4/40 UTF-8바이트 · 부분 분석")
+                    put("findingsExcerpt","합성 근거만 포함")
+                    put("originalSourceReverified",true)
+                })}
+            })
+        }
+        val preview=parsed(result(source,state=VerificationState.VERIFIED),1600)
+        val report=preview.getValue("savedReports").jsonArray.single().jsonObject
+        assertEquals("합성 근거만 포함",report.getValue("findingsExcerpt").jsonPrimitive.content)
+        assertFalse(report.getValue("originalSourceReverified").jsonPrimitive.boolean)
+        assertTrue(preview.getValue("contextTruncated").jsonPrimitive.boolean)
+    }
+
     @Test fun boundedReportOmissionsNeverBecomeAnAllFindingsExportClaim() {
         val source=JsonObject(payload()+mapOf("reportFindingCount" to JsonPrimitive(100),"reportOmittedFindingCount" to JsonPrimitive(800),
             "reportContainsAllFindings" to JsonPrimitive(false),"reportLimitationsTruncated" to JsonPrimitive(true)))

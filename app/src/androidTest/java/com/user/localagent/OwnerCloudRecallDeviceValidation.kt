@@ -16,6 +16,63 @@ import java.io.File
 /** Opt-in current-owner check. Only statuses, tool names and counts leave the device. */
 @RunWith(AndroidJUnit4::class)
 class OwnerCloudRecallDeviceValidation {
+    @Test fun auditSavedAnalysisFiles() = runBlocking {
+        val instrument = InstrumentationRegistry.getInstrumentation()
+        assumeTrue(InstrumentationRegistry.getArguments().getString("ownerRecallDeviceApproved") == "true")
+        val context = instrument.targetContext
+        val store = (context.applicationContext as LocalAgentApplication).container.repository.chat
+        val namePattern = Regex("""artifact-[a-f0-9-]{36}\.(?:txt|csv|pdf|docx|xlsx)""")
+        val tokenPattern = Regex("""\[\[file:([a-zA-Z0-9_.-]{1,150})]]""")
+        val directory = File(context.filesDir,"exports").canonicalFile
+        val files = directory.listFiles().orEmpty().filter {
+            it.isFile && it.canonicalFile.parentFile == directory && it.length() > 0L
+        }
+        val analysisTexts = files.filter { file ->
+            file.extension.equals("txt", true) && file.length() <= 20L * 1024 * 1024 &&
+                file.inputStream().buffered().use { input ->
+                    val probe = ByteArray(128)
+                    val read = input.read(probe)
+                    read > 0 && String(probe, 0, read, Charsets.UTF_8).startsWith("개인 자료 분석 상세 결과")
+                }
+        }
+        val filesByName = files.associateBy(File::getName)
+        val linked = mutableSetOf<String>()
+        val chairLinked = mutableSetOf<String>()
+        val linkedPrivateAnalysis = mutableSetOf<String>()
+        val completedAssociated = mutableSetOf<String>()
+        for (thread in store.threads.first()) {
+            val sourceRuns = store.runsForThread(thread.id).associateBy { it.id }
+            for (message in store.messages(thread.id).first()) {
+                if (message.role != "assistant") continue
+                for (token in tokenPattern.findAll(message.text)) {
+                    val name = token.groupValues[1]
+                    if (name !in filesByName) continue
+                    linked += name
+                    if (thread.id == ZipHapRoom.MAIN.threadId) chairLinked += name
+                    if (analysisTexts.any { it.name == name }) linkedPrivateAnalysis += name
+                    if (sourceRuns[message.runId]?.status == "completed") completedAssociated += name
+                }
+            }
+        }
+        val report = buildJsonObject {
+            put("artifactFiles", files.count { namePattern.matches(it.name) })
+            put("filesByFormat", buildJsonObject { files.groupingBy { it.extension }.eachCount().forEach { (format,count) ->
+                if (format in setOf("txt","csv","pdf","docx","xlsx","json","md")) put(format,count)
+            } })
+            put("analysisReportTexts", analysisTexts.size)
+            val coverage = analysisTexts.map { file ->
+                file.bufferedReader(Charsets.UTF_8).use { reader -> reader.lineSequence().take(8).firstOrNull { it.startsWith("처리: ") }.orEmpty() }
+            }
+            put("reportsCompleteForSelectedText", coverage.count { it.endsWith(" · 선택 본문 범위 처리") })
+            put("reportsPartial", coverage.count { it.endsWith(" · 부분 분석") })
+            put("linkedFiles", linked.size)
+            put("linkedFromChair", chairLinked.size)
+            put("linkedAnalysisReports", linkedPrivateAnalysis.size)
+            put("linkedFromCompletedRuns", completedAssociated.size)
+        }
+        File(checkNotNull(context.getExternalFilesDir("diagnostics")), "owner-analysis-file-aggregate.json").writeText(report.toString())
+    }
+
     @Test fun auditReportedFollowup() = runBlocking {
         val instrument = InstrumentationRegistry.getInstrumentation()
         assumeTrue(InstrumentationRegistry.getArguments().getString("ownerRecallDeviceApproved") == "true")

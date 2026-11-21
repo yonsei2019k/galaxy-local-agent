@@ -42,7 +42,10 @@ class PrivateAnalysisExecutor(
                     put("contentAnalysisVerified",false)
                 }
             }.take(10).toList()
-            return ToolResult(call.id,true,JsonObject(raw+mapOf("analyses" to JsonArray(checkpoints),"analysesMayHaveMore" to JsonPrimitive(checkpoints.size==10))).toString(),VerificationState.VERIFIED,"현재 범위의 자료·저장된 분석 목록 확인 · 내용 분석 완료 아님")
+            val scoped=raw+mapOf("analyses" to JsonArray(checkpoints),"analysesMayHaveMore" to JsonPrimitive(checkpoints.size==10))
+            val reportRequested=call.arguments["includeSavedReports"]?.jsonPrimitive?.booleanOrNull==true
+            val result=if(reportRequested)scoped+("savedReports" to savedReportPreviews())else scoped
+            return ToolResult(call.id,true,JsonObject(result).toString(),VerificationState.VERIFIED,"현재 범위의 자료·저장된 분석 목록 확인 · 내용 분석 완료 아님")
         }
         if(call.name=="read_analysis_evidence")return readEvidence(call)
         require(call.name in PrivateAnalysisToolCatalog.analysisNames)
@@ -96,6 +99,36 @@ class PrivateAnalysisExecutor(
         }.toString()
         return ToolResult(call.id,true,payload,if(result.coverage.partial)VerificationState.UNVERIFIED else VerificationState.VERIFIED,
             "원문 ${result.coverage.knownTextBytes}바이트 중 ${result.coverage.modelProcessedBytes}바이트 분석 응답·정확 인용·상세 보고서 저장 확인"+if(result.coverage.partial)" · 부분 분석, 남은 범위 있음"else" · 선택한 저장 본문 범위 처리")
+    }
+
+    private suspend fun savedReportPreviews():JsonArray=withContext(Dispatchers.IO) {
+        val notes=repository.analysisReportMessages()
+        val exportDir=File(context.filesDir,"exports").canonicalFile
+        val names=notes.asSequence().flatMap {message->
+            REPORT_LINK.findAll(message.text).map {it.groupValues[1]}
+        }.distinct()
+        JsonArray(names.mapNotNull {name->
+            val file=File(exportDir,name)
+            if(!file.isFile||file.canonicalFile.parentFile!=exportDir||file.length() !in 1..20L*1024*1024)return@mapNotNull null
+            val prefix=file.bufferedReader(Charsets.UTF_8).use {reader->
+                val chars=CharArray(2200)
+                val count=reader.read(chars)
+                if(count>0)String(chars,0,count)else ""
+            }
+            if(!prefix.startsWith("개인 자료 분석 상세 결과\n"))return@mapNotNull null
+            val coverage=prefix.lineSequence().firstOrNull {it.startsWith("처리: ")}.orEmpty()
+            val excerpt=prefix.substringAfter("질문에 맞춰 검토할 항목\n","")
+                .substringBefore("저장된 상세 결과")
+                .lineSequence().filter {it.startsWith("- ")}.take(2).joinToString("\n")
+            buildJsonObject {
+                put("untrustedData",true)
+                put("sourceType","historical_saved_analysis_report")
+                put("coverage",coverage.takeSafe(140))
+                put("selectedTextCompleteAsRecorded",coverage.endsWith(" · 선택 본문 범위 처리"))
+                put("originalSourceReverified",false)
+                put("findingsExcerpt",excerpt.takeSafe(440))
+            }
+        }.take(3).toList())
     }
 
     private suspend fun reload(checkpoint:PrivateAnalysisCheckpoint):PrivateSourceSnapshot {
@@ -200,6 +233,7 @@ class PrivateAnalysisExecutor(
     }
 
     companion object {
+        private val REPORT_LINK=Regex("""저장한 분석 근거와 상세 결과를 열 수 있습니다\. \[\[file:(artifact-[a-f0-9-]{36}\.txt)]]""")
         private fun ToolCall.optional(key:String)=arguments[key]?.jsonPrimitive?.content
         private fun ToolCall.integer(key:String,default:Int)=arguments[key]?.jsonPrimitive?.int?:default
         private fun allFindings(checkpoint:PrivateAnalysisCheckpoint)=checkpoint.processed.flatMap {it.findings}.distinctBy {it.id}
