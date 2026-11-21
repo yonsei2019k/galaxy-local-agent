@@ -175,10 +175,11 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
         finally { if (catalogLoadToken === loadToken) catalogLoading = false }
     }
 
-    val textPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val textPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { selected ->
+        val files = selected.distinct()
         val token = textPickerToken
         textPickerToken = null
-        if (uri == null) { token?.let { app.privateDataPickerOrigins.cancel(it) } }
+        if (files.isEmpty()) { token?.let { app.privateDataPickerOrigins.cancel(it) } }
         else if (token == null) { status = "원래 파일 선택 요청을 확인할 수 없습니다. 파일을 다시 선택해주세요." }
         else {
             val origin = runCatching { app.privateDataPickerOrigins.consume(token, PrivateDataPickerPurpose.CONVERSATION_IMPORT) }.getOrNull()
@@ -192,12 +193,32 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                     try {
                         val repository = app.privateDataRepository(origin)
                         importer = ConversationImport(context, repository, discardIncompleteNotes = repository::discardIncompleteConversationNotes)
-                        val result = monitorOrigin(origin) { checkNotNull(importer).importUri(uri) { done, total ->
-                            context.mainExecutor.execute { if (displaysScope(origin.scope)) progress = "자료 조각 $done / $total" }
-                        } }
+                        var imported = 0
+                        var existing = 0
+                        var rejected = 0
+                        var messages = 0L
+                        monitorOrigin(origin) {
+                            for ((index, uri) in files.withIndex()) {
+                                app.validatePrivateDataOrigin(origin)
+                                try {
+                                    val result = checkNotNull(importer).importUri(uri) { done, total ->
+                                        context.mainExecutor.execute {
+                                            if (displaysScope(origin.scope)) progress = "파일 ${index+1}/${files.size} · 자료 조각 $done/$total"
+                                        }
+                                    }
+                                    if (result.duplicate) existing++ else { imported++; messages+=result.messageCount }
+                                } catch (cancel: CancellationException) { throw cancel }
+                                catch (_: Exception) {
+                                    app.validatePrivateDataOrigin(origin)
+                                    if (importer?.lastCleanupResult?.verified == false)
+                                        error("이 파일의 정리 상태를 확인할 수 없어 나머지 가져오기를 멈췄습니다.")
+                                    rejected++
+                                }
+                            }
+                        }
                         app.validatePrivateDataOrigin(origin)
                         if (displaysScope(origin.scope)) {
-                            status = "가져오기 완료 · ${result.messageCount}개 메시지 인식 · ${result.chunkCount}개 조각${if (result.duplicate) " · 기존 자료와 동일" else ""}"
+                            status = "새 파일 ${imported}개 · 중복 ${existing}개 · 미처리 ${rejected}개 · 새 메시지 ${messages}건"
                         }
                         refreshKey++ // Reload the displayed repository; never publish another scope's counts.
                     } catch (cancel: CancellationException) {
@@ -251,7 +272,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                     Button(onClick = { launchPicker(PrivateDataPickerPurpose.CONVERSATION_IMPORT) {
                         textPicker.launch(arrayOf("text/plain", "text/csv", "application/octet-stream"))
                     } }, enabled = !busy && !pickerPending && panelReady) {
-                        Text("텍스트 파일 선택")
+                        Text("대화 파일 선택")
                     }
                     if (busy) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -365,7 +386,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                                 try {
                                     requirePrivateDataUiScope(app.repository, origin)
                                     check(displaysScope(origin))
-                                    onAsk("가져온 대화 자료 ${entry.contentSha256}를 요약하고, 확인 가능한 범위와 기간을 밝혀 핵심 내용을 정리해줘.", origin.threadId)
+                                    onAsk("가져온 대화 자료 ${entry.contentSha256}를 요약하고, 확인 가능한 범위와 기간을 밝히고, 다시 찾을 수 있도록 핵심 발견을 자료의 정확한 인용과 함께 저장해줘.", origin.threadId)
                                 } catch (cancel: CancellationException) { throw cancel }
                                 catch (_: Exception) { status = "현재 대화의 자료 목록을 다시 확인해주세요." }
                             }

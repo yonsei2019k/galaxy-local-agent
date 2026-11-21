@@ -60,9 +60,8 @@ object KnowledgeExtraction {
 
     /** Third-party text yields only a record-scoped topic assertion, never an owner profile fact. */
     fun observedTopics(text:String):List<ExtractedKnowledgeFact> {
-        val bounded=text.take(4000)
         val vocabulary=linkedMapOf("회의" to listOf("회의","미팅"),"일정" to listOf("일정","스케줄","스케쥴"),"서류" to listOf("서류","문서","자료","파일"),"배송" to listOf("배송","택배"),"마감" to listOf("마감","기한"),"예약" to listOf("예약"))
-        return vocabulary.filterValues {words->words.any {it in bounded}}.keys.take(4).map {topic->
+        return vocabulary.filterValues {words->words.any {it in text}}.keys.take(4).map {topic->
             ExtractedKnowledgeFact("record.mentions_topic",topic,"연결된 자료에 '$topic' 관련 표현이 있음; 화자·사용자 사실로 확정하지 않음",false,.8,listOf("source_observation",topic,"not_owner_identity"))
         }
     }

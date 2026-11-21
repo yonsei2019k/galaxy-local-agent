@@ -85,4 +85,9 @@ class KnowledgeExtractionTest {
         assertTrue(KnowledgeExtraction.observedTopics("회의 일정 파일 배송 마감 예약").size<=4)
         assertTrue(KnowledgeExtraction.directOwnerStatements("나는 아들이 99명 있어").isEmpty())
     }
+    @Test fun linkedRecordTopicSearchIncludesTheEndOfSavedText() {
+        val facts=KnowledgeExtraction.observedTopics("가".repeat(6000)+" 배송")
+        assertEquals(listOf("배송"),facts.map {it.value})
+        assertTrue(facts.none {it.ownerProfile})
+    }
 }

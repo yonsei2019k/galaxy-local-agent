@@ -114,7 +114,20 @@ import kotlinx.coroutines.*
                 onStatus(if(enabled)"새벽 기억 정리를 예약했습니다."else"새벽 기억 정리를 껐습니다.")
             }})
         }
-        OutlinedButton(enabled=learning.enabled&&!working,onClick={execute {val report=app.knowledgeIngestion.scanNow(manual=true,maxSources=200);learning=app.knowledgeIngestion.state();onStatus("자료 ${report.processedSources}건의 기억 정리를 확인했습니다.${if(report.hasMore)" 나머지는 이어서 처리합니다."else""}");if(report.hasMore)app.knowledgeIngestion.requestInitialScan()}}){Text("연결한 자료 지금 정리")}}
+        OutlinedButton(enabled=learning.enabled&&!working,onClick={execute {
+            val report=app.knowledgeIngestion.scanConnectedNow {
+                onStatus("자료 ${it.processedSources}건 확인 · 기억 ${it.savedClaims}건 저장")
+            }
+            learning=app.knowledgeIngestion.state()
+            val detail=when(report.status){
+                "busy"->"다른 기억 정리가 실행 중입니다."
+                "sms_permission_missing"->"문자 접근 권한이 없어 문자는 건너뛰었습니다."
+                "nightly_kakao_capture_partial"->"일부 카톡 알림을 확보하지 못했습니다."
+                "source_or_generation_changed","deferred_device_state","disabled"->"자료나 기기 상태를 확인한 뒤 다시 눌러주세요."
+                else->if(report.hasMore)"다시 누르면 저장 지점부터 이어집니다."else""
+            }
+            onStatus("자료 ${report.processedSources}건 확인 · 기억 ${report.savedClaims}건 저장. $detail".trim())
+        }}){Text("연결한 자료 지금 정리")}}
         item {Text("기억과 사용자 프로필",style=MaterialTheme.typography.titleLarge)
             Text("확인된 기본 프로필과 현재 요청에 관련된 기억만 대화에 사용합니다. 관찰은 추론으로 구분하며, 제안은 확정 전까지 사실로 사용하지 않습니다.",style=MaterialTheme.typography.bodySmall)}
         item {OutlinedTextField(value,{if(it.length<=4000)value=it},label={Text("직접 확인한 사실·선호·교정")},modifier=Modifier.fillMaxWidth())

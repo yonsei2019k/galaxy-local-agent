@@ -14,6 +14,7 @@ import android.os.UserManager
 import androidx.work.*
 import com.user.localagent.LocalAgentApplication
 import com.user.localagent.benchmark.RuntimeGate
+import com.user.localagent.briefing.BriefingArchive
 import com.user.localagent.core.ExtractedKnowledgeFact
 import com.user.localagent.core.KnowledgeExtraction
 import com.user.localagent.data.KnowledgeClaim
@@ -44,6 +45,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
     private val context=context.applicationContext
     private val prefs=this.context.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
     private val notificationStore=DraftStore(this.context,"knowledge-kakao-observations-v1",200_000)
+    private val archiveVersions=DraftStore(this.context,"knowledge-kakao-archive-versions-v1",100_000)
     fun state()=KnowledgeIngestionState(prefs.getBoolean("enabled",false),prefs.getLong("generation",0),prefs.getLong("last_success",0),prefs.getString("status","disabled")?:"disabled",prefs.getLong("processed",0),prefs.getLong("claims",0),prefs.getBoolean("has_more",false),prefs.getBoolean("nightly_enabled",false))
 
     /** Authorized host/UI action. Disabling waits until any in-flight publication has stopped. */
@@ -177,14 +179,29 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                 .remove("notification_seen").remove("kakao_capture_gap").remove("last_night_complete")
                 .putLong("processed",0).putLong("claims",0).putBoolean("has_more",false).putString("status","history_erased").commit())
             notificationStore.write("")
+            archiveVersions.write("")
         }
         activeScan?.cancel(IngestionInterrupted());WorkManager.getInstance(context).cancelUniqueWork(EVENT)
         SCAN_MUTEX.withLock {repository.clearKnowledge()}
     }
 
+    /** Explicit settings action, using the same source cursors as the scheduled scan. */
+    suspend fun scanConnectedNow(onProgress:(KnowledgeIngestionReport)->Unit={}):KnowledgeIngestionReport {
+        var total=KnowledgeIngestionReport(0,0,true,"started")
+        repeat(80){
+            val pass=scanNow(manual=true,maxSources=200,includeDeviceSources=true)
+            total=pass.copy(processedSources=total.processedSources+pass.processedSources,
+                savedClaims=total.savedClaims+pass.savedClaims)
+            onProgress(total)
+            if(!pass.hasMore||pass.status!="incremental_checkpoint_saved"||pass.processedSources==0)return total
+            yield()
+        }
+        return total
+    }
+
     /** Explicit initial/manual scan API; background workers additionally require charging/idle constraints. */
-    suspend fun scanNow(manual:Boolean=true,maxSources:Int=100,nightly:Boolean=false):KnowledgeIngestionReport=withContext(Dispatchers.IO){
-        require(maxSources in 1..200)
+    suspend fun scanNow(manual:Boolean=true,maxSources:Int=100,nightly:Boolean=false,includeDeviceSources:Boolean=nightly):KnowledgeIngestionReport=withContext(Dispatchers.IO){
+        require(maxSources in 1..200&&(manual||nightly||!includeDeviceSources))
         if(!SCAN_MUTEX.tryLock())return@withContext KnowledgeIngestionReport(0,0,true,"busy")
         val generation=state().generation
         var processed=0;var claims=0;var more=false
@@ -219,11 +236,11 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
             }
             suspend fun checkpoint(edit:android.content.SharedPreferences.Editor){eligible();synchronized(SETTINGS_LOCK){if(state().enabled&&state().generation==generation)check(edit.commit())}}
             var smsMissing=false
-            if(nightly){
+            if(includeDeviceSources){
                 smsMissing=!smsAllowed()
                 if(!smsMissing){
                     val after=prefs.getLong("nightly_sms_id",-1)
-                    val limit=minOf(40,maxSources/3)
+                    val limit=minOf(if(manual)120 else 40,maxSources/2)
                     if(limit>0)context.contentResolver.query(Telephony.Sms.CONTENT_URI,arrayOf("_id","date","body"),
                         "_id > ? AND date > ?",arrayOf(after.toString(),floor.toString()),"_id ASC")?.use {rows->
                         var read=0
@@ -241,7 +258,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                     }?:error("SMS provider returned no cursor")
                 }
             }
-            if(nightly&&kakaoAllowed()){
+            if(includeDeviceSources&&kakaoAllowed()){
                 val pending=synchronized(SETTINGS_LOCK){notificationRows()}
                 val handled=mutableSetOf<String>()
                 for(row in pending.take(20)){
@@ -264,6 +281,37 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                     }
                 }
                 more=more||pending.size>handled.size
+                val archive=BriefingArchive(context)
+                val authority=if(archive.enabled())archive.authorization() else ""
+                if(authority.isNotBlank()){
+                    val archived=archive.pending().mapNotNull {row->
+                        if(row["source"]?.jsonPrimitive?.content!="notification")return@mapNotNull null
+                        val body=row["body"] as? JsonObject?:return@mapNotNull null
+                        if(body["package"]?.jsonPrimitive?.content!=KAKAO)return@mapNotNull null
+                        val version=row.getValue("version").jsonPrimitive.content
+                        Triple(digest(version),row.getValue("at").jsonPrimitive.long,body["text"]?.jsonPrimitive?.contentOrNull.orEmpty())
+                    }
+                    val liveVersions=archived.mapTo(mutableSetOf()){it.first}
+                    val checked=synchronized(SETTINGS_LOCK){archiveVersions.readStrict().takeIf(String::isNotEmpty)
+                        ?.let{Json.parseToJsonElement(it).jsonArray.mapTo(mutableSetOf()){item->item.jsonPrimitive.content}}
+                        ?:mutableSetOf()}
+                    checked.retainAll(liveVersions)
+                    val unprocessed=archived.filter {it.first !in checked}
+                    for((version,at,sourceText) in unprocessed.take(20)){
+                        if(processed>=maxSources||SystemClock.elapsedRealtime()>deadline){more=true;break}
+                        eligible()
+                        check(kakaoAllowed()&&archive.authorization()==authority)
+                        persist("kakao_notification","kakao:$version",at,KnowledgeExtraction.observedTopics(sourceText))
+                        checked+=version
+                        processed++
+                    }
+                    eligible()
+                    synchronized(SETTINGS_LOCK){
+                        if(state().enabled&&state().generation==generation&&kakaoAllowed()&&archive.authorization()==authority)
+                            archiveVersions.write(JsonArray(checked.map(::JsonPrimitive)).toString())
+                    }
+                    more=more||checked.size<liveVersions.size
+                }
             }
             val seen=runCatching {Json.parseToJsonElement(prefs.getString("notification_seen","[]")!!).jsonArray.map {it.jsonPrimitive.content}.toMutableSet()}.getOrDefault(mutableSetOf())
             val notificationLimit=minOf(processed+10,maxSources)
@@ -303,7 +351,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                 }
             }
             eligible()
-            val outcome=when {more->"incremental_checkpoint_saved";smsMissing->"nightly_sms_permission_missing";nightly&&prefs.getBoolean("kakao_capture_gap",false)->"nightly_kakao_capture_partial";else->"up_to_date"}
+            val outcome=when {more->"incremental_checkpoint_saved";smsMissing->"sms_permission_missing";includeDeviceSources&&prefs.getBoolean("kakao_capture_gap",false)->"nightly_kakao_capture_partial";else->"up_to_date"}
             val update=prefs.edit().putLong("last_success",System.currentTimeMillis())
                 .putLong("processed",state().processedSources+processed).putLong("claims",state().savedClaims+claims)
                 .putBoolean("has_more",more).putString("status",outcome)

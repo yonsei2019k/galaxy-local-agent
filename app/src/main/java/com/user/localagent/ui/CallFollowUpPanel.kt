@@ -56,12 +56,16 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
             onStatus("선택한 통화 녹음 폴더의 새 파일부터 분석합니다. 기존 녹음은 자동으로 읽지 않습니다.")
         }
     }
-    val recordingPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->
+    val recordingPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()){selection->
         val expected=selectedRecordingGeneration;selectedRecordingGeneration=null
-        if(uri!=null&&expected!=null)launchWork {
-            check(app.callFollowUp.state().generation==expected){"녹음을 선택하는 동안 설정이 바뀌었습니다."}
-            app.callFollowUp.requestSelectedRecording(uri)
-            onStatus("선택한 한 녹음만 분석 대기열에 추가했습니다. 기존 녹음 전체를 자동으로 읽지 않습니다.")
+        val files=selection.distinct()
+        if(files.isNotEmpty()&&expected!=null)launchWork {
+            if(files.size>20){
+                onStatus("한 번에 녹음 20개까지 선택할 수 있습니다.")
+                return@launchWork
+            }
+            val intake=app.callFollowUp.requestSelectedRecordings(files,expected)
+            onStatus("선택 ${files.size}개 · 대기열 요청 ${intake.accepted}개 · 미접수 ${intake.skipped}개")
         }
     }
     LaunchedEffect(app,jobsOffset){while(isActive){try {refresh()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){};delay(10_000)}}
@@ -90,7 +94,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
         Text("전화 앱의 녹음 목록에서 저장 위치를 확인한 뒤 해당 폴더만 선택하세요. 새로 켠 시점 이전 녹음과 다른 폴더는 자동 수집하지 않습니다.",style=MaterialTheme.typography.bodySmall)
         OutlinedButton(enabled=!busy,onClick={permissions.launch(arrayOf(Manifest.permission.READ_PHONE_STATE,Manifest.permission.POST_NOTIFICATIONS))}){Text("통화와 알림 권한 확인")}
         TextButton(enabled=!busy&&state?.enabled==true,onClick={launchWork {app.callFollowUp.requestReconciliation("owner_refresh");refresh()}}){Text("새 녹음 확인")}
-        OutlinedButton(enabled=!busy&&sourceSelected&&state?.enabled==true,onClick={selectedRecordingGeneration=state?.generation;recordingPicker.launch(arrayOf("audio/*"))}){Text("기존 통화 녹음 한 개 선택")}
+        OutlinedButton(enabled=!busy&&sourceSelected&&state?.enabled==true,onClick={selectedRecordingGeneration=state?.generation;recordingPicker.launch(arrayOf("audio/*"))}){Text("기존 통화 녹음 선택")}
         Text("파일 저장과 Android의 백그라운드 실행 일정에 따라 지연될 수 있습니다. 전사 구간 시각은 단어 시각이 아니며, 날짜·이름·수신자·부정·정정은 원음과 대조해야 합니다. 실제 일정 등록과 메일 발송은 별도로 확인합니다.",style=MaterialTheme.typography.bodySmall)
         SettingsDisclosure("음성 인식 세부 정보","통화 정리에서 사용하는 인식 방법을 확인해요."){
             Text("자동 통화 전사는 별도 Qwen 경로를 사용합니다. 기기 내 ML Kit는 화면을 연 상태의 비교 후보이며 일반 음성 인식 선택은 바꾸지 않습니다.",style=MaterialTheme.typography.bodySmall)

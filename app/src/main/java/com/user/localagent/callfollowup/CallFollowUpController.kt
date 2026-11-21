@@ -56,11 +56,32 @@ class CallFollowUpController(context: Context, private val pipeline: () -> CallF
 
     suspend fun configuredSource(): RecordingSourceGrant? = withContext(Dispatchers.IO) { journal.config().source }
 
+    data class SelectedRecordingIntake(val accepted:Int,val skipped:Int)
+
+    /** Explicit system-picker selections only. Each file keeps its independent durable intake. */
+    suspend fun requestSelectedRecordings(selection:List<Uri>,expectedGeneration:Long):SelectedRecordingIntake=withContext(Dispatchers.IO) {
+        val files=selection.distinct()
+        require(files.size in 1..20)
+        var accepted=0
+        for(uri in files){
+            currentCoroutineContext().ensureActive()
+            if(journal.config().let{!it.enabled||it.generation!=expectedGeneration})break
+            try{
+                requestSelectedRecording(uri,expectedGeneration)
+                accepted++
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){ /* A failed item does not discard durable requests for other selected files. */ }
+        }
+        SelectedRecordingIntake(accepted,files.size-accepted)
+    }
+
     /** Explicit owner-selected ONE URI. Automatic enabledAt cutoff is never widened or backdated. */
-    suspend fun requestSelectedRecording(uri: Uri): String = withContext(Dispatchers.IO) {
+    suspend fun requestSelectedRecording(uri: Uri): String = requestSelectedRecording(uri,null)
+
+    private suspend fun requestSelectedRecording(uri: Uri,expectedGeneration:Long?): String = withContext(Dispatchers.IO) {
         require(uri.scheme == "content" && !uri.authority.isNullOrBlank()) { "직접 선택한 녹음 파일이 필요합니다." }
         val config = journal.config()
-        check(config.enabled) { "통화 후속 분석을 먼저 켜주세요." }
+        check(config.enabled&&(expectedGeneration==null||config.generation==expectedGeneration)) { "녹음 선택 권한 범위가 변경되었습니다." }
         val grant = checkNotNull(config.source) { "통화 녹음 폴더를 먼저 선택해주세요." }
         check(phonePermission() && discovery.hasAccess(grant)) { "선택한 녹음과 통화 상태 접근 권한이 필요합니다." }
         check(context.getSystemService(UserManager::class.java).isUserUnlocked)
