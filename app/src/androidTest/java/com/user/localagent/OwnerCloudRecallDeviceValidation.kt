@@ -84,7 +84,9 @@ class OwnerCloudRecallDeviceValidation {
         val consent = ExternalAgentSettings.get(context).capture()
         check(consent.permitsPersonalData(consent.revision)) { "PERSONAL_CLOUD_CONSENT_REQUIRED" }
         val chair = checkNotNull(store.thread(ZipHapRoom.MAIN.threadId)) { "CHAIR_ROOM_MISSING" }
-        val question = "나에 대해 이야기해봐"
+        val followup = InstrumentationRegistry.getArguments().getString("ownerRecallFollowup") == "true"
+        val question = if (followup) "문자, 메일, 카톡등으로 알게된 정보도 많잖아" else "나에 대해 이야기해봐"
+        val models = if (followup) listOf("auto") else listOf("auto", ExternalAgentSettings.MODEL_ID)
         suspend fun waitFor(ms: Long, predicate: suspend () -> Boolean) =
             withTimeout(ms) { while (!predicate()) delay(150) }
         waitFor(20_000) { coordinator.selectionReady.value }
@@ -108,7 +110,8 @@ class OwnerCloudRecallDeviceValidation {
             it.collection == "private-analysis" && it.title == "개인 자료 분석 진행"
         }
         val rows = mutableListOf<JsonObject>()
-        val reportFile = File(checkNotNull(context.getExternalFilesDir("diagnostics")), "owner-cloud-recall-aggregate.json")
+        val reportName = if (followup) "owner-cloud-followup-retest.json" else "owner-cloud-recall-aggregate.json"
+        val reportFile = File(checkNotNull(context.getExternalFilesDir("diagnostics")), reportName)
         fun publish() {
             reportFile.writeText(buildJsonObject {
                 put("version", 1)
@@ -123,7 +126,7 @@ class OwnerCloudRecallDeviceValidation {
         try {
             withContext(Dispatchers.Main.immediate) { coordinator.selectThread(chair.id) }
             waitFor(20_000) { coordinator.selectionReady.value && coordinator.selectedThreadId.value == chair.id }
-            for (model in listOf("auto", ExternalAgentSettings.MODEL_ID)) {
+            for (model in models) {
                 val previous = store.runsForThread(chair.id).map { it.id }.toSet()
                 val started = SystemClock.elapsedRealtime()
                 withContext(Dispatchers.Main.immediate) {
