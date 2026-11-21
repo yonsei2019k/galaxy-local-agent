@@ -137,7 +137,7 @@ class ChatConverters {
     @Query("SELECT * FROM source_scopes WHERE threadId=:threadId") suspend fun threadSources(threadId:String):List<SourceScopeRecord>
     @Query("SELECT * FROM knowledge_scopes WHERE claimId=:id") suspend fun knowledgeScope(id:String):KnowledgeScopeRecord?
     @Query("SELECT c.* FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id WHERE (s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey ORDER BY c.updatedAt DESC LIMIT 1000") fun knowledge(scopeKey:String,includeOwner:Boolean):Flow<List<KnowledgeClaim>>
-    @Query("SELECT c.* FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id WHERE ((s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey) AND c.status IN ('confirmed','observed') ORDER BY c.updatedAt DESC LIMIT 1000") suspend fun accessibleKnowledge(scopeKey:String,includeOwner:Boolean):List<KnowledgeClaim>
+    @Query("SELECT c.* FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id WHERE ((s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey) AND c.status='confirmed' AND c.sourceKind!='analysis_finding' ORDER BY c.updatedAt DESC LIMIT 1000") suspend fun profileKnowledge(scopeKey:String,includeOwner:Boolean):List<KnowledgeClaim>
     @Query("""
         SELECT c.* FROM knowledge_terms t JOIN knowledge_claims c ON c.id=t.claimId
         LEFT JOIN knowledge_scopes s ON s.claimId=c.id

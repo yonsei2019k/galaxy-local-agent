@@ -7,6 +7,7 @@ import android.util.Base64
 import androidx.room.*
 import com.user.localagent.core.CapabilityPolicy
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -102,6 +103,12 @@ data class ToolAuditMetadataRecord(val id:String,val name:String,val success:Boo
     @Query("DELETE FROM memories WHERE id=:id") suspend fun deleteMemory(id:String)
     @Query("DELETE FROM memories WHERE id=:id AND kind='proposed'") suspend fun discardProposed(id:String):Int
     @Query("DELETE FROM memories WHERE kind='proposed'") suspend fun discardAllProposed():Int
+    @Query("""
+        SELECT n.id FROM notes n
+        WHERE n.collection='private-analysis' AND n.title='분석 근거 조각' AND n.id>:afterId
+          AND NOT EXISTS (SELECT 1 FROM knowledge_meta m WHERE m.key='analysis_memory_v1.'||n.id)
+        ORDER BY n.id LIMIT :limit
+    """) suspend fun unindexedAnalysisSteps(afterId:String,limit:Int):List<String>
     @Query("DELETE FROM notes WHERE id=:id") suspend fun deleteNote(id:String)
     @Query("DELETE FROM reminders WHERE id=:id") suspend fun deleteReminder(id:String)
     @Query("DELETE FROM messages WHERE id=:id OR instr(text,:memoryText)>0") suspend fun removeMemorySource(id:String,memoryText:String)
@@ -175,13 +182,25 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     suspend fun getKnowledge(id:String):KnowledgeClaim?=graph.get(id)?.takeIf {knowledgeAccessible(it.id)}?.let(::displayKnowledge)
     suspend fun getMessage(id:String):MessageRecord? {require(id.length in 1..100);return dao.messageById(id)?.takeIf {access==null||it.threadId==access.threadId}?.let {it.copy(text=chat.fullMessageText(it.id))}}
     suspend fun retrieveKnowledge(query:String,limit:Int=5):List<KnowledgeClaim> = scopedKnowledge(query,scopeKey,access?.useOwnerMemory?:true,limit)
-    suspend fun approveKnowledge(id:String):KnowledgeClaim {check(knowledgeAccessible(id));return displayKnowledge(graph.approve(id))}
+    suspend fun approveKnowledge(id:String):KnowledgeClaim=database.withTransaction {
+        check(knowledgeAccessible(id))
+        check(graph.get(id)?.sourceKind!="analysis_finding"){"분석 결과는 원래 분석의 근거로 확인해 주세요."}
+        displayKnowledge(graph.approve(id))
+    }
     suspend fun deleteKnowledge(id:String)=database.withTransaction {
         check(knowledgeAccessible(id)){"현재 범위의 기억이 아닙니다."}
         if(id.startsWith("memory.")){val memoryId=id.removePrefix("memory.");if(dao.memoryById(memoryId)!=null)forgetMemory(memoryId)}
         graph.delete(id);chatDao.deleteKnowledgeScope(id)
     }
-    suspend fun clearKnowledge():Int=if(access==null)graph.clear()else database.withTransaction {chatDao.scopeClaims(scopeKey).also {items->items.forEach {graph.delete(it.id);chatDao.deleteKnowledgeScope(it.id)}}.size}
+    suspend fun clearKnowledge():Int=database.withTransaction {
+        val cleared=if(access==null)graph.clear()else {
+            val claims=chatDao.scopeClaims(scopeKey)
+            claims.forEach {graph.delete(it.id);chatDao.deleteKnowledgeScope(it.id)}
+            claims.size
+        }
+        database.knowledgeDao().meta(KnowledgeMeta(analysisMemoryResetKey(if(access==null)"*" else scopeKey),System.currentTimeMillis()))
+        cleared
+    }
     suspend fun knowledgeEpoch():Long=graph.epoch()
     suspend fun knowledgeSourceAllowed(sourceKind:String,sourceId:String,@Suppress("UNUSED_PARAMETER") sourceUpdatedAt:Long=0):Boolean=graph.allowed(sourceKind,sourceId)
     suspend fun knowledgeEvidence(id:String):List<KnowledgeEvidence> = database.knowledgeDao().evidenceFor(id)
@@ -218,7 +237,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
             val genericContact=Regex("(?i)contact|연락").containsMatchIn(predicate)
             return (!email||emailQuery)&&(!phone||phoneQuery)&&(!address||addressQuery)&&(!genericContact||emailQuery||phoneQuery||addressQuery)
         }
-        val candidates=if(!includeCore)emptyList()else chatDao.accessibleKnowledge(scopeKey,access?.useOwnerMemory?:true).map(::displayKnowledge).filter {claim->
+        val candidates=if(!includeCore)emptyList()else chatDao.profileKnowledge(scopeKey,access?.useOwnerMemory?:true).map(::displayKnowledge).filter {claim->
             claim.status=="confirmed"&&("core" in claim.tags||claim.subject=="owner"&&Regex("^(?:preferred_name|name|display_name|occupation|profession|job|workplace|organization|role|family|spouse|partner|children|children_count|child|son|daughter|response_preference|response_style|language|preference|communication_preference)(?:[._].*)?$").matches(claim.predicate))&&permitted(claim.predicate,claim.value)
         }.sortedWith(compareBy<KnowledgeClaim> {when {it.predicate in setOf("preferred_name","name","display_name")->0;it.predicate in setOf("family.size","family_size","family.children","children_count","family.children_count","children.count")->1;Regex("family|children|child|spouse|partner|son|daughter|가족|자녀|배우자").containsMatchIn(it.predicate)->2;else->3}}.thenByDescending {it.updatedAt}).take(16)
         val family=candidates.filter {Regex("family|children|child|spouse|partner|son|daughter|가족|자녀|배우자").containsMatchIn(it.predicate)}.take(4)
@@ -228,8 +247,16 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val existingValues=(core+relevant).map {it.value}.toSet()
         val legacy=if(!includeCore)mutableListOf()else searchMemories(query,3).filter {it.text !in existingValues&&permitted("legacy_memory",it.text)&&graph.allowed("approved_memory",it.id)}.take(2).toMutableList()
         fun claim(item:KnowledgeClaim)=buildJsonObject {
-            put("subject",item.subject.take(48));item.objectSubject?.let {put("relatedSubject",it.take(48))};put("predicate",item.predicate.take(64));put("value",item.value.take(140))
-            put("status",item.status);put("confidence",item.confidence);put("sourceKind",item.sourceKind.take(32))
+            put("value",item.value.take(140));put("status",item.status);put("sourceKind",item.sourceKind.take(32))
+            if(item.sourceKind=="analysis_finding"){
+                put("analysisId",item.subject.removePrefix("analysis."))
+                put("evidenceId",item.predicate.removePrefix("analysis_finding."))
+                item.tags.firstOrNull {it!="analysis_finding"}?.let {put("sourceType",it)}
+            }else{
+                put("subject",item.subject.take(48))
+                item.objectSubject?.let {put("relatedSubject",it.take(48))}
+                put("predicate",item.predicate.take(64));put("confidence",item.confidence)
+            }
         }
         fun render()=buildJsonObject {
             put("type","local_owner_knowledge_context");put("untrustedData",true);put("modelWeightsLearned",false)
@@ -547,7 +574,17 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val previous=dao.noteById(id)
         if(previous!=null)checkResource("note",id)
         if(expectedUpdatedAt!=null)check(previous?.updatedAt==expectedUpdatedAt){"확인한 메모가 변경되었거나 삭제되어 지우지 않았습니다."}
-        if(previous!=null){if(previous.collection!="planning-feedback")graph.eraseSource(id);dao.deleteNote(id);chatDao.deleteSourceScope("note",id)}
+        if(previous!=null){
+            if(previous.collection=="private-analysis"){
+                val knowledgeDao=database.knowledgeDao()
+                val subject=com.user.localagent.analysis.AnalysisMemoryIndex.scopedSubject(scopeKey,id)
+                knowledgeDao.deleteAnalysisFindingScopes(subject)
+                knowledgeDao.deleteAnalysisFindings(subject)
+                knowledgeDao.deleteMeta(com.user.localagent.analysis.AnalysisMemoryIndex.marker(id))
+            }
+            if(previous.collection!="planning-feedback")graph.eraseSource(id)
+            dao.deleteNote(id);chatDao.deleteSourceScope("note",id)
+        }
     }
     suspend fun deleteReminder(id:String,expectedUpdatedAt:Long?=null)=database.withTransaction {
         val previous=dao.reminderById(id)
@@ -600,6 +637,46 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
             status=if(approved)"confirmed"else"proposed",confidence=if(approved)1.0 else 0.5,
             sourceKind=if(approved)"approved_memory"else"memory",sourceId=memory.id,sourceExcerpt=memory.text.take(1000),updatedAt=memory.updatedAt,tags=listOf("legacy_memory",memory.kind)))
     }
+    suspend fun indexAnalysisMemoryPage(afterId:String,limit:Int=16):String? {
+        check(access==null)
+        require(limit in 1..64&&afterId.length<=128)
+        val ids=dao.unindexedAnalysisSteps(afterId,limit)
+        for(id in ids){
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            indexAnalysisMemoryStep(id)
+        }
+        return ids.lastOrNull()?.takeIf {ids.size==limit}
+    }
+
+    private suspend fun indexAnalysisMemoryStep(id:String)=database.withTransaction {
+        val classifier=com.user.localagent.analysis.AnalysisMemoryIndex
+        val step=dao.noteById(id)?.takeIf {it.collection=="private-analysis"}?:return@withTransaction
+        val parentId=classifier.parentId(step.body)?:return@withTransaction
+        val root=dao.noteById(parentId)?.takeIf {it.collection=="private-analysis"}?:return@withTransaction
+        val stepScope=chatDao.sourceScope("note",id)
+        val scope=stepScope?.scopeKey?:"owner"
+        if((chatDao.sourceScope("note",parentId)?.scopeKey?:"owner")!=scope)return@withTransaction
+        val enabled=when {
+            scope=="owner"->true
+            scope.startsWith("project:")->chat.project(scope.removePrefix("project:"))?.settings?.memoryMode?.let {it!="off"}==true
+            scope.startsWith("thread:")->chat.thread(scope.removePrefix("thread:"))?.let {
+                it.deletedAt==null&&chat.accessScope(it.id).let {live->live.scopeKey==scope&&live.memoryEnabled}
+            }==true
+            else->false
+        }
+        if(!enabled)return@withTransaction
+        val knowledgeDao=database.knowledgeDao()
+        val resetAt=maxOf(knowledgeDao.metaValue(analysisMemoryResetKey("*"))?:0,knowledgeDao.metaValue(analysisMemoryResetKey(scope))?:0)
+        val epoch=graph.epoch()
+        if(step.updatedAt>resetAt&&graph.allowed("analysis_finding",id)&&graph.allowed("analysis_finding",parentId)){
+            classifier.findings(step,root,scope).filterNot {credentialAssignment.containsMatchIn(it.value)}
+                .forEach {saveKnowledgeClaim(it,epoch)}
+        }
+        knowledgeDao.meta(KnowledgeMeta(classifier.marker(id),1))
+    }
+
+    private fun analysisMemoryResetKey(scope:String)="analysis_memory_reset_v1.$scope"
+
     /** Host-only append and compare-and-set pointer. No model-selected collection or raw SQL. */
     suspend fun commitPrivateAnalysisCheckpoint(rootId:String,expectedRootSha256:String?,rootBody:String,stepId:String?,stepBody:String?)=database.withTransaction {
         verifyScopeLive()
@@ -786,7 +863,9 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val matches=chatDao.matchingKnowledge(indexedTerms,key,includeOwner)
         val scored=matches.mapNotNull {claim->
             val readable=displayKnowledge(claim)
-            val text="${readable.subject} ${readable.predicate} ${readable.value} ${readable.tags.joinToString(" ")}"
+            val labels=readable.tags.joinToString(" ")
+            val text=if(readable.sourceKind=="analysis_finding")"${readable.value} $labels"
+                else "${readable.subject} ${readable.predicate} ${readable.value} $labels"
             val overlap=tokens.intersect(lexicalTokens(text)).size
             val paired=pairs.intersect(characterPairs(text)).size
             if(overlap==0&&paired<2)null else claim to (overlap*5+paired)

@@ -39,7 +39,7 @@ object ToolRegistry {
         "open_map" to "Open the default map app searching for a place or address. Does not start turn-by-turn navigation by itself.",
         "open_url" to "Open an https URL in the phone's browser. Opening is not reading; use read_webpage to read page content.",
         "save_memory" to "Record an owner-stated fact, preference or correction for later chats with owner review. For a request to learn from past conversations, read permitted owner messages first and save only clearly stated facts. Storage is confirmed by readback.",
-        "search_memories" to "Read approved saved facts and preferences before answering a question about the owner. Omit query for a bounded owner overview; use a short topic for specific recall.",
+        "search_memories" to "Read approved saved facts and preferences before answering a question about the owner. Omit query for a bounded owner overview; use a short topic to search remembered facts and past local analysis findings. Analysis findings are unverified interpretations; confirm with read_analysis_evidence using the returned IDs when needed.",
         "delete_memory" to "Delete one remembered fact by id after the owner explicitly asks.",
         "update_note" to "Replace the entire saved note body by actual id; content is the complete intended body, not a search excerpt. For one literal edit in a longer note, use read_note then patch_note to preserve unread text.",
         "update_reminder" to "Change the title or time of one saved reminder by id.",

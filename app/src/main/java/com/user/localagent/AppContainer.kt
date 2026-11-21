@@ -139,7 +139,14 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
         return ToolExecutor(appContext,scoped,scheduler,imports,phoneRecords,
             createDocument={call->fileTools.createDocument(call.arguments.getValue("format").jsonPrimitive.content,call.arguments.getValue("title").jsonPrimitive.content,call.arguments.getValue("content").jsonPrimitive.content).toolResult()},
             researchWeb={call->com.user.localagent.web.WebResearchController(appContext,scoped).research(call.arguments.getValue("query").jsonPrimitive.content,call.name=="search_shopping",call.arguments["store"]?.jsonPrimitive?.content).toolResult()},
-            privateAnalysis={call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{analysis.execute(call)})},
+            privateAnalysis={call->
+                try {
+                    com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{analysis.execute(call)})
+                } finally {
+                    if(call.name in com.user.localagent.core.PrivateAnalysisToolCatalog.analysisNames)
+                        com.user.localagent.analysis.AnalysisMemoryWorker.enqueue(appContext)
+                }
+            },
             transcribeRecording={call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{transcription.execute(call)})},
             recordingListing=recordings::register,
             goalTools={call->verifyAnalysisAccess();checkNotNull(goalTools){"목표 실행의 원래 요청 연결이 필요합니다."}.execute(call).also {

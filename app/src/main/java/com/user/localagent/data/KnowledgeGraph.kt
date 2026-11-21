@@ -65,6 +65,12 @@ class KnowledgeConverters {
     @Query("INSERT OR REPLACE INTO knowledge_tombstones (sourceKind,sourceId,deletedAt) SELECT sourceKind,sourceId,:at FROM knowledge_evidence WHERE claimId=:id") suspend fun tombstoneEvidence(id:String,at:Long)
     @Query("INSERT OR REPLACE INTO knowledge_tombstones (sourceKind,sourceId,deletedAt) SELECT sourceKind,sourceId,:at FROM knowledge_claims WHERE id=:id") suspend fun tombstoneCurrent(id:String,at:Long)
     @Query("SELECT DISTINCT c.* FROM knowledge_claims c LEFT JOIN knowledge_evidence e ON e.claimId=c.id WHERE c.sourceId=:sourceId OR e.sourceId=:sourceId") suspend fun linkedToSource(sourceId:String):List<KnowledgeClaim>
+    @Query("DELETE FROM knowledge_scopes WHERE claimId IN (SELECT id FROM knowledge_claims WHERE subject=:subject AND sourceKind='analysis_finding')")
+    suspend fun deleteAnalysisFindingScopes(subject:String)
+    @Query("SELECT value FROM knowledge_meta WHERE `key`=:key") suspend fun metaValue(key:String):Long?
+    @Query("DELETE FROM knowledge_claims WHERE subject=:subject AND sourceKind='analysis_finding'")
+    suspend fun deleteAnalysisFindings(subject:String)
+    @Query("DELETE FROM knowledge_meta WHERE `key`=:key") suspend fun deleteMeta(key:String)
     @Query("DELETE FROM knowledge_claims WHERE id=:id") suspend fun delete(id:String)
     @Query("DELETE FROM knowledge_entities WHERE NOT EXISTS (SELECT 1 FROM knowledge_claims c WHERE c.subject=knowledge_entities.subject OR c.objectSubject=knowledge_entities.subject)") suspend fun pruneEntities()
     @Query("SELECT COUNT(*) FROM knowledge_claims") suspend fun count():Int
@@ -178,9 +184,10 @@ internal class KnowledgeStore(private val database:LocalDatabase) {
             updatedAt=input.updatedAt.coerceIn(0,now+300_000),tags=input.tags.map(::key).distinct(),objectSubject=objectSubject,identityKey=hash(identity))
     }
     private fun terms(claim:KnowledgeClaim):List<String> {
-        val category = if ("legacy_memory" in claim.tags) "" else claim.predicate
-        val fields = listOf(category, claim.tags.joinToString(" "),
-            claim.subject.substringAfter('|'), claim.objectSubject.orEmpty().substringAfter('|'))
+        val category = if ("legacy_memory" in claim.tags || claim.sourceKind == "analysis_finding") "" else claim.predicate
+        val labelsOnly = listOf(category, claim.tags.joinToString(" "))
+        val fields = if (claim.sourceKind == "analysis_finding") labelsOnly else labelsOnly +
+            listOf(claim.subject.substringAfter('|'), claim.objectSubject.orEmpty().substringAfter('|'))
         val labels = fields.flatMap(::queryTerms).distinct().take(32)
         return (labels + queryTerms(claim.value)).distinct().take(160)
     }

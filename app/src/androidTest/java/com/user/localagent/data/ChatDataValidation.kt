@@ -264,6 +264,51 @@ class ChatDataValidation {
         assertTrue(scoped.ownerProfileContext("QZG-72381").contains("Campus-N9"))
     }}
 
+    @Test fun storedAnalysisFindingsAreIndexedOnceAndStayInTheirSourceProject()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        val source=repo.chat.createProject("Synthetic previous analysis")
+        val thread=repo.chat.createThread(source.id)
+        val other=repo.forThread(repo.chat.createThread().id)
+        val scoped=repo.forThread(thread.id)
+        val scope="project:${source.id}"
+        val analysisId=UUID.randomUUID().toString()
+        val stepId=UUID.randomUUID().toString()
+        val evidenceId="a".repeat(64)
+        scoped.saveNote("개인 자료 분석 진행",buildJsonObject {
+            put("kind","private_analysis_checkpoint_v1");put("scopeId",scope);put("id",analysisId)
+            put("stepCount",1);put("lastId",stepId)
+            put("source",buildJsonObject {put("scopeId",scope);put("kind","SMS")})
+        }.toString(),"private-analysis",analysisId)
+        scoped.saveNote("분석 근거 조각",buildJsonObject {
+            put("kind","private_analysis_step_v1");put("scopeId",scope);put("analysisId",analysisId);put("index",0)
+            put("result",buildJsonObject {put("findings",buildJsonArray {
+                add(buildJsonObject {put("id",evidenceId);put("text","Synthetic WXG912 previous finding");put("quote","Private QA original")})
+                add(buildJsonObject {put("id","b".repeat(64));put("text","비밀번호: SecretSynthetic783")})
+            })})
+        }.toString(),"private-analysis",stepId)
+        repo.chat.updateProject(source.id,settings=source.settings.copy(memoryMode="off"))
+        repo.indexAnalysisMemoryPage("")
+        assertTrue(repo.forThread(thread.id).retrieveKnowledge("WXG912").isEmpty())
+        repo.chat.updateProject(source.id,settings=source.settings)
+        val refreshed=repo.forThread(thread.id)
+        assertEquals(stepId,repo.indexAnalysisMemoryPage("",limit=1))
+        assertNull(repo.indexAnalysisMemoryPage(stepId,limit=1))
+        assertNull(repo.indexAnalysisMemoryPage("",limit=1))
+        val claim=refreshed.retrieveKnowledge("WXG912").single()
+        assertEquals("observed",claim.status)
+        assertEquals(stepId,claim.sourceId)
+        assertEquals(listOf("analysis_finding","sms"),claim.tags)
+        val context=refreshed.ownerProfileContext("WXG912")
+        assertTrue(context.contains(analysisId)&&context.contains(evidenceId))
+        assertFalse(context.contains("Private QA original"))
+        assertTrue(other.retrieveKnowledge("WXG912").isEmpty())
+        assertTrue(repo.retrieveKnowledge("WXG912").isEmpty())
+        assertTrue(refreshed.retrieveKnowledge("SecretSynthetic783").isEmpty())
+        refreshed.deleteNote(analysisId)
+        assertTrue(refreshed.retrieveKnowledge("WXG912").isEmpty())
+        repo.indexAnalysisMemoryPage("")
+        assertTrue(refreshed.retrieveKnowledge("WXG912").isEmpty())
+    }}
+
     @Test fun deletedRoomCannotReceiveDraftMessageOrRun()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val t=repo.chat.createThread();repo.chat.deleteThread(t.id)
         assertNull(repo.chat.thread(t.id))

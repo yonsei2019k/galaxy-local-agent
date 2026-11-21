@@ -39,6 +39,7 @@ INSTRUCTIONS = (
     "A question about the owner personally, how they work, or what is known about them is not self-contained unless the current request supplies the answer. "
     "If available, plan search_memories and, for prior conversations when needed, search_conversation_history. The phone may move the whole request to its local model. "
     "If the owner asks to learn or remember, plan save_memory and any needed source reads. Use only owner-stated facts, preferences, or corrections. "
+    "For previous analysis, plan a scoped search_memories by topic and read_analysis_evidence if available and needed. "
     "Never claim anything was learned or saved without phone-confirmed readback. If these tools are unavailable, explain the missing evidence without guessing. "
     "A prepared intent, queued call, or your own prose is not a verified effect. "
     "Read back actual changed data as required. Never retry an unknown effect. "
