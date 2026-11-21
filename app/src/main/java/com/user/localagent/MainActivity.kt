@@ -302,7 +302,7 @@ class MainActivity : ComponentActivity() {
                 val epoch=(runForRoom.orEmpty()+currentBranchId).hashCode().toLong().and(0x7fffffff)
                 val menuById=menuThreads.associateBy{it.id}
                 val staffRooms=ZipHapRoom.entries.filter{it.agent!=null}.sortedBy{checkNotNull(it.agent).ordinal}
-                    .mapNotNull{seat->menuById[seat.threadId]?.takeUnless{it.archived}?.let{it to checkNotNull(seat.agent).label}}
+                    .mapNotNull{seat->menuById[seat.threadId]?.takeUnless{it.archived}}
                 fun threadJson(id:String,title:String)=buildJsonObject{
                     put("id",id);put("title",title);put("selected",id==composerThreadId)
                     put("working",activeExecutions.any{it.threadId==id&&!it.waitingForApproval&&it.waitingForResource==null})
@@ -321,10 +321,10 @@ class MainActivity : ComponentActivity() {
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
                         put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
                     })}})
-                    put("staffRooms",buildJsonArray{staffRooms.forEach{(thread,label)->add(threadJson(thread.id,label))}})
+                    put("staffRooms",buildJsonArray{staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}})
                     put("threads",buildJsonArray{
-                        staffRooms.forEach{(thread,_)->add(threadJson(thread.id,thread.title))}
-                        menuById[composerThreadId]?.takeUnless{thread->staffRooms.any{it.first.id==thread.id}}?.let{add(threadJson(it.id,it.title))}
+                        staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}
+                        menuById[composerThreadId]?.takeUnless{thread->staffRooms.any{it.id==thread.id}}?.let{add(threadJson(it.id,it.title))}
                     })
                     put("models",buildJsonArray{modelChoices.forEach{(id,label)->add(buildJsonObject{put("id",id);put("label",label)})}})
                     put("attachments",buildJsonArray{attachments.forEach{add(buildJsonObject{put("id",it.id);put("name",it.name)})}})

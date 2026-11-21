@@ -26,7 +26,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onNew,
   const staff = snapshot?.staffRooms
   const threads = staff ?? snapshot?.threads ?? []
   return (
-    <div className={`sidebar-content${staff ? ' sidebar-content--staff' : ''}`}>
+    <div className="sidebar-content">
       <div className="sidebar-brand">
         <span className="wordmark"><BrandMark /> ZipHap<span>.Agent</span></span>
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
