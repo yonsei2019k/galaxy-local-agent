@@ -2840,6 +2840,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return observed
     }
 
+    private suspend fun performTool(call:ToolCall,targetConfirmed:Boolean=false):ToolResult {
         ToolRegistry.validate(call)
         enforceGoalToolFence(checkNotNull(activeRequest),call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
