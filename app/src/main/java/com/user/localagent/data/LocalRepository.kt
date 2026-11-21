@@ -393,7 +393,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     suspend fun searchNotes(query:String)=chatDao.searchNotes(scopeKey,query.take(500),50)
     suspend fun searchUserNotes(query:String,scope:String="",limit:Int=5)=chatDao.searchUserNotes(scopeKey,query.take(500),scope.takeIf {it.isNotBlank()}.orEmpty(),com.user.localagent.core.InternalNoteCollections.protected.toList(),limit.coerceIn(1,5))
     suspend fun latestNote(collection:String):NoteRecord? {require(collection.length<=80);return chatDao.searchNotes(scopeKey,"",2000).firstOrNull {it.collection==collection}}
-    internal suspend fun saveApprovedMemory(text:String,kind:String):MemoryRecord {
+    suspend fun saveApprovedMemory(text:String,kind:String):MemoryRecord {
         require(approvedMemoryKind(kind)){"기억 유형은 사실, 선호 또는 정정이어야 합니다."}
         return saveMemory(text,kind)
     }
