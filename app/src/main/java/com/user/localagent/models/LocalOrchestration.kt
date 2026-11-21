@@ -38,7 +38,7 @@ class LocalOrchestration(
     suspend fun choose(text: String, explicitDeep: Boolean = false, requireStructured:Boolean=false): ChosenInference? = withContext(Dispatchers.IO) {
         models.refresh()
         val validation=context.getSharedPreferences("validated-tools",Context.MODE_PRIVATE)
-        val installed = models.models.value.filter { it.verified && File(it.path).isFile &&
+        val installed = models.models.value.filter { it.verified && File(it.path).isFile && GemmaMediaCatalog.supportsText(it.id, it.sha256) &&
             if(requireStructured)it.runtime=="litertlm"&&validation.getBoolean("structured."+it.sha256,false)else !GemmaMediaCatalog.auxiliary(it.id) }
         val reports = loadReports(installed.map { File(it.path).name }.toSet())
         val resident = engine.residentModelPath
@@ -56,7 +56,7 @@ class LocalOrchestration(
                 // The maximum observed peak is conservative across successful reports of the same context.
                 peakPssMb = baseReports.maxOfOrNull { it.peakPssMb },
                 endurancePassed = baseReports.any { it.endurancePassed },
-                qualityTier = if (model.id in setOf("gemma-e4b", "qwen-4b")) ModelQualityTier.QUALITY else ModelQualityTier.FAST,
+                qualityTier = if (model.id == "qwen-4b") ModelQualityTier.QUALITY else ModelQualityTier.FAST,
                 warm = resident == model.path,
                 backend = "CPU",
                 context8192PeakPssMb = largeReports.maxOfOrNull { it.peakPssMb },

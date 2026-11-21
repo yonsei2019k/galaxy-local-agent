@@ -40,8 +40,8 @@ internal enum class PairedPcTextProfileDescriptor(
     val supportsQwenThinking: Boolean get() = this == LEGACY_V1 || this == FAST_4B_V1
 
     fun requireRunnable() {
-        if (this != GEMMA_E4B_V1)
-            throw InferencePrerequisiteMissing(InferencePrerequisiteReason.PC_MODEL_RETIRED)
+        throw InferencePrerequisiteMissing(if (this == GEMMA_E4B_V1) InferencePrerequisiteReason.IMAGE_ONLY_MODEL
+            else InferencePrerequisiteReason.PC_MODEL_RETIRED)
     }
 
     companion object {
@@ -59,7 +59,7 @@ internal enum class PairedPcTextProfileDescriptor(
                 capturedDefault ?: "auto" else selectionId
 
         fun directTextProfile(capturedDefault: String?, requestOwned: Boolean): PairedPcTextProfileDescriptor {
-            val profile = if (requestOwned) forSelection(capturedDefault ?: "auto") else GEMMA_E4B_V1
+            val profile = if (requestOwned) forSelection(capturedDefault ?: "auto") else LEGACY_V1
             return checkNotNull(profile).also { it.requireRunnable() }
         }
     }

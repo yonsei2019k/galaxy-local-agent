@@ -17,13 +17,11 @@ class PairedPcTargetSelectionTest {
     private fun invalid(block:()->Unit) {
         try { block();fail("Expected invalid receipt") }catch(_:IllegalArgumentException){}
     }
-    @Test fun e4bUsesLogicalTargetWithoutAnyInstalledPhoneModel() {
+    @Test fun e4bCannotBecomeAnExecutableTextTarget() {
         val profile=PairedPcTextProfileDescriptor.GEMMA_E4B_V1
-        val choice=checkNotNull(RequestInferenceSelection.pairedText(profile.selectionId,7,false,7,true,false))
-        assertTrue(choice.model is PairedPcText)
-        assertFalse(choice.model is LocalWeight)
-        assertEquals(profile.selectionId,choice.model.id)
-        assertEquals(8192,choice.options.contextSize)
+        missing(InferencePrerequisiteReason.IMAGE_ONLY_MODEL) {
+            RequestInferenceSelection.pairedText(profile.selectionId,7,false,7,true,false)
+        }
     }
     @Test fun retiredAutoAndExplicitNineBFailBeforeReturningAnExecutionChoice() {
         for(id in listOf("auto",PairedPcTextProfile.SELECTION_ID))

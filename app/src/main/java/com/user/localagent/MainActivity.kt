@@ -592,20 +592,21 @@ class MainActivity : ComponentActivity() {
                 item {Text("설치한 모델",style=MaterialTheme.typography.titleMedium)}
                 items(installed.filterNot {it.id=="gemma-e2b"||com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { model -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(model.title,fontWeight=FontWeight.Bold)
-                    Text(if(selectedId==model.id) "이 대화에서 선택됨" else "선택 가능",color=Mint)
+                    val imageOnly=com.user.localagent.models.GemmaMediaCatalog.imageOnly(model.id,model.sha256)
+                    Text(if(imageOnly) "이미지 전용" else if(selectedId==model.id) "이 대화에서 선택됨" else "선택 가능",color=Mint)
                     if(model.id in com.user.localagent.models.GemmaMediaCatalog.modelIds) {
                         val ready=app.models.mediaReady(model)
-                        Text(if(ready)"음성 내용 분석·사진 분석 지원"else"사진 분석 지원 파일 다운로드 필요",style=MaterialTheme.typography.bodySmall)
+                        Text(if(ready)"사진 분석 지원"else"사진 분석 지원 파일 다운로드 필요",style=MaterialTheme.typography.bodySmall)
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
+                            if(!imageOnly)FilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
                             FilterChip(selected=media.vision==model.id,enabled=ready,onClick={scope.launch {app.models.selectMedia("vision",model.id)}},label={Text("사진용")})
                         }
-                        if(model.id=="gemma-e4b")Text("음성·사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
+                        if(model.id=="gemma-e4b")Text("사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
                     }
                     if(!model.verified)TextButton(onClick={hashTarget=model.id;expectedHash=""}){Text("확인 코드 입력")}
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        if(model.id !in com.user.localagent.models.GemmaMediaCatalog.modelIds)TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("이 대화에서 사용")}
-                        TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("성능 측정")}
+                        if(!imageOnly&&model.id !in com.user.localagent.models.GemmaMediaCatalog.modelIds)TextButton(enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)}){Text("이 대화에서 사용")}
+                        if(!imageOnly)TextButton(onClick={scope.launch {runBenchmark(model.path,if(endurance)10 else 0)}}){Text("성능 측정")}
                         TextButton(onClick={scope.launch {maintainModelFiles {app.models.delete(model.id);status.value="모델을 삭제했습니다."}}}){Text("삭제")}
                     }
                 } } }

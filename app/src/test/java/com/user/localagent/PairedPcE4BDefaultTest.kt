@@ -18,10 +18,12 @@ class PairedPcE4BDefaultTest {
             revision,paired,value.thinking)?.model as? PairedPcText
     }
 
-    @Test fun onlyNewCapturedDefaultUsesGemmaAndFollowsTheRequest() {
+    @Test fun savedGemmaTargetRemainsBoundButCannotRunText() {
         val fresh=request.copy(capturedPcTextDefault=gemma.selectionId)
         val restored=QueuedChatRequest.fromJson(fresh.toJson())
-        assertEquals(gemma,target(restored)?.profile)
+        assertEquals(gemma.selectionId,restored.capturedPcTextDefault)
+        assertEquals(InferencePrerequisiteReason.IMAGE_ONLY_MODEL,
+            assertThrows(InferencePrerequisiteMissing::class.java) {target(restored)}.reason)
         for(retired in listOf(QueuedChatRequest.fromJson(request.toJson()),fresh.copy(modelId=PairedPcTextProfile.SELECTION_ID),
             fresh.copy(modelId=PairedPcFast4BProfile.SELECTION_ID))) {
             assertEquals(InferencePrerequisiteReason.PC_MODEL_RETIRED,
@@ -33,10 +35,14 @@ class PairedPcE4BDefaultTest {
         assertThrows(IllegalArgumentException::class.java) {fresh.copy(capturedPcRevision=null)}
     }
 
-    @Test fun directLoadUsesGemmaOnlyForNewOrIndependentWork() {
+    @Test fun directTextLoadNeverSelectsTheImageHelper() {
         val profiles=PairedPcTextProfileDescriptor
-        assertEquals(gemma,profiles.directTextProfile(null,false))
-        assertEquals(gemma,profiles.directTextProfile(gemma.selectionId,true))
+        assertEquals(InferencePrerequisiteReason.PC_MODEL_RETIRED,assertThrows(InferencePrerequisiteMissing::class.java) {
+            profiles.directTextProfile(null,false)
+        }.reason)
+        assertEquals(InferencePrerequisiteReason.IMAGE_ONLY_MODEL,assertThrows(InferencePrerequisiteMissing::class.java) {
+            profiles.directTextProfile(gemma.selectionId,true)
+        }.reason)
         for(retired in listOf(null,PairedPcTextProfile.SELECTION_ID,PairedPcFast4BProfile.SELECTION_ID)) {
             assertEquals(InferencePrerequisiteReason.PC_MODEL_RETIRED,assertThrows(InferencePrerequisiteMissing::class.java) {
                 profiles.directTextProfile(retired,true)
@@ -52,8 +58,14 @@ class PairedPcE4BDefaultTest {
             assertThrows(InferencePrerequisiteMissing::class.java) {target(fresh,revision=8)}.reason)
     }
 
+    @Test fun imageHelperRemainsAvailableByIdentityButImportedAliasCannotRunText() {
+        assertEquals("gemma-e4b",com.user.localagent.core.GemmaImagePreparation.modelId("gemma-e4b-" + gemma.modelSha256.take(16) + ".gguf"))
+        assertFalse(GemmaMediaCatalog.supportsText("imported-model", gemma.modelSha256))
+        assertTrue(GemmaMediaCatalog.supportsText("qwen-4b"))
+    }
+
     @Test fun continuationAndLoadCannotSubstituteTheOldProfile() {
-        val target=checkNotNull(target(request.copy(capturedPcTextDefault=gemma.selectionId)))
+        val target=checkNotNull(PairedPcText.forRequest(gemma.selectionId,7,false,7,true))
         assertFalse(pcTextProfileWireSupported(target,null))
         val health=buildJsonObject {put("textGenerationContract",buildJsonObject {
             put("wireVersion",1);put("strictThinkingBool",true)

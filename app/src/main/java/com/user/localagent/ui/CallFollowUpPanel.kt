@@ -85,7 +85,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
             CallFollowUpReadiness.SOURCE_NOT_SELECTED->"삼성 전화의 통화 녹음 폴더를 선택해주세요."
             CallFollowUpReadiness.REQUIRES_SOURCE_ACCESS->"녹음 폴더 접근을 다시 연결해주세요."
             CallFollowUpReadiness.REQUIRES_PHONE_PERMISSION->"통화 종료 감지 권한이 필요합니다."
-            CallFollowUpReadiness.MODEL_UNAVAILABLE->if(modelDetail=="TEXT_MODEL_UNAVAILABLE")"모델 관리에서 Gemma E4B 대화 모델을 준비해주세요."else"자동 분석용 Qwen 음성 모델과 인코더를 모델 관리에서 준비해주세요."
+            CallFollowUpReadiness.MODEL_UNAVAILABLE->if(modelDetail=="TEXT_MODEL_UNAVAILABLE")"통화 내용을 분석하려면 모델 관리에서 Qwen 4B를 준비해주세요."else"자동 분석용 Qwen 음성 모델과 인코더를 모델 관리에서 준비해주세요."
             CallFollowUpReadiness.DEFERRED_DEVICE_STATE->"다른 작업·통화·발열·전원 상태가 안정되면 이어갑니다."
             CallFollowUpReadiness.SOURCE_REVIEW_REQUIRED->"녹음 파일 또는 폴더 상태를 확인해주세요."
             CallFollowUpReadiness.READY->"새 녹음 대기 · 저장 완료 확인 후 분석"
@@ -173,6 +173,7 @@ private fun callFailureDetail(code:String?):String?=when(code){
     "STAGE_TIME_LIMIT"->"정리 단계가 시간 한도에 걸렸습니다. 전사는 보존되어 이어 분석할 수 있습니다."
     "MODEL_EVIDENCE_INVALID"->"후속 후보가 원문 근거 검사를 통과하지 못했습니다. 전사와 원음을 확인해주세요."
     "MODEL_OUTPUT_INCOMPLETE"->"모델 출력이 끝나지 않아 제안으로 확정하지 않았습니다. 전사는 보존했습니다."
+    "IMAGE_ONLY_MODEL"->"이 작업의 E4B는 이미지 전용입니다. 기존 전사문을 보존했습니다."
     "ANALYSIS_CONTRACT_CHANGED"->"분석 방식이 변경되어 기존 결과에 이어 붙이지 않았습니다. 별도의 새 분석이 필요합니다."
     else->null
 }

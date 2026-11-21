@@ -407,7 +407,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         goalState.value=null;runTimeline.value=emptyList()
         historyLimit.value=initialHistoryLimit
         draft.value=saved?.text.orEmpty();runMode.value=initialMode
-        preferredModelId.value=saved?.modelId?:project?.settings?.modelId?:"auto"
+        preferredModelId.value=(saved?.modelId?:project?.settings?.modelId?:"auto").let { id ->
+            if(isImageOnlySelection(id)) com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION else id
+        }
         modelOptions.value=modelOptions.value.copy(thinking=saved?.thinking?:project?.settings?.thinking?:false)
         selectedProjectId.value=thread.projectId.orEmpty();selectedThreadId.value=id
         preferences.edit().putString("thread",id).apply()
@@ -550,8 +552,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
                 QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
                     allowExternalAgent=resolvedModel==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(resolvedModel==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null,
-                    cloudReadOnlyModes=resolvedModel==ExternalAgentSettings.MODEL_ID && externalAuthority.enabled,
-                    capturedPcTextDefault=com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId).also {submitted=it}.toJson()
+                    cloudReadOnlyModes=resolvedModel==ExternalAgentSettings.MODEL_ID && externalAuthority.enabled).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -2003,6 +2004,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             return pairedTextChoice(request,selectionId)?.model
                 ?:throw InferencePrerequisiteMissing(InferencePrerequisiteReason.ORIGINAL_PC_AUTHORITY_MISSING)
         val installed=app.models.models.value.firstOrNull {it.id==selectionId&&it.verified}
+            ?.also { LocalWeight(it).requireSelectable() }
             ?:throw InferencePrerequisiteMissing(InferencePrerequisiteReason.MODEL_SELECTION_MISSING)
         return LocalWeight(installed)
     }
@@ -2010,10 +2012,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         inferenceChoiceOverride?.let {return it(request)}
         val selection=com.user.localagent.models.PairedPcTextProfileDescriptor.resolveRequestSelection(request.modelId,request.capturedPcTextDefault)
         pairedTextChoice(request,selection)?.let{return it}
+        if(com.user.localagent.models.GemmaMediaCatalog.imageOnly(selection))
+            throw InferencePrerequisiteMissing(InferencePrerequisiteReason.IMAGE_ONLY_MODEL)
         if(selection=="auto")executionOrchestration.choose(request.text,request.thinking)?.let {return it}
         // Local/helper selection retains actual phone-file validation; it is not a PC load receipt.
-        val model=app.models.models.value.firstOrNull {it.id==selection&&it.verified&&it.runtime in setOf("litertlm","gguf")}
-            ?:app.models.models.value.firstOrNull {selection=="auto"&&it.verified&&it.runtime in setOf("litertlm","gguf")}?:return null
+        val model=app.models.models.value.firstOrNull {it.id==selection&&it.verified&&com.user.localagent.models.GemmaMediaCatalog.supportsText(it.id,it.sha256)&&it.runtime in setOf("litertlm","gguf")}
+            ?:app.models.models.value.firstOrNull {selection=="auto"&&it.verified&&com.user.localagent.models.GemmaMediaCatalog.supportsText(it.id,it.sha256)&&it.runtime in setOf("litertlm","gguf")}?:return null
         return ChosenInference(model,InferenceOptions(contextSize=4096,backend="CPU",thinking=request.thinking,maxOutputTokens=if(request.thinking)2048 else 768),"사용자가 선택한 로컬 모델")
     }
     private suspend fun executeSemanticResearch(plan:com.user.localagent.core.SemanticRequestPlan,chosen:ChosenInference,request:QueuedChatRequest,offeredTools:Set<String>):Boolean {
@@ -2449,7 +2453,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         updateDraft(draft.value,threadId)
     }
 
+    private fun isImageOnlySelection(id:String):Boolean =
+        id==com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId ||
+            com.user.localagent.models.GemmaMediaCatalog.imageOnly(id,app.models.models.value.firstOrNull {it.id==id}?.sha256.orEmpty())
+
     fun chooseModel(id:String,expectedThreadId:String?=null) {
+        if(isImageOnlySelection(id))return
         if(!selectionReady.value||selectedThreadId.value.isBlank()||expectedThreadId!=null&&expectedThreadId!=selectedThreadId.value)return
         preferredModelId.value=id
         context.getSharedPreferences("chat-preferences",android.content.Context.MODE_PRIVATE).edit().putString("model",id).apply()

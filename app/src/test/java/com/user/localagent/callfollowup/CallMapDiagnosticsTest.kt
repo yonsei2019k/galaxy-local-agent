@@ -73,6 +73,7 @@ class CallMapDiagnosticsTest {
         assertEquals(CallAnalysisContractPolicy.Decision.REQUIRES_EXPLICIT_REANALYSIS, CallAnalysisContractPolicy.decide("b".repeat(64), actual, 0, false))
         assertEquals(CallAnalysisContractPolicy.Decision.SAME_CONTRACT, CallAnalysisContractPolicy.decide(actual, actual, 3, true))
         assertFalse(CallAnalysisContractPolicy.permitsRetry("ANALYSIS_CONTRACT_CHANGED"))
+        assertFalse(CallAnalysisContractPolicy.permitsRetry("IMAGE_ONLY_MODEL"))
         assertTrue(CallAnalysisContractPolicy.permitsRetry("STAGE_TIME_LIMIT"))
     }
 

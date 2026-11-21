@@ -77,9 +77,9 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
             val prepared=saveUiGoalGuarded(access,goal)
             goalMutation.withLock {
                 val previousRun=prepared.linkedRunIds.lastOrNull()
-                val pcTextDefault=if(previousRun==null)
-                    com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId
-                else QueuedChatRequest.fromJson(checkNotNull(app.repository.chat.run(previousRun)).contextJson).capturedPcTextDefault
+                val pcTextDefault=previousRun?.let {
+                    QueuedChatRequest.fromJson(checkNotNull(app.repository.chat.run(it)).contextJson).capturedPcTextDefault
+                }
                 queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),
                     capturedPcRevision=pcAuthority.revision,allowCloudText=false,
                     capturedAllowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,

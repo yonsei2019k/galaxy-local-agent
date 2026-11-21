@@ -194,7 +194,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
             "browser" to android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("https://example.com")))
         candidates.forEach {(key,intent)->if(intent.resolveActivity(appContext.packageManager)!=null)handlers+=key}
         val localModels=mutableSetOf<String>()
-        if(models.models.value.any {it.verified&&it.runtime in setOf("litertlm","gguf")})localModels+="text"
+        if(models.models.value.any {it.verified&&com.user.localagent.models.GemmaMediaCatalog.supportsText(it.id,it.sha256)&&it.runtime in setOf("litertlm","gguf")})localModels+="text"
         imageStudio.models.refresh()
         val pcImages=com.user.localagent.compute.PcComputeSettings.get(appContext).state.value.let{it.paired&&it.preferPcImages}&&
             com.user.localagent.compute.PcTransport(appContext).available()!=null

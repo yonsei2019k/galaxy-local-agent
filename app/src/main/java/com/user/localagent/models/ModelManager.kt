@@ -78,7 +78,8 @@ class ModelManager(private val context: Context) {
 
     fun mediaModel(purpose: String): InstalledModel {
         require(purpose in setOf("audio", "vision"))
-        val id = if (purpose == "audio") mediaSelection.value.audio else mediaSelection.value.vision
+        val id = if (purpose == "audio") mediaSelection.value.audio.takeUnless { GemmaMediaCatalog.imageOnly(it) }
+            ?: MediaSelection().audio else mediaSelection.value.vision
         return mutableModels.value.firstOrNull { it.id == id && mediaReady(it) }
             ?: error("모델 화면에서 선택한 Gemma의 음성·사진 지원 파일을 먼저 내려받아주세요.")
     }
@@ -87,6 +88,7 @@ class ModelManager(private val context: Context) {
         mutex.withLock {
             require(purpose in setOf("audio", "vision"))
             val model = mutableModels.value.firstOrNull { it.id == id } ?: error("모델 없음")
+            require(purpose == "vision" || !GemmaMediaCatalog.imageOnly(model.id, model.sha256))
             require(mediaReady(model)) { "검증된 Gemma 모델과 음성·사진 지원 파일이 필요합니다." }
             check(selected.edit().putString("$purpose-id", id).commit())
             mutableMediaSelection.value = if (purpose == "audio") mutableMediaSelection.value.copy(audio=id) else mutableMediaSelection.value.copy(vision=id)
@@ -94,6 +96,7 @@ class ModelManager(private val context: Context) {
     }
 
     fun mediaOptions(model: InstalledModel, audio: Boolean): com.user.localagent.inference.InferenceOptions {
+        require(!audio || !GemmaMediaCatalog.imageOnly(model.id, model.sha256))
         require(mediaReady(model))
         val projector = mutableModels.value.single { it.id == model.id + "-mmproj" && it.verified }
         return com.user.localagent.inference.InferenceOptions(contextSize=4096, thinking=false, backend="CPU",
@@ -200,7 +203,7 @@ class ModelManager(private val context: Context) {
         }
         if (checked != values) saveIndex(checked) else mutableModels.value = checked
         val selectedId = selected.getString("id", null)
-        mutableSelected.value = checked.find { it.id == selectedId && it.verified && it.runtime in setOf("litertlm", "gguf") }
+        mutableSelected.value = checked.find { it.id == selectedId && it.verified && GemmaMediaCatalog.supportsText(it.id,it.sha256) && it.runtime in setOf("litertlm", "gguf") }
         if (selectedId != null && mutableSelected.value == null) clearSelection()
     }
 
@@ -372,9 +375,10 @@ class ModelManager(private val context: Context) {
     }
 
     suspend fun select(id: String) = withContext(Dispatchers.IO) {
-        require(!GemmaMediaCatalog.auxiliary(id)) { "음성·사진 지원 파일은 대화 모델로 선택할 수 없습니다." }
+        require(GemmaMediaCatalog.supportsText(id)) { "이 모델은 대화에서 사용할 수 없습니다." }
         mutex.withLock {
             val model = mutableModels.value.find { it.id == id } ?: error("모델 없음")
+            require(GemmaMediaCatalog.supportsText(model.id,model.sha256))
             require(model.runtime in setOf("litertlm", "gguf")) { "지원하지 않는 실행 엔진입니다." }
             require(model.verified && HASH.matches(model.sha256)) { "원본 SHA-256이 확인되지 않은 모델입니다." }
             val file = managedFile(model) ?: error("모델 경로가 유효하지 않습니다.")
@@ -448,7 +452,7 @@ class ModelManager(private val context: Context) {
         check(temporary.renameTo(index)) { "모델 목록을 저장할 수 없습니다." }
         mutableModels.value = values
         val id = selected.getString("id", null)
-        mutableSelected.value = values.find { it.id == id && it.verified && HASH.matches(it.sha256) && it.runtime in setOf("litertlm", "gguf") }
+        mutableSelected.value = values.find { it.id == id && it.verified && HASH.matches(it.sha256) && GemmaMediaCatalog.supportsText(it.id,it.sha256) && it.runtime in setOf("litertlm", "gguf") }
         if (id != null && mutableSelected.value == null) clearSelection()
     }
 
