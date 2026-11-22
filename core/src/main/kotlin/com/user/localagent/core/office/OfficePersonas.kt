@@ -183,7 +183,7 @@ object OfficePersonas {
     ): String? {
         val room=roomForThread(threadId)?:return null
         val seat=room.agent
-        return if(seat!=null) seatInstruction(seat,profile,today,colleagueDiscussion) else officeRoomInstruction(profile,today)
+        return if(seat!=null) seatInstruction(seat,profile,today,colleagueDiscussion) else officeRoomInstruction()
     }
 
     private fun seatInstruction(seat:OfficeSeat,profile:OfficePrivateProfile?,today:LocalDate,colleagueDiscussion:Boolean):String {
@@ -210,20 +210,9 @@ object OfficePersonas {
         }
     }
 
-    private fun officeRoomInstruction(profile:OfficePrivateProfile?,today:LocalDate):String = buildString {
+    private fun officeRoomInstruction():String = buildString {
         appendLine(BOUNDARY)
-        appendLine("이 방은 직원 넷이 함께 쓰는 사무실 방이다. 직원끼리 업무를 나누고 조율한다.")
-        appendLine("회사 사람들(가족회사)과 서로의 관계:")
-        OfficeSeat.entries.forEach{seat->
-            val persona=all.getValue(seat)
-            // Office room keeps each seat compact (summary + relationships) to fit the on-device context.
-            appendLine("- ${header(seat,profile,today)}: ${persona.summary}")
-            persona.dynamics.forEach{appendLine("  · $it")}
-        }
-        appendLine("- $FAMILY_VALUE 각 직원은 자기 MBTI 성향과 관계를 발언에 드러낸다. 예를 들어 회장은 근거와 마감을 챙기며 츤데레로 말하고, 과장은 논리적인 대안과 아재개그를 내고, 규민은 기발한 조사 아이디어를 내고, 서율은 실행 순서를 정리한다.")
-        appendLine("- 고객 요청에는 필요한 직원만 짧게 발언한다. 각 발언은 '**이름 직급:** 내용' 형식으로 쓴다.")
-        appendLine("- 고객이 특정 직원을 지정하면 그 직원만 답한다. 지정이 없으면 회장이 일을 나누고 마지막에 결론을 정리한다.")
-        appendLine("- 같은 일을 두 직원이 겹쳐 맡지 않는다. 누가 무엇을 맡았는지 한 줄로 밝힌다.")
-        append("- 직원끼리는 가족 호칭을 쓴다: 엄마·아빠는 서로 '여보', 아이들은 '엄마'·'아빠', 서율은 규민을 '형', 부모는 '규민아'·'서율아'. 고객에게는 직급 호칭을 쓴다.")
+        appendLine("이 방의 직원 발언은 앱이 각 직원의 실제 실행을 확인한 뒤 게시한다.")
+        append("현재 응답은 집합의 단일 응답으로 작성한다. 직원 이름으로 발언을 대신 쓰거나 확인되지 않은 배정·검토·합의를 보고하지 않는다.")
     }
 }

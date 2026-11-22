@@ -39,19 +39,22 @@ class OfficePersonasTest {
         }
     }
 
-    @Test fun officeRoomDefinesSpeakerFormatAndFamilyAddress() {
-        val text=checkNotNull(OfficePersonas.instruction(ZipHapRoom.OFFICE.threadId,null,today))
-        assertTrue(text.contains("**이름 직급:**"))
-        assertTrue(text.contains("여보"))
-        assertTrue(text.contains("규민아"))
+    @Test fun officeRoomWithNoStaffRunDoesNotSimulateEmployeeReplies() {
+        val profile=OfficePrivateProfile(mapOf("CHAIR" to OfficePrivateProfile.Entry("2000-01-01","합성 학년")))
+        val text=checkNotNull(OfficePersonas.instruction(ZipHapRoom.OFFICE.threadId,profile,today))
+        assertTrue(text.contains("각 직원의 실제 실행을 확인한 뒤 게시"))
+        assertTrue(text.contains("직원 이름으로 발언을 대신 쓰거나"))
+        assertFalse(text.contains("**이름 직급:**"))
+        assertFalse(text.contains("합성 학년"))
+        assertFalse(text.contains("2000년"))
         assertTrue(text.contains("권한, 안전 규칙"))
     }
 
     @Test fun birthDatesAppearOnlyWithAnOwnerProfileAndAgeIsComputed() {
-        val without=checkNotNull(OfficePersonas.instruction(ZipHapRoom.OFFICE.threadId,null,today))
+        val without=checkNotNull(OfficePersonas.instruction(ZipHapRoom.MAIN.threadId,null,today))
         assertFalse(without.contains("생("))
         val profile=OfficePrivateProfile(mapOf(OfficeSeat.CHAIR.name to OfficePrivateProfile.Entry("2000-01-01","초3")))
-        val with=checkNotNull(OfficePersonas.instruction(ZipHapRoom.OFFICE.threadId,profile,today))
+        val with=checkNotNull(OfficePersonas.instruction(ZipHapRoom.MAIN.threadId,profile,today))
         assertTrue(with.contains("2000년 1월 1일생(만 26세)"))
         assertTrue(with.contains("초3"))
         // one day before the birthday still counts as the previous age
