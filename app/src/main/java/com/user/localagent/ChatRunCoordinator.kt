@@ -2787,6 +2787,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용 대기")
         requestTools?.validateGoalEditRead(call)
+        // A sub-agent's inner call nests inside the parent run_subagent call: restore, never clear, the parent's in-flight state.
+        val parentInFlight=toolInFlight
         toolInFlight=true
         return try {val target=resolveRecipient(call);performTool(target.first,target.second).also {if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}
         catch(cancel:CancellationException){throw cancel}
@@ -2798,7 +2800,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))
             persistStepEvidence();failure
         }finally{
-            toolInFlight=false
+            toolInFlight=parentInFlight
             if(pendingGoalStopRunId==request.runId){pendingGoalStopRunId=null;currentCoroutineContext()[Job]?.cancel(CancellationException("목표 상태 영수증을 저장한 뒤 현재 실행을 중지했습니다."))}
         }
     }
@@ -2877,12 +2879,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val tools=com.user.localagent.core.LocalSubagentToolCatalog.innerTools(call.arguments["tools"]?.jsonPrimitive?.content,available)
         check(tools.isNotEmpty()){"하위 에이전트에 줄 수 있는 읽기 도구가 없습니다."}
         val task=call.arguments.getValue("task").jsonPrimitive.content
+        // Reserve the parent receipt slot first, then share the real remaining run/goal budget with the inner calls.
+        val innerBudget=com.user.localagent.core.LocalSubagentToolCatalog.innerBudget(requestSteps.size,com.user.localagent.core.WorkSegments.STEP_BUDGET,
+            request.goalSegment?.let{GoalSegmentBinding.MAX_TOOL_CALLS-it.consumedToolCalls-requestSteps.size})
+        check(innerBudget>=1){"남은 실행 단계가 부족해 하위 에이전트를 시작하지 않았습니다."}
         traceAttempt?.let{workTraceSession?.start(it)}
         val previousStatus=status.value
         localSubagentActive=true
-        val outcome=try {
-            status.value="하위 에이전트 작업 중"
-            com.user.localagent.core.LocalSubagentLoop(
+        val loop=com.user.localagent.core.LocalSubagentLoop(
                 generate={system,user,schema->
                     val text=StringBuilder()
                     val events=if(engine.supportsStructuredOutput)engine.generateStructuredEvents(user,system,schema) else engine.generateChatEvents(user,system)
@@ -2894,22 +2898,36 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     check(complete){"하위 답변이 끝까지 생성되지 않았습니다."}
                     text.toString()
                 },
-                // runTool clears toolInFlight in its finally; the outer sub-agent call is still in flight.
-                execute={inner->try{runTool(inner)}finally{toolInFlight=true}},
-            ).run(task,tools,call.id.take(80))
+                // runTool restores the parent's in-flight state, so one parent call stays in flight throughout.
+                execute={inner->runTool(inner)},
+            )
+        val timeout=ToolRegistry.definitions.getValue(call.name).timeoutMillis
+        suspend fun commit(observed:ToolResult)=withContext(NonCancellable){
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
+            requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed)) // Slot reserved above.
+            val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
+            recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
+            persistStepEvidence()
+        }
+        val outcome=try {
+            status.value="하위 에이전트 작업 중"
+            // The parent deadline covers generation and inner reads; only this run's own generation is cancelled.
+            withTimeoutOrNull(timeout){loop.run(task,tools,call.id.take(80),innerBudget)}
+                ?:com.user.localagent.core.LocalSubagentOutcome(false,"","하위 에이전트 시간 초과(${timeout/60_000}분).",loop.observed)
+        } catch(cancel:CancellationException) {
+            // Owner stop / steer / goal stop: keep reads verified before the stop, then propagate the cancellation.
+            commit(com.user.localagent.core.LocalSubagentLoop.toolResult(call.id,
+                com.user.localagent.core.LocalSubagentOutcome(false,"","하위 에이전트가 중지되었습니다.",loop.observed)))
+            throw cancel
+        } catch(error:Exception) {
+            // Incomplete/oversized generation: the attempt ends, but reads verified before it stay as evidence.
+            com.user.localagent.core.LocalSubagentOutcome(false,"","하위 에이전트 생성 실패: ${error.message?:"원인 미상"}".take(300),loop.observed)
         } finally {
             localSubagentActive=false
             status.value=previousStatus
         }
         val observed=com.user.localagent.core.LocalSubagentLoop.toolResult(call.id,outcome)
-        withContext(NonCancellable){
-            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
-            if(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET)
-                requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
-            val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
-            recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
-            persistStepEvidence()
-        }
+        commit(observed)
         return observed
     }
 

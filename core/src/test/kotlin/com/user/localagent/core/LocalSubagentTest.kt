@@ -76,8 +76,9 @@ class LocalSubagentTest {
     }
 
     @Test fun toolCallLimitStopsAfterSixExecutions()=runTest {
-        val f=Fixture(List(7){toolCall}){verified(it)}
-        val outcome=f.loop.run("작업",tools,"p")
+        // Distinct arguments per call: identical verified repeats are now blocked before they count.
+        val f=Fixture(List(7){"""{"action":"tool","tool":"search_contacts","arguments":{"query":"q$it"}}"""}){verified(it)}
+        val outcome=f.loop.run("작업",setOf("search_contacts"),"p")
         assertFalse(outcome.completed)
         assertEquals(6,f.executed.size)
         assertTrue(outcome.reason,outcome.reason.contains("한도"))
@@ -167,5 +168,184 @@ class LocalSubagentTest {
         assertTrue(ToolReadPolicy.isReadOnly("run_subagent"))
         AgentWorkMode.values().forEach{assertTrue(it.name,AgentWorkModePolicy.allows(it,"run_subagent"))}
         assertTrue("run_subagent" in ToolRegistry.definitions)
+    }
+
+    // ---- budget / repeat guard / classification / resolution / observed ----
+    private val twoTools=setOf("search_contacts","search_memories")
+    private fun callJson(tool:String,args:String)="""{"action":"tool","tool":"$tool","arguments":$args}"""
+    private val a1=callJson("search_contacts","""{"query":"alpha","limit":2}""")
+    private val a2=callJson("search_contacts","""{"limit":2,"query":"alpha"}""")
+    private val b1=callJson("search_memories","""{"query":"beta"}""")
+    private fun obj(vararg pairs:Pair<String,String>)=JsonObject(pairs.associate{it.first to JsonPrimitive(it.second)})
+    private fun step(tool:String,state:VerificationState,args:JsonObject)=LocalSubagentStep(tool,state,"s",args)
+
+    @Test fun innerBudgetReservesParentReceiptSlot() {
+        assertEquals(6,LocalSubagentToolCatalog.innerBudget(0,18,null))
+        assertEquals(1,LocalSubagentToolCatalog.innerBudget(16,18,null))
+        assertEquals(0,LocalSubagentToolCatalog.innerBudget(17,18,null))
+        assertEquals(1,LocalSubagentToolCatalog.innerBudget(0,18,2))
+        assertEquals(0,LocalSubagentToolCatalog.innerBudget(0,18,1))
+    }
+
+    @Test fun maxToolCallsLimitsExecutionsAndShowsRemaining()=runTest {
+        val f=Fixture(listOf(a1,b1,final("x"))){verified(it)}
+        val outcome=f.loop.run("작업",twoTools,"p",maxToolCalls=1)
+        assertFalse(outcome.completed)
+        assertEquals(1,f.executed.size)
+        assertTrue(outcome.reason,outcome.reason.contains("1회"))
+        assertTrue(f.prompts[0].contains("남은 도구 호출: 1회"))
+        assertTrue(f.prompts[1].contains("남은 도구 호출: 0회"))
+    }
+
+    @Test fun invalidMaxToolCallsRejected() {
+        for(n in listOf(0,7)) {
+            val f=Fixture(listOf(final("x"))){verified(it)}
+            assertThrows(IllegalArgumentException::class.java){kotlinx.coroutines.runBlocking{f.loop.run("작업",twoTools,"p",maxToolCalls=n)}}
+        }
+    }
+
+    @Test fun reorderedArgumentRepeatIsBlockedWithEarlierObservation()=runTest {
+        val f=Fixture(listOf(a1,a2,final("끝"))){verified(it,"obs-alpha-text")}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        assertTrue(outcome.completed)
+        assertEquals(1,f.executed.size)
+        assertEquals(1,outcome.steps.size)
+        assertTrue(f.prompts[2].contains("반복 차단"))
+        assertTrue(f.prompts[2].contains("obs-alpha-text"))
+    }
+
+    @Test fun aThenBThenAIsBlockedOnThird()=runTest {
+        val f=Fixture(listOf(a1,b1,a2,final("끝"))){verified(it,"obs-${it.name}")}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        assertTrue(outcome.completed)
+        assertEquals(listOf("search_contacts","search_memories"),f.executed.map{it.name})
+        assertTrue(f.prompts[3].contains("반복 차단"))
+        assertTrue(f.prompts[3].contains("obs-search_contacts"))
+    }
+
+    @Test fun twoBlockedRepeatsEndIncomplete()=runTest {
+        val f=Fixture(listOf(a1,a2,a1,final("x"))){verified(it)}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        assertFalse(outcome.completed)
+        assertEquals(1,f.executed.size)
+        assertTrue(outcome.reason,outcome.reason.contains("반복"))
+    }
+
+    @Test fun sameToolDifferentArgsExecutes()=runTest {
+        val other=callJson("search_contacts","""{"query":"gamma","limit":2}""")
+        val f=Fixture(listOf(a1,other,final("끝"))){verified(it)}
+        assertTrue(f.loop.run("작업",twoTools,"p").completed)
+        assertEquals(2,f.executed.size)
+    }
+
+    @Test fun repeatOfFailedCallIsExecutedAgain()=runTest {
+        var n=0
+        val f=Fixture(listOf(a1,a2,final("끝"))){call->
+            n++
+            if(n==1)ToolResult(call.id,false,"fail",VerificationState.FAILED,"실패")else verified(call)
+        }
+        val outcome=f.loop.run("작업",twoTools,"p")
+        assertTrue(outcome.completed)
+        assertEquals(2,f.executed.size)
+        assertTrue(LocalSubagentLoop.unresolved(outcome.steps).isEmpty())
+    }
+
+    @Test fun invalidArgumentsAreRefusedBeforeExecution()=runTest {
+        val missing=callJson("search_contacts","{}")
+        val f=Fixture(listOf(missing,final("끝"))){verified(it)}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        assertTrue(f.executed.isEmpty())
+        val st=outcome.steps.single()
+        assertEquals(false,st.started)
+        assertTrue(st.effectNotApplied)
+        assertEquals(VerificationState.FAILED,st.state)
+        assertTrue(st.summary,st.summary.startsWith("실행 전 검증 거부"))
+    }
+
+    @Test fun escapedExceptionHasUnknownStart()=runTest {
+        val f=Fixture(listOf(a1,final("끝"))){throw IllegalStateException("synthetic")}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        val st=outcome.steps.single()
+        assertEquals(null,st.started)
+        assertFalse(st.effectNotApplied)
+        assertEquals("실행 중 예외 · 시작 여부 미확인",st.summary)
+        val evidence=Json.parseToJsonElement(LocalSubagentLoop.toolResult("c",outcome).content).jsonObject.getValue("evidence").jsonArray[0].jsonObject
+        assertEquals("unknown",evidence.getValue("started").jsonPrimitive.content)
+        assertFalse("effectNotApplied" in evidence)
+    }
+
+    @Test fun structuredHostFailureIsPreserved()=runTest {
+        val f=Fixture(listOf(a1,final("끝"))){ToolResult(it.id,false,"host-fail",VerificationState.FAILED,"구조 실패",effectNotApplied=false)}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        val st=outcome.steps.single()
+        assertEquals(true,st.started)
+        assertFalse(st.effectNotApplied)
+        assertEquals("구조 실패",st.summary)
+        val evidence=Json.parseToJsonElement(LocalSubagentLoop.toolResult("c",outcome).content).jsonObject.getValue("evidence").jsonArray[0].jsonObject
+        assertEquals("true",evidence.getValue("started").jsonPrimitive.content)
+    }
+
+    @Test fun evidenceCarriesStartedFalseAndEffectNotApplied()=runTest {
+        val f=Fixture(listOf(callJson("search_contacts","{}"),final("끝"))){verified(it)}
+        val outcome=f.loop.run("작업",twoTools,"p")
+        val evidence=Json.parseToJsonElement(LocalSubagentLoop.toolResult("c",outcome).content).jsonObject.getValue("evidence").jsonArray[0].jsonObject
+        assertEquals("false",evidence.getValue("started").jsonPrimitive.content)
+        assertEquals("true",evidence.getValue("effectNotApplied").jsonPrimitive.content)
+    }
+
+    @Test fun failedThenVerifiedSameCallIsResolved() {
+        val steps=listOf(step("t",VerificationState.FAILED,obj("a" to "1","b" to "2")),step("t",VerificationState.VERIFIED,obj("b" to "2","a" to "1")))
+        assertTrue(LocalSubagentLoop.unresolved(steps).isEmpty())
+        val r=LocalSubagentLoop.toolResult("c",LocalSubagentOutcome(true,"답","",steps))
+        assertEquals(VerificationState.VERIFIED,r.verification)
+        assertEquals("completed",Json.parseToJsonElement(r.content).jsonObject.getValue("status").jsonPrimitive.content)
+    }
+
+    @Test fun failedThenVerifiedDifferentTargetStaysPartial() {
+        val steps=listOf(step("t",VerificationState.FAILED,obj("a" to "1")),step("t",VerificationState.VERIFIED,obj("a" to "2")))
+        assertEquals(listOf(0),LocalSubagentLoop.unresolved(steps))
+        val r=LocalSubagentLoop.toolResult("c",LocalSubagentOutcome(true,"답","",steps))
+        assertEquals(VerificationState.UNVERIFIED,r.verification)
+        assertEquals("partial",Json.parseToJsonElement(r.content).jsonObject.getValue("status").jsonPrimitive.content)
+    }
+
+    @Test fun verifiedThenLaterFailedStaysUnresolved() {
+        val steps=listOf(step("t",VerificationState.VERIFIED,obj("a" to "1")),step("t",VerificationState.FAILED,obj("a" to "1")))
+        assertEquals(listOf(1),LocalSubagentLoop.unresolved(steps))
+        val r=LocalSubagentLoop.toolResult("c",LocalSubagentOutcome(true,"답","",steps))
+        assertEquals(VerificationState.UNVERIFIED,r.verification)
+    }
+
+    @Test fun observedSurvivesInterruption()=runTest {
+        var n=0
+        val f=Fixture(listOf(a1,b1,final("x"))){call->
+            n++
+            if(n==2)throw CancellationException("synthetic cancel")
+            verified(call)
+        }
+        assertThrows(CancellationException::class.java){kotlinx.coroutines.runBlocking{f.loop.run("작업",twoTools,"p")}}
+        assertEquals(1,f.loop.observed.size)
+        assertEquals(VerificationState.VERIFIED,f.loop.observed[0].state)
+        val r=LocalSubagentLoop.toolResult("c",LocalSubagentOutcome(false,"","취소됨",f.loop.observed))
+        assertEquals(VerificationState.FAILED,r.verification)
+        assertTrue(r.verificationSummary,r.verificationSummary.contains("보존"))
+        assertEquals("partial",Json.parseToJsonElement(r.content).jsonObject.getValue("status").jsonPrimitive.content)
+    }
+
+    @Test fun loopCannotRunTwice()=runTest {
+        val f=Fixture(listOf(final("a"),final("b"))){verified(it)}
+        f.loop.run("작업",twoTools,"p")
+        assertThrows(IllegalStateException::class.java){kotlinx.coroutines.runBlocking{f.loop.run("작업",twoTools,"p")}}
+    }
+
+    @Test fun formatErrorsAndUnlistedToolsNeverExecute()=runTest {
+        val badArgs="""{"action":"tool","tool":"search_contacts","arguments":"x"}"""
+        val unlisted=callJson("list_reminders","{}")
+        for(script in listOf(listOf("garbage",badArgs),listOf(unlisted,unlisted),listOf(badArgs,unlisted))) {
+            val f=Fixture(script){verified(it)}
+            val outcome=f.loop.run("작업",twoTools,"p")
+            assertFalse(outcome.completed)
+            assertEquals(0,f.executed.size)
+        }
     }
 }
