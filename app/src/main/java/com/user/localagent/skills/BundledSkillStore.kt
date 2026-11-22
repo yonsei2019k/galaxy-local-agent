@@ -40,7 +40,7 @@ class BundledSkillStore internal constructor(private val reader:(String)->ByteAr
     /** Discover metadata on demand; do not inject the whole catalog into each model round. */
     fun discoveryForPrompt(availableTools:Set<String>):String=when {
         "list_skills" in availableTools&&"read_skill" in availableTools->
-            "Bundled guidance: list_skills discovers available workflows; read_skill(id) reads only the instructions needed for this task. Guidance adds no permissions."
+            "Bundled guidance: list_skills shows workflows with tools available in this round; read_skill(id) reads only the instructions needed for this task. Guidance adds no permissions."
         "list_skills" in availableTools->
             "Bundled guidance metadata is available through list_skills. Listing metadata adds no permissions."
         "read_skill" in availableTools->
@@ -48,12 +48,20 @@ class BundledSkillStore internal constructor(private val reader:(String)->ByteAr
         else->""
     }
 
+    /** A related tool is a usable part of a workflow, even when other parts are unavailable. */
+    fun applicableSkillIds(availableTools:Set<String>):List<String> =
+        entries.filter {it.appliesTo(availableTools)}.map {it.id}
+
+    private fun BundledSkillMetadata.appliesTo(availableTools:Set<String>):Boolean =
+        tools.isEmpty()||tools.any {it in availableTools}
+
     /**
      * IDs only (no descriptions or bodies) so the model can pick a fitting skill without a
      * list_skills round. Empty when read_skill is not offered; a skill still grants no permissions.
      */
     fun idIndexForPrompt(availableTools:Set<String>):String =
-        if("read_skill" !in availableTools)"" else "Skill ids for read_skill: "+entries.joinToString(","){it.id}
+        if("read_skill" !in availableTools)"" else applicableSkillIds(availableTools).joinToString(",")
+            .takeIf {it.isNotEmpty()}?.let {"Skill ids for read_skill: $it"}.orEmpty()
 
     /** Entire metadata descriptions or an explicit size error; never silently clips a skill. */
     fun summaryForPrompt(maxChars:Int=4000):String {
@@ -67,19 +75,22 @@ class BundledSkillStore internal constructor(private val reader:(String)->ByteAr
     }
 
     /** Query filters metadata for browsing; it is not an intent router or an execution policy. */
-    fun listJson(query:String?=null):String {
+    fun listJson(query:String?=null,availableTools:Set<String>?=null):String {
         require(query==null||query.length<=200){"스킬 검색어가 너무 깁니다."}
         val term=query?.trim()?.lowercase(Locale.ROOT).orEmpty()
-        val selected=if(term.isBlank())entries else entries.filter {entry->
+        val applicable=if(availableTools==null)entries else entries.filter {it.appliesTo(availableTools)}
+        val selected=if(term.isBlank())applicable else applicable.filter {entry->
             listOf(entry.id,entry.title,entry.description,entry.category).any {term in it.lowercase(Locale.ROOT)}
         }
         return buildJsonObject {
             put("origin","signed_apk_bundle");put("grantsCapabilities",false);put("bodiesLoaded",false)
-            put("totalCount",entries.size);put("matchedCount",selected.size)
+            put("totalCount",applicable.size);put("matchedCount",selected.size)
             put("skills",buildJsonArray {selected.forEach {entry->add(buildJsonObject {
                 put("id",entry.id);put("title",entry.title);put("description",entry.description)
                 put("category",entry.category);put("version",entry.version)
-                put("tools",JsonArray(entry.tools.map(::JsonPrimitive)))
+                val visibleTools=if(availableTools==null)entry.tools else entry.tools.filter {it in availableTools}
+                put("tools",JsonArray(visibleTools.map(::JsonPrimitive)))
+                if(availableTools!=null)put("partiallyAvailable",visibleTools.size<entry.tools.size)
             })}})
         }.toString()
     }

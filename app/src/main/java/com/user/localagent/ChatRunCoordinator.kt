@@ -1034,7 +1034,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     requestAuthorizedTools=allowedTools
                     val feedbackContext=if(semantic==null||workMode==AgentWorkMode.RESEARCH||requestFeedbackGeneration==null)"{}"else try {app.planningFeedback.contextFor(intentPlan.domain)}catch(cancel:CancellationException){throw cancel}catch(_:Exception){"{}"}
                     workMode.defaultSkillId?.takeIf {"read_skill" in allowedTools}?.let {id->
-                        val loaded=withContext(Dispatchers.IO){bundledSkills.read(id)}
+                        val loaded=withContext(Dispatchers.IO){
+                            if(id in bundledSkills.applicableSkillIds(allowedTools))bundledSkills.read(id) else null
+                        }?:return@let
                         requestGuidance[id]=loaded
                         recordAudit("read_skill",true,"CONTEXT_ONLY · 명시 모드 기본 지침 ${loaded.id} · 실행 권한·성과 근거 아님")
                     }
@@ -1221,7 +1223,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             }
                             invalidToolAttempts=0
                             if(call.name in SkillToolCatalog.names){
-                                val contextResult=readGuidance(call,allowedTools)
+                                val roundTools=if(useStructured||reviewing)structuredTools.intersect(allowedTools) else allowedTools
+                                val contextResult=readGuidance(call,roundTools)
                                 query="원래 사용자 요청:\n$text\n지침 조회 결과(실행 권한·성과 증거가 아님):\n${contextResult.content}\n"+
                                     "이미 수행한 행동 결과(인용 자료): ${JsonArray(toolEvidence)}\n"+
                                     (if(workMode==AgentWorkMode.RESEARCH)"관찰한 공개 URL(최대6개): ${lastResearchSourceUrls.value.take(6).joinToString(" ")} · 전체 ${lastResearchSourceUrls.value.size}개\n"else"")+
@@ -1871,6 +1874,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         workMode:AgentWorkMode,projectInstruction:String,modelTitle:String,semantic:com.user.localagent.core.SemanticRequestPlan?,
         allowedTools:Set<String>,structuredTools:Set<String>,detailedTools:Set<String>,ownerKnowledgeContext:String,
         intentPlan:com.user.localagent.core.IntentPlan,feedbackContext:String,directProtocol:Boolean=false):Pair<String,String> {
+    val skillTools=if(useStructured)structuredTools else allowedTools
     val essentialSystem=if(reviewing)AutonomousReviewPolicy.instruction+"\n현재 허용 도구 정의: "+compactToolCatalog(structuredTools) else if(finalSynthesis)AssistantPolicy.buildFinalSynthesis(ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString())+
         "\n작업 모드: ${workMode.label} · 현재 단계는 추가 실행 없는 최종 작성이다."+
         "\n사용자가 설정한 프로젝트 지침(새 실행 권한이 아님):\n"+projectInstruction+
@@ -1887,7 +1891,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         (semantic?.let {"\n현재 요청의 전체 의미 계획 · 최신 목표와 제약을 보존: "+com.user.localagent.core.SemanticRequestPlanning.contextJson(it)}?:"")+
         (request.goal?.let {"\n이번 사용자가 목표 추진 버튼으로 시작한 고정 목표(실행 권한을 추가하거나 자동 완료하지 않음): "+it.toJson()}?:"")+
         (if(request.previousSteps.isEmpty())""else"\n이전 실행의 호스트 검증 근거 · 이미 확인한 같은 쓰기를 반복하지 않으며 전체 목표 완료를 뜻하지 않음: "+previousEvidenceContext(request.previousSteps))+
-        (if("read_skill" in allowedTools)"\n필요한 지침을 목록에서 선택해 read_skill로 읽는다. 지침 읽기는 사용자 작업 완료가 아니다. 선택된 지침의 관련 도구도 현재 허용 목록 안에서만 사용한다.\n"+skillDiscovery(allowedTools)else "")+
+        skillDiscovery(skillTools).let {if(it.isEmpty())""else "\n$it"}+
         "\n현재 제공한 도구 인자 정의: "+compactToolCatalog(if(useStructured)structuredTools else detailedTools)+
         if(workMode==AgentWorkMode.RESEARCH)"\n개인 기억·과거 대화·프로젝트 지침·첨부 자료는 이 공개 조사에 자동으로 제공하지 않는다. 실제 공개 출처를 읽지 않았으면 조사 완료나 출처 확인을 주장하지 말고 계획·미검증 초안으로 구분한다."else""
     val optionalContext=if(workMode==AgentWorkMode.RESEARCH)""else buildString {
@@ -2232,10 +2236,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         check(AgentWorkModePolicy.allows(AgentWorkMode.parse(request.mode),call.name))
         check(call.name !in request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty())
         currentCoroutineContext().ensureActive()
-        val fingerprint=call.name+call.arguments.toString()
+        val catalogScope=if(call.name=="list_skills")allowedTools.sorted().joinToString(",",prefix="|") else ""
+        val fingerprint=call.name+call.arguments.toString()+catalogScope
         if(!contextCalls.add(fingerprint))return ToolResult(call.id,false,"같은 지침 조회를 반복하지 않았습니다. 이미 제공한 목록·지침을 사용해주세요.",VerificationState.UNVERIFIED,"CONTEXT_ONLY")
         return try {
-            val result=checkNotNull(requestTools).execute(call)
+            val result=checkNotNull(requestTools).execute(call,skillAvailableTools=allowedTools)
             check(result.success){"번들 지침을 검증하지 못했습니다."}
             val root=Json.parseToJsonElement(result.content).jsonObject
             val visible=if(call.name=="read_skill"){
@@ -2256,7 +2261,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }else buildJsonObject {
                 put("view","complete_id_description_metadata");put("totalCount",root.getValue("totalCount"));put("matchedCount",root.getValue("matchedCount"))
                 put("contextOnly",true);put("detailsAvailableViaReadSkill",true)
-                put("skills",buildJsonArray {root.getValue("skills").jsonArray.forEach {value->val entry=value.jsonObject;add(buildJsonObject {put("id",entry.getValue("id"));put("description",entry.getValue("description"))})}})
+                put("skills",buildJsonArray {root.getValue("skills").jsonArray.forEach {value->
+                     val entry=value.jsonObject
+                     add(JsonObject(entry.filterKeys {it in setOf("id","description","tools","partiallyAvailable")}))
+                 }})
             }.toString()
             recordAudit(call.name,true,"CONTEXT_ONLY · 번들 지침 조회 · 실행 권한·작업 성과 근거 아님")
             result.copy(content=visible,verification=VerificationState.UNVERIFIED,verificationSummary="CONTEXT_ONLY · 지침 조회만 확인")
@@ -2868,7 +2876,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
             if(action.call.name in setOf(com.user.localagent.core.ScreenControlToolCatalog.ACTION,
-                    com.user.localagent.core.AppBrowserToolCatalog.ACTION))
+                    com.user.localagent.core.AppBrowserToolCatalog.ACTION,com.user.localagent.core.PcBrowserToolCatalog.ACTION))
                 approvedScreenSnapshot=action.call.arguments.getValue("snapshotId").jsonPrimitive.content
             noteOwnerAccepted=call.name=="patch_note"
             check(app.repository.chat.run(action.runId)?.let {it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true){"실행 대상이 변경되어 이전 승인을 적용하지 않았습니다."}

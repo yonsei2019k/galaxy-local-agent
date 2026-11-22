@@ -72,6 +72,13 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
+        val pcAction=catalog==PcBrowserToolCatalog&&call.name==catalog.action
+        val observed=last
+        val ref=call.arguments["ref"]?.jsonPrimitive?.contentOrNull
+        val approvedPcTarget=pcAction&&approvedSnapshot!=null&&observed!=null&&observed.first==approvedSnapshot&&
+            call.arguments["snapshotId"]?.jsonPrimitive?.contentOrNull==approvedSnapshot&&ref!=null&&ref in observed.third
+        if(pcAction&&(review(call).first||approvedSnapshot!=null)&&!approvedPcTarget)
+            return refused(call,"APPROVAL_MISMATCH")
         val (operation,body)=when(call.name){
             catalog.open->"open" to buildJsonObject{put("url",call.arguments.getValue("url"))}
             catalog.read->"read" to buildJsonObject{}
@@ -79,19 +86,19 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 val arguments=if(catalog==AppBrowserToolCatalog){
                     val modelArguments=call.arguments-APP_APPROVED_SNAPSHOT
                     if(approvedSnapshot==null)modelArguments else modelArguments+(APP_APPROVED_SNAPSHOT to JsonPrimitive(approvedSnapshot))
-                }else call.arguments
+                }else call.arguments-"approvalId"
                 "act" to JsonObject(arguments)
             }
         }
         var result=backend(operation,body)
-        // The owner already approved this exact control against the same snapshot; confirm it to the browser once.
         if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required"&&call.name==catalog.action){
-            if(catalog==AppBrowserToolCatalog)result=buildJsonObject{put("error","APPROVAL_MISMATCH")}
-            else{
-                val approval=result.getValue("approvalId").jsonPrimitive.content
-                require(Regex("[0-9a-f]{32}").matches(approval))
-                result=backend(operation,JsonObject(call.arguments+("approvalId" to JsonPrimitive(approval))))
-            }
+            // A worker challenge is not owner consent. Echo only its token for a host-approved target.
+            if(!approvedPcTarget)return refused(call,"APPROVAL_MISMATCH")
+            val token=result["approvalId"] as? JsonPrimitive
+            if(token==null||!token.isString||!Regex("[0-9a-f]{32}").matches(token.content))
+                return refused(call,"APPROVAL_MISMATCH")
+            result=backend(operation,JsonObject(body+("approvalId" to token)))
+            if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required")return refused(call,"APPROVAL_MISMATCH")
         }
         val error=result["error"]?.jsonPrimitive?.contentOrNull
         if(error!=null){
@@ -101,12 +108,15 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                     VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
             }
             if(error=="SNAPSHOT_STALE")last=null
-            return ToolResult(call.id,false,buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
+            return refused(call,error)
         }
         remember(result)
         return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,
             if(result["performed"]==null)"$where 페이지를 실제로 읽음" else "$where 동작 후 페이지를 다시 읽음 · 사이트의 최종 처리는 미보증")
     }
+
+    private fun refused(call:ToolCall,error:String)=ToolResult(call.id,false,
+        buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
 
     private fun hint(code:String)=when(code){
         "SNAPSHOT_STALE"->"페이지가 바뀌었습니다. ${catalog.read}로 다시 읽은 뒤 새 snapshotId와 ref를 사용하세요."

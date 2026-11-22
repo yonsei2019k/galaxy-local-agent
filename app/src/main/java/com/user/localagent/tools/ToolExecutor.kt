@@ -153,10 +153,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             else->null
         }
     }
-    suspend fun execute(call:ToolCall,approvedScreenSnapshot:String?=null):ToolResult=
-        if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call,null)}
-        else executeUnlocked(call,approvedScreenSnapshot)
-    private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?):ToolResult = withContext(Dispatchers.IO) {
+    suspend fun execute(call:ToolCall,approvedScreenSnapshot:String?=null,skillAvailableTools:Set<String> = capturedAvailableTools):ToolResult=
+        if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call,null,skillAvailableTools)}
+        else executeUnlocked(call,approvedScreenSnapshot,skillAvailableTools)
+    private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?,skillAvailableTools:Set<String>):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
             if(call.name in NoteReadPatchToolCatalog.names){
@@ -169,9 +169,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             }
             browserFor(call.name)?.let{browser->
                 check(connectionRunId==null||connectionIsRunLive()){"브라우저 요청이 중단됐습니다."}
-                return@withContext browser.execute(call,approvedScreenSnapshot.takeIf{
-                    call.name==com.user.localagent.core.AppBrowserToolCatalog.ACTION
-                })
+                return@withContext browser.execute(call,approvedScreenSnapshot)
             }
             if(call.name in KakaoScreenToolCatalog.names){
                 check(connectionRunId!=null&&connectionIsRunLive()){"카카오톡 조회의 원래 실행이 끝났습니다."}
@@ -186,7 +184,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             if(call.name in OfficeToolCatalog.names)return@withContext ToolResult(call.id,true,OfficeToolEngine.execute(call),VerificationState.VERIFIED,"기기 내 계산 완료 · 입력한 조건에 한정")
             if(call.name in SkillToolCatalog.names){
                 val content=when(call.name){
-                    "list_skills"->bundledSkills.listJson(call.arguments["query"]?.jsonPrimitive?.content)
+                    "list_skills"->bundledSkills.listJson(call.arguments["query"]?.jsonPrimitive?.content,skillAvailableTools)
                     "read_skill"->{val read=bundledSkills.read(call.s("id"));buildJsonObject {
                         put("id",read.id);put("body",read.body);put("sha256",read.sha256)
                         put("origin","signed_apk_bundle");put("grantsCapabilities",false);put("contextOnly",true)

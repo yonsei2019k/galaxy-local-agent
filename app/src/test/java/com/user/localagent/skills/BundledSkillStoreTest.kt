@@ -62,6 +62,35 @@ class BundledSkillStoreTest {
         assertEquals(2,Json.parseToJsonElement(f.store.listJson("  ")).jsonObject.getValue("matchedCount").jsonPrimitive.int)
         assertEquals(listOf(BundledSkillStore.CATALOG_ASSET),f.reads)
     }
+    @Test fun automaticDiscoveryUsesEachRoundWithoutHidingDirectReads(){
+        val flow=entry("flow")
+        val email=changed(entry("email"),"tools",JsonArray(listOf(JsonPrimitive("prepare_email"))))
+        val general=changed(entry("general"),"tools",JsonArray(emptyList()))
+        val store=fixture(listOf(flow,email,general)).store
+        assertEquals("Skill ids for read_skill: flow,general",store.idIndexForPrompt(setOf("read_skill","get_current_datetime")))
+        assertEquals("Skill ids for read_skill: email,general",store.idIndexForPrompt(setOf("read_skill","prepare_email")))
+        assertEquals("",store.idIndexForPrompt(setOf("get_current_datetime")))
+        assertEquals(body,store.read("email").body)
+        assertEquals(3,store.catalog().size)
+    }
+
+    @Test fun scopedListingKeepsPartialWorkflowsAndOnlyTheirAvailableTools(){
+        val both=changed(entry("shopping"),"tools",JsonArray(listOf(JsonPrimitive("search_web"),JsonPrimitive("open_url"))))
+        val write=changed(entry("draft"),"tools",JsonArray(listOf(JsonPrimitive("prepare_email"))))
+        val f=fixture(listOf(both,write))
+        val allowed=setOf("list_skills","read_skill","search_web")
+        val result=Json.parseToJsonElement(f.store.listJson(availableTools=allowed)).jsonObject
+        val row=result.getValue("skills").jsonArray.single().jsonObject
+        assertEquals(1,result.getValue("totalCount").jsonPrimitive.int)
+        assertEquals("shopping",row.getValue("id").jsonPrimitive.content)
+        assertEquals(JsonArray(listOf(JsonPrimitive("search_web"))),row.getValue("tools"))
+        assertTrue(row.getValue("partiallyAvailable").jsonPrimitive.boolean)
+        assertEquals(0,Json.parseToJsonElement(f.store.listJson("draft",allowed)).jsonObject.getValue("matchedCount").jsonPrimitive.int)
+        assertTrue(Json.parseToJsonElement(f.store.listJson(availableTools=emptySet())).jsonObject.getValue("skills").jsonArray.isEmpty())
+        assertEquals(listOf(BundledSkillStore.CATALOG_ASSET),f.reads)
+        assertEquals(1,Json.parseToJsonElement(f.store.listJson("draft")).jsonObject.getValue("matchedCount").jsonPrimitive.int)
+    }
+
     @Test fun unknownAndTraversalIdsNeverReachTheAssetReader(){
         val f=fixture()
         listOf("unknown","../plan","skills/plan/SKILL.md","%2e%2e","","Plan","plan\\SKILL.md").forEach {id->rejected {f.store.read(id)}}

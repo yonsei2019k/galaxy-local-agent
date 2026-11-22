@@ -7,6 +7,9 @@ import com.user.localagent.core.ToolCall
 import com.user.localagent.core.VerificationState
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -51,17 +54,72 @@ class AppWebAgentDispatchTest {
     }
 
     @Test
-    fun pcBackendUsesItsExistingApprovalHandshake() = runBlocking {
-        val calls=mutableListOf<JsonObject>()
-        val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){_,body->
-            calls+=body
-            if(calls.size==1)buildJsonObject{put("status","approval_required");put("approvalId","a".repeat(32))}
-            else buildJsonObject{put("error","SNAPSHOT_STALE")}
+    fun readIsAllowedButRiskyPcActionsNeedTheCurrentReviewedSnapshot() = runBlocking {
+        val actions=mutableListOf<JsonObject>()
+        val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){operation,body->
+            if(operation=="read")snapshot(risky=true)
+            else {
+                actions+=body
+                if(actions.size==1)challenge() else snapshot(risky=true)
+            }
         }
-        tools.execute(click(PcBrowserToolCatalog.ACTION))
-        assertEquals(2,calls.size)
-        assertEquals("a".repeat(32),calls.last().getValue("approvalId").jsonPrimitive.content)
-        assertNull(calls.last()["approvedAppSnapshot"])
+        val read=ToolCall("read",PcBrowserToolCatalog.READ,JsonObject(emptyMap()))
+        assertFalse(tools.review(read).first)
+        assertTrue(tools.execute(read).success)
+        val action=click(PcBrowserToolCatalog.ACTION).let {call->
+            call.copy(arguments=JsonObject(call.arguments+("approvalId" to JsonPrimitive("model-value"))))
+        }
+        assertTrue(tools.review(action).first)
+        for(approved in listOf(null,"stale")){
+            assertTrue(tools.execute(action,approved).effectNotApplied)
+            assertTrue(actions.isEmpty())
+        }
+        assertTrue(tools.execute(action,approvedSnapshot="snapshot").success)
+        assertEquals(2,actions.size)
+        assertNull(actions.first()["approvalId"])
+        assertEquals("a".repeat(32),actions.last().getValue("approvalId").jsonPrimitive.content)
+    }
+
+    @Test
+    fun unexpectedWorkerChallengeDoesNotGrantConsentOrTriggerASecondDispatch() = runBlocking {
+        var attempts=0
+        val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){operation,_->
+            if(operation=="read")snapshot(risky=false) else {attempts++;challenge()}
+        }
+        tools.execute(ToolCall("read",PcBrowserToolCatalog.READ,JsonObject(emptyMap())))
+        val action=click(PcBrowserToolCatalog.ACTION)
+        assertFalse(tools.review(action).first)
+        val denied=tools.execute(action)
+        assertEquals(1,attempts)
+        assertFalse(denied.success)
+        assertTrue(denied.effectNotApplied)
+    }
+
+    @Test
+    fun pcTypingOutsideSearchNeedsApprovalBeforeBackendDispatch() = runBlocking {
+        var attempts=0
+        val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){operation,_->
+            if(operation!="read")attempts++
+            snapshot(risky=false,tag="input",label="Description")
+        }
+        tools.execute(ToolCall("read",PcBrowserToolCatalog.READ,JsonObject(emptyMap())))
+        val action=ToolCall("type",PcBrowserToolCatalog.ACTION,buildJsonObject {
+            put("action","type");put("snapshotId","snapshot");put("ref","e1");put("text","Synthetic text")
+        })
+        assertTrue(tools.review(action).first)
+        assertTrue(tools.execute(action).effectNotApplied)
+        assertEquals(0,attempts)
+        assertTrue(tools.execute(action,approvedSnapshot="snapshot").success)
+        assertEquals(1,attempts)
+    }
+
+    private fun challenge()=buildJsonObject {put("status","approval_required");put("approvalId","a".repeat(32))}
+
+    private fun snapshot(risky:Boolean,tag:String="button",label:String="Details")=buildJsonObject {
+        put("snapshotId","snapshot");put("url","https://fixture.example.test")
+        putJsonArray("elements"){
+            addJsonObject {put("ref","e1");put("tag",tag);put("label",label);put("needsApproval",risky)}
+        }
     }
 
     private fun click(tool:String,spoof:Boolean=false)=ToolCall("call",tool,buildJsonObject {
