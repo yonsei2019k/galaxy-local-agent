@@ -41,7 +41,8 @@ internal class ScheduledReadWork(private val context: Context, private val app: 
         when (call.name) {
             ScheduledReadToolCatalog.CREATE -> {
                 val record = app.repository.chat.scheduleRead(registrationRunId, text("title").trim(), text("prompt"),
-                    OffsetDateTime.parse(text("datetime")).toInstant().toEpochMilli(), text("readTool"))
+                    OffsetDateTime.parse(text("datetime")).toInstant().toEpochMilli(), text("readTool"),
+                    ScheduledReadToolCatalog.clockReceiptOnly(call))
                 if (record.status == ScheduledReadPolicy.SCHEDULED) {
                     arm(record.id, OffsetDateTime.parse(text("datetime")).toInstant().toEpochMilli())
                     receipt(call, record.id, record.status, "한 번의 기기 내 조회 등록을 확인했습니다. 실행 결과는 원래 대화에서 확인할 수 있습니다.")

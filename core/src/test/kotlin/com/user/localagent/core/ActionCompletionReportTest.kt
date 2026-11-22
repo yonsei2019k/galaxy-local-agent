@@ -26,6 +26,21 @@ class ActionCompletionReportTest {
         val text=ActionCompletionReport.render(setOf("save_note"),listOf(observed("save_note",VerificationState.VERIFIED,args=buildJsonObject{put("content",body);put("title","원문")})))
         assertTrue(text.endsWith(body));assertFalse(text.contains("17 번"))
     }
+    @Test fun approvedClockReportPreservesTheObservedReadingExactly() {
+        val tool = ScheduledReadPolicy.CLOCK_TOOL
+        val reading = "2026-11-22T15:03:00.123456789+09:00[Asia/Seoul]"
+        val notice = "예약한 시각 조회를 확인했습니다."
+        val outcomes = listOf(observed(tool, VerificationState.VERIFIED, body = reading))
+
+        assertTrue(ActionCompletionReport.manages(setOf(tool), outcomes))
+        assertEquals(
+            "기기에서 조회한 시각: $reading\n$notice",
+            ActionCompletionReport.render(setOf(tool), outcomes, notice),
+        )
+        val missing = ActionCompletionReport.render(setOf(tool), emptyList())
+        assertFalse(missing.contains("기기에서 조회한 시각:"))
+        assertTrue(missing.contains("전체 요청의 완료는 확인되지 않았습니다."))
+    }
     @Test fun intentReceiptCannotClaimScreenOrSendCompletion(){
         val text=ActionCompletionReport.render(setOf("prepare_sms"),listOf(observed("prepare_sms",VerificationState.PREPARED,args=buildJsonObject{put("phoneNumber","00000000002");put("message","안내")})))
         assertTrue(text.contains("실제 화면 표시·저장·발송·길 안내 시작은 확인되지 않았습니다"));assertTrue(text.contains("00000000002"));assertFalse(text.contains("발송했습니다"))

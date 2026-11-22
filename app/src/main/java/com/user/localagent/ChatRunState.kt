@@ -28,6 +28,7 @@ data class QueuedChatRequest(
     val scheduledReadTool:String?=null,
     val officeStage: OfficeStage? = null,
     val officeParentId: String? = null,
+    val scheduledClockReceiptOnly: Boolean = false,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -58,6 +59,7 @@ data class QueuedChatRequest(
                 require((officeStage == OfficeStage.SUMMARY) == (room == com.user.localagent.core.office.ZipHapRoom.MAIN))
             }
         } else require(officeParentId == null)
+        require(!scheduledClockReceiptOnly || scheduledReadTool == ScheduledReadPolicy.CLOCK_TOOL)
         require(goalLedger.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
         require(goalLedger.map {it.sourceRunId to it.stepIndex}.distinct().size==goalLedger.size)
         goalSegment?.let { segment->
@@ -84,6 +86,7 @@ data class QueuedChatRequest(
         scheduledReadTool?.let {put("scheduledReadTool",it)}
         officeStage?.let { put("officeStage", it.name) }
         officeParentId?.let { put("officeParentId", it) }
+        if (scheduledClockReceiptOnly) put("scheduledClockReceiptOnly", true)
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -120,7 +123,8 @@ data class QueuedChatRequest(
                 o["capturedPcTextDefault"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["scheduledReadTool"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["officeStage"]?.jsonPrimitive?.content?.let(OfficeStage::valueOf),
-                o["officeParentId"]?.jsonPrimitive?.content)
+                o["officeParentId"]?.jsonPrimitive?.content,
+                o["scheduledClockReceiptOnly"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean} ?: false)
         }
     }
 }
