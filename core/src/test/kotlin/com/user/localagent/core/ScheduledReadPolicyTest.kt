@@ -1,5 +1,8 @@
 package com.user.localagent.core
 
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -33,6 +36,39 @@ class ScheduledReadPolicyTest {
         assertEquals(ScheduledReadAdmission.REVOKED, plan.admission("scheduled", 101, original, setOf(plan.tool)))
         for (state in listOf("queued", "running", "completed", "interrupted", "cancelled")) {
             assertEquals(ScheduledReadAdmission.CLOSED, plan.admission(state, 101, original, emptySet()))
+        }
+    }
+
+    @Test fun approvedClockReceiptChangesIdentityAndCannotGrantOtherReads() {
+        val normalClock = plan.copy(tool = ScheduledReadPolicy.CLOCK_TOOL)
+        val approved = normalClock.copy(clockReceiptOnly = true)
+        assertNotEquals(normalClock.idFor("registration-one"), approved.idFor("registration-one"))
+        assertEquals(approved.idFor("registration-one"), approved.copy().idFor("registration-one"))
+        val json = kotlinx.serialization.json.Json
+        val legacy = json.decodeFromString<ScheduledReadRequest>(json.encodeToString(normalClock))
+        assertFalse(legacy.clockReceiptOnly)
+        assertEquals(normalClock.idFor("registration-one"), legacy.idFor("registration-one"))
+        assertEquals(ScheduledReadAdmission.REVOKED,
+            approved.admission("scheduled", 100, original, setOf(ScheduledReadPolicy.CLOCK_TOOL)))
+        assertThrows(IllegalArgumentException::class.java) { plan.copy(clockReceiptOnly = true) }
+    }
+
+    @Test fun approvalMarkerMustBeBooleanAndAppliesOnlyToTheDeviceClock() {
+        fun schedule(readTool: String, receipt: kotlinx.serialization.json.JsonPrimitive) =
+            ToolCall("registration", ScheduledReadToolCatalog.CREATE, buildJsonObject {
+                put("title", "Clock")
+                put("prompt", "Read the device clock at execution")
+                put("datetime", "2027-01-01T09:00:00+09:00")
+                put("readTool", readTool)
+                put(ScheduledReadToolCatalog.CLOCK_RECEIPT_ONLY, receipt)
+            })
+        assertTrue(ScheduledReadToolCatalog.clockReceiptOnly(
+            ToolRegistry.validate(schedule(ScheduledReadPolicy.CLOCK_TOOL, JsonPrimitive(true)))))
+        assertThrows(IllegalArgumentException::class.java) {
+            ToolRegistry.validate(schedule("list_reminders", JsonPrimitive(true)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ToolRegistry.validate(schedule(ScheduledReadPolicy.CLOCK_TOOL, JsonPrimitive("true")))
         }
     }
 

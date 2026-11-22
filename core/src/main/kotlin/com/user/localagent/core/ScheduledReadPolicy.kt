@@ -14,10 +14,17 @@ data class ScheduledReadScope(
 @Serializable
 data class ScheduledReadRequest(
     val title: String, val prompt: String, val atEpochMillis: Long, val tool: String, val scope: ScheduledReadScope,
+    val clockReceiptOnly: Boolean = false,
 ) {
+    init {
+        require(!clockReceiptOnly || tool == ScheduledReadPolicy.CLOCK_TOOL)
+    }
+
     fun idFor(registrationRunId: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        listOf(registrationRunId, scope.threadId, scope.branchId, atEpochMillis.toString(), tool, title, prompt).forEach { value ->
+        val originalFields = listOf(registrationRunId, scope.threadId, scope.branchId, atEpochMillis.toString(), tool, title, prompt)
+        val fields = if (clockReceiptOnly) originalFields + "clock-receipt-v1" else originalFields
+        fields.forEach { value ->
             val bytes = value.toByteArray(Charsets.UTF_8)
             digest.update(bytes.size.toString().toByteArray(Charsets.UTF_8))
             digest.update(0.toByte())
@@ -45,7 +52,8 @@ object ScheduledReadPolicy {
     const val SCHEDULED = "scheduled"
     const val STOP_REQUESTED = "scheduled_owner_stop"
     const val WORKER_STOPPED = "scheduled_worker_stopped"
-    val localReads = setOf("get_current_datetime", "search_notes", "read_note", "list_reminders")
+    const val CLOCK_TOOL = "get_current_datetime"
+    val localReads = setOf(CLOCK_TOOL, "search_notes", "read_note", "list_reminders")
 
     fun isId(value: String): Boolean = value.length == ID_PREFIX.length + 64 &&
         value.startsWith(ID_PREFIX) && value.drop(ID_PREFIX.length).all { it in '0'..'9' || it in 'a'..'f' }
@@ -60,17 +68,22 @@ object ScheduledReadPolicy {
 object ScheduledReadToolCatalog {
     const val CREATE = "schedule_agent_task"
     const val CANCEL = "cancel_scheduled_agent_task"
+    const val CLOCK_RECEIPT_ONLY = "clockReceiptOnly"
     val definitions = listOf(
         ToolDefinition(CREATE, Risk.MEDIUM, mapOf(
             "title" to Argument("string", true, 120, "Short label for the scheduled read."),
             "prompt" to Argument("string", true, 2000, "Complete original request to execute once at the scheduled time."),
             "datetime" to Argument("string", true, 80, "Future time as an ISO datetime with offset."),
             "readTool" to Argument("string", true, 64, "One allowed local read: get_current_datetime, search_notes, read_note, list_reminders."),
+            CLOCK_RECEIPT_ONLY to Argument("boolean", false, description = "True only if the user requested just the device date/time at execution, with no conditions, formatting, calculation, comparison or other work. The approved clock value will be delivered as-is without asking the model again."),
         ), "After owner approval, schedule a single on-device read in this conversation. Registration does not verify future execution."),
         ToolDefinition(CANCEL, Risk.MEDIUM, mapOf(
             "scheduleId" to Argument("string", true, 80, "Schedule ID from the original conversation's registration receipt."),
         ), "After owner approval, cancel a local read scheduled from this conversation. If started, request stop for its exact run."),
     )
+
+    fun clockReceiptOnly(call: ToolCall): Boolean =
+        call.arguments[CLOCK_RECEIPT_ONLY]?.jsonPrimitive?.let { !it.isString && it.content == "true" } ?: false
 
     fun validate(call: ToolCall) {
         fun text(key: String) = call.arguments.getValue(key).jsonPrimitive.content
@@ -78,7 +91,9 @@ object ScheduledReadToolCatalog {
             CREATE -> {
                 require(text("title").isNotBlank() && text("prompt").isNotBlank())
                 require(text("title").none { it.isISOControl() } && '\u0000' !in text("prompt"))
-                require(text("readTool") in ScheduledReadPolicy.localReads)
+                val tool = text("readTool")
+                require(tool in ScheduledReadPolicy.localReads)
+                require(!clockReceiptOnly(call) || tool == ScheduledReadPolicy.CLOCK_TOOL)
                 OffsetDateTime.parse(text("datetime"))
             }
             CANCEL -> require(ScheduledReadPolicy.isId(text("scheduleId")))

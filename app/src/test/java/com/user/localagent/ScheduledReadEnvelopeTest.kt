@@ -17,6 +17,15 @@ class ScheduledReadEnvelopeTest {
         assertNull(QueuedChatRequest.fromJson(request.copy(scheduledReadTool=null).toJson()).scheduledReadTool)
     }
 
+    @Test fun fastClockMarkerSurvivesPromotionPayloadAndRejectsAnotherTool() {
+        val clock = request.copy(scheduledReadTool = ScheduledReadPolicy.CLOCK_TOOL, scheduledClockReceiptOnly = true)
+        assertEquals(clock, QueuedChatRequest.fromJson(clock.toJson()))
+        assertFalse(QueuedChatRequest.fromJson(request.toJson()).scheduledClockReceiptOnly)
+        assertThrows(IllegalArgumentException::class.java) { request.copy(scheduledClockReceiptOnly = true) }
+        val malformed = clock.toJson().replace("\"scheduledClockReceiptOnly\":true", "\"scheduledClockReceiptOnly\":\"true\"")
+        assertThrows(IllegalArgumentException::class.java) { QueuedChatRequest.fromJson(malformed) }
+    }
+
     @Test fun restartPayloadCannotAcquireAnotherToolOrCloudAndDeviceGrants() {
         assertThrows(IllegalArgumentException::class.java) { request.copy(scheduledReadTool="save_note") }
         assertThrows(IllegalArgumentException::class.java) { request.copy(scheduledReadTool="read_webpage") }

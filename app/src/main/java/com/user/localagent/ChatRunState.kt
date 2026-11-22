@@ -26,6 +26,7 @@ data class QueuedChatRequest(
     val cloudReadOnlyModes:Boolean=false,
     val capturedPcTextDefault:String?=null,
     val scheduledReadTool:String?=null,
+    val scheduledClockReceiptOnly: Boolean = false,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -46,6 +47,7 @@ data class QueuedChatRequest(
                 pcDataBinding==null&&kakaoReadBinding==null&&capturedPcRevision==null&&!pcImageRecoveryAllowed&&
                 attachments.isEmpty()&&goal==null)
         }
+        require(!scheduledClockReceiptOnly || scheduledReadTool == ScheduledReadPolicy.CLOCK_TOOL)
         require(goalLedger.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
         require(goalLedger.map {it.sourceRunId to it.stepIndex}.distinct().size==goalLedger.size)
         goalSegment?.let { segment->
@@ -70,6 +72,7 @@ data class QueuedChatRequest(
         put("capturedPcRevision",capturedPcRevision);put("allowCloudText",allowCloudText)
         capturedPcTextDefault?.let {put("capturedPcTextDefault",it)}
         scheduledReadTool?.let {put("scheduledReadTool",it)}
+        if (scheduledClockReceiptOnly) put("scheduledClockReceiptOnly", true)
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -104,7 +107,8 @@ data class QueuedChatRequest(
                 o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList(),
                 o["cloudReadOnlyModes"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["capturedPcTextDefault"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
-                o["scheduledReadTool"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
+                o["scheduledReadTool"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
+                o["scheduledClockReceiptOnly"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean} ?: false)
         }
     }
 }

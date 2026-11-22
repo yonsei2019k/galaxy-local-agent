@@ -957,6 +957,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val requestProgress=makeRequestProgress(request,workTraceSession)
                 liveComputeProgress=observeComputeProgress(request,workTraceSession,this)
                 prepareRequestTools(request,requestProgress){lease=it}
+                if (request.scheduledClockReceiptOnly && request.allowTools && request.continuation == null) {
+                    runApprovedClockSchedule(request)
+                    return@launch
+                }
                 val request=if(ExternalAgentSettings.isCloud(request.modelId)){
                     try {executeCloudPhoneRequestWithPrivateRead(request);return@launch}
                     catch(handoff:PrivatePlanRejected){
@@ -1422,6 +1426,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 finishRequestResources(request,lease,liveComputeProgress,updateLease,interruptedTerminalState,prerequisitePauseReason)
             }
         }
+    }
+
+    private suspend fun runApprovedClockSchedule(request: QueuedChatRequest) {
+        val tool = ScheduledReadPolicy.CLOCK_TOOL
+        if (request.previousSteps.isNotEmpty()) {
+            publishActionFinal(request, setOf(tool), "이 예약에 이전 실행 기록이 있어 다시 조회하지 않았습니다.", true)
+            return
+        }
+        requestAuthorizedTools = setOf(tool)
+        val call = ToolRegistry.validate(ToolCall(UUID.randomUUID().toString(), tool, buildJsonObject {}))
+        val result = runTool(call)
+        val verified = result.success && result.verification == VerificationState.VERIFIED
+        val notice = if (verified) "예약한 시각 조회를 확인했습니다." else "예약한 시각을 확인하지 못했습니다."
+        publishActionFinal(request, setOf(tool), notice, !verified)
+        if (verified) status.value = "예약 시각 조회 완료"
     }
 
     private fun cloudPersonalDataAllowed(request:QueuedChatRequest):Boolean =
@@ -2561,6 +2580,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         updateDraft(draft.value,expectedThreadId)
     }
     fun actionSummary(call:ToolCall):String {
+        if (call.name == com.user.localagent.core.ScheduledReadToolCatalog.CREATE &&
+            com.user.localagent.core.ScheduledReadToolCatalog.clockReceiptOnly(call)) {
+            val datetime = call.arguments["datetime"]?.jsonPrimitive?.content.orEmpty()
+            val request = call.arguments["prompt"]?.jsonPrimitive?.content.orEmpty()
+            return "예약 시각: $datetime\n원래 요청: $request\n예약 시각에 기기의 날짜·시각을 한 번 조회해 그대로 알려드립니다."
+        }
         if(call.name!="reply_messenger_notification")return call.arguments.toString()
         val target=com.user.localagent.integrations.MessengerInbox.messages.value.firstOrNull {it.id==call.arguments["id"]?.jsonPrimitive?.content}
         val label=target?.let {com.user.localagent.integrations.MessengerInbox.supported[it.packageName]}?:"만료된 알림"

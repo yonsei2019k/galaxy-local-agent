@@ -562,12 +562,13 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val run=createRun(threadId,branchId,user.id,modelId,4096,thinking,runId=runId)
         updateRunContext(run.id,contextFactory(user,run))
     }
-    internal suspend fun scheduleRead(registrationRunId: String, title: String, prompt: String, at: Long, tool: String): ChatRunRecord =
+    internal suspend fun scheduleRead(registrationRunId: String, title: String, prompt: String, at: Long, tool: String,
+        clockReceiptOnly: Boolean = false): ChatRunRecord =
         database.withTransaction {
             val source = validRun(registrationRunId)
             check(source.status == "running" && !ScheduledReadPolicy.isId(source.id))
             val (scope, disabled) = scheduledScope(source) ?: error("예약할 원래 대화가 변경되었습니다.")
-            val plan = ScheduledReadRequest(title, prompt, at, tool, scope)
+            val plan = ScheduledReadRequest(title, prompt, at, tool, scope, clockReceiptOnly)
             check(plan.allows(scope, tool, disabled)){"현재 대화에서 허용한 기기 내 조회만 예약할 수 있습니다."}
             val id = plan.idFor(registrationRunId)
             dao.run(id)?.let { return@withTransaction it }
@@ -596,7 +597,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             ScheduledReadAdmission.READY -> {
                 val user = addMessage(record.threadId, record.branchId, "user", plan.prompt)
                 val payload = QueuedChatRequest(record.id, record.threadId, record.branchId, record.projectId,
-                    plan.prompt, record.modelId, false, emptyList(), user.id, scheduledReadTool=plan.tool)
+                    plan.prompt, record.modelId, false, emptyList(), user.id,
+                    scheduledReadTool = plan.tool, scheduledClockReceiptOnly = plan.clockReceiptOnly)
                 val queued = record.copy(status="queued", userMessageId=user.id, contextJson=payload.toJson(), updatedAt=now())
                 dao.run(queued)
                 beginAssistant(queued.id)
