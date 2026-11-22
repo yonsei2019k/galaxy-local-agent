@@ -1092,7 +1092,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val projectInstruction=if(workMode==AgentWorkMode.RESEARCH)""else request.projectId?.let {app.repository.chat.project(it)?.settings?.instructions}.orEmpty()
                     // Fixed Office rooms speak in their seat persona; owner-entered ages stay on the phone (local path only).
                     val officeInstruction=com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,
-                        runCatching{app.officeProfile.read()}.getOrNull(),java.time.LocalDate.now(ZoneId.of("Asia/Seoul"))).orEmpty()
+                        runCatching{app.officeProfile.read()}.getOrNull(),java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
+                        colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW).orEmpty()
                     val attachmentContext=if(usableAttachments.isNotEmpty()){
                         status.value="첨부 자료를 기기에서 읽는 중"
                         app.chatAttachments.prepareInCurrentRequest(text,usableAttachments,request.runId,requestEngine=executionEngine).also {
@@ -1752,7 +1753,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
             // Cloud gets the public persona only: owner-entered ages stay on the phone (profile=null).
             val officePersona=com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,null,
-                java.time.LocalDate.now(ZoneId.of("Asia/Seoul")))
+                java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
+                colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW)
             val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
                 beforeLaunch={check(authority().permits(capture))},officePersona=officePersona)
             lastProviderState=launch.getValue("state").jsonPrimitive.content

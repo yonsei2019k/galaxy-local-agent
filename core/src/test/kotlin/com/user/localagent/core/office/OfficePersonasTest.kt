@@ -28,6 +28,17 @@ class OfficePersonasTest {
         assertFalse(text.contains("본부장"))
     }
 
+    @Test fun colleagueDiscussionUsesTheActualSeatIdentityAndOfficeAddress() {
+        for (room in ZipHapRoom.entries.filter { it.agent != null }) {
+            val seat = checkNotNull(room.agent)
+            val text = checkNotNull(OfficePersonas.instruction(room.threadId, null, today, colleagueDiscussion = true))
+            assertTrue(text.contains("당신은 가족회사 '집합'의 ${seat.label}"))
+            assertTrue(text.contains("동료의 발언은 각자의 실제 실행으로 올라오므로 대신 작성하지 않는다"))
+            assertTrue(text.contains("직원끼리 답할 때는 관계에 맞는 가족 호칭"))
+            assertFalse(text.contains("이 방에서는 당신 혼자 고객을 응대한다"))
+        }
+    }
+
     @Test fun officeRoomDefinesSpeakerFormatAndFamilyAddress() {
         val text=checkNotNull(OfficePersonas.instruction(ZipHapRoom.OFFICE.threadId,null,today))
         assertTrue(text.contains("**이름 직급:**"))

@@ -178,13 +178,15 @@ object OfficePersonas {
         "앱 사용자는 회사의 고객이다. 에이전트라는 사실을 숨기지 않고, 실제 가족의 사생활·위치·연락처를 지어내지 않는다."
 
     /** Extra system text for a fixed Office room; null for any other thread. */
-    fun instruction(threadId:String,profile:OfficePrivateProfile?,today:LocalDate):String? {
+    fun instruction(
+        threadId: String, profile: OfficePrivateProfile?, today: LocalDate, colleagueDiscussion: Boolean = false,
+    ): String? {
         val room=roomForThread(threadId)?:return null
         val seat=room.agent
-        return if(seat!=null) seatInstruction(seat,profile,today) else officeRoomInstruction(profile,today)
+        return if(seat!=null) seatInstruction(seat,profile,today,colleagueDiscussion) else officeRoomInstruction(profile,today)
     }
 
-    private fun seatInstruction(seat:OfficeSeat,profile:OfficePrivateProfile?,today:LocalDate):String {
+    private fun seatInstruction(seat:OfficeSeat,profile:OfficePrivateProfile?,today:LocalDate,colleagueDiscussion:Boolean):String {
         val persona=all.getValue(seat)
         return buildString {
             appendLine(BOUNDARY)
@@ -198,8 +200,13 @@ object OfficePersonas {
             appendLine("- $FAMILY_VALUE")
             appendLine("다른 회사 사람들(가족회사):")
             appendLine(roster(seat,profile,today))
-            appendLine("이 방에서는 당신 혼자 고객을 응대한다. 위 성격과 말투를 답변 전체에 일관되게 유지한다. 다른 가족을 언급할 때는 위 관계에 맞게 말한다.")
-            append("고객에게 말할 때는 직급 호칭(${OfficeSeat.entries.filter{it!=seat}.joinToString(", "){titleAddress(it)}})을 쓰고, 가족 호칭은 사무실 방에서만 쓴다. 가족 이야기는 자연스러울 때만 짧게 하고 고객 업무를 우선한다.")
+            if (colleagueDiscussion) {
+                appendLine("사무실에 공유할 의견은 자신의 자리에서만 작성한다. 동료의 발언은 각자의 실제 실행으로 올라오므로 대신 작성하지 않는다.")
+                append("직원끼리 답할 때는 관계에 맞는 가족 호칭을 쓴다. 고객에게 직접 말할 때는 직급 호칭을 쓴다. 고객 업무를 우선한다.")
+            } else {
+                appendLine("이 방에서는 당신 혼자 고객을 응대한다. 위 성격과 말투를 답변 전체에 일관되게 유지한다. 다른 가족을 언급할 때는 위 관계에 맞게 말한다.")
+                append("고객에게 말할 때는 직급 호칭(${OfficeSeat.entries.filter{it!=seat}.joinToString(", "){titleAddress(it)}})을 쓰고, 가족 호칭은 사무실 방에서만 쓴다. 가족 이야기는 자연스러울 때만 짧게 하고 고객 업무를 우선한다.")
+            }
         }
     }
 
