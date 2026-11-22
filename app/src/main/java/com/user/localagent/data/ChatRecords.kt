@@ -644,8 +644,13 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     internal suspend fun verifyScheduledRead(id: String, threadId: String) = database.withTransaction {
         val row = validRun(id)
         check(ScheduledReadPolicy.isId(id) && row.threadId == threadId && row.status == "running")
-        if (row.errorCode in setOf(ScheduledReadPolicy.STOP_REQUESTED, ScheduledReadPolicy.WORKER_STOPPED))
-            throw kotlinx.coroutines.CancellationException("예약 실행이 중단되었습니다.")
+        requireScheduledOutputActive(row)
+    }
+
+    private fun requireScheduledOutputActive(run: ChatRunRecord) {
+        if (ScheduledReadPolicy.isId(run.id) &&
+            (run.errorCode == ScheduledReadPolicy.STOP_REQUESTED || run.errorCode == ScheduledReadPolicy.WORKER_STOPPED)
+        ) throw kotlinx.coroutines.CancellationException("예약 실행이 중단되었습니다.")
     }
 
     private suspend fun scheduledScope(run: ChatRunRecord): Pair<ScheduledReadScope, Set<String>>? {
@@ -733,6 +738,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)
         val run=validRun(runId);check(run.status in setOf("running","waiting_approval")){"시작된 작업의 답변만 저장합니다."}
+        requireScheduledOutputActive(run)
         val primary=beginAssistant(runId);val segments=dao.segmentsForMessage(primary.id)
         check(segments.none {it.status=="running"}){"작성 중인 모델 출력 사이에 별도 답변을 삽입하지 않습니다."}
         val body=(if(fullMessageText(primary.id).isNotEmpty())"\n\n"else"")+text
@@ -756,11 +762,13 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     suspend fun beginSegment(runId:String,messageId:String,partNumber:Int,segmentId:String=UUID.randomUUID().toString()):GenerationSegmentRecord=database.withTransaction {
         val r=validRun(runId);checkMessage(r,messageId);require(partNumber in 1..10000)
+        requireScheduledOutputActive(r)
         dao.segment(segmentId)?.let {check(it.runId==runId&&it.messageId==messageId&&it.partNumber==partNumber);return@withTransaction it}
         GenerationSegmentRecord(segmentId,runId,messageId,partNumber).also {dao.segment(it)}
     }
     suspend fun appendChunk(runId:String,messageId:String,segmentId:String,sequence:Int,text:String):ChunkAppendResult=database.withTransaction {
         val r=validRun(runId);check(r.status in setOf("running","waiting_approval")){"실행 중인 작업에만 내용을 추가합니다."};checkMessage(r,messageId)
+        requireScheduledOutputActive(r)
         val s=dao.segment(segmentId)?:error("출력 구간을 찾을 수 없습니다.");check(s.runId==runId&&s.messageId==messageId&&s.status=="running")
         require(sequence>=0&&text.isNotEmpty()&&text.length<=65536&&'\u0000' !in text)
         dao.chunk(segmentId,sequence)?.let {check(it.text==text&&it.messageId==messageId&&it.runId==runId){"동일 순번에 다른 내용을 저장하지 않습니다."};return@withTransaction ChunkAppendResult(false,sequence,text.length)}

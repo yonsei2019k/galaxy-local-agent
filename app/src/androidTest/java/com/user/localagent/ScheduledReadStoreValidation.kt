@@ -10,6 +10,7 @@ import com.user.localagent.data.LocalRepository
 import com.user.localagent.data.ProjectSettings
 import java.security.SecureRandom
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -56,6 +57,39 @@ class ScheduledReadStoreValidation {
             assertEquals("scheduled_scope_changed",chat.promoteScheduledRead(revoked.id,due)?.errorCode)
             assertEquals("cancelled",chat.promoteScheduledRead(cancelled.id,due)?.status)
             assertTrue(chat.queuedRuns().isEmpty())
+        }
+    }
+
+    @Test fun stopBlocksBothAnswerPathsAndPreservesEarlierChunks() = runBlocking(Dispatchers.IO) {
+        isolated { chat ->
+            val room = chat.createThread(title = "Scheduled cancellation output fixture")
+            val owner = chat.startRun(chat.createRun(room.id, room.activeBranchId).id)
+            val due = System.currentTimeMillis() + 60_000
+            val scheduled = chat.scheduleRead(owner.id, "Fixture", "Read time", due, "get_current_datetime")
+            assertEquals("queued", chat.promoteScheduledRead(scheduled.id, due)?.status)
+            chat.startRun(scheduled.id)
+            val message = chat.beginAssistant(scheduled.id)
+            val segment = chat.beginSegment(scheduled.id, message.id, 1)
+            chat.appendChunk(scheduled.id, message.id, segment.id, 0, "Recorded before stop")
+
+            val stopping = chat.cancelScheduledRead(owner.id, scheduled.id)
+            assertEquals("running", stopping.status)
+            assertEquals(ScheduledReadPolicy.STOP_REQUESTED, stopping.errorCode)
+            assertTrue(runCatching {
+                chat.appendChunk(scheduled.id, message.id, segment.id, 1, "Late answer")
+            }.exceptionOrNull() is CancellationException)
+            assertTrue(runCatching {
+                chat.beginSegment(scheduled.id, message.id, 2)
+            }.exceptionOrNull() is CancellationException)
+            chat.finishSegment(segment.id, "cancelled")
+            assertTrue(runCatching {
+                chat.writeRunAnswer(scheduled.id, "Late completion")
+            }.exceptionOrNull() is CancellationException)
+
+            assertEquals("Recorded before stop", chat.fullMessageText(message.id))
+            val closed = chat.updateRun(scheduled.id, "completed")
+            assertEquals("cancelled", closed.status)
+            assertEquals(ScheduledReadPolicy.STOP_REQUESTED, closed.errorCode)
         }
     }
 
