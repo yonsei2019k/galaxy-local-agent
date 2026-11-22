@@ -26,11 +26,23 @@ class RustReactBoundaryCanary {
         RustExecutionJournal(binding,profile).use{journal->
             val prepare=call.copy(name="prepare_sms")
             journal.begin(binding,prepare)
-            journal.outcome(prepare,ToolResult(prepare.id,true,"synthetic handoff",VerificationState.PREPARED))
+            journal.outcome(ToolResult(prepare.id,true,"synthetic handoff",VerificationState.PREPARED))
             assertTrue(journal.snapshot().contains("handed_off"))
             assertTrue(runCatching{journal.begin(binding,call.copy(id="synthetic-next"))}.isFailure)
         }
     }
+    @Test fun actualArm64BridgeUsesTheExecutorReceiptId() {
+        val call = ToolCall("synthetic-call", "save_note", buildJsonObject {})
+        RustExecutionJournal(binding, profile).use { journal ->
+            journal.begin(binding, call)
+            val foreign = ToolResult("other-call", true, "synthetic", VerificationState.VERIFIED)
+            assertTrue(runCatching { journal.outcome(foreign) }.isFailure)
+            assertFalse(journal.snapshot().contains("tool_finished"))
+            journal.outcome(foreign.copy(id = call.id))
+            assertTrue(journal.snapshot().contains("verified"))
+        }
+    }
+
     @Test fun reactAssetsArePackagedOfflineWithMascot(){
         val assets=InstrumentationRegistry.getInstrumentation().targetContext.assets
         val html=assets.open("react/index.html").bufferedReader().use{it.readText()}
