@@ -291,10 +291,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }else if(!restorePersistedQueue){initialized.complete(Unit)}else scope.launch {
         app.repository.chat.importLegacyDraft(context)
         app.repository.chat.recoverInterruptedRuns()
-        val threads=app.repository.chat.threads.first()
-        val previous=preferences.getString("thread",null)
-        val thread=threads.firstOrNull {it.id==previous}?:threads.firstOrNull()?:app.repository.chat.createThread()
-        selectThread(thread.id)
+        val office=try{app.repository.chat.openFixedOfficeRooms()}
+        catch(cancel:CancellationException){throw cancel}
+        catch(error:Exception){FailureLog.record(context,"office_room_setup",error);null}
+        if(selection == null){
+            val thread=office ?: app.repository.chat.threads.first().firstOrNull() ?: app.repository.chat.createThread()
+            if(selection == null)selectThread(thread.id)
+        }
         queued.value=app.repository.chat.queuedRuns().mapNotNull {run->runCatching {QueuedChatRequest.fromJson(run.contextJson)}.getOrNull()}
         initialized.complete(Unit)
         drain()

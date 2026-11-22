@@ -136,7 +136,10 @@ export default function App() {
           onClear={() => request({ action: 'clearOfficeProfile' })} onClose={() => setOfficeProfileOpen(false)} />}
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
           onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
-          onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })} />
+          onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })}
+          onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
+          onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}
+          onOfficeCalendar={() => request({action:'requestOfficeCalendar'})} />
         <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} status={status}
           onDraft={text => {
             if (!snapshot?.ready) return

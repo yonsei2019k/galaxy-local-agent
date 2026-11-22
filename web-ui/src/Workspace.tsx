@@ -7,6 +7,8 @@ import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 
 const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
+  { panel: 'capabilities', label: '할 수 있는 일', icon: 'activity' },
+  { panel: 'connections', label: '앱과 컴퓨터 연결', icon: 'group' },
   { panel: 'images', label: '이미지 만들기', icon: 'image' },
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
@@ -28,8 +30,14 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
         <span className="wordmark"><BrandMark /> ZipHap<span>.Agent</span></span>
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
       </div>
+      <nav className="shared-rooms" aria-label="메인 채팅">
+        <button type="button" className="sidebar-row" disabled={!enabled}
+          aria-current={snapshot?.officeSelected && !collaborationOpen ? 'page' : undefined} onClick={onOpenOffice}>
+          <Icon name="group" /><span>사무실</span>
+        </button>
+      </nav>
       <nav className={`thread-nav${staff ? ' staff-rooms' : ''}`} aria-label={staff ? '직원 채팅방' : '대화 목록'}>
-        <h2>채팅방</h2>
+        <h2>{staff ? '직원' : '대화 목록'}</h2>
         {threads.length > 0 ? <ul>{threads.map(thread => (
           <li key={thread.id}>
             <button type="button" className="sidebar-row" aria-current={thread.selected && !collaborationOpen ? 'page' : undefined}
@@ -40,11 +48,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
           </li>
         ))}</ul> : snapshot?.ready && <p className="no-threads">대화가 없습니다.</p>}
       </nav>
-      <nav className="shared-rooms" aria-label="공용 채팅방">
-        <button type="button" className="sidebar-row" disabled={!enabled}
-          aria-current={snapshot?.officeSelected && !collaborationOpen ? 'page' : undefined} onClick={onOpenOffice}>
-          <Icon name="group" /><span>사무실</span>
-        </button>
+      <nav className="shared-rooms" aria-label="외부 협업">
         <button type="button" className="sidebar-row" disabled={!enabled}
           aria-current={collaborationOpen ? 'page' : undefined} onClick={() => onNavigate('collab')}>
           <Icon name="group" /><span>협력사 핫라인</span>
