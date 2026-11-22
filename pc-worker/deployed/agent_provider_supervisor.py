@@ -23,14 +23,15 @@ def _event(outcome, calls=None, elapsed_ms=None):
 
 from agent_bridge import BridgeError
 from codex_agent_provider import ProviderConfig, ProviderError, run
+from claude_agent_provider import run as run_claude
 from provider_conversation_context import (ConversationContextError, conversation_context_digest,
                                            has_conversation_context, validate_conversation_context)
 
 
-def load_config(home):
+def load_config(home, provider="codex"):
     """Operator-pinned local configuration; no remotely supplied executable or path."""
     try:
-        source = Path(home) / "agent-provider.json"
+        source = Path(home) / ("agent-provider-claude.json" if provider == "claude" else "agent-provider.json")
         if not source.is_file() or source.stat().st_size > 16384:
             return None
         def unique(items):
@@ -42,14 +43,19 @@ def load_config(home):
             return value
         data = json.loads(source.read_text(encoding="utf-8"), object_pairs_hook=unique)
         required = {"executable", "executableSha256", "python", "mcpScript", "mcpScriptSha256", "runtimeDirectory", "workspace"}
-        if type(data) is not dict or not required <= data.keys() or data.keys() - required - {"model"}:
+        if type(data) is not dict or not required <= data.keys() or data.keys() - required - ({"model", "claudeConfigDir"} if provider == "claude" else {"model"}):
             return None
         if any(type(data[key]) is not str or not Path(data[key]).is_absolute() for key in
                ("executable", "python", "mcpScript", "runtimeDirectory", "workspace")):
             return None
+        config_dir = data.get("claudeConfigDir")
+        if config_dir is not None and (type(config_dir) is not str or not Path(config_dir).is_absolute() or not Path(config_dir).is_dir()):
+            return None
+        if provider == "claude" and Path(data["executable"]).name.lower() != "claude.exe":
+            return None
         return ProviderConfig(Path(data["executable"]), data["executableSha256"], Path(data["python"]),
                               Path(data["mcpScript"]), data["mcpScriptSha256"], Path(data["runtimeDirectory"]),
-                              Path(data["workspace"]), data.get("model"), orchestrate=True)
+                              Path(data["workspace"]), data.get("model"), orchestrate=provider == "codex", config_dir=Path(config_dir) if config_dir else None)
     except (OSError, ValueError, UnicodeError, TypeError):
         return None
 
@@ -68,11 +74,13 @@ class _Child:
     started: float = field(default_factory=time.monotonic, repr=False)
     progress_updates: int = 0
     context_digest: str = field(default="", repr=False)
+    provider: str = "codex"
 
 
 class AgentProviderSupervisor:
-    def __init__(self, bridge, config, runner=run):
-        self.bridge, self.config, self.runner = bridge, config, runner
+    def __init__(self, bridge, config, runner=run, *, claude_config=None, claude_runner=run_claude):
+        self.bridge = bridge
+        self.providers = {"codex": (config, runner), "claude": (claude_config, claude_runner)}
         self.lock = threading.RLock()
         self.children = {}
 
@@ -82,7 +90,8 @@ class AgentProviderSupervisor:
     def health(self):
         with self.lock:
             self._reconcile_revocations()
-            return {"providerConfigured": self.config is not None,
+            return {"providerConfigured": self.providers["codex"][0] is not None,
+                    "cloudProviders": [name for name, (config, _) in self.providers.items() if config is not None],
                     "activeProviders": sum(child.state != "FINISHED" for child in self.children.values())}
 
     def _reconcile_revocations(self):
@@ -149,16 +158,19 @@ class AgentProviderSupervisor:
             if tool in child.tool_names:
                 child.progress["toolName"] = tool
 
-    def _supports_keyword(self, name, *, variadic=True):
+    def _supports_keyword(self, runner, name, *, variadic=True):
         try:
             return any((p.name == name and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
                                                      inspect.Parameter.KEYWORD_ONLY)) or
                        (variadic and p.kind == inspect.Parameter.VAR_KEYWORD)
-                       for p in inspect.signature(self.runner).parameters.values())
+                       for p in inspect.signature(runner).parameters.values())
         except (TypeError, ValueError):
             return False
 
-    def launch(self, owner, sid, capability, request, conversation_context=None):
+    def launch(self, owner, sid, capability, request, conversation_context=None, *, provider="codex"):
+        if type(provider) is not str or provider not in self.providers:
+            raise BridgeError("PROVIDER_UNKNOWN", 400)
+        config, runner = self.providers[provider]
         try:
             valid_request = type(request) is str and request.strip() and len(request.encode("utf-8")) <= 48000
         except UnicodeError:
@@ -176,16 +188,18 @@ class AgentProviderSupervisor:
             self._reconcile_revocations()
             existing = self.children.get(sid)
             if existing:
+                if existing.provider != provider:
+                    raise BridgeError("PROVIDER_CHANGED", 409)
                 if existing.digest != digest:
                     raise BridgeError("PROVIDER_REQUEST_CHANGED", 409)
                 if existing.context_digest != context_digest:
                     raise BridgeError("PROVIDER_CONTEXT_CHANGED", 409)
                 return self._public(existing)
-            if self.config is None:
+            if config is None:
                 raise BridgeError("PROVIDER_NOT_CONFIGURED", 503)
             # An explicit keyword declaration acknowledges the new data contract.
             # A generic **kwargs legacy stub may silently discard it, so is insufficient.
-            if has_conversation_context(context) and not self._supports_keyword("conversation_context", variadic=False):
+            if has_conversation_context(context) and not self._supports_keyword(runner, "conversation_context", variadic=False):
                 raise BridgeError("PROVIDER_CONTEXT_UNSUPPORTED", 503)
             if any(c.state != "FINISHED" for c in self.children.values()):
                 raise BridgeError("PROVIDER_BUSY", 409)
@@ -195,13 +209,13 @@ class AgentProviderSupervisor:
             bootstrap = self.bridge.bootstrap_agent(owner, sid, local_authenticated=True)
             tools = frozenset(item.get("name") for item in snapshot.get("tools", [])
                               if type(item) is dict and type(item.get("name")) is str)
-            child = _Child(digest, owner, capability, tools, context_digest=context_digest)
+            child = _Child(digest, owner, capability, tools, context_digest=context_digest, provider=provider)
             self.children[sid] = child
-            threading.Thread(target=self._run, args=(child, owner, sid, capability, request, bootstrap, context),
+            threading.Thread(target=self._run, args=(child, owner, sid, capability, request, bootstrap, context, config, runner),
                              name="ziphap-cloud-child", daemon=True).start()
             return self._public(child)
 
-    def _run(self, child, owner, sid, capability, request, bootstrap, conversation_context):
+    def _run(self, child, owner, sid, capability, request, bootstrap, conversation_context, config, runner):
         def revoked():
             if child.cancel.is_set():
                 return True
@@ -216,22 +230,22 @@ class AgentProviderSupervisor:
                 return revoked()
         try:
             kwargs = {"external_allowed": True, "cancelled": AuthorityCancellation(), "timeout": 300}
-            if self._supports_keyword("progress"):
+            if self._supports_keyword(runner, "progress"):
                 kwargs["progress"] = lambda value: self._progress(child, value)
-            if conversation_context is not None and self._supports_keyword("conversation_context", variadic=False):
+            if conversation_context is not None and self._supports_keyword(runner, "conversation_context", variadic=False):
                 kwargs["conversation_context"] = conversation_context
-            if self._supports_keyword("allowed_tools", variadic=False):
+            if self._supports_keyword(runner, "allowed_tools", variadic=False):
                 kwargs["allowed_tools"] = child.tool_names
             total_calls = total_ms = 0
             for attempt in range(2):
                 started = time.monotonic()
                 try:
-                    result = self.runner(self.config, bootstrap, request, **kwargs)
+                    result = runner(config, bootstrap, request, **kwargs)
                 except ProviderError as error:
                     # The runner has unwound its process tree. Only a terminal response failure
                     # with settled observations can earn the existing single recovery attempt.
                     if (attempt or error.code not in {"PROVIDER_RUN_FAILED", "PROVIDER_FINAL_FORMAT"}
-                            or not self._supports_keyword("read_recovery", variadic=False) or revoked()):
+                            or not self._supports_keyword(runner, "read_recovery", variadic=False) or revoked()):
                         raise
                     remaining = int(300 - (time.monotonic() - child.started))
                     if remaining <= 0:
@@ -251,7 +265,7 @@ class AgentProviderSupervisor:
                     raise ProviderError("PROVIDER_FINAL_FORMAT")
                 total_calls += result.mcp_calls
                 total_ms += result.elapsed_ms
-                if attempt or not self._supports_keyword("read_recovery", variadic=False) or revoked():
+                if attempt or not self._supports_keyword(runner, "read_recovery", variadic=False) or revoked():
                     break
                 remaining = int(300 - (time.monotonic() - child.started))
                 if remaining <= 0:

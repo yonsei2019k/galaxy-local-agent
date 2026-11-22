@@ -168,19 +168,19 @@ class MainActivity : ComponentActivity() {
     private fun send(text:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text)}
     private fun sendToThread(text:String,threadId:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text,threadId)}
     private fun chooseModel(id:String)=app.runs.chooseModel(id)
-    private val externalAgentConsentThread=mutableStateOf<String?>(null)
+    private val externalAgentConsentThread=mutableStateOf<Pair<String,String>?>(null)
     private fun chooseConversationModel(id:String,threadId:String){
         if(id==com.user.localagent.externalagent.ExternalAgentSettings.DISABLE_ID){
-            com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(false)
+            com.user.localagent.externalagent.ExternalAgentSettings.get(this,app.runs.preferredModelId.value).setEnabled(false)
             app.runs.chooseModel("auto",threadId);status.value="클라우드 도구 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다.";return
         }
         // Preference only: the coordinator retains the model/authority captured by active requests.
         if(!app.runs.selectionReady.value||app.runs.selectedThreadId.value!=threadId){
             status.value="선택한 대화를 불러온 뒤 모델을 바꿔주세요.";return
         }
-        if(id==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID){
+        if(com.user.localagent.externalagent.ExternalAgentSettings.isCloud(id)){
             if(!com.user.localagent.compute.PcComputeSettings.get(this).state.value.paired){status.value="설정에서 개인 PC를 먼저 연결해주세요.";return}
-            if(!com.user.localagent.externalagent.ExternalAgentSettings.get(this).capture().allowsPersonalData){externalAgentConsentThread.value=threadId;return}
+            if(!com.user.localagent.externalagent.ExternalAgentSettings.get(this,id).capture().allowsPersonalData){externalAgentConsentThread.value=threadId to id;return}
             app.runs.chooseModel(id,threadId);status.value="다음 요청에서 클라우드 모델이 승인된 휴대폰 도구를 사용합니다.";return
         }
         if(id!="auto" && id!=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION){status.value="일반 업무는 Codex, 개인 자료는 개인정보 · 로컬을 선택해주세요.";return}
@@ -193,13 +193,13 @@ class MainActivity : ComponentActivity() {
     private fun invalidateKnowledgeContext()=app.runs.invalidateKnowledgeContext()
     private fun actionSummary(action:ToolCall)=app.runs.actionSummary(action)
     @Composable private fun AppScreen() {
-        externalAgentConsentThread.value?.let {threadId->AlertDialog(
+        externalAgentConsentThread.value?.let {(threadId,modelId)->AlertDialog(
             onDismissRequest={externalAgentConsentThread.value=null},title={Text("클라우드 도구 연결")},
-            text={Text(com.user.localagent.externalagent.ExternalAgentSettings.CONSENT_TEXT)},
+            text={Text(com.user.localagent.externalagent.ExternalAgentSettings.consentText(modelId))},
             confirmButton={TextButton(onClick={
                 if(app.runs.selectionReady.value&&app.runs.selectedThreadId.value==threadId){
-                    com.user.localagent.externalagent.ExternalAgentSettings.get(this).setEnabled(true)
-                    app.runs.chooseModel(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID,threadId)
+                    com.user.localagent.externalagent.ExternalAgentSettings.get(this,modelId).setEnabled(true)
+                    app.runs.chooseModel(modelId,threadId)
                 }
                 externalAgentConsentThread.value=null
             }){Text("연결하고 선택")}},dismissButton={TextButton(onClick={externalAgentConsentThread.value=null}){Text("취소")}})}
@@ -308,7 +308,7 @@ class MainActivity : ComponentActivity() {
                     put("id",id);put("title",title);put("selected",id==composerThreadId)
                     put("working",activeExecutions.any{it.threadId==id&&!it.waitingForApproval&&it.waitingForResource==null})
                 }
-                val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex",
+                val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex",com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID to "Claude",
                     com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION to com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
@@ -458,7 +458,7 @@ class MainActivity : ComponentActivity() {
                 threads=menuThreads.filterNot{room->ZipHapRoom.entries.any{it.threadId==room.id}}.map{room->UiThread(room.id,room.projectId.orEmpty(),room.title,room.pinned,
                     room.archived,room.deletedAt!=null,room.updatedAt)},
                 selectedProjectId=selectedProjectId,selectedThreadId=selectedThreadId,supportsTrash=false,
-                modelChoices=listOf(UiModelChoice("auto","자동"),UiModelChoice(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID,"Codex"),
+                modelChoices=listOf(UiModelChoice("auto","자동"),UiModelChoice(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID,"Codex"),UiModelChoice(com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID,"Claude"),
                     UiModelChoice(com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION,com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)),
                 actions=ChatNavigationActions(onSelectThread=chat::selectThread,onNewThread=chat::newThread,
                     onSelectProject=chat::selectProject,onSaveProject=chat::saveProject,onDeleteProject=chat::deleteProject,
@@ -712,6 +712,12 @@ class MainActivity : ComponentActivity() {
                             com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity).setEnabled(false)
                             status.value="Codex 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
                         }){Text("Codex 연결 해제")}
+                    }}
+                    item {SettingsDisclosure("Claude 연결","이 앱이 Claude를 사용하도록 허용한 상태를 관리해요."){
+                        TextButton(onClick={
+                            com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity,com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID).setEnabled(false)
+                            status.value="Claude 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
+                        }){Text("Claude 연결 해제")}
                     }}
                 }
                 SettingsPage.UPDATES->{

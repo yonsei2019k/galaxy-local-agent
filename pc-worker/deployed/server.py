@@ -90,7 +90,7 @@ try:
  private_coordination=next((parent for parent in coordination.parents if parent.name=='.local'),coordination)
  AGENT_BRIDGE=AgentBridge(workspace_profiles=agent_workspace_profiles(),private_roots=(HOME,TOOLS,Path(LOG).parent,private_coordination))
 except (BridgeError,OSError,RuntimeError):AGENT_BRIDGE=AgentBridge(workspace_profiles={})
-AGENT_PROVIDER=AgentProviderSupervisor(AGENT_BRIDGE,load_agent_provider(HOME))
+AGENT_PROVIDER=AgentProviderSupervisor(AGENT_BRIDGE,load_agent_provider(HOME),claude_config=load_agent_provider(HOME,"claude"))
 PC_OPENCLAW=PcOpenClawAgent(load_pc_openclaw(HOME))
 ENGINE=RecoveryEngines(hashlib.sha256(TOKEN.encode()).hexdigest());PAIRING=Pairing(CONFIG)
 from media_engine import MediaEngine
@@ -205,15 +205,18 @@ class Handler(BaseHTTPRequestHandler):
     sid=str(uuid.UUID(host[1]));action=host[2]
     try:
      if self.command=='POST' and action=='launch':
-      if set(request)=={'ownerRequest'}:
-       value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'])
-      elif set(request)=={'ownerRequest','conversationContext'}:
+      if type(request) is not dict or 'ownerRequest' not in request or set(request)-{'ownerRequest','conversationContext','provider'}:
+       raise ValueError('PROVIDER_ROUTE')
+      context=None
+      if 'conversationContext' in request:
        try:
         if request['conversationContext'] is None:raise ConversationContextError()
         context=validate_conversation_context(request['conversationContext'])
        except ConversationContextError:raise BridgeError('INVALID_CONVERSATION_CONTEXT',400) from None
-       value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'],conversation_context=context)
-      else:raise ValueError('PROVIDER_ROUTE')
+      options={}
+      if context is not None:options['conversation_context']=context
+      if 'provider' in request:options['provider']=request['provider']
+      value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'],**options)
      elif self.command=='GET' and action=='provider':value=AGENT_PROVIDER.status(owner,sid,capability)
      elif self.command=='POST' and action=='provider-cancel' and request=={}:value=AGENT_PROVIDER.cancel(owner,sid,capability)
      elif self.command=='GET' and action=='evidence':value=AGENT_BRIDGE.task_evidence(owner,sid,capability)

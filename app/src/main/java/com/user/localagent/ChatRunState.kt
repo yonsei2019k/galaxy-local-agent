@@ -36,7 +36,7 @@ data class QueuedChatRequest(
         require(capturedPcTextDefault==null || capturedPcRevision!=null &&
             capturedPcTextDefault==com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId)
         require(!allowCloudText||capturedPcRevision!=null){"클라우드 사용은 현재 요청에 캡처한 명시 권한이 필요합니다."}
-        require(!cloudReadOnlyModes || allowExternalAgent && modelId==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)
+        require(!cloudReadOnlyModes || allowExternalAgent && com.user.localagent.externalagent.ExternalAgentSettings.isCloud(modelId))
         require(externalAgentRevision==null||externalAgentRevision>=0)
         require(!allowExternalAgent||(externalAgentRevision!=null&&capturedPcRevision!=null))
         require(goalLedger.size<=GoalSegmentBinding.MAX_TOOL_CALLS)

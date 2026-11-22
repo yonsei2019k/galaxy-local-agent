@@ -64,8 +64,8 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
     val selectedModel=preferredModelId.value;val thinking=modelOptions.value.thinking
     val pcSettings=PcComputeSettings.get(context)
     val pcAuthority=pcSettings.captureTextAuthority()
-    val externalAuthority=ExternalAgentSettings.get(context).capture()
-    val model=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(selectedModel,ExternalAgentSettings.MODEL_ID,
+    val externalAuthority=ExternalAgentSettings.get(context,selectedModel).capture()
+    val model=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(selectedModel,if(selectedModel==ExternalAgentSettings.CLAUDE_MODEL_ID)selectedModel else ExternalAgentSettings.MODEL_ID,
         goal.toJson().toString(),false,allowCloudPersonalData=externalAuthority.allowsPersonalData)
     scope.launch {
         try {
@@ -82,8 +82,8 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
                 }
                 queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),
                     capturedPcRevision=pcAuthority.revision,allowCloudText=false,
-                    capturedAllowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,
-                    capturedExternalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null,
+                    capturedAllowExternalAgent=ExternalAgentSettings.isCloud(model)&&externalAuthority.enabled,
+                    capturedExternalAgentRevision=if(ExternalAgentSettings.isCloud(model))externalAuthority.revision else null,
                     capturedPcTextDefault=pcTextDefault)
                 if(selectedThreadId.value==threadId&&selectedProjectId.value==goal.projectId.orEmpty()){
                     runMode.value=ConversationSubmissionPolicy.newRequestMode().wireName

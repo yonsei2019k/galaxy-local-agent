@@ -90,6 +90,16 @@ class ServerAgentAdapterTests(unittest.TestCase):
         ns["AGENT_PROVIDER"].launch.assert_called_once_with(OWNER,SESSION,CAP,"합성\n원문")
         self.assertEqual(200,response[0][0]);self.assertNotIn("agentCapability",response[0][1])
         b.bootstrap_agent.assert_not_called();b.dispatch_authenticated.assert_not_called()
+    def test_explicit_claude_launch_preserves_phone_authority_and_provider(self):
+        ns,b,c,response,_=self.make("/v1/agent/sessions/"+SESSION+"/launch",
+            body={"ownerRequest":"synthetic", "provider":"claude"})
+        c.headers.add_header("X-ZipHap-Phone-Capability",CAP)
+        ns["AGENT_PROVIDER"].launch.return_value={"state":"RUNNING","report":None,"errorCode":None}
+        ns["Handler"].dispatch(c)
+        ns["AGENT_PROVIDER"].launch.assert_called_once_with(OWNER,SESSION,CAP,"synthetic",provider="claude")
+        self.assertEqual(200,response[0][0])
+        b.bootstrap_agent.assert_not_called()
+
     def test_provider_launch_forwards_detached_v1_context_as_keyword_and_preserves_exact_request(self):
         context=context_fixture();request="  그 작업\n계속 확인해  "
         ns,b,c,response,_=self.make("/v1/agent/sessions/"+SESSION+"/launch",

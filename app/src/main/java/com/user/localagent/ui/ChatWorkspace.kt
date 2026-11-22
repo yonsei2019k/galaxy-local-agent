@@ -535,6 +535,7 @@ private fun WorkspaceModelSelector(selectedId: String, onModelChange: (String) -
     var expanded by remember { mutableStateOf(false) }
     val label = when(selectedId){
         com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID -> "Codex"
+        com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID -> "Claude"
         com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION -> com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL
         "auto" -> "자동"
         else -> "모델 선택"
@@ -564,7 +565,10 @@ private fun WorkspaceModelSelector(selectedId: String, onModelChange: (String) -
             DropdownMenuItem(text={Text(com.user.localagent.externalagent.ExternalAgentSettings.TITLE)},
                 onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)},
                 modifier=Modifier.testTag("model_option_cloud_phone_agent"))
-            if(selectedId==com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)DropdownMenuItem(
+            DropdownMenuItem(text={Text("Claude")},
+                onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID)},
+                modifier=Modifier.testTag("model_option_claude"))
+            if(com.user.localagent.externalagent.ExternalAgentSettings.isCloud(selectedId))DropdownMenuItem(
                 text={Text("클라우드 도구 연결 해제")},
                 onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.DISABLE_ID)})
             DropdownMenuItem(

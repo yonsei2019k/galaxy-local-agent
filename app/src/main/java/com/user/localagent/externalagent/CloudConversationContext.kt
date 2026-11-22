@@ -131,7 +131,7 @@ object CloudConversationContext {
             (binding.projectId==null||binding.projectId.isNotBlank())&&
             binding.authorizationRevision!=null&&binding.authorizationRevision>=0&&
             binding.pcRevision!=null&&binding.pcRevision>=0&&
-            binding.modelId==ExternalAgentSettings.MODEL_ID&&binding.allowExternalAgent&&binding.mode in setOf("act","debug")
+            ExternalAgentSettings.isCloud(binding.modelId)&&binding.allowExternalAgent&&binding.mode in setOf("act","debug")
 
     internal fun isEligible(current:Binding,source:Binding):Boolean = cloudCapture(current)&&eligible(current,source)
 

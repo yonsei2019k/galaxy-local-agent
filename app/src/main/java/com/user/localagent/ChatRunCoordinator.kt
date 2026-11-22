@@ -539,20 +539,20 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val binding=app.workspaceFor(thread.projectId).bindingFingerprint()
             val pcBinding=capturePcDataBindingForNewRun(threadId)
             val pcTextAuthority=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
-            val externalAuthority=ExternalAgentSettings.get(context).capture()
+            val externalAuthority=ExternalAgentSettings.get(context,model).capture()
             // Only fresh requests inherit the owner-approved subscription-first default.
             val imageOnly=snapshot.isNotEmpty() && snapshot.all {it.mimeType.startsWith("image/")}
             val selection=if(model=="auto" && remoteAuthority==null && app.repository.chat.awaitingPrivateReply(threadId,thread.activeBranchId))
                 com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION else model
             val resolvedModel=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(
-                selection,ExternalAgentSettings.MODEL_ID,text,imageOnly,
+                selection,if(selection==ExternalAgentSettings.CLAUDE_MODEL_ID)selection else ExternalAgentSettings.MODEL_ID,text,imageOnly,
                 allowCloudPersonalData=mode!=AgentWorkMode.RESEARCH.wireName&&externalAuthority.allowsPersonalData)
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,resolvedModel,thinking,runId=reservedRunId,
                 expectedPreviousRunId=previousRunId,remoteTestThreadRevision=remoteThreadRevision,
                 beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
                 QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
-                    allowExternalAgent=resolvedModel==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,externalAgentRevision=if(resolvedModel==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null,
-                    cloudReadOnlyModes=resolvedModel==ExternalAgentSettings.MODEL_ID && externalAuthority.enabled).also {submitted=it}.toJson()
+                    allowExternalAgent=ExternalAgentSettings.isCloud(resolvedModel)&&externalAuthority.enabled,externalAgentRevision=if(ExternalAgentSettings.isCloud(resolvedModel))externalAuthority.revision else null,
+                    cloudReadOnlyModes=ExternalAgentSettings.isCloud(resolvedModel) && externalAuthority.enabled).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -695,8 +695,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val pc=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
         request.capturedPcRevision?.let{check(pc.revision==it){"목표 실행의 PC 권한 버전이 변경되었습니다."}}
         if(request.allowCloudText)check(pc.allowCloudText)
-        if(request.modelId==ExternalAgentSettings.MODEL_ID) {
-            val external=ExternalAgentSettings.get(context).capture()
+        if(ExternalAgentSettings.isCloud(request.modelId)) {
+            val external=ExternalAgentSettings.get(context,request.modelId).capture()
             check(request.allowExternalAgent&&external.enabled&&external.revision==request.externalAgentRevision&&request.capturedPcRevision!=null) {"목표 실행의 클라우드 권한이 만료되었습니다."}
         }
         request.pcDataBinding?.let{check(queueOwner.capturePcDataBindingForNewRun(request.threadId)==it){"목표 실행의 PC 자료 선택이 변경되었습니다."}}
@@ -889,13 +889,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     (request.attachments.isNotEmpty() && request.attachments.all {it.mimeType.startsWith("image/")}) ||
                     !cloudPersonalDataAllowed(request) && (com.user.localagent.core.ConversationPrivacy.sensitiveText(request.text) ||
                         request.goal?.let {com.user.localagent.core.ConversationPrivacy.sensitiveText(it.toJson().toString())}==true)
-                if(privateLocal && (request.modelId==ExternalAgentSettings.MODEL_ID || request.allowCloudText)){
+                if(privateLocal && (ExternalAgentSettings.isCloud(request.modelId) || request.allowCloudText)){
                     publishActionFinal(request,emptySet(),"개인 자료가 포함된 요청을 대화에 보존했습니다. 개인정보 · 로컬로 다시 보내면 기기나 페어링 PC에서 처리합니다.",true,"local_privacy_required")
                     return@launch
                 }
-                if(!privateLocal && (request.modelId!=ExternalAgentSettings.MODEL_ID || !request.allowExternalAgent)){
-                    val recovery=if(request.modelId==ExternalAgentSettings.MODEL_ID)
-                        "이 요청에 클라우드 사용 동의가 확인되지 않아 대화에 보존했어요. 일반 업무는 모델 메뉴에서 Codex를 연결한 뒤 새로 보내고, 내 기억을 확인하려면 개인정보 · 로컬을 선택해 보내주세요."
+                if(!privateLocal && (!ExternalAgentSettings.isCloud(request.modelId) || !request.allowExternalAgent)){
+                    val recovery=if(ExternalAgentSettings.isCloud(request.modelId))
+                        "이 요청에 클라우드 사용 동의가 확인되지 않아 대화에 보존했어요. 일반 업무는 모델 메뉴에서 선택한 클라우드 모델을 연결한 뒤 새로 보내고, 내 기억을 확인하려면 개인정보 · 로컬을 선택해 보내주세요."
                     else "이 요청을 대화에 보존했어요. 모델 메뉴에서 일반 업무는 Codex, 내 기억이나 개인 자료는 개인정보 · 로컬을 선택해 새로 보내주세요."
                     publishActionFinal(request,emptySet(),recovery,true,"cloud_model_required")
                     return@launch
@@ -903,7 +903,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val requestProgress=makeRequestProgress(request,workTraceSession)
                 liveComputeProgress=observeComputeProgress(request,workTraceSession,this)
                 prepareRequestTools(request,requestProgress){lease=it}
-                val request=if(request.modelId==ExternalAgentSettings.MODEL_ID){
+                val request=if(ExternalAgentSettings.isCloud(request.modelId)){
                     try {executeCloudPhoneRequestWithPrivateRead(request);return@launch}
                     catch(handoff:PrivatePlanRejected){
                         currentCoroutineContext().ensureActive()
@@ -1352,9 +1352,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     private fun cloudPersonalDataAllowed(request:QueuedChatRequest):Boolean =
-        request.allowExternalAgent && request.modelId==ExternalAgentSettings.MODEL_ID &&
+        request.allowExternalAgent && ExternalAgentSettings.isCloud(request.modelId) &&
             request.mode!=AgentWorkMode.RESEARCH.wireName &&
-            ExternalAgentSettings.get(context).capture().permitsPersonalData(request.externalAgentRevision)
+            ExternalAgentSettings.get(context,request.modelId).capture().permitsPersonalData(request.externalAgentRevision)
 
     /** Automatic context still requires the original source run to have the same cloud grant. */
     private suspend fun captureCloudContext(request:QueuedChatRequest,allowCloudPersonalData:Boolean):JsonObject? {
@@ -1412,7 +1412,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(request.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
         }
         if(pauseGoalBudgetIfExhausted(request))return
-        val externalSettings=ExternalAgentSettings.get(context)
+        val externalSettings=ExternalAgentSettings.get(context,request.modelId)
         val keepAlive=com.user.localagent.voice.RunKeepAlive.await(request.runId)
         if(!keepAlive.active){
             publishActionFinal(request,emptySet(),"백그라운드 실행 유지를 확인하지 못해 작업을 시작하지 않았습니다. 빠른 요청 또는 앱에서 다시 시작하고, 시스템의 백그라운드 실행 허용을 확인해주세요.",true)
@@ -1457,7 +1457,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }.toString()
         val savedNative=app.repository.chat.run(request.runId)?.contextJson?.let{Json.parseToJsonElement(it).jsonObject["sharedEngineState"]}
         val nativeJournal=com.user.localagent.engine.RustExecutionJournal(nativeBinding(),buildJsonObject{
-            put("profileId","subscription-codex");put("provider","codex_cli");put("modelId","provider-configured")
+            val provider=ExternalAgentSettings.provider(request.modelId)
+            put("profileId","subscription-$provider");put("provider","${provider}_cli");put("modelId","provider-configured")
             put("reasoning",JsonNull);put("maxToolCalls",minOf(18,GoalSegmentBinding.MAX_TOOL_CALLS-(request.goalSegment?.consumedToolCalls?:0)));put("deadlineMs",330000);put("cloudAuthorized",request.allowExternalAgent)
         }.toString(),savedNative?.toString())
         nativeDeadlineAt=Json.parseToJsonElement(nativeJournal.checkpoint()).jsonObject.getValue("deadlineAtMs").jsonPrimitive.long
@@ -1542,7 +1543,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
             app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
                 "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
-            val launch=client.launchProvider(request.text,conversationContext,beforeLaunch={check(authority().permits(capture))})
+            val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),beforeLaunch={check(authority().permits(capture))})
             lastProviderState=launch.getValue("state").jsonPrimitive.content
             val provider=withTimeout(330_000) {
                 var lastStage:String?=null

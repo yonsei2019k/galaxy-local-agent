@@ -3,12 +3,12 @@ package com.user.localagent.externalagent
 import android.content.Context
 
 /** Separate opt-in for uploading this request and scoped tool results to the cloud. */
-class ExternalAgentSettings private constructor(context:Context) {
+class ExternalAgentSettings private constructor(context:Context, modelId:String) {
     data class Authority(val revision:Long,val enabled:Boolean,val allowsPersonalData:Boolean=false) {
         fun permitsPersonalData(capturedRevision:Long?):Boolean =
             enabled && allowsPersonalData && capturedRevision==revision
     }
-    private val preferences=context.getSharedPreferences("external-agent-authority",Context.MODE_PRIVATE)
+    private val preferences=context.getSharedPreferences(if(modelId==CLAUDE_MODEL_ID)"claude-agent-authority" else "external-agent-authority",Context.MODE_PRIVATE)
     private val lock=Any()
     // A consent given for an older, narrower tool scope does not silently cover new data categories.
     private var authority=readAuthority(
@@ -24,6 +24,10 @@ class ExternalAgentSettings private constructor(context:Context) {
     }
     companion object {
         const val MODEL_ID="paired-pc-cloud-agent-v1"
+        const val CLAUDE_MODEL_ID="paired-pc-claude-agent-v1"
+        fun isCloud(modelId:String)=modelId==MODEL_ID||modelId==CLAUDE_MODEL_ID
+        fun provider(modelId:String)=if(modelId==CLAUDE_MODEL_ID)"claude" else "codex"
+        fun label(modelId:String)=if(modelId==CLAUDE_MODEL_ID)"Claude" else "Codex"
         const val TITLE="클라우드 · 휴대폰 도구"
         const val DISABLE_ID="disable-cloud-phone-agent"
         /** Scope 2 retains the old cloud grant. Scope 3 also allows personal data for newly captured runs. */
@@ -36,7 +40,13 @@ class ExternalAgentSettings private constructor(context:Context) {
 
             "문자·일정·메일은 작성 화면만 열고 직접 보내야 합니다. 글자 입력과 보내기·결제·삭제 같은 버튼은 실행 전에 확인을 받습니다. 비밀번호·결제·인증 화면은 다루지 않습니다. "+
             "연결을 해제하면 진행 중인 요청의 권한도 만료됩니다."
-        @Volatile private var instance:ExternalAgentSettings?=null
-        fun get(context:Context):ExternalAgentSettings=instance?:synchronized(this){instance?:ExternalAgentSettings(context.applicationContext).also{instance=it}}
+        fun consentText(modelId:String)=if(modelId==CLAUDE_MODEL_ID)
+            CONSENT_TEXT.replace("Codex를 통해 클라우드(ChatGPT)로","Claude Code를 통해 Anthropic으로") else CONSENT_TEXT
+
+        private val instances=mutableMapOf<String,ExternalAgentSettings>()
+        fun get(context:Context,modelId:String=MODEL_ID):ExternalAgentSettings=synchronized(this){
+            val key=if(modelId==CLAUDE_MODEL_ID)CLAUDE_MODEL_ID else MODEL_ID
+            instances.getOrPut(key){ExternalAgentSettings(context.applicationContext,key)}
+        }
     }
 }

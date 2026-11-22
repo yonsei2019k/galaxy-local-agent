@@ -143,7 +143,7 @@ class PcExternalAgentClient(
     }
     var latestProviderProgress:ProviderProgress?=null
         private set
-    suspend fun launchProvider(ownerRequest:String,conversationContext:JsonObject?=null,beforeLaunch:suspend ()->Unit={}):JsonObject {
+    suspend fun launchProvider(ownerRequest:String,conversationContext:JsonObject?=null,provider:String="codex",beforeLaunch:suspend ()->Unit={}):JsonObject {
         require(captured.allowExternalAgent&&ownerRequest.isNotBlank()&&ownerRequest.toByteArray(Charsets.UTF_8).size<=65_536&&
             ExternalAgentContract.sha(ownerRequest)==captured.requestDigest){"BRIDGE_OWNER_REQUEST_CHANGED"}
         if(!captured.allowCloudPersonalData){
@@ -161,6 +161,8 @@ class PcExternalAgentClient(
         }
         val request=buildJsonObject{
             put("ownerRequest",ownerRequest)
+            require(provider in setOf("codex","claude"))
+            if(provider=="claude")put("provider",provider)
             conversationContext?.let {
                 require(it.toString().toByteArray(Charsets.UTF_8).size<=CloudConversationContext.MAX_UTF8_BYTES)
                 put("conversationContext",it)

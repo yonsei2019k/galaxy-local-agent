@@ -43,7 +43,7 @@ class ProviderSupervisorTests(unittest.TestCase):
         self.assertEqual({"state", "report", "errorCode"}, set(report))
         self.assertNotIn("verified", json.dumps(report).lower())
         self.assertEqual("reported_done", report["report"]["state"])
-        self.assertEqual({"providerConfigured": True, "activeProviders": 0}, manager.health())
+        self.assertEqual({"providerConfigured": True, "cloudProviders": ["codex"], "activeProviders": 0}, manager.health())
 
     def test_phone_authority_and_exact_request_are_checked_before_bootstrap(self):
         bridge, manager = self.fixture()
@@ -203,7 +203,8 @@ class ProviderSupervisorTests(unittest.TestCase):
         self.assertEqual([True], observed)
 
     def test_unconfigured_and_duplicate_config_fail_closed(self):
-        bridge, manager = self.fixture(); manager.config = None
+        bridge, _ = self.fixture()
+        manager = AgentProviderSupervisor(bridge, None)
         with self.assertRaisesRegex(BridgeError, "PROVIDER_NOT_CONFIGURED"):
             manager.launch(OWNER, SID, "phone", "owner")
         with tempfile.TemporaryDirectory() as root:
