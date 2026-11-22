@@ -62,6 +62,7 @@ import com.user.localagent.core.GoalToolCatalog
 import com.user.localagent.data.GrantRecord
 import com.user.localagent.benchmark.BenchmarkRunner
 import com.user.localagent.automation.ReflectionController
+import com.user.localagent.tools.PhoneCalendarReadEvidence
 import com.user.localagent.inference.InferenceOptions
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -1336,6 +1337,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             }
                             workTraceSession?.publicDecision(call.publicExplanation)
                             val result=try {runGoalBoundTool(call.copy(publicExplanation=null),taskGoal)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
+                            if(PhoneCalendarReadEvidence.requiresPermission(call.name,result)){
+                                pauseForCalendarReadPermission(request)
+                                complete=true
+                                return@roundStep
+                            }
                             if(call.name in setOf(GoalToolCatalog.START,GoalToolCatalog.RESUME)&&result.success&&result.verification==VerificationState.VERIFIED&&
                                 TaskHarness.decide(taskGoal,requestSteps,requestedFinish=true) is HarnessDecision.Finish) {
                                 answer("목표에 연결된 작업 한 건을 대기열에 저장했습니다. 이어서 같은 대화에서 진행합니다. 목표 자체의 완료는 확인 후 판단합니다.")
@@ -1468,6 +1474,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         val started = mutableListOf<QueuedChatRequest>()
         var incomplete = false
+        var calendarPermissionNeeded = false
         suspend fun wave(rooms: List<com.user.localagent.core.office.ZipHapRoom>, stage: OfficeStage,
                          prior: Map<com.user.localagent.core.office.OfficeSeat, String>): Map<com.user.localagent.core.office.OfficeSeat, String> {
             val children = rooms.map { room ->
@@ -1481,7 +1488,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             val replies = linkedMapOf<com.user.localagent.core.office.OfficeSeat, String>()
             for (child in children) {
-                chat.awaitOfficeRun(child.runId)
+                val terminal = chat.awaitOfficeRun(child.runId)
+                if (terminal?.status == "paused" && terminal.errorCode == PhoneCalendarReadEvidence.PAUSE_CODE)
+                    calendarPermissionNeeded = true
                 val reply = chat.publishOfficeReply(child)
                 if (reply == null) incomplete = true
                 else replies[checkNotNull(officeRoomForRun(child.threadId)?.agent)] = reply
@@ -1492,18 +1501,27 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             kotlinx.coroutines.withTimeout(20L * 60 * 1000) {
                 status.value = "직원들이 각자 대화방에서 업무를 확인하고 있어요."
                 val proposals = wave(officeEmployees, OfficeStage.PROPOSAL, emptyMap())
+                if (calendarPermissionNeeded) {
+                    pauseForCalendarReadPermission(parent)
+                    return@withTimeout
+                }
                 if (proposals.isEmpty()) {
                     publishActionFinal(parent, emptySet(), "사무실 지시를 보관했습니다. 직원이 완료한 답변을 받지 못했어요.", true)
                 } else {
                     status.value = "직원들이 서로의 의견을 검토하고 있어요."
                     val reviews = if (proposals.size > 1) wave(officeEmployees.filter { it.agent in proposals }, OfficeStage.REVIEW, proposals)
                                   else emptyMap()
+                    if (calendarPermissionNeeded) {
+                        pauseForCalendarReadPermission(parent)
+                        return@withTimeout
+                    }
                     status.value = "회장이 확인된 의견을 모으고 있어요."
                     val material = proposals.mapValues { (seat, proposal) ->
                         reviews[seat]?.let { "첫 의견: " + proposal.take(850) + "\n동료 의견 검토: " + it.take(850) } ?: proposal
                     }
                     wave(listOf(com.user.localagent.core.office.ZipHapRoom.MAIN), OfficeStage.SUMMARY, material)
-                    if (incomplete) publishActionFinal(parent, emptySet(), "일부 답변을 받지 못했습니다. 실제로 도착한 답변을 보존했어요.", true)
+                    if (calendarPermissionNeeded) pauseForCalendarReadPermission(parent)
+                    else if (incomplete) publishActionFinal(parent, emptySet(), "일부 답변을 받지 못했습니다. 실제로 도착한 답변을 보존했어요.", true)
                     else {
                         chat.updateRun(parent.runId, "completed")
                         status.value = "사무실 검토 완료"
@@ -1665,6 +1683,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         var preparedSeen=false
         var screenApprovalInvalidated=false
         var phoneBrowserAuthentication=false
+        var calendarPermissionNeeded=false
         var taskGoal:com.user.localagent.core.TaskGoal?=null
         val actual=linkedMapOf<String,PhoneAgentExecution>()
         var nativeDeadlineAt=Long.MAX_VALUE
@@ -1743,6 +1762,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     screenApprovalInvalidated=true
                 if(entry.result.verificationSummary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED)
                     phoneBrowserAuthentication=true
+                if(PhoneCalendarReadEvidence.requiresPermission(entry.proposal.tool,entry.result))
+                    calendarPermissionNeeded=true
                 check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
@@ -1811,7 +1832,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         publishActionFinal(request,emptySet(),"개인 자료를 읽기 전에 멈췄습니다. 이 실행의 저장된 권한 범위에서는 모델을 바꿀 수 없습니다. 개인정보 · 로컬에서 이어갈 수 있습니다.",true,"private_plan_requires_local")
                         return@withTimeout value
                     }
-                    if(screenApprovalInvalidated||phoneBrowserAuthentication)return@withTimeout value
+                    if(screenApprovalInvalidated||phoneBrowserAuthentication||calendarPermissionNeeded)return@withTimeout value
                     if(pauseGoalBudgetIfExhausted(request))return@withTimeout value
                     if(preparedSeen)return@withTimeout value
                     if(controller.phase !in setOf(ExternalAgentController.Phase.ACTIVE,ExternalAgentController.Phase.RESULT_PENDING))return@withTimeout value
@@ -1820,6 +1841,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 @Suppress("UNREACHABLE_CODE") error("BRIDGE_PROVIDER_LOOP")
             }
             if(privatePlan || requestAutopilotPauseReason!=null)return
+            if(calendarPermissionNeeded){
+                pauseForCalendarReadPermission(request)
+                return
+            }
             if(phoneBrowserAuthentication&&pauseForBrowserAuthentication(request))return
             if(screenApprovalInvalidated){
                 publishActionFinal(request,requestAuthorizedTools,
@@ -2974,6 +2999,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             app.repository.chat.updateRun(request.runId,"paused",errorCode=pauseCode)
             status.value=if(pauseCode=="cloud_clarification_read_only")"추가 정보 대기 중" else "작업 일시정지"
         }
+    }
+    private suspend fun pauseForCalendarReadPermission(request:QueuedChatRequest) {
+        answer(PhoneCalendarReadEvidence.NOTICE)
+        persistStepEvidence()
+        app.repository.chat.updateRun(request.runId,"paused",errorCode=PhoneCalendarReadEvidence.PAUSE_CODE)
+        status.value="휴대폰 일정 읽기 권한 대기"
     }
     private suspend fun pauseForBrowserAuthentication(request:QueuedChatRequest):Boolean {
         val outcome=observedOutcomes.lastOrNull{it.call.name in com.user.localagent.core.AppBrowserToolCatalog.names||

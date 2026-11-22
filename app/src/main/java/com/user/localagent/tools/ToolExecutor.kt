@@ -277,7 +277,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "update_reminder"->{val old=repository.getReminder(call.s("id"))?:error("알림을 찾을 수 없습니다.");require(old.group==call.s("scope")){"알림 범위가 일치하지 않습니다."};val at=if(call.s("datetime").isBlank())old.atEpochMillis else OffsetDateTime.parse(call.s("datetime")).toInstant().toEpochMilli();require(at>System.currentTimeMillis());val record=repository.saveReminder(call.s("title",old.title),at,old.group,old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);val scheduled=scheduler.schedule(record);check(repository.getReminder(record.id)==record&&scheduler.verifyScheduled(record)){"리마인더 수정·예약 큐를 확인하지 못했습니다."};reminderMutationReceipt(record,scheduled.message)}
                 "delete_note"->{val old=repository.getNote(call.s("id"))?:error("대상 메모가 이미 없어 삭제하지 않았습니다.");require(old.collection !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."};repository.deleteNote(old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));check(repository.getNote(old.id)==null){"메모 삭제를 확인하지 못했습니다."};"메모 삭제·재조회 확인"}
                 "delete_reminder"->{val old=repository.getReminder(call.s("id"))?:error("대상 알림이 이미 없어 삭제하지 않았습니다.");repository.deleteReminder(old.id,expectedUpdatedAt=approvedVersion(call,old.updatedAt));scheduler.cancel(old.id);check(repository.getReminder(old.id)==null){"리마인더 삭제를 확인하지 못했습니다."};"리마인더 삭제·재조회 확인"}
-                "list_calendar_events"->listCalendar(call)
+                PhoneCalendarReadEvidence.TOOL->return@withContext listCalendar(call)
                 "search_contacts"->searchContacts(call)
                 "list_messenger_notifications"->listMessengerNotifications(call)
                 // MainActivity must show the real inbox recipient and obtain HIGH-risk user confirmation before execute.
@@ -384,14 +384,29 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             is PhoneRecordResult.Unavailable->{put("status","unavailable");put("connectionRequired",false);put("details",buildJsonObject {put("description",clip(result.description,500))})}
         }
     }.toString()
-    private fun listCalendar(call:ToolCall):String {
-        require(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED){"일정 읽기 권한을 먼저 허용해주세요."}
+    private fun listCalendar(call:ToolCall):ToolResult {
+        if(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CALENDAR)!=PackageManager.PERMISSION_GRANTED)
+            return PhoneCalendarReadEvidence.permissionDenied(call)
         val start=OffsetDateTime.parse(call.s("start")).toInstant().toEpochMilli();val end=OffsetDateTime.parse(call.s("end")).toInstant().toEpochMilli();require(end-start<=366L*24*60*60*1000){"일정 조회 범위는 최대 1년입니다."}
         val uri=CalendarContract.Instances.CONTENT_URI.buildUpon().also {ContentUris.appendId(it,start);ContentUris.appendId(it,end)}.build()
         val projection=arrayOf(CalendarContract.Instances.TITLE,CalendarContract.Instances.BEGIN,CalendarContract.Instances.END,CalendarContract.Instances.CALENDAR_ID)
         val result=mutableListOf<String>()
-        context.contentResolver.query(uri,projection,null,null,CalendarContract.Instances.BEGIN+" ASC")?.use {cursor->while(cursor.moveToNext()&&result.size<50){if(call.s("calendarId").isBlank()||cursor.getString(3)==call.s("calendarId"))result+="${cursor.getString(0)} | ${java.time.Instant.ofEpochMilli(cursor.getLong(1)).atZone(ZoneId.of("Asia/Seoul"))} | ${java.time.Instant.ofEpochMilli(cursor.getLong(2)).atZone(ZoneId.of("Asia/Seoul"))}"}}
-        return result.joinToString("\n").ifBlank {"해당 기간에 조회 가능한 일정이 없습니다."}
+        try {
+            val cursor=context.contentResolver.query(uri,projection,null,null,CalendarContract.Instances.BEGIN+" ASC")
+                ?:return PhoneCalendarReadEvidence.providerUnavailable(call)
+            cursor.use {
+                while(it.moveToNext()&&result.size<50) {
+                    if(call.s("calendarId").isBlank()||it.getString(3)==call.s("calendarId"))
+                        result+="${it.getString(0)} | ${java.time.Instant.ofEpochMilli(it.getLong(1)).atZone(ZoneId.of("Asia/Seoul"))} | ${java.time.Instant.ofEpochMilli(it.getLong(2)).atZone(ZoneId.of("Asia/Seoul"))}"
+                }
+            }
+        }catch(error:SecurityException){
+            if(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CALENDAR)!=PackageManager.PERMISSION_GRANTED)
+                return PhoneCalendarReadEvidence.permissionDenied(call)
+            throw error
+        }
+        return ToolResult(call.id,true,result.joinToString("\n").ifBlank{"해당 기간에 조회 가능한 일정이 없습니다."},
+            VerificationState.VERIFIED,"휴대폰 일정 조회")
     }
     private fun searchContacts(call:ToolCall):String {
         require(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED){"연락처 읽기 권한을 먼저 허용해주세요."}
