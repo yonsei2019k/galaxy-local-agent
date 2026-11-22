@@ -212,6 +212,7 @@ object OfficePersonas {
 
     private fun officeRoomInstruction():String = buildString {
         appendLine(BOUNDARY)
+        appendLine(FAMILY_VALUE)
         appendLine("이 방의 직원 발언은 앱이 각 직원의 실제 실행을 확인한 뒤 게시한다.")
         append("현재 응답은 집합의 단일 응답으로 작성한다. 직원 이름으로 발언을 대신 쓰거나 확인되지 않은 배정·검토·합의를 보고하지 않는다.")
     }

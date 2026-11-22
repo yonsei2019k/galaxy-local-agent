@@ -114,8 +114,9 @@ class OfficePersonasTest {
             assertTrue("${room.name} ${public.length}",public.length<=6000&&public==public.trim())
             assertTrue(public.none{it.isISOControl()&&it!='\n'})
             assertFalse(public.contains("2000년")||public.contains("초3"))
-            // Owner-entered details appear only on the local path that passes the profile.
-            assertTrue(checkNotNull(OfficePersonas.instruction(room.threadId,profile,today)).contains("2000년"))
+            // Local seat runs may receive the profile. The fallback has no seat.
+            val local=checkNotNull(OfficePersonas.instruction(room.threadId,profile,today))
+            assertEquals(room.agent != null, local.contains("2000년"))
         }
     }
 }
