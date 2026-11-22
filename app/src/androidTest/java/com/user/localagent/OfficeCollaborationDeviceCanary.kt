@@ -38,7 +38,11 @@ class OfficeCollaborationDeviceCanary {
             checkNotNull(chat.thread(room.threadId)) { "missing_staff_room" }
         }
         val parentId = UUID.randomUUID().toString()
-        val text = "사무실 공동 작업용 합성 시험. 317 × 47 + 29를 계산하고 각 직원은 계산 방법과 검산 의견을 " +
+        val introduction = InstrumentationRegistry.getArguments().getString("officeCanaryScenario") == "introduction"
+        val text = if (introduction)
+            "사무실 공동 작업용 합성 시험. 직원들은 새 고객에게 각자 이름과 직급, 담당 업무, 가족회사에서 맡은 가족 역할을 " +
+                "두 문장으로 자기소개해 주세요. 동료의 실제 소개를 읽고 협업할 일을 한 가지 의견으로 주세요. 회장도 이름과 직급을 소개하고 직원 의견을 정리해 주세요."
+        else "사무실 공동 작업용 합성 시험. 317 × 47 + 29를 계산하고 각 직원은 계산 방법과 검산 의견을 " +
             "자기 이름으로 작성하세요. 동료 의견을 읽고 검산한 뒤 회장이 최종 결과를 정리해 주세요. " +
             "시각이나 개인 자료, 파일, 실제 외부 서비스는 필요 없습니다."
         val stages = buildList {
@@ -148,7 +152,22 @@ class OfficeCollaborationDeviceCanary {
                     report.contains(originals.getValue(room to OfficeStage.REVIEW).take(850))) { "summary_missing_staff_evidence" }
             }
             val summary = originals.getValue(ZipHapRoom.MAIN to OfficeStage.SUMMARY)
-            check(Regex("(?<![0-9])14[, ]?928(?![0-9])").containsMatchIn(summary)) { "summary_arithmetic" }
+            if (introduction) {
+                val modelAsName = Regex("(?:저는|제가|제 이름은)\\s*(?:ChatGPT|GPT|Claude|Codex)", RegexOption.IGNORE_CASE)
+                for (room in officeEmployees + ZipHapRoom.MAIN) {
+                    val seat = checkNotNull(room.agent)
+                    val body = originals.getValue(room to if (room == ZipHapRoom.MAIN) OfficeStage.SUMMARY else OfficeStage.PROPOSAL)
+                    check(seat.displayName in body && seat.jobTitle in body && !modelAsName.containsMatchIn(body)) {
+                        "self_introduction_seat_mismatch"
+                    }
+                }
+                check(originals.values.none { "본부장" in it || "휴대폰 도구로 확인하지 않고 클라우드 모델이 생성한 답변입니다." in it }) {
+                    "retired_title_or_notice"
+                }
+                report("scenario=introduction identity=verified legacyNotice=absent")
+            } else {
+                check(Regex("(?<![0-9])14[, ]?928(?![0-9])").containsMatchIn(summary)) { "summary_arithmetic" }
+            }
             report("office=completed proposals=3 reviews=3 summaries=1 seats=${OfficeSeat.entries.size} " +
                 "provenance=verified cloudRoomHistory=$cloudRoomHistoryVerified")
         } finally {
