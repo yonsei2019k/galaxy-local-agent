@@ -1823,6 +1823,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val why=code?:"SESSION_${controller.phase.name}"
                 val stop=controller.stopMetadata()
                 FailureLog.cloudStop(context,why,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
+                if(stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&pauseForScreenSetup(request))return
                 val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
                     "마지막 작업의 결과를 확인하지 못했어요. 앞서 확인한 내용은 남겨뒀어요. 다시 시도하기 전에 마지막 결과를 확인해 주세요."
                     else "연결이 끊겼거나 작업이 아직 끝나지 않았어요. 앞서 확인한 내용은 남겨뒀어요."
@@ -1830,6 +1831,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
+                if(pauseForScreenSetup(request))return
                 val question=report.getValue("question").jsonPrimitive.content
                 val readOnly=requestSteps.all{com.user.localagent.core.ToolReadPolicy.isReadOnly(it.tool)}
                 val canAnswerInSameTest=readOnly&&question.isNotBlank()&&runCatching {
@@ -2937,18 +2939,28 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             request.capturedPcTextDefault==null&&!request.allowCloudText&&!request.allowExternalAgent&&
             request.continuation?.modelId.let { it==null||it=="qwen-4b" }
     private suspend fun publishCheckedAnswer(request:QueuedChatRequest,required:Set<String>,raw:String,written:WrittenAnswer,blockedReason:String?){
+        if(blockedReason!=null&&pauseForScreenSetup(request))return
         val final=if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,blockedReason)else blockedReason?:raw.ifBlank{"모델이 빈 답변을 반환했습니다."}
         if(written.messageId==null)answer(final)else lines.value+=ChatLine(written.messageId,"assistant",written.text)
         if(blockedReason!=null){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
     }
     private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean,
         pauseCode:String="execution_not_verified"){
+        if(paused&&pauseCode=="execution_not_verified"&&pauseForScreenSetup(request))return
         answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,reason)else reason)
         if(paused){
             persistStepEvidence()
             app.repository.chat.updateRun(request.runId,"paused",errorCode=pauseCode)
             status.value=if(pauseCode=="cloud_clarification_read_only")"추가 정보 대기 중" else "작업 일시정지"
         }
+    }
+    private suspend fun pauseForScreenSetup(request:QueuedChatRequest):Boolean {
+        val setup=com.user.localagent.integrations.ScreenControl.SetupNeeded.forPause(observedOutcomes)?:return false
+        answer("휴대폰 화면 연결이 준비되지 않아 요청을 일시정지했어요. ${setup.instruction} 설정한 뒤 이 대화에서 다시 요청하면 이어서 확인할 수 있어요.")
+        persistStepEvidence()
+        app.repository.chat.updateRun(request.runId,"paused",errorCode=setup.code)
+        status.value="화면 연결 설정 대기"
+        return true
     }
     private suspend fun resolveRecipient(call:ToolCall):Pair<ToolCall,Boolean>{
         val tools=checkNotNull(requestTools)
@@ -2995,6 +3007,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         catch(error:Exception){
             val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
                 else if(error is com.user.localagent.integrations.ScreenControl.SnapshotChanged)error.failure(call.id)
+                else if(error is com.user.localagent.integrations.ScreenControl.SetupRequired){
+                    FailureLog.record(context,"screen_setup",null,error.setup.code)
+                    recordOutcomeSafely(call.name,false,"FAILED · ${error.setup.code}")
+                    error.failure(call.id)
+                }
                 else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))
@@ -3168,6 +3185,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         ToolRegistry.validate(call)
         enforceGoalToolFence(checkNotNull(activeRequest),call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
+        if(call.name in com.user.localagent.core.ScreenControlToolCatalog.names)
+            com.user.localagent.integrations.ScreenControl(context).requireReady()
         val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
         val traceAttempt=workTraceSession?.attempt(call)

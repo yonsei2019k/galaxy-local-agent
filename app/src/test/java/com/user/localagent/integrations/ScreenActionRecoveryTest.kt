@@ -23,6 +23,19 @@ class ScreenActionRecoveryTest {
         ScreenControlToolCatalog.STALE_SNAPSHOT_RECEIPT,effectNotApplied=true))
 
     @Test
+    fun missingScreenSetupIsActionableOnlyWithoutPossibleEarlierEffects() {
+        for(setup in ScreenControl.SetupNeeded.entries){
+            val result=ScreenControl.SetupRequired(setup).failure(before.call.id)
+            val blocked=ObservedToolOutcome(before.call,result)
+            assertEquals(setup,ScreenControl.SetupNeeded.forPause(listOf(blocked)))
+            assertEquals(null,ScreenControl.SetupNeeded.forPause(listOf(blocked,after)))
+            assertEquals(null,ScreenControl.SetupNeeded.forPause(listOf(success(old),blocked)))
+            assertEquals(null,ScreenControl.SetupNeeded.forPause(listOf(
+                ObservedToolOutcome(old,ToolResult(old.id,false,"unknown result")),blocked)))
+        }
+    }
+
+    @Test
     fun sameGoalCanReobserveThenProposeTheFreshRef() {
         val rejected=listOf(before,stale)
         val recoveryRead=after.call

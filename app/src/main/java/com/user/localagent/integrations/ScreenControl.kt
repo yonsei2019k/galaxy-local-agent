@@ -12,9 +12,11 @@ import android.text.InputType
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.user.localagent.core.ObservedToolOutcome
 import com.user.localagent.core.ScreenControlToolCatalog
 import com.user.localagent.core.ScreenReadEvidence
 import com.user.localagent.core.ToolCall
+import com.user.localagent.core.ToolReadPolicy
 import com.user.localagent.core.ToolResult
 import com.user.localagent.core.VerificationState
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +43,21 @@ class ScreenControl(context:Context) {
 
     fun enabled():Boolean=prefs.getBoolean("enabled",false)
     fun setEnabled(value:Boolean){prefs.edit().putBoolean("enabled",value).apply()}
-    fun ready():Boolean=enabled()&&ScreenBridgeController(context).state().let{it.systemEnabled&&it.connected}
+    fun ready():Boolean=setupNeeded()==null
+
+    private fun setupNeeded():SetupNeeded? {
+        val bridge=ScreenBridgeController(context).state()
+        if(!bridge.systemEnabled){
+            val listed=android.provider.Settings.Secure.getString(context.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                .orEmpty().split(':').any{it.startsWith("${context.packageName}/")}
+            return if(listed)SetupNeeded.RECONNECT else SetupNeeded.SYSTEM
+        }
+        if(!enabled())return SetupNeeded.APP
+        return if(bridge.connected)null else SetupNeeded.RECONNECT
+    }
+
+    internal fun requireReady(){setupNeeded()?.let{throw SetupRequired(it)}}
 
     /** Element of a read: ref is its index in a deterministic traversal of the same screen. */
     private data class Element(val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,val sensitive:Boolean)
@@ -51,7 +67,7 @@ class ScreenControl(context:Context) {
     }
 
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult=try {
-        check(enabled()){"화면 제어가 꺼져 있습니다. 설정 > 화면 연결에서 '에이전트 화면 제어'를 켜주세요."}
+        requireReady()
         val observation=if(call.name==ScreenControlToolCatalog.READ) {
             try{onMain{snapshot(service())}}catch(own:OwnAppForeground){null}
         } else null
@@ -66,6 +82,7 @@ class ScreenControl(context:Context) {
     }catch(error:Throwable){
         if(error is kotlinx.coroutines.CancellationException)throw error
         if(error is SnapshotChanged)error.failure(call.id)
+        else if(error is SetupRequired)error.failure(call.id)
         else ToolResult(call.id,false,error.message?:"화면 제어 실패",VerificationState.FAILED,"화면 동작을 실행하지 않았거나 확인하지 못함",
             effectNotApplied=error is ScreenRefused)
     }
@@ -177,14 +194,28 @@ class ScreenControl(context:Context) {
     }.toString()
 
     private fun service():ScreenBridgeService {
-        if(!ScreenBridgeController(context).state().systemEnabled){
-            // Android lists a force-stopped/crashed service as enabled but never binds it again on its own.
-            val listed=android.provider.Settings.Secure.getString(context.contentResolver,android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-                .orEmpty().contains("${context.packageName}/")
-            error(if(listed)"Android가 'ZipHap.Agent 화면 연결' 서비스를 중지한 상태입니다. 설정 > 접근성에서 이 서비스를 껐다가 다시 켜주세요."
-                else "Android 설정 > 접근성에서 'ZipHap.Agent 화면 연결'을 켜주세요.")
+        requireReady()
+        return ScreenBridgeService.current()?:throw SetupRequired(SetupNeeded.RECONNECT)
+    }
+
+    internal enum class SetupNeeded(val code:String,val instruction:String){
+        SYSTEM("screen_setup_system","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘ZipHap.Agent 화면 연결’을 켜 주세요. 집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’도 켜져 있는지 확인해 주세요."),
+        APP("screen_setup_app","집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’를 켜 주세요."),
+        RECONNECT("screen_setup_reconnect","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘ZipHap.Agent 화면 연결’을 껐다가 다시 켜고 집합으로 돌아와 주세요.");
+
+        companion object {
+            fun forPause(outcomes:List<ObservedToolOutcome>):SetupNeeded? {
+                val result=outcomes.lastOrNull{it.call.name in ScreenControlToolCatalog.names}?.result?:return null
+                if(result.success||result.verification!=VerificationState.FAILED||!result.effectNotApplied)return null
+                // A preceding effect takes precedence over setup instructions and replay.
+                if(outcomes.any{!it.result.effectNotApplied&&!ToolReadPolicy.isReadOnly(it.call.name)})return null
+                return entries.firstOrNull{result.verificationSummary==it.code}
+            }
         }
-        return ScreenBridgeService.current()?:error("화면 연결 서비스가 아직 연결되지 않았습니다.")
+    }
+
+    internal class SetupRequired(val setup:SetupNeeded):IllegalStateException(setup.instruction){
+        fun failure(id:String)=ToolResult(id,false,setup.instruction,VerificationState.FAILED,setup.code,effectNotApplied=true)
     }
 
     private fun snapshot(service:ScreenBridgeService):Snapshot {
