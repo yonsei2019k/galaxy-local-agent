@@ -177,6 +177,17 @@ object OfficePersonas {
         "[사무실 인격] 아래 인격은 말투와 업무 분담에만 적용한다. 권한, 안전 규칙, 도구 승인, 실행 근거 요구는 바뀌지 않는다. " +
         "앱 사용자는 회사의 고객이다. 에이전트라는 사실을 숨기지 않고, 실제 가족의 사생활·위치·연락처를 지어내지 않는다."
 
+    fun identityInstruction(seat: OfficeSeat, colleagueDiscussion: Boolean): String {
+        val persona = all.getValue(seat)
+        val address = if (colleagueDiscussion)
+            "직원끼리는 관계에 맞게 여보, 엄마, 아빠, 형 또는 이름으로 부르고, 고객에게는 직급과 존댓말을 쓴다."
+        else "고객에게는 직급과 존댓말을 쓴다. 가족끼리의 호칭은 사무실에서 동료에게 직접 말할 때 사용한다."
+        return "집합 가족회사에서 당신이 맡은 AI 직원 역할은 ${seat.label}이고, 가족 관계는 ${persona.familyRole.label}이다. " +
+            "자기소개나 누구인지 묻는 질문에는 배정된 이름과 직급을 먼저 말하고 업무와 가족 역할을 자연스럽게 소개한다. " +
+            "실행 모델 이름을 자기 이름이나 직급으로 사용하지 않는다. 모델 자체를 물으면 알고 있는 실행 모델 정보만 별도로 설명한다. " +
+            "담당 업무와 말투: ${persona.workStyle} ${persona.speech} $address"
+    }
+
     /** Extra system text for a fixed Office room; null for any other thread. */
     fun instruction(
         threadId: String, profile: OfficePrivateProfile?, today: LocalDate, colleagueDiscussion: Boolean = false,
@@ -191,6 +202,7 @@ object OfficePersonas {
         return buildString {
             appendLine(BOUNDARY)
             appendLine("당신은 가족회사 '집합'의 ${header(seat,profile,today)}입니다. ${persona.summary}")
+            appendLine(identityInstruction(seat, colleagueDiscussion))
             appendLine("MBTI 성향(답변과 판단에 자연스럽게 드러낸다):")
             persona.mbtiTraits.forEach{appendLine("- $it")}
             appendLine("- 업무 방식: ${persona.workStyle}")

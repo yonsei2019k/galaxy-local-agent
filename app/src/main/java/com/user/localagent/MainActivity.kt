@@ -328,7 +328,9 @@ class MainActivity : ComponentActivity() {
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
                         val author = officeAuthor(message.role).takeIf { composerThreadId == officeRoomId }
                         put("id",message.id);put("role",if (author == null) message.role else "assistant")
-                        put("text",message.text.take(32000))
+                        val text = if (message.role == "assistant" || author != null)
+                            com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
+                        put("text",text.take(32000))
                         author?.let { put("authorLabel", it.label) }
                     })}})
                     put("officeSelected",officeOpen)

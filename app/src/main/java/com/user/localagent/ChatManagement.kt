@@ -259,7 +259,7 @@ fun ChatRunCoordinator.regenerate(messageId: String) = manage {
 }
 
 fun ChatRunCoordinator.copyMessage(messageId: String) = manage {
-    val text = app.repository.chat.fullMessageText(messageId)
+    val text = com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(app.repository.chat.fullMessageText(messageId))
     val clip = ClipData.newPlainText("ZipHap.Agent 답변", text).apply {
         description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
     }
@@ -268,7 +268,7 @@ fun ChatRunCoordinator.copyMessage(messageId: String) = manage {
 }
 
 fun ChatRunCoordinator.exportMessage(messageId: String) = manage {
-    val text = app.repository.chat.fullMessageText(messageId)
+    val text = com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(app.repository.chat.fullMessageText(messageId))
     val file = verifiedExport("answer", "txt") { output -> output.write(text.toByteArray(Charsets.UTF_8)) }
     shareExport(file, "text/plain")
 }

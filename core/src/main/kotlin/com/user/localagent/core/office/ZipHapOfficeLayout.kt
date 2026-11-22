@@ -10,7 +10,7 @@ enum class OfficeSeat(val displayName:String,val jobTitle:String) {
 
     val label:String get()="$jobTitle $displayName"
     /** Default room titles from earlier releases, refreshed to [label] when the owner never renamed them. */
-    val legacyLabels:Set<String> get()=if(this==DIRECTOR)setOf("본부장 $displayName") else emptySet()
+    val legacyLabels:Set<String> get()=if(this==DIRECTOR)setOf("본부장 $displayName", "$displayName 본부장") else emptySet()
 }
 
 /** Fixed product rooms. Work topics belong to tasks inside a room. */

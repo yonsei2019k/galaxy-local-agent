@@ -1606,7 +1606,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(!CloudConversationContext.isEligible(currentBinding,sourceBinding) ||
                 !allowCloudPersonalData && (com.user.localagent.core.ConversationPrivacy.sensitiveText(source.text) ||
                     com.user.localagent.core.ConversationPrivacy.sensitiveText(message.text)))continue
-            turns+=CloudConversationContext.Turn(sourceBinding,message.role,message.text,sourceConfirmed=true)
+            val contextText = if (message.role == "assistant") CloudAgentFinals.visibleAnswer(message.text) else message.text
+            turns+=CloudConversationContext.Turn(sourceBinding,message.role,contextText,sourceConfirmed=true)
             if(request.officeParentId!=null)continue
             val payload=runCatching{Json.parseToJsonElement(run.contextJson).jsonObject}.getOrNull()?:continue
             val uncertain=goalNativeEffectsUnresolved(run,app.repository.chat.accessScope(source.threadId).scopeKey,true)
@@ -1857,11 +1858,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     publishActionFinal(request,emptySet(),"공개 자료 조회 없이 조사가 끝났습니다. 확인된 출처가 없어 결과로 표시하지 않았습니다.",true,"research_evidence_unavailable")
                     return
                 }
-                answer(CloudAgentFinals.toolFreeAnswer(report.getValue("answer").jsonPrimitive.content))
+                val body = CloudAgentFinals.toolFreeAnswer(report.getValue("answer").jsonPrimitive.content)
+                if (body.isBlank()) {
+                    publishActionFinal(request, emptySet(), "답변을 받지 못했습니다. 요청을 보존했어요.", true)
+                    return
+                }
+                answer(body)
                 recordCloudReceipt(request.runId,null,0,report.getValue("elapsedMs"),nativeJournal.snapshot())
                 app.repository.chat.updateRun(request.runId,"completed")
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
-                status.value="클라우드 응답 완료 · 도구 확인 없음"
+                status.value="응답 완료"
                 return
             }
             val accepted=plan
@@ -1892,13 +1898,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             check(authority().permits(capture))
             controller.close();closed=true
             check(authority().permits(capture))
-            val answerText=report.getValue("answer").jsonPrimitive.content
+            val answerText=CloudAgentFinals.visibleAnswer(report.getValue("answer").jsonPrimitive.content)
             // Host-rendered reports replace model prose only when something was changed or handed off.
             // A read-only answer (date, calendar, contacts, search) keeps the model's synthesis of verified reads.
             val final=if(CloudAgentFinals.needsHostReport(observedOutcomes.map{it.call.name}))
                 com.user.localagent.core.ActionCompletionReport.render(requestAuthorizedTools,observedOutcomes)
-                else if(requestAuthorizedTools.isEmpty())"도구 실행 없이 생성한 답변:\n$answerText"
-                else "확인한 도구: ${requestAuthorizedTools.sorted().joinToString()}\n$answerText"
+                else answerText
+            if (final.isBlank()) {
+                publishActionFinal(request, requestAuthorizedTools, "답변을 받지 못했습니다. 확인한 결과를 보존했어요.", true)
+                return
+            }
             persistStepEvidence();answer(final)
             persistNativeState(nativeJournal.sealCheckpoint())
             recordCloudReceipt(request.runId,checkNotNull(accepted).planDigest,actual.size,report.getValue("elapsedMs"),nativeJournal.snapshot())

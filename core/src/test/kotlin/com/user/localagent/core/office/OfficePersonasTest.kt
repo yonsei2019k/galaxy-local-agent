@@ -95,6 +95,8 @@ class OfficePersonasTest {
 
     @Test fun legacyDirectorLabelIsKnown() {
         assertTrue(OfficeSeat.DIRECTOR.legacyLabels.contains("본부장 김호영"))
+        assertTrue(OfficeSeat.DIRECTOR.legacyLabels.contains("김호영 본부장"))
+        assertFalse(OfficeSeat.DIRECTOR.legacyLabels.contains("김호영 과장"))
         assertTrue(OfficeSeat.CHAIR.legacyLabels.isEmpty())
     }
 

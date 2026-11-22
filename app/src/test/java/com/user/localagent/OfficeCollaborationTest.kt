@@ -35,6 +35,11 @@ class OfficeCollaborationTest {
             officeTaskText(OfficeStage.REVIEW, OfficeSeat.DIRECTOR, "원래 요청", mapOf(OfficeSeat.CHAIR to "x".repeat(4000)))
         ).jsonObject
         assertEquals("원래 요청", text.getValue("ownerRequest").jsonPrimitive.content)
+        assertEquals("과장 김호영", text.getValue("assignedEmployee").jsonPrimitive.content)
+        val instruction = text.getValue("coordinationInstruction").jsonPrimitive.content
+        assertTrue(instruction.contains("가족 관계는 아빠"))
+        assertTrue(instruction.contains("실행 모델 이름을 자기 이름이나 직급으로 사용하지 않는다"))
+        assertTrue(instruction.contains("직원끼리는 관계에 맞게"))
         assertEquals(1800, text.getValue("colleagueReplies").jsonObject.getValue(OfficeSeat.CHAIR.label).jsonPrimitive.content.length)
         assertEquals(OfficeSeat.DIRECTOR, officeAuthor("office.DIRECTOR"))
         assertNull(officeAuthor("회장 이수빈"))

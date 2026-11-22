@@ -28,10 +28,12 @@ class CloudAgentFinalsTest {
         assertThrows(IllegalArgumentException::class.java){com.user.localagent.core.ToolRegistry.validate(bad.checkedCall(capture))}
         assertThrows(IllegalArgumentException::class.java){proposal("save_note",kotlinx.serialization.json.buildJsonObject{}).checkedCall(capture)}
     }
-    @Test fun plainAnswerIsLabelledAsUnverified(){
-        val text=CloudAgentFinals.toolFreeAnswer("  2026년 11월 16일입니다. ")
-        assertTrue(text.startsWith("휴대폰 도구로 확인하지 않고"))
-        assertTrue(text.endsWith("2026년 11월 16일입니다."))
+    @Test fun plainAndPreviouslySavedAnswersDoNotShowTheRepeatedNotice(){
+        val legacy="휴대폰 도구로 확인하지 않고 클라우드 모델이 생성한 답변입니다. 기기 자료나 현재 시각을 조회한 근거는 없습니다."
+        val body="안녕하세요. 집합의 김호영 과장입니다."
+        assertEquals(body,CloudAgentFinals.toolFreeAnswer("  $body "))
+        assertEquals(body,CloudAgentFinals.visibleAnswer("$legacy\n\n$legacy\n\n$body"))
+        assertEquals("  $body ",CloudAgentFinals.visibleAnswer("  $body "))
         assertTrue(CloudAgentFinals.PREPARED_PAUSE.contains("완료는 확인하지 않았습니다"))
     }
 }
