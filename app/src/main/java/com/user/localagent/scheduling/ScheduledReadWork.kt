@@ -21,12 +21,19 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 internal class ScheduledReadWork(private val context: Context, private val app: AppContainer) {
+    private val recovery = ScheduledReadRecovery(
+        isScheduled = { id -> app.repository.chat.run(id)?.status == ScheduledReadPolicy.SCHEDULED },
+        arm = ::arm,
+    )
+
     suspend fun execute(call: ToolCall, registrationRunId: String): ToolResult = withContext(Dispatchers.IO) {
         fun text(key: String) = call.arguments.getValue(key).jsonPrimitive.content
         when (call.name) {
@@ -42,8 +49,11 @@ internal class ScheduledReadWork(private val context: Context, private val app: 
             }
             ScheduledReadToolCatalog.CANCEL -> {
                 val id = text("scheduleId")
-                val record = app.runs.cancelScheduledRead(registrationRunId, id)
-                WorkManager.getInstance(context).cancelUniqueWork(id)
+                val record = recovery.cancel {
+                    val cancelled = app.runs.cancelScheduledRead(registrationRunId, id)
+                    WorkManager.getInstance(context).cancelUniqueWork(id)
+                    cancelled
+                }
                 val stopping = record.status == "running" && record.errorCode == ScheduledReadPolicy.STOP_REQUESTED
                 receipt(call, id, if (stopping) "stop_requested" else record.status, if (stopping)
                     "해당 실행에 중단을 요청했습니다. 확인된 결과는 원래 대화에서 확인할 수 있습니다." else
@@ -54,7 +64,7 @@ internal class ScheduledReadWork(private val context: Context, private val app: 
     }
 
     suspend fun restore() {
-        restorePendingScheduledReads(app.repository.chat.pendingScheduledReads(), ::arm) { error ->
+        restorePendingScheduledReads(app.repository.chat.pendingScheduledReads(), recovery::rearm) { error ->
             FailureLog.record(context, "scheduled_read_restore", error, "schedule_rearm_failed")
         }
     }
@@ -110,4 +120,18 @@ internal suspend fun restorePendingScheduledReads(
             onFailure(error)
         }
     }
+}
+
+internal class ScheduledReadRecovery(
+    private val isScheduled: suspend (String) -> Boolean,
+    private val arm: suspend (String, Long) -> Unit,
+) {
+    private val mutex = Mutex()
+
+    suspend fun rearm(id: String, time: Long) = mutex.withLock {
+        // Cancellation can commit after startup takes its pending snapshot.
+        if (isScheduled(id)) arm(id, time)
+    }
+
+    suspend fun <T> cancel(action: suspend () -> T): T = mutex.withLock { action() }
 }
