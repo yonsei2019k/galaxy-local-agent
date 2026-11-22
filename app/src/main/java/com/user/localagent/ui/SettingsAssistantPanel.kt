@@ -15,16 +15,18 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun SettingsAssistantPanel(app: AppContainer, open: (SettingsLink) -> Unit, modifier: Modifier = Modifier) {
+internal fun SettingsAssistantPanel(
+    app:AppContainer, open:(SettingsLink)->Unit, moveToChat:(String)->Boolean, modifier:Modifier=Modifier,
+) {
     val context = LocalContext.current
     val runner = remember(app, context) { SettingsAssistantRunner(context, app) }
     val scope = rememberCoroutineScope()
     val messages = remember {
-        mutableStateListOf(false to SettingsReply("어떤 설정이 궁금하세요? 바꿀 수 있는 설정을 알려드리고, 원하시는 설정을 바꿔드릴게요."))
+        mutableStateListOf(false to SettingsReply("업데이트 확인이나 음성 인식, 이미지 작업 위치를 물어보세요. 계정이나 권한을 바꾸려면 해당 설정 화면을 안내해드려요."))
     }
     var question by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
-    var clarification by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var previousExchange by remember { mutableStateOf<Pair<String, String>?>(null) }
     val list = rememberLazyListState()
     LaunchedEffect(messages.size, working) {
         list.scrollToItem(if (working) messages.size else messages.lastIndex)
@@ -38,10 +40,33 @@ internal fun SettingsAssistantPanel(app: AppContainer, open: (SettingsLink) -> U
                         Text(reply.text, Modifier.padding(14.dp))
                     }
                     reply.link?.let { link -> TextButton(onClick = { open(link) }) { Text(link.label) } }
+                    reply.chatDraft?.let { request ->
+                        TextButton(enabled=!working,onClick={
+                            if(!moveToChat(request)){
+                                val detail="일반 대화가 준비되지 않았거나 이미 작성 중인 내용이 있어요. 요청은 여기에 남겨뒀어요."
+                                if(messages.last().second.text!=detail){
+                                    if(messages.size>=25)messages.removeAt(1)
+                                    messages.add(false to SettingsReply(detail))
+                                }
+                            }
+                        }){Text("일반 대화로 옮기기")}
+                    }
                 }
             }
             if (working) item { Text("설정을 확인하고 있어요…", Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall) }
         }
+        TextButton(enabled=!working,onClick={
+            if(messages.size>=25) repeat(2){messages.removeAt(1)}
+            messages.add(true to SettingsReply("업데이트 확인"))
+            working=true
+            scope.launch {
+                try {
+                    val reply=runner.checkUpdates()
+                    previousExchange="업데이트 확인" to reply.text
+                    messages.add(false to reply)
+                }finally {working=false}
+            }
+        }){Text("지금 업데이트 확인")}
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 question, { if (it.length <= 600) question = it }, Modifier.weight(1f),
@@ -55,15 +80,14 @@ internal fun SettingsAssistantPanel(app: AppContainer, open: (SettingsLink) -> U
                 working = true
                 scope.launch {
                     try {
-                        val previous = clarification
-                        clarification = null
-                        val reply = runner.ask(request, previous)
-                        if (reply.followUp) clarification = (previous?.first ?: request) to reply.text
+                        val reply = runner.ask(request, previousExchange)
+                        previousExchange = request to reply.text.take(600)
                         messages.add(false to reply)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
-                        messages.add(false to SettingsReply("설정 요청의 결과를 확인하지 못했어요. 수동 설정에서 현재 값을 확인할 수 있어요."))
+                        messages.add(false to SettingsReply("설정 요청의 결과를 확인하지 못했어요. 수동 설정을 열거나 일반 대화에서 이어갈 수 있어요.",
+                            SettingsLink.MANUAL,chatDraft=request))
                     } finally {
                         working = false
                     }

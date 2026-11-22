@@ -10,12 +10,14 @@ internal data class SettingsProposal(val setting: String, val value: String) {
             "language" to setOf("ko", "en", "auto"),
             "voice" to setOf("asr-mlkit", "asr-qwen-06b", "asr-qwen-17b"),
             "image" to setOf("pc", "phone"),
+            "check" to setOf("updates"),
+            "handoff" to setOf("chat"),
             "open" to setOf("connections", "privacy", "automation", "updates", "voice", "manual"),
         )
 
         val schema = buildJsonObject {
             put("name", TOOL)
-            put("description", "Suggest one app setting change or link to its manual settings.")
+            put("description", "Select one setting change, live update check, settings link, or general chat handoff.")
             put("parameters", buildJsonObject {
                 put("type", "object")
                 put("additionalProperties", false)

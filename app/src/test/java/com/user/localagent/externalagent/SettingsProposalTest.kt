@@ -1,5 +1,6 @@
 package com.user.localagent.externalagent
 
+import com.user.localagent.ui.settingsCloudModel
 import java.util.UUID
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -23,6 +24,16 @@ class SettingsProposalTest {
         assertThrows(IllegalArgumentException::class.java) { capture(tools = setOf(SettingsProposal.TOOL, "save_note")) }
     }
 
+    @Test fun settingsUseTheSelectedProviderAndPreserveLocalAuthority() {
+        val codex = ExternalAgentSettings.MODEL_ID
+        val claude = ExternalAgentSettings.CLAUDE_MODEL_ID
+        assertEquals(codex, settingsCloudModel(codex, true))
+        assertEquals(claude, settingsCloudModel(claude, false))
+        assertEquals(claude, settingsCloudModel("auto", true))
+        assertEquals(codex, settingsCloudModel("auto", false))
+        assertNull(settingsCloudModel("private-local", true))
+    }
+
     @Test fun changeRequestsRequireAnExactAllowedValueAndBinding() {
         val granted = capture()
         fun call(arguments: String, binding: String = granted.projectBinding) = ExternalAgentProposal(
@@ -30,7 +41,11 @@ class SettingsProposalTest {
             digest, binding, 1,
         ).checkedCall(granted)
         assertEquals("en", SettingsProposal.parse(call("""{"setting":"language","value":"en"}""").arguments).value)
+        assertEquals(SettingsProposal("check","updates"), SettingsProposal.parse(call("""{"setting":"check","value":"updates"}""").arguments))
+        assertEquals(SettingsProposal("handoff","chat"), SettingsProposal.parse(call("""{"setting":"handoff","value":"chat"}""").arguments))
         listOf(
+            """{"setting":"check","value":"install"}""",
+            """{"setting":"handoff","value":"https://example.com"}""",
             """{"setting":"language","value":"pc"}""",
             """{"setting":"image","value":true}""",
             """{"setting":"account","value":"open"}""",

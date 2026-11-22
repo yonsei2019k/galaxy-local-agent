@@ -56,6 +56,19 @@ private data class PendingUpdateApproval(
         manifestDigest==other.manifestDigest&&capabilities==other.capabilities&&newCapabilities==other.newCapabilities&&newPermissions==other.newPermissions
 }
 
+private data class UpdateTrust(val verifier:UpdateVerifier,val certificate:String,val capabilities:Set<String>)
+
+internal fun updateVersionSummary(installedName:String, installedCode:Long, published:UpdateManifest, sdk:Int):String {
+    val installed="현재 설치 버전은 $installedName ($installedCode)입니다."
+    val release="${published.versionName.take(64)} (${published.versionCode})"
+    return when {
+        published.versionCode == installedCode -> "$installed 최신 게시 버전을 사용 중입니다."
+        published.versionCode < installedCode -> "$installed 현재 게시 버전 ${release}보다 높습니다."
+        published.minSdk > sdk -> "$installed 새 버전 $release 게시를 확인했습니다. 이 기기의 Android 버전에서는 설치할 수 없습니다."
+        else -> "$installed 새 버전 $release 게시를 확인했습니다. 설치하려면 앱 업데이트 화면에서 진행하세요."
+    }
+}
+
 class UpdateManager(private val context:Context) {
     private val packageMetadata=RuntimePackageMetadata(context)
     private val preferences=context.getSharedPreferences("updates",Context.MODE_PRIVATE)
@@ -80,6 +93,30 @@ class UpdateManager(private val context:Context) {
 
     suspend fun checkAndApply(install:Boolean=true,retryOnIoFailure:Boolean=false):String = checkAndApplyInternal(install,retryOnIoFailure,null)
 
+    /** Fetches only the signed manifest. Pending approvals and downloads are independent. */
+    suspend fun checkLatestVersion():String = withContext(Dispatchers.IO) {
+        try {
+            if(packageMetadata.updateUrl.isBlank())return@withContext "이 앱에는 업데이트 채널이 설정되어 있지 않습니다."
+            val trust=loadTrust()?:return@withContext "업데이트 서명 키가 설정되어 있지 않습니다."
+            val manifest=trust.verifier.verify(readManifest(),0,trust.capabilities).manifest
+            updateVersionSummary(packageMetadata.versionName,packageMetadata.versionCode,manifest,Build.VERSION.SDK_INT)
+        }catch(cancel:CancellationException){throw cancel}
+        catch(_:IOException){"최신 버전을 조회하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해주세요."}
+        catch(_:Exception){"게시된 업데이트 정보를 검증하지 못했습니다."}
+    }
+
+    private fun loadTrust():UpdateTrust? {
+        val trust=Json.parseToJsonElement(context.assets.open("update-trust.json").bufferedReader().use {it.readText()}).jsonObject
+        val keys=trust["keys"]!!.jsonObject.mapValues { Base64.getDecoder().decode(it.value.jsonPrimitive.content) }
+        if(keys.isEmpty()) return null
+        val cert=trust["apkCertificateSha256"]!!.jsonPrimitive.content
+        val capabilities=trust["approvedCapabilities"]?.jsonArray?.map {it.jsonPrimitive.content}?.toSet()?:emptySet()
+        val verifier=UpdateVerifier(keys,cert,context.packageName,"https://github.com/yonsei2019k/galaxy-local-agent/releases/download/")
+        return UpdateTrust(verifier,cert,capabilities)
+    }
+
+    private fun readManifest()=readHttps(packageMetadata.updateUrl,128*1024,packageMetadata.versionName).toString(Charsets.UTF_8)
+
     /** Approves only the exact pending manifest and APK the user reviewed in the panel. */
     suspend fun approvePendingUpdate(apkSha256:String,version:Long,manifestDigest:String):String {
         val pending=pendingApproval?:error("승인 대기 중인 업데이트가 없습니다.")
@@ -101,14 +138,11 @@ class UpdateManager(private val context:Context) {
                 status("현재 로컬 작업이 끝난 뒤 업데이트를 확인합니다.")
                 return@withContext mutableState.value.message
             }
-            val trust=Json.parseToJsonElement(context.assets.open("update-trust.json").bufferedReader().use {it.readText()}).jsonObject
-            val keys=trust["keys"]!!.jsonObject.mapValues { Base64.getDecoder().decode(it.value.jsonPrimitive.content) }
-            if(keys.isEmpty()) {status("서명 키 설정 후 자동 패치를 사용할 수 있습니다.");return@withContext mutableState.value.message}
-            val cert=trust["apkCertificateSha256"]!!.jsonPrimitive.content
-            val capabilities=trust["approvedCapabilities"]?.jsonArray?.map {it.jsonPrimitive.content}?.toSet()?:emptySet()
-            val verifier=UpdateVerifier(keys,cert,context.packageName,"https://github.com/yonsei2019k/galaxy-local-agent/releases/download/")
+            val trust=loadTrust()
+            if(trust==null) {status("서명 키 설정 후 자동 패치를 사용할 수 있습니다.");return@withContext mutableState.value.message}
+            val (verifier,cert,capabilities)=trust
             status("GitHub 릴리스 확인 중")
-            val raw=readHttps(packageMetadata.updateUrl,128*1024,packageMetadata.versionName).toString(Charsets.UTF_8)
+            val raw=readManifest()
             val verified=verifier.verify(raw,packageMetadata.versionCode-1,capabilities)
             val manifest=verified.manifest
             if(manifest.versionCode==packageMetadata.versionCode){status("최신 버전입니다.",manifest.versionCode);return@withContext mutableState.value.message}
