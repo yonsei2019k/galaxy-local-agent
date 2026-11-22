@@ -2165,3 +2165,8 @@ Owned ImageStudioState/Controller/Panel and new ImageStudioStateTest only. Adds 
 
 ## 2026-11-18 — SOURCE foreground-start receipt and provider display progress (image_fast_ui)
 Owned VoiceCommand.kt/new RunKeepAliveState.kt, PcExternalAgentClient.kt/new ProviderProgress.kt and4 pure tests. Foreground tracking requests now carry perrun generation tokens; receipt becomes ACTIVE only after successful ServiceCompat.startForeground, fixed failures cover rejected start,5s timeout, tracking end and service destruction. Stale callbacks cannot promote failed generations; bounded64 RAM entries never evict active runs. RunKeepAlive.await(runId,max5000ms)/snapshot expose actual start ACK, not battery survival guarantee; no jobs cancelled and no new permissions. Optional provider progress metadata is backward compatible, fixed-stage/number/identifier bounded, unknown tool names removed unless in capturedphone/PCtools, sequence monotonic; latestProviderProgress label is host-rendered and never execution verification. Root integrates receipt/progress in coordinator.4 pure tests added for token/timeout/capacity and progress sanitation; child did not run Gradle/build/device/runtime/model/deploy/commit. Owned-source diff check PASS. Preexisting Manifest/PcComputePanel/BackgroundRunExemption preserved. Ownership released to root.
+
+## 2026-11-22 Android Rust 영수증 결합 (차기 OpenClaw 증류 후보)
+
+- 클라우드 도구의 실제 Android 결과 ID와 성공 플래그를 Rust 실행 기록에 전달한다. 다른 호출 ID, 실패와 확인 성공이 함께 표시된 결과, 미적용과 확인 성공이 함께 표시된 결과는 미해결 호출을 종결하지 못한다. 재시작 시 미확인 실행은 보존하며 정확한 원래 호출의 뒤늦은 결과만 기록한다.
+- Rust workspace 84건과 갱신한 UniFFI를 포함한 Android debug Kotlin 컴파일이 통과했다. 이 후속 후보는 92aa350 출시 입력에 포함되어 있지 않다. 차기 release 조립·서명·폰 실행은 별도 검증이다.

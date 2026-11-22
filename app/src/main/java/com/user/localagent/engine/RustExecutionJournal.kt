@@ -3,7 +3,6 @@ package com.user.localagent.engine
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolResult
 import android.os.SystemClock
-import kotlinx.serialization.json.*
 import uniffi.ziphap_android.NativeRunJournal
 import uniffi.ziphap_android.protocolVersion
 
@@ -14,8 +13,14 @@ internal class RustExecutionJournal(binding:String,profile:String,checkpoint:Str
     fun begin(binding:String,call:ToolCall){
         native.beginCall(binding,call.id,call.name,SystemClock.elapsedRealtime().toULong())
     }
-    fun outcome(call:ToolCall,result:ToolResult){
-        native.finishCall(call.id,result.verification.name,result.effectNotApplied,SystemClock.elapsedRealtime().toULong())
+    fun outcome(result: ToolResult) {
+        native.finishCall(
+            result.id,
+            result.success,
+            result.verification.name,
+            result.effectNotApplied,
+            SystemClock.elapsedRealtime().toULong(),
+        )
     }
     fun snapshot():String=native.events(0u)
     fun checkpoint():String=native.checkpoint()

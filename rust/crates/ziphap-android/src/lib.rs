@@ -251,9 +251,20 @@ impl NativeRunJournal {
     /// Metadata from the actual Android executor only; never invoke with a provider's success report.
     /// A closed journal can retain the receipt for its original in-flight call.
     /// This does not reopen dispatch, clear closure uncertainty, or complete the task.
-    pub fn finish_call(&self, call_id: String, verification: String, effect_not_applied: bool,now_ms: u64) -> Result<(), EngineError> {
+    pub fn finish_call(
+        &self,
+        receipt_id: String,
+        success: bool,
+        verification: String,
+        effect_not_applied: bool,
+        now_ms: u64,
+    ) -> Result<(), EngineError> {
         let mut s = self.state.lock().map_err(|_| EngineError::Unavailable)?;
-        if s.in_flight.as_ref() != Some(&call_id) { return Err(EngineError::Rejected); }
+        if s.in_flight.as_ref() != Some(&receipt_id)
+            || (verification == "VERIFIED" && (!success || effect_not_applied))
+        {
+            return Err(EngineError::Rejected);
+        }
         let tool=s.in_flight_tool.as_deref().ok_or(EngineError::Rejected)?;
         let pending_owner=verification=="PREPARED"&&!opens_screen(tool);
         let state = match verification.as_str() {
@@ -263,7 +274,7 @@ impl NativeRunJournal {
             "FAILED" | "UNVERIFIED" => EffectState::Unknown,
             _ => return Err(EngineError::Rejected),
         };
-        s.journal.append(EventKind::ToolFinished { effect_id: call_id, state }, now_ms)?;
+        s.journal.append(EventKind::ToolFinished { effect_id: receipt_id, state }, now_ms)?;
         s.uncertain |= state == EffectState::Unknown||pending_owner; s.in_flight = None;s.in_flight_tool=None; Ok(())
     }
 
@@ -296,20 +307,40 @@ mod tests {
     fn binding() -> String { r#"{"runId":"r","threadId":"t","projectId":null,"branchId":"b","scopeId":"scope","authorizationRevision":2}"#.into() }
     #[test] fn exact_bound_dispatch_and_uncertain_write_block_replay() {
         let n = native(); n.begin_call(binding(), "one".into(), "save_note".into(), 101).unwrap();
-        n.finish_call("one".into(), "UNVERIFIED".into(), false, 102).unwrap();
+        n.finish_call("one".into(), true, "UNVERIFIED".into(), false, 102).unwrap();
         assert!(n.begin_call(binding(), "two".into(), "save_note".into(), 103).is_err());
         assert!(n.events(0).unwrap().contains("unknown"));
     }
     #[test] fn reads_and_prepared_actions_never_become_task_completion() {
         let n = native(); n.begin_call(binding(), "one".into(), "read_note".into(), 101).unwrap();
-        n.finish_call("one".into(), "VERIFIED".into(), false, 102).unwrap();
+        n.finish_call("one".into(), true, "VERIFIED".into(), false, 102).unwrap();
         assert!(n.begin_call(binding(), "one".into(), "read_note".into(), 103).is_err());
         assert!(n.begin_call(binding().replace("scope", "foreign"), "two".into(), "read_note".into(), 103).is_err());
         n.close(104).unwrap(); assert!(!n.events(0).unwrap().contains("completed"));
     }
+    #[test]
+    fn wrong_receipt_id_and_contradictory_success_cannot_verify_a_write() {
+        let journal = native();
+        journal.begin_call(binding(), "pending".into(), "save_note".into(), 101).unwrap();
+        for (id, success, not_applied) in [
+            ("other", true, false),
+            ("pending", false, false),
+            ("pending", true, true),
+        ] {
+            assert!(journal.finish_call(id.into(), success, "VERIFIED".into(), not_applied, 102).is_err());
+        }
+        assert!(!journal.events(0).unwrap().contains("tool_finished"));
+        assert!(journal.begin_call(binding(), "next".into(), "save_note".into(), 103).is_err());
+        journal.close(104).unwrap();
+        let restored = NativeRunJournal::restore(binding(), journal.checkpoint().unwrap()).unwrap();
+        assert!(restored.begin_call(binding(), "next".into(), "save_note".into(), 105).is_err());
+        restored.finish_call("pending".into(), true, "VERIFIED".into(), false, 106).unwrap();
+        assert!(restored.events(0).unwrap().contains("verified"));
+    }
+
     #[test] fn dispatch_deadline_is_enforced_but_late_actual_receipt_is_retained() {
         let n = native(); n.begin_call(binding(), "one".into(), "save_note".into(), 101).unwrap();
-        n.finish_call("one".into(), "VERIFIED".into(), false, 400_000).unwrap();
+        n.finish_call("one".into(), true, "VERIFIED".into(), false, 400_000).unwrap();
         assert!(n.begin_call(binding(), "two".into(), "save_note".into(), 400_001).is_err());
         assert!(n.events(0).unwrap().contains("verified"));
     }
@@ -319,11 +350,11 @@ mod tests {
         journal.begin_call(binding(), "pending".into(), "save_note".into(), 101).unwrap();
         journal.close(102).unwrap();
         let restored = NativeRunJournal::restore(binding(), journal.checkpoint().unwrap()).unwrap();
-        assert!(restored.finish_call("foreign".into(), "VERIFIED".into(), false, 103).is_err());
+        assert!(restored.finish_call("foreign".into(), true, "VERIFIED".into(), false, 103).is_err());
         assert!(restored.begin_call(binding(), "new".into(), "save_note".into(), 103).is_err());
 
-        restored.finish_call("pending".into(), "VERIFIED".into(), false, 104).unwrap();
-        assert!(restored.finish_call("pending".into(), "VERIFIED".into(), false, 105).is_err());
+        restored.finish_call("pending".into(), true, "VERIFIED".into(), false, 104).unwrap();
+        assert!(restored.finish_call("pending".into(), true, "VERIFIED".into(), false, 105).is_err());
         restored.close(106).unwrap();
         let sealed = NativeRunJournal::restore(binding(), restored.checkpoint().unwrap()).unwrap();
         assert!(sealed.begin_call(binding(), "new".into(), "save_note".into(), 107).is_err());
@@ -336,9 +367,9 @@ mod tests {
     fn restore_rejects_new_dispatch_after_uncertainty_marker() {
         let ledger = native();
         ledger.begin_call(binding(), "first".into(), "read_note".into(), 101).unwrap();
-        ledger.finish_call("first".into(), "VERIFIED".into(), false, 102).unwrap();
+        ledger.finish_call("first".into(), true, "VERIFIED".into(), false, 102).unwrap();
         ledger.begin_call(binding(), "second".into(), "read_note".into(), 104).unwrap();
-        ledger.finish_call("second".into(), "VERIFIED".into(), false, 105).unwrap();
+        ledger.finish_call("second".into(), true, "VERIFIED".into(), false, 105).unwrap();
         let mut checkpoint: Checkpoint = serde_json::from_str(&ledger.checkpoint().unwrap()).unwrap();
         checkpoint.closed = true;
         for event in &mut checkpoint.events[4..] {
@@ -359,11 +390,11 @@ mod tests {
     #[test] fn pending_external_effect_and_low_risk_mutation_cannot_become_no_effect() {
         for tool in ["prepare_sms","create_goal"]{
             let n=native();n.begin_call(binding(),"one".into(),tool.into(),101).unwrap();
-            n.finish_call("one".into(),if tool=="prepare_sms"{"PREPARED"}else{"UNVERIFIED"}.into(),false,102).unwrap();
+            n.finish_call("one".into(),true, if tool=="prepare_sms"{"PREPARED"}else{"UNVERIFIED"}.into(),false,102).unwrap();
             assert!(n.begin_call(binding(),"two".into(),tool.into(),103).is_err());
         }
         let n=native();n.begin_call(binding(),"one".into(),"search_coupang".into(),101).unwrap();
-        n.finish_call("one".into(),"PREPARED".into(),false,102).unwrap();
+        n.finish_call("one".into(),true, "PREPARED".into(),false,102).unwrap();
         n.begin_call(binding(),"two".into(),"read_screen".into(),103).unwrap();
         assert!(n.events(0).unwrap().contains("handed_off"));
     }

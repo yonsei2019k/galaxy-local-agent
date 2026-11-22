@@ -1554,7 +1554,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // restores an uncertain in-flight call and cannot silently replay a write.
                     persistNativeState()
                     val result=runTool(call)
-                    withContext(NonCancellable){nativeJournal.outcome(call,result);persistNativeState()}
+                    withContext(NonCancellable){nativeJournal.outcome(result);persistNativeState()}
                     result
                 }
             },recordActual={entry->
