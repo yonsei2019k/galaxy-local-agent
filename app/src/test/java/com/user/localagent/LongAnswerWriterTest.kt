@@ -123,9 +123,4 @@ class LongAnswerWriterTest {
         assertTrue(hasSavedAnswerBody("기존 전체 본문",emptyList()))
     }
 
-    @Test fun summaryPrefixExcludesCurrentRequestAndAllFutureQueuedMessages() {
-        val branch=listOf("older-user","older-answer","request-a","reserved-a","queued-user-b","reserved-b")
-        assertEquals(listOf("older-user","older-answer"),answerPrefixBeforeRequest(branch,"request-a"){it})
-        assertTrue(answerPrefixBeforeRequest(branch,"missing-request"){it}.isEmpty())
-    }
 }

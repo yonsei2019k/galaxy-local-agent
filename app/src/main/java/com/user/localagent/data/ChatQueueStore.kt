@@ -6,7 +6,7 @@ import kotlinx.serialization.json.*
 import java.security.MessageDigest
 
 data class BranchSummaryRecord(val id:String,val threadId:String,val branchId:String,val text:String,
-    val sourceMessageIds:List<String>,val updatedAt:Long)
+    val sourceMessageIds:List<String>,val updatedAt:Long,val checkpointMessageId:String?=null)
 
 /** Exact run/thread IDs, never a timestamp association. Legacy unbound audits are deliberately omitted. */
 fun LocalRepository.toolRunsForThread(threadId:String,runId:String?=null):Flow<List<ToolRunRecord>> = chat.toolRunsForThread(threadId,runId)
@@ -70,17 +70,27 @@ internal class ChatQueueStore(private val database:LocalDatabase) {
         dao.deleteRefs(message.id);dao.deleteSourceScope("message",message.id);local.deleteMessage(message.id);true
     }
 
-    suspend fun saveBranchSummary(chat:ChatStore,threadId:String,branchId:String,text:String,sourceMessageIds:List<String>):ChatRunRecord=database.withTransaction {
+    suspend fun saveBranchSummary(
+        chat:ChatStore,threadId:String,branchId:String,text:String,sourceMessageIds:List<String>,
+        checkpointMessageId:String,sourceTexts:Map<String,String>?,
+    ):ChatRunRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=12000&&'\u0000' !in text)
         require(sourceMessageIds.isNotEmpty()&&sourceMessageIds.size<=2000&&sourceMessageIds.distinct().size==sourceMessageIds.size)
-        val thread=activeBranch(threadId,branchId);val refs=dao.refs(branchId).map {it.messageId}.toSet()
-        check(sourceMessageIds.all {it in refs}){"요약 원문이 현재 분기에 없습니다."}
+        val thread=activeBranch(threadId,branchId)
+        val boundary=dao.position(branchId,checkpointMessageId)?:error("요약 기준점이 현재 분기에 없습니다.")
+        check(local.messageById(checkpointMessageId)?.threadId==threadId)
         val hashes=mutableMapOf<String,JsonElement>()
-        for(id in sourceMessageIds){val message=local.messageById(id)?:error("요약 원문이 삭제되었습니다.");check(message.threadId==threadId);hashes[id]=JsonPrimitive(digest(chat.fullMessageText(id)))}
+        for(id in sourceMessageIds){
+            check(local.messageById(id)?.threadId==threadId && dao.position(branchId,id)?.let {it<=boundary}==true)
+            val current=chat.fullMessageText(id)
+            if(sourceTexts!=null)check(sourceTexts[id]==current){"요약 원문이 변경되었습니다."}
+            hashes[id]=JsonPrimitive(digest(current))
+        }
         val context=buildJsonObject {
             put("kind","branch_summary");put("untrustedData",true);put("text",text)
             put("sourceMessageIds",buildJsonArray {sourceMessageIds.forEach {add(JsonPrimitive(it))}})
             put("sourceHashes",JsonObject(hashes))
+            put("checkpointMessageId",checkpointMessageId)
         }.toString()
         val now=System.currentTimeMillis()
         ChatRunRecord(id=summaryId(branchId),threadId=threadId,branchId=branchId,projectId=thread.projectId,
@@ -88,7 +98,7 @@ internal class ChatQueueStore(private val database:LocalDatabase) {
             modelId="branch-summary",status="completed",contextJson=context,createdAt=now,updatedAt=now,finishedAt=now).also {dao.run(it)}
     }
 
-    suspend fun branchSummary(chat:ChatStore,threadId:String,branchId:String):BranchSummaryRecord?=database.withTransaction {
+    suspend fun branchSummary(chat:ChatStore,threadId:String,branchId:String,beforeUserId:String?):BranchSummaryRecord?=database.withTransaction {
         val thread=dao.thread(threadId)?.takeIf {it.deletedAt==null}?:return@withTransaction null
         if(dao.branch(branchId)?.let {it.threadId==threadId&&it.deletedAt==null}!=true)return@withTransaction null
         val run=dao.run(summaryId(branchId))?:return@withTransaction null
@@ -98,13 +108,21 @@ internal class ChatQueueStore(private val database:LocalDatabase) {
         if(content["kind"]?.jsonPrimitive?.contentOrNull!="branch_summary")return@withTransaction null
         val sources=runCatching {content.getValue("sourceMessageIds").jsonArray.map {it.jsonPrimitive.content}}.getOrNull()?:return@withTransaction null
         val hashes=content["sourceHashes"]?.jsonObject?:return@withTransaction null
-        val refs=dao.refs(branchId).map {it.messageId}.toSet()
+        if(sources.isEmpty()||sources.size>2000||sources.distinct().size!=sources.size)return@withTransaction null
+        val anchor=if(beforeUserId==null)null else
+            chat.userAnchorPosition(threadId,branchId,beforeUserId)?:return@withTransaction null
+        val checkpoint=(content["checkpointMessageId"] as? JsonPrimitive)?.contentOrNull
+        val checkpointId=checkpoint?:sources.last()
+        if(local.messageById(checkpointId)?.threadId!=threadId)return@withTransaction null
+        val checkpointPosition=dao.position(branchId,checkpointId)?:return@withTransaction null
+        if(anchor!=null&&checkpointPosition>=anchor)return@withTransaction null
         for(id in sources){
-            if(id !in refs||local.messageById(id)?.threadId!=threadId)return@withTransaction null
+            if(local.messageById(id)?.threadId!=threadId ||
+                dao.position(branchId,id)?.let {it<=checkpointPosition}!=true)return@withTransaction null
             if(hashes[id]?.jsonPrimitive?.contentOrNull!=digest(chat.fullMessageText(id)))return@withTransaction null
         }
         val text=content["text"]?.jsonPrimitive?.contentOrNull?:return@withTransaction null
-        BranchSummaryRecord(run.id,threadId,branchId,text,sources,run.updatedAt)
+        BranchSummaryRecord(run.id,threadId,branchId,text,sources,run.updatedAt,checkpoint)
     }
 
     private suspend fun queued(id:String):ChatRunRecord {

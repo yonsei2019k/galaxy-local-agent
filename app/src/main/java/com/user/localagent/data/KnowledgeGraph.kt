@@ -11,6 +11,34 @@ import java.text.Normalizer
 import java.util.Locale
 import java.util.UUID
 
+internal fun normalizedKnowledgeText(value:String):String =
+    Normalizer.normalize(value,Normalizer.Form.NFKC).lowercase(Locale.ROOT)
+
+private val KNOWLEDGE_ALIASES=mapOf("이름" to listOf("name","preferred_name"),"직업" to listOf("occupation","profession","job"),"직장" to listOf("workplace","organization"),"가족" to listOf("family","spouse","children"),"아이" to listOf("children"),"아들" to listOf("children","son"),"딸" to listOf("children","daughter"),"선호" to listOf("preference","response_preference"),"메일" to listOf("email","work_email"),"연락처" to listOf("phone","email"),
+    "약속" to listOf("일정","예약","appointment"),"답장" to listOf("회신","할일","task"),
+    "바뀐" to listOf("변경","changed"),"취소" to listOf("cancelled"))
+
+internal fun knowledgeAliases(normalizedText:String):List<String> =
+    KNOWLEDGE_ALIASES.filterKeys {it in normalizedText}.values.flatten()
+
+internal fun knowledgeSearchTerms(value:String,limit:Int=160):List<String> {
+    require(limit in 1..160)
+    val normalized=normalizedKnowledgeText(value)
+    val windows=if(normalized.length<=5000)listOf(normalized)
+        else listOf(normalized.take(2500),normalized.takeLast(2500))
+    val aliases=windows.flatMap(::knowledgeAliases).distinct().take(20)
+    val tokens=windows.flatMap {it.split(Regex("[^\\p{L}\\p{N}]+"))}
+        .filter {it.length in 1..80}.distinct()
+    val wordBudget=minOf(80,(limit- aliases.size).coerceAtLeast(0))
+    fun ends(items:List<String>,size:Int):List<String> =
+        if(items.size<=size)items else items.take((size+1)/2)+items.takeLast(size/2)
+    val words=(ends(tokens,wordBudget)+aliases).distinct().take(limit)
+    val compact=windows.joinToString(" ").filter {it.isLetterOrDigit()}
+    val pairs=if(compact.length<=121)compact.windowed(2)
+        else compact.take(61).windowed(2)+compact.takeLast(61).windowed(2)
+    return words+ends(pairs.distinct().filterNot {it in words},limit-words.size)
+}
+
 @Entity(tableName="knowledge_entities")
 data class KnowledgeEntity(@PrimaryKey val subject:String,val updatedAt:Long)
 
@@ -189,15 +217,9 @@ internal class KnowledgeStore(private val database:LocalDatabase) {
         val fields = if (claim.sourceKind == "analysis_finding") labelsOnly else labelsOnly +
             listOf(claim.subject.substringAfter('|'), claim.objectSubject.orEmpty().substringAfter('|'))
         val labels = fields.flatMap(::queryTerms).distinct().take(32)
-        return (labels + queryTerms(claim.value)).distinct().take(160)
+        return (labels + knowledgeSearchTerms(claim.value,160-labels.size)).distinct()
     }
-    internal fun queryTerms(value:String):List<String> {
-        val normalized=Normalizer.normalize(value.lowercase(Locale.ROOT),Normalizer.Form.NFKC).take(5000)
-        val tokens=normalized.split(Regex("[^\\p{L}\\p{N}]+" )).filter {it.length in 1..80}.take(80)
-        val compact=normalized.filter {it.isLetterOrDigit()}.take(600)
-        val aliases=ALIASES.filterKeys {it in normalized}.values.flatten()
-        return (tokens+aliases+compact.windowed(2).take(120)).distinct().take(160)
-    }
+    internal fun queryTerms(value:String):List<String> = knowledgeSearchTerms(value)
     private fun key(value:String)=Normalizer.normalize(value.trim().lowercase(Locale.ROOT),Normalizer.Form.NFKC).replace(Regex("\\s+"),"_")
     private fun corePriority(predicate:String)=when {
         predicate in setOf("preferred_name","name","display_name")->0
@@ -210,6 +232,6 @@ internal class KnowledgeStore(private val database:LocalDatabase) {
     companion object {
         private val CONFIRMED_SOURCES=setOf("owner","owner_approved","owner_seed","owner_transfer","developer_seed","approved_memory","user_message","direct_user")
         private val CORE_PREDICATES=listOf("preferred_name","name","display_name","occupation","profession","job","workplace","organization","role","family","spouse","partner","children","children_count","child","son","daughter","response_preference","response_style","language","preference","communication_preference")
-        private val ALIASES=mapOf("이름" to listOf("name","preferred_name"),"직업" to listOf("occupation","profession","job"),"직장" to listOf("workplace","organization"),"가족" to listOf("family","spouse","children"),"아이" to listOf("children"),"아들" to listOf("children","son"),"딸" to listOf("children","daughter"),"선호" to listOf("preference","response_preference"),"메일" to listOf("email","work_email"),"연락처" to listOf("phone","email"))
+
     }
 }

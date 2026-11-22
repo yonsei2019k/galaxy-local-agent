@@ -512,9 +512,10 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         }
         val approved=accessible.filter {approvedMemoryKind(it.kind)}
         if(literal.isBlank())return@withContext approved.take(maximum)
-        val exact=approved.filter {it.text.contains(literal,ignoreCase=true)}.take(maximum)
+        val normalized=normalizedKnowledgeText(literal)
+        val exact=approved.filter {normalizedKnowledgeText(it.text).contains(normalized)}.take(maximum)
         if(exact.isNotEmpty())return@withContext exact
-        val queryTokens=lexicalTokens(literal)
+        val queryTokens=lexicalTokens(normalized+" "+knowledgeAliases(normalized).joinToString(" "))
         val queryPairs=characterPairs(literal)
         approved.asSequence().mapNotNull {memory ->
             val tokens=lexicalTokens(memory.text)
@@ -892,10 +893,8 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     }
     private suspend fun scopedKnowledge(query:String,key:String,includeOwner:Boolean,limit:Int):List<KnowledgeClaim> {
         require(query.length<=2000&&limit in 1..10&&'\u0000' !in query)
-        val normalized=query.lowercase(java.util.Locale.ROOT)
-        val aliases=mapOf("가족" to "family spouse children","아이" to "children","직업" to "occupation profession job","이름" to "name preferred_name","메일" to "email work_email","선호" to "preference response_preference",
-            "약속" to "일정 예약 appointment","답장" to "회신 할일 task","바뀐" to "변경 changed","취소" to "cancelled")
-        val expanded=normalized+" "+aliases.filterKeys {it in normalized}.values.joinToString(" ")
+        val normalized=normalizedKnowledgeText(query)
+        val expanded=normalized+" "+knowledgeAliases(normalized).joinToString(" ")
         val tokens=lexicalTokens(expanded);val pairs=characterPairs(normalized)
         val indexedTerms=graph.queryTerms(expanded)
         if(indexedTerms.isEmpty())return emptyList()
@@ -907,25 +906,37 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
                 else "${readable.subject} ${readable.predicate} ${readable.value} $labels"
             val overlap=tokens.intersect(lexicalTokens(text)).size
             val paired=pairs.intersect(characterPairs(text)).size
-            if(overlap==0&&paired<2)null else claim to (overlap*5+paired)
+            val exactShort=normalized.trim().let {word ->
+                word.length==1&&word.single().isLetterOrDigit()&&
+                    normalizedKnowledgeText(text).split(Regex("[^\\p{L}\\p{N}]+")).contains(word)
+            }
+            if(overlap==0&&paired<2&&!exactShort)null else claim to (overlap*5+paired+if(exactShort)5 else 0)
         }.sortedWith(compareByDescending<Pair<KnowledgeClaim,Int>> {it.second}
             .thenByDescending {it.first.status=="confirmed"}.thenByDescending {it.first.updatedAt}).map {it.first}
+        val corrections=scored.take(2).mapNotNull {earlier->
+            if("record_semantic" !in earlier.tags)return@mapNotNull null
+            chatDao.laterKnowledgeCorrection(earlier.id,key,includeOwner)?.let {listOf(it,earlier)}
+        }
+        val preferred=prioritizeKnowledgeCorrection(corrections.firstOrNull().orEmpty(),scored,limit)
+        if(preferred.size==limit)return preferred.map(::displayKnowledge)
         val subjects=scored.take(3).mapNotNull {it.objectSubject}.distinct()
         val related=if(subjects.isEmpty())emptyList()else chatDao.relatedKnowledge(subjects,key,includeOwner,limit)
-        val laterChanges=related.filter {candidate->"record_semantic" in candidate.tags&&
-            candidate.tags.any {it=="changed"||it=="cancelled"}&&
-            scored.take(2).any {earlier->earlier.objectSubject==candidate.objectSubject&&earlier.updatedAt<candidate.updatedAt}}
-        return (laterChanges.take(1)+scored+related).distinctBy {it.id}.take(limit).map(::displayKnowledge)
+        return (preferred+related).distinctBy {it.id}.take(limit).map(::displayKnowledge)
     }
     private fun escapeLike(value:String)=value.replace("!","!!").replace("%","!%").replace("_","!_")
     private fun approvedMemoryKind(kind:String)=kind.lowercase(java.util.Locale.ROOT) in setOf("fact","preference","correction","approved","approved_fact","approved_preference","approved_correction")
-    private fun lexicalTokens(value:String)=value.lowercase(java.util.Locale.ROOT).split(Regex("[^\\p{L}\\p{N}]+"))
+    private fun lexicalTokens(value:String)=normalizedKnowledgeText(value).split(Regex("[^\\p{L}\\p{N}]+"))
         .filter {it.length>=2&&it !in setOf("what","when","where","which","that","this","with","have","does","remember","please","내가","나는","저는","기억","알려줘","무엇","뭐야")}.toSet()
     private fun characterPairs(value:String):Set<String> {
-        val normalized=value.lowercase(java.util.Locale.ROOT).filter {it.isLetterOrDigit()}.take(4000)
-        return normalized.windowed(2).toSet()
+        val normalized=normalizedKnowledgeText(value).filter {it.isLetterOrDigit()}
+        val bounded=if(normalized.length<=4000)listOf(normalized)else listOf(normalized.take(2000),normalized.takeLast(2000))
+        return bounded.flatMap {it.windowed(2)}.toSet()
     }
 }
+internal fun prioritizeKnowledgeCorrection(
+    correctionAndSource:List<KnowledgeClaim>,ranked:List<KnowledgeClaim>,limit:Int,
+):List<KnowledgeClaim> = (correctionAndSource+ranked).distinctBy {it.id}.take(limit)
+
 private object DatabaseProvider {
     @Volatile private var instance:LocalDatabase?=null
     fun get(context:Context):LocalDatabase=instance?:synchronized(this){instance?:run {

@@ -63,6 +63,19 @@ class ContextAnchorQueryTest(unittest.TestCase):
         self.row("other-room", -1, thread="other")
         self.assertEqual([f"before-{i}" for i in range(8, 40)], self.load())
 
+    def test_summary_page_excludes_future_rows_and_keeps_40_before_recent_six(self):
+        for i in range(120):
+            self.row(f"past-{i}", i)
+        self.row("request", 120)
+        self.row("future", 121)
+        self.row("fork-only", 119, branch="fork")
+        source = CHAT_RECORDS.read_text(encoding="utf-8")
+        query = re.search(r'@Query\("([^"]+)"\) suspend fun messagePage\b', source)[1]
+        rows = list(self.db.execute(query, {"threadId": "room", "branchId": "current", "before": 120, "limit": 46}))
+        chronological = [row[0] for row in reversed(rows)]
+        self.assertEqual([f"past-{i}" for i in range(74, 114)], chronological[:-6])
+        self.assertEqual([f"past-{i}" for i in range(114, 120)], chronological[-6:])
+
     def test_missing_wrong_branch_wrong_room_and_assistant_anchors_fail_closed(self):
         self.row("before", 0)
         self.row("fork-anchor", 1, branch="fork")

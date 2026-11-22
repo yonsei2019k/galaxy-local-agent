@@ -60,10 +60,45 @@ class ChatRunStateTest {
     @Test fun explicitSummaryIsBoundedAndKeepsLatestOriginalsUnmodified(){
         val messages=(1..40).map {"user" to "원문 $it · "+"긴 합성 문장 ".repeat(80)}
         val original=messages.map {it.second}
-        val summary=extractiveChatSummary(messages)
+        val summary=extractiveChatSummaryWithSources(messages).text
         assertTrue(summary.length<=2200)
         assertTrue(summary.startsWith("발췌 요약"))
         assertTrue(summary.contains("원문 40"))
         assertEquals(original,messages.map {it.second})
     }
+
+    @Test fun extractiveSummaryAttributesOnlyIncludedRowsAndKeepsLatestCorrectionTail(){
+        val correction="열기 전에 확인. "+"가".repeat(500)+" 마지막 정정: 다른 사람에게 보내지 말 것."
+        val messages=(1..20).map {"assistant" to "old-$it "+"가".repeat(400)}+
+            listOf("user" to correction,"assistant" to " ")
+        val result=extractiveChatSummaryWithSources(messages,256)
+        assertEquals(listOf(20),result.sourceIndices)
+        assertTrue(result.text.contains("마지막 정정: 다른 사람에게 보내지 말 것."))
+        assertFalse(result.text.contains("old-20"))
+        assertTrue(result.text.length<=256)
+    }
+
+
+    @Test fun boundedKnowledgeTermsFindNormalizedAndTailOnlyWords(){
+        val text="첫단어 "+(1..110).joinToString(" ") {"합성$it"}+" 마지막표식 김 민"
+        val terms=com.user.localagent.data.knowledgeSearchTerms(text,128)
+        assertTrue(terms.size<=128)
+        assertTrue("첫단어" in terms)
+        assertTrue("마지막표식" in terms)
+        assertTrue("김" in terms)
+        assertTrue("민" in terms)
+        assertEquals("김",com.user.localagent.data.normalizedKnowledgeText("김"))
+    }
+
+
+    @Test fun newestCorrectionAndItsSourcePrecedeUnrelatedResultsWithinBudget(){
+        fun claim(id:String)=com.user.localagent.data.KnowledgeClaim(id=id,predicate="record",value=id)
+        val old=claim("previous")
+        val newest=claim("corrected")
+        val ranked=listOf(claim("other"),old,newest)
+        val pair=listOf(newest,old)
+        assertEquals(listOf(newest),com.user.localagent.data.prioritizeKnowledgeCorrection(pair,ranked,1))
+        assertEquals(pair,com.user.localagent.data.prioritizeKnowledgeCorrection(pair,ranked,2))
+    }
+
 }

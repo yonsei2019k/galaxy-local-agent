@@ -4,7 +4,6 @@ import com.user.localagent.core.*
 import com.user.localagent.ui.UiRunEvent
 import com.user.localagent.data.LocalRepository
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 
@@ -42,27 +41,51 @@ internal fun ChatRunCoordinator.handleChatCommand(input:String):String? {
 internal suspend fun ChatRunCoordinator.compactBranch(threadId:String,branchId:String,explicit:Boolean=false):String? {
     val chat=app.repository.chat
     val prior=chat.branchSummary(threadId,branchId)
-    val messages=chat.messages(threadId,branchId).first()
+    val messages=chat.branchSummaryWindow(threadId,branchId)?:return prior?.text
     if(!explicit&&messages.size<=12)return prior?.text
     val selected=(if(explicit)messages else messages.dropLast(6)).takeLast(40)
     if(selected.isEmpty())return prior?.text
-    if(!explicit&&prior?.sourceMessageIds?.lastOrNull()==selected.last().id)return prior.text
-    val summary=extractiveChatSummary(selected.map {it.role to it.text})
-    chat.saveBranchSummary(threadId,branchId,summary,selected.map {it.id})
-    return summary
+    return chat.recordExtractiveSummary(threadId,branchId,selected,prior,2200)
+}
+
+internal data class ExtractiveSummary(val text:String,val sourceIndices:List<Int>)
+
+internal suspend fun com.user.localagent.data.ChatStore.recordExtractiveSummary(
+    threadId:String,branchId:String,messages:List<com.user.localagent.data.MessageRecord>,
+    prior:com.user.localagent.data.BranchSummaryRecord?,limit:Int,
+):String {
+    val summary=extractiveChatSummaryWithSources(messages.map {it.role to it.text},limit)
+    val sources=summary.sourceIndices.map(messages::get)
+    if(sources.isEmpty())return prior?.text.orEmpty()
+    val ids=sources.map {it.id}
+    val checkpoint=messages.last().id
+    if(prior!=null&&prior.checkpointMessageId==checkpoint&&prior.sourceMessageIds==ids&&prior.text==summary.text)return prior.text
+    saveBranchSummary(threadId,branchId,summary.text,ids,checkpoint,sources.associate {it.id to it.text})
+    return summary.text
 }
 
 /** Explicitly labelled extractive context: originals remain available for retrieval/export. */
-internal fun extractiveChatSummary(messages:List<Pair<String,String>>,limit:Int=2200):String {
+internal fun extractiveChatSummaryWithSources(messages:List<Pair<String,String>>,limit:Int=2200):ExtractiveSummary {
     require(limit>=256)
-    val parts=messages.map {(role,text)->
-        val headings=text.lineSequence().filter {it.trimStart().startsWith('#')}.take(4).joinToString(" / ")
-        val excerpt=if(role=="user")text.safeHead(240)else (headings.ifBlank {text.safeHead(120)}+" … "+text.safeTail(120))
-        "${if(role=="user")"사용자"else"응답"}: $excerpt"
+    val heading="발췌 요약 · 원문 보존 · 새로운 실행 권한이 아님"
+    val chosen=mutableListOf<Pair<Int,String>>()
+    var used=heading.length
+    for(index in messages.indices.reversed()){
+        val (role,text)=messages[index]
+        if(text.isBlank())continue
+        val excerpt=if(role=="user"){
+            if(text.length<=200)text else text.safeHead(96)+" … "+text.safeTail(96)
+        }else{
+            val headings=text.lineSequence().filter {it.trimStart().startsWith('#')}.firstOrNull()?.safeHead(90)
+            (headings?:text.safeHead(90))+" … "+text.safeTail(90)
+        }
+        val line="${if(role=="user")"사용자"else"응답"}: $excerpt"
+        if(used+line.length+1>limit)break
+        chosen+=index to line
+        used+=line.length+1
     }
-    val chosen=mutableListOf<String>();var used=80
-    for(part in parts.asReversed()){if(used+part.length+1>limit)break;chosen+=part;used+=part.length+1}
-    return "발췌 요약 · 원문 보존 · 새로운 실행 권한이 아님\n"+chosen.asReversed().joinToString("\n")
+    val ordered=chosen.asReversed()
+    return ExtractiveSummary((listOf(heading)+ordered.map {it.second}).joinToString("\n"),ordered.map {it.first})
 }
 
 fun ChatRunCoordinator.editQueued(id:String,text:String){scope.launch {

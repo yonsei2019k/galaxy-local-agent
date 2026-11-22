@@ -166,6 +166,21 @@ class ChatConverters {
           AND c.status IN ('confirmed','observed')
         ORDER BY CASE c.status WHEN 'confirmed' THEN 0 ELSE 1 END,c.updatedAt DESC,c.id LIMIT :limit
     """) suspend fun relatedKnowledge(subjects:List<String>,scopeKey:String,includeOwner:Boolean,limit:Int):List<KnowledgeClaim>
+    @Query("""
+        SELECT c.* FROM knowledge_claims a
+        JOIN knowledge_claims c ON c.objectSubject=a.objectSubject AND c.sourceKind=a.sourceKind
+          AND c.sourceId=a.sourceId AND c.updatedAt>a.updatedAt
+        LEFT JOIN knowledge_scopes sourceScope ON sourceScope.claimId=a.id
+        LEFT JOIN knowledge_scopes candidateScope ON candidateScope.claimId=c.id
+        WHERE a.id=:anchorId AND a.objectSubject IS NOT NULL AND a.sourceId!=''
+          AND ((sourceScope.scopeKey IS NULL AND :includeOwner=1) OR sourceScope.scopeKey=:scopeKey)
+          AND COALESCE(sourceScope.scopeKey,'owner')=COALESCE(candidateScope.scopeKey,'owner')
+          AND ((candidateScope.scopeKey IS NULL AND :includeOwner=1) OR candidateScope.scopeKey=:scopeKey)
+          AND c.status IN ('confirmed','observed')
+          AND instr(a.tags,'"record_semantic"')>0 AND instr(c.tags,'"record_semantic"')>0
+          AND (instr(c.tags,'"changed"')>0 OR instr(c.tags,'"cancelled"')>0)
+        ORDER BY c.updatedAt DESC,c.id LIMIT 1
+    """) suspend fun laterKnowledgeCorrection(anchorId:String,scopeKey:String,includeOwner:Boolean):KnowledgeClaim?
     @Query("SELECT c.* FROM knowledge_claims c JOIN knowledge_scopes s ON s.claimId=c.id WHERE s.scopeKey=:scopeKey") suspend fun scopeClaims(scopeKey:String):List<KnowledgeClaim>
     @Query("SELECT n.* FROM notes n LEFT JOIN source_scopes s ON s.resourceKind='note' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun notes(scopeKey:String):Flow<List<NoteRecord>>
     @Query("SELECT n.* FROM memories n LEFT JOIN source_scopes s ON s.resourceKind='memory' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun memories(scopeKey:String):Flow<List<MemoryRecord>>
@@ -280,8 +295,12 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun reorderQueuedRuns(ids:List<String>):List<ChatRunRecord> = queueStore.reorderQueuedRuns(ids)
     suspend fun cancelQueuedRun(runId:String):ChatRunRecord = queueStore.cancelQueuedRun(runId)
     fun toolRunsForThread(threadId:String,runId:String?=null):Flow<List<ToolRunRecord>> = dao.toolRunsForThread(threadId,runId)
-    suspend fun saveBranchSummary(threadId:String,branchId:String,text:String,sourceMessageIds:List<String>):ChatRunRecord = queueStore.saveBranchSummary(this,threadId,branchId,text,sourceMessageIds)
-    suspend fun branchSummary(threadId:String,branchId:String):BranchSummaryRecord? = queueStore.branchSummary(this,threadId,branchId)
+    suspend fun saveBranchSummary(
+        threadId:String,branchId:String,text:String,sourceMessageIds:List<String>,
+        checkpointMessageId:String=sourceMessageIds.last(),sourceTexts:Map<String,String>?=null,
+    ):ChatRunRecord = queueStore.saveBranchSummary(this,threadId,branchId,text,sourceMessageIds,checkpointMessageId,sourceTexts)
+    suspend fun branchSummary(threadId:String,branchId:String,beforeUserId:String?=null):BranchSummaryRecord? =
+        queueStore.branchSummary(this,threadId,branchId,beforeUserId)
     suspend fun accessScope(threadId:String):ChatAccessScope {
         val t=activeThread(threadId);val p=t.projectId?.let {dao.project(it)}
         val enabled=p?.settings?.memoryMode!="off"
@@ -656,6 +675,36 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val selected=found.take(limit).map {it.copy(text=fullMessageText(it.id))}
         return ChatMessagePage(selected,if(found.size>limit)selected.lastOrNull()?.let {dao.position(branch,it.id)}else null)
     }
+    /** Read a bounded window of actual non-empty messages, in branch order. */
+    internal suspend fun branchSummaryWindow(
+        threadId:String,branchId:String,beforeUserId:String?=null,
+    ):List<MessageRecord>? = database.withTransaction {
+        activeBranch(threadId,branchId)
+        var before:Long?=null
+        if(beforeUserId!=null){
+            before=userAnchorPosition(threadId,branchId,beforeUserId)?:return@withTransaction null
+        }
+        val newest=ArrayList<MessageRecord>(46)
+        repeat(4){
+            val page=dao.messagePage(threadId,branchId,before,46)
+            for(message in page){
+                val text=fullMessageText(message.id)
+                if(text.isNotBlank())newest+=message.copy(text=text)
+                if(newest.size==46)return@withTransaction newest.asReversed()
+            }
+            if(page.size<46)return@withTransaction newest.asReversed()
+            before=dao.position(branchId,page.last().id)?:return@withTransaction null
+        }
+        // An unusually sparse branch needs more evidence than this query is allowed to read.
+        null
+    }
+
+    internal suspend fun userAnchorPosition(threadId:String,branchId:String,messageId:String):Long? {
+        val anchor=local.messageById(messageId)?:return null
+        if(anchor.threadId!=threadId||anchor.role!="user")return null
+        return dao.position(branchId,messageId)
+    }
+
     /** Capture the bounded history before the queued request, in branch order. */
     internal suspend fun contextBeforeUserMessage(
         threadId: String, branchId: String, anchorMessageId: String, limit: Int,
