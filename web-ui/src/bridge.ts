@@ -8,6 +8,7 @@ export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   text: string
+  authorLabel?: string
 }
 
 interface Thread {
@@ -153,7 +154,10 @@ function resultPreview(value: unknown): value is ResultPreview {
 
 function message(value: unknown): value is ConversationMessage {
   return record(value) && strings(value, 'id', 'text') &&
-    (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool')
+    (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool') &&
+    (value.authorLabel === undefined || (value.role === 'assistant' && typeof value.authorLabel === 'string' &&
+      value.authorLabel.trim().length > 0 && value.authorLabel.length <= 80 &&
+      !/[\u0000-\u001f\u007f]/.test(value.authorLabel)))
 }
 
 function thread(value: unknown): value is Thread {

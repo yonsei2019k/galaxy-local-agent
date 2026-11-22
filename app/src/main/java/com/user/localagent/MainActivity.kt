@@ -317,10 +317,13 @@ class MainActivity : ComponentActivity() {
                     put("otherApprovalPending",approvalThread!=null)
                     put("status",if(runForRoom!=null||activeExecutions.isEmpty())state else "다른 대화에서 작업 중")
                     put("modelId",chosenId);put("modelLabel",modelChoices.find{it.first==chosenId}?.second?:"선택한 모델")
-                    put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&!preparingAttachments&&attachments.isEmpty())
+                    put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&!chat.officeTeamRun(runForRoom)&&!preparingAttachments&&attachments.isEmpty())
                     put("resultPreviews",resultPreviews)
                     put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
-                        put("id",message.id);put("role",message.role);put("text",message.text.take(32000))
+                        val author = officeAuthor(message.role).takeIf { composerThreadId == officeRoomId }
+                        put("id",message.id);put("role",if (author == null) message.role else "assistant")
+                        put("text",message.text.take(32000))
+                        author?.let { put("authorLabel", it.label) }
                     })}})
                     put("officeSelected",composerThreadId==ZipHapRoom.OFFICE.threadId)
                     put("staffRooms",buildJsonArray{staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}})
@@ -385,10 +388,10 @@ class MainActivity : ComponentActivity() {
                             "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})}
                             "collabRefresh"->collaboration.refresh(payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "collabSend"->collaboration.post(payload.getValue("clientMessageId").jsonPrimitive.content,payload.getValue("text").jsonPrimitive.content,payload.getValue("recipient").jsonPrimitive.content,payload.getValue("bindingEpoch").jsonPrimitive.long)
-                            "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&it.role=="assistant"})chat.copyMessage(id)}
+                            "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&(it.role=="assistant"||officeAuthor(it.role)!=null)})chat.copyMessage(id)}
                             "messageMenu"->{
                                 val id=payload.getValue("messageId").jsonPrimitive.content
-                                if(messages.any{it.id==id&&it.role in setOf("user","assistant")})messageMenuId=id
+                                if(messages.any{it.id==id&&(it.role in setOf("user","assistant")||officeAuthor(it.role)!=null)})messageMenuId=id
                             }
                             "manageThreads"->chatManagerOpen=true
                             "removeAttachment"->{

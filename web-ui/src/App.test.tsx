@@ -77,6 +77,20 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('renders the host author on office replies and keeps the default for ordinary replies', () => {
+    mount()
+    snapshot({ ...base, messages: [
+      { id: 'office', role: 'assistant', text: '회장 이수빈: 검토 결과', authorLabel: '대리 김규민' },
+      { id: 'ordinary', role: 'assistant', text: '일반 답변' },
+    ] })
+    const office = host.querySelector('[aria-label="대리 김규민 답변"]')
+    expect(office?.querySelector('.message-label')?.textContent?.trim()).toBe('대리 김규민')
+    expect(host.querySelector('[aria-label="ZipHap 답변"] .message-label')?.textContent?.trim()).toBe('ZipHap')
+    expect(readSnapshot({ ...base, messages: [
+      { id: 'input', role: 'user', text: '사용자 입력', authorLabel: '대리 김규민' },
+    ] })).toBeNull()
+  })
+
   it('shows two host-bound previews and clears them after switching conversations', () => {
     mount()
     host.style.width = '320px'

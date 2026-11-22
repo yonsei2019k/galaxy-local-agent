@@ -51,9 +51,10 @@ function Message({ message, previews, enabled, onCopy, onMessageMenu }: {
 }) {
   const user = message.role === 'user'
   const assistant = message.role === 'assistant'
+  const author = assistant ? message.authorLabel ?? 'ZipHap' : undefined
   return (
-    <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? 'ZipHap 답변' : '작업 기록'}>
-      {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> ZipHap</div>}
+    <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
+      {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> {author}</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
       {assistant ? <RichAnswer text={message.text} /> : <div className="message-text" dir="auto">{message.text}</div>}
       {assistant && previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}

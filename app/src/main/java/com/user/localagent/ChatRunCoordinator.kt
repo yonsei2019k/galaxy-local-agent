@@ -533,6 +533,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }else handleChatCommand(inputText)?:return true
         val text=routedInput.ifBlank {if(snapshot.isNotEmpty())"첨부한 자료를 분석하고 핵심 내용을 정리해줘."else""}
         if(text.isBlank())return false
+        val office = threadId == officeRoomId && remoteAuthority == null
+        if (office && (snapshot.isNotEmpty() || text.length > 6000)) {
+            status.value = "사무실에 올릴 지시는 첨부 없이 6,000자 이내로 입력해 주세요. 초안을 유지했습니다."
+            return false
+        }
         if(text.length>12000){status.value="12,000자를 넘는 요청은 파일로 첨부해주세요. 입력 내용은 유지됩니다.";return false}
         val thinking=modelOptions.value.thinking
         val mode=if(publicResearchOnly)AgentWorkMode.RESEARCH.wireName else submission.mode.wireName
@@ -567,7 +572,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
                 QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
                     allowExternalAgent=ExternalAgentSettings.isCloud(resolvedModel)&&externalAuthority.enabled,externalAgentRevision=if(ExternalAgentSettings.isCloud(resolvedModel))externalAuthority.revision else null,
-                    cloudReadOnlyModes=ExternalAgentSettings.isCloud(resolvedModel) && externalAuthority.enabled).also {submitted=it}.toJson()
+                    cloudReadOnlyModes=ExternalAgentSettings.isCloud(resolvedModel) && externalAuthority.enabled,
+                    officeStage = OfficeStage.WORKFLOW.takeIf { office }).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -939,6 +945,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     request.goal?.outcome,if(request.goal==null)com.user.localagent.data.WorkSummarySource.HOST else com.user.localagent.data.WorkSummarySource.USER_GOAL)
                 if(!prepareGoalAutopilotHold(request))return@launch
                 if(request.scheduledReadTool!=null)app.repository.chat.verifyScheduledRead(request.runId,request.threadId)
+                if (request.officeStage == OfficeStage.WORKFLOW) {
+                    runOfficeWorkflow(request)
+                    return@launch
+                }
+                if (request.officeParentId != null && !app.repository.chat.officeParentActive(request)) {
+                    app.repository.chat.updateRun(request.runId, "cancelled", errorCode = "office_parent_closed")
+                    return@launch
+                }
                 val privateLocal = request.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION ||
                     (request.attachments.isNotEmpty() && request.attachments.all {it.mimeType.startsWith("image/")}) ||
                     !cloudPersonalDataAllowed(request) && (com.user.localagent.core.ConversationPrivacy.sensitiveText(request.text) ||
@@ -961,6 +975,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     try {executeCloudPhoneRequestWithPrivateRead(request);return@launch}
                     catch(handoff:PrivatePlanRejected){
                         currentCoroutineContext().ensureActive()
+                        if (request.officeParentId != null) {
+                            publishActionFinal(request, emptySet(), "현재 공유 범위로 전달할 수 없는 자료가 있어 이 답변을 보류했습니다.", true)
+                            return@launch
+                        }
                         check(requestSteps.isEmpty() && observedOutcomes.isEmpty())
                         val local=request.copy(modelId=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION,
                             allowExternalAgent=false,externalAgentRevision=null,allowCloudText=false,cloudReadOnlyModes=false)
@@ -1424,6 +1442,114 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
+    private suspend fun runOfficeWorkflow(parent: QueuedChatRequest) {
+        val chat = app.repository.chat
+        if (ExternalAgentSettings.isCloud(parent.modelId) && !parent.allowExternalAgent) {
+            publishActionFinal(parent, emptySet(), "사무실 지시를 보관했습니다. 선택한 클라우드 연결을 확인해 주세요.", true)
+            return
+        }
+        val targets = (officeEmployees + com.user.localagent.core.office.ZipHapRoom.MAIN).associateWith { room ->
+            checkNotNull(chat.thread(room.threadId)).also { thread ->
+                check(thread.deletedAt == null && !thread.archived && thread.projectId == null) {
+                    "직원 대화의 공유 범위가 변경되었습니다."
+                }
+            }
+        }
+        val started = mutableListOf<QueuedChatRequest>()
+        var incomplete = false
+        suspend fun wave(rooms: List<com.user.localagent.core.office.ZipHapRoom>, stage: OfficeStage,
+                         prior: Map<com.user.localagent.core.office.OfficeSeat, String>): Map<com.user.localagent.core.office.OfficeSeat, String> {
+            val children = rooms.map { room ->
+                val seat = checkNotNull(room.agent)
+                currentCoroutineContext().ensureActive()
+                withContext(NonCancellable) {
+                    queueOwner.enqueueOfficeChild(parent, targets.getValue(room), room, stage,
+                        officeTaskText(stage, seat, parent.text, if (stage == OfficeStage.REVIEW) prior - seat else prior))
+                        .also { started += it }
+                }
+            }
+            val replies = linkedMapOf<com.user.localagent.core.office.OfficeSeat, String>()
+            for (child in children) {
+                chat.awaitOfficeRun(child.runId)
+                val reply = chat.publishOfficeReply(child)
+                if (reply == null) incomplete = true
+                else replies[checkNotNull(officeRoomForRun(child.threadId)?.agent)] = reply
+            }
+            return replies
+        }
+        try {
+            kotlinx.coroutines.withTimeout(20L * 60 * 1000) {
+                status.value = "직원들이 각자 대화방에서 업무를 확인하고 있어요."
+                val proposals = wave(officeEmployees, OfficeStage.PROPOSAL, emptyMap())
+                if (proposals.isEmpty()) {
+                    publishActionFinal(parent, emptySet(), "사무실 지시를 보관했습니다. 직원이 완료한 답변을 받지 못했어요.", true)
+                } else {
+                    status.value = "직원들이 서로의 의견을 검토하고 있어요."
+                    val reviews = if (proposals.size > 1) wave(officeEmployees.filter { it.agent in proposals }, OfficeStage.REVIEW, proposals)
+                                  else emptyMap()
+                    status.value = "회장이 확인된 의견을 모으고 있어요."
+                    val material = proposals.mapValues { (seat, proposal) ->
+                        reviews[seat]?.let { "첫 의견: " + proposal.take(850) + "\n동료 의견 검토: " + it.take(850) } ?: proposal
+                    }
+                    wave(listOf(com.user.localagent.core.office.ZipHapRoom.MAIN), OfficeStage.SUMMARY, material)
+                    if (incomplete) publishActionFinal(parent, emptySet(), "일부 답변을 받지 못했습니다. 실제로 도착한 답변을 보존했어요.", true)
+                    else {
+                        chat.updateRun(parent.runId, "completed")
+                        status.value = "사무실 검토 완료"
+                    }
+                }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            publishActionFinal(parent, emptySet(), "시간 내 도착한 사무실 답변을 보존했습니다.", true)
+        } finally {
+            withContext(NonCancellable) { queueOwner.stopOfficeChildren(started) }
+        }
+    }
+
+    private suspend fun enqueueOfficeChild(
+        parent: QueuedChatRequest, target: com.user.localagent.data.ChatThreadRecord,
+        room: com.user.localagent.core.office.ZipHapRoom, stage: OfficeStage, text: String,
+    ): QueuedChatRequest = withContext(Dispatchers.Main.immediate) {
+        val chat = app.repository.chat
+        val id = officeChildId(parent.runId, room, stage)
+        val request = queueMutation.withLock {
+            val existing = chat.run(id)
+            if (existing != null) return@withLock QueuedChatRequest.fromJson(existing.contextJson)
+            val row = chat.enqueueOfficeRun(parent, target, id, text) { user, run ->
+                QueuedChatRequest(run.id, target.id, target.activeBranchId, null,
+                    text, parent.modelId, parent.thinking, emptyList(), user.id, mode = AgentWorkMode.REVIEW.wireName,
+                    workspaceBinding = parent.workspaceBinding, capturedPcRevision = parent.capturedPcRevision,
+                    allowExternalAgent = parent.allowExternalAgent, externalAgentRevision = parent.externalAgentRevision,
+                    cloudReadOnlyModes = parent.cloudReadOnlyModes, capturedPcTextDefault = parent.capturedPcTextDefault,
+                    officeStage = stage, officeParentId = parent.runId).toJson()
+            }
+            val saved = QueuedChatRequest.fromJson(row.contextJson)
+            check(saved.officeParentId == parent.runId && saved.officeStage == stage)
+            com.user.localagent.voice.AgentRunService.track(context, id, target.id, "사무실 공동 작업")
+            queued.value = queued.value + saved
+            saved
+        }
+        drain()
+        request
+    }
+
+    private suspend fun stopOfficeChildren(children: List<QueuedChatRequest>) = withContext(Dispatchers.Main.immediate) {
+        for (child in children) {
+            queueMutation.withLock {
+                if (app.repository.chat.run(child.runId)?.status == "queued") {
+                    app.repository.chat.cancelQueuedRun(child.runId)
+                    queued.value = queued.value.filterNot { it.runId == child.runId }
+                }
+            }
+            if (app.repository.chat.run(child.runId)?.status in setOf("running", "waiting_approval")) {
+                stopRun(child.runId, child.threadId)
+            }
+        }
+    }
+
+    internal fun officeTeamRun(id: String): Boolean = executionForRun(id)?.activeRequest?.officeStage != null
+
     private fun cloudPersonalDataAllowed(request:QueuedChatRequest):Boolean =
         request.allowExternalAgent && ExternalAgentSettings.isCloud(request.modelId) &&
             request.mode!=AgentWorkMode.RESEARCH.wireName &&
@@ -1431,8 +1557,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
 
     /** Automatic context still requires the original source run to have the same cloud grant. */
     private suspend fun captureCloudContext(request:QueuedChatRequest,allowCloudPersonalData:Boolean):JsonObject? {
-        fun binding(value:QueuedChatRequest)=CloudConversationContext.Binding(value.runId,value.threadId,value.branchId,
-            value.projectId,value.externalAgentRevision,value.capturedPcRevision,value.modelId,value.allowExternalAgent,value.mode)
+        fun binding(value:QueuedChatRequest):CloudConversationContext.Binding {
+            // Office review can read its room's ordinary history under the same grants.
+            // This alias is only for historical context matching; the run still uses REVIEW.
+            val contextMode = if (request.officeParentId != null && value.officeParentId != null &&
+                value.mode == AgentWorkMode.REVIEW.wireName) AgentWorkMode.ACT.wireName else value.mode
+            return CloudConversationContext.Binding(value.runId,value.threadId,value.branchId,
+                value.projectId,value.externalAgentRevision,value.capturedPcRevision,value.modelId,value.allowExternalAgent,contextMode)
+        }
         val chat=app.repository.chat
         val currentBinding=binding(request)
         val window=chat.contextBeforeUserMessage(request.threadId,request.branchId,request.userMessageId,32)
@@ -1452,6 +1584,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 !allowCloudPersonalData && (com.user.localagent.core.ConversationPrivacy.sensitiveText(source.text) ||
                     com.user.localagent.core.ConversationPrivacy.sensitiveText(message.text)))continue
             turns+=CloudConversationContext.Turn(sourceBinding,message.role,message.text,sourceConfirmed=true)
+            if(request.officeParentId!=null)continue
             val payload=runCatching{Json.parseToJsonElement(run.contextJson).jsonObject}.getOrNull()?:continue
             val uncertain=goalNativeEffectsUnresolved(run,app.repository.chat.accessScope(source.threadId).scopeKey,true)
             val goal=(payload["externalAgentPlan"] as? JsonObject)?.get("goal")?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -1513,7 +1646,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val currentDisabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
             val liveGoal=request.goal?.let {original->goals.loadGuarded(scope)?.let {it.status==com.user.localagent.core.GoalStatus.ACTIVE&&sameGoalWork(original,it)&&request.runId in it.linkedRunIds}==true}?:true
             val active=android.os.SystemClock.elapsedRealtime()<nativeDeadlineAt&&com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active&&activeRequest?.runId==request.runId&&requestJob?.isActive==true&&pendingSteerRunId!=request.runId&&
-                liveGoal&&requestAutopilotPauseReason==null&&(queueOwner.goalStopEpochs[request.threadId]?:0L)==admittedGoalStopEpoch&&
+                liveGoal&&(request.officeParentId==null||app.repository.chat.officeParentActive(request))&&requestAutopilotPauseReason==null&&(queueOwner.goalStopEpochs[request.threadId]?:0L)==admittedGoalStopEpoch&&
                 run?.status=="running"&&run.threadId==request.threadId&&run.branchId==request.branchId&&run.projectId==request.projectId&&
                 thread?.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
                 app.repository.chat.accessScope(request.threadId)==scope&&executionWorkspace?.bindingFingerprint()==request.workspaceBinding
@@ -2793,6 +2926,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private suspend fun runTool(call:ToolCall):ToolResult {
         validateSemanticCall(call)
         val request=checkNotNull(activeRequest)
+        if (request.officeParentId != null) check(app.repository.chat.officeParentActive(request))
         enforceGoalToolFence(request,call)
         request.goal?.let {snapshot->
             val current=goals.loadGuarded(app.repository.chat.accessScope(request.threadId))

@@ -131,6 +131,10 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
     require(text.isNotBlank()&&text.length<=4000)
     val runId=expectedRunId?:return
     val threadId=expectedThreadId?:return
+    if (officeTeamRun(runId)) {
+        status.value = "진행 중인 사무실 작업을 멈추거나 새 지시를 보내 주세요."
+        return
+    }
     val worker=executionForRun(runId)
     if(worker!=null&&worker!==this){worker.steer(text,runId,threadId);return}
     scope.launch {

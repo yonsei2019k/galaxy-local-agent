@@ -735,6 +735,56 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         insertMessage(MessageRecord(id=id,role="assistant",text="",threadId=r.threadId,branchId=r.branchId,runId=r.id),r.userMessageId)
     }
     /** Host/rule/tool prose shares the same ordered primary answer as later model output. */
+    internal suspend fun enqueueOfficeRun(parent: com.user.localagent.QueuedChatRequest, target: ChatThreadRecord,
+        id: String, text: String, makeContext: (MessageRecord, ChatRunRecord) -> String): ChatRunRecord = database.withTransaction {
+        val ownerRun = validRun(parent.runId)
+        check(ownerRun.status == "running" && ownerRun.threadId == com.user.localagent.officeRoomId &&
+            dao.thread(ownerRun.threadId)?.activeBranchId == ownerRun.branchId)
+        val live = activeThread(target.id)
+        check(!live.archived && live.projectId == null && live.activeBranchId == target.activeBranchId &&
+            live.revision == target.revision)
+        dao.run(id) ?: enqueueUserRun(target.id, target.activeBranchId, text, parent.modelId, parent.thinking, runId = id,
+            contextFactory = makeContext)
+    }
+
+    internal suspend fun officeParentActive(child: com.user.localagent.QueuedChatRequest): Boolean = database.withTransaction {
+        val parentId = child.officeParentId ?: return@withTransaction false
+        val parent = dao.run(parentId) ?: return@withTransaction false
+        if (parent.status != "running" || parent.threadId != com.user.localagent.officeRoomId ||
+            dao.thread(parent.threadId)?.activeBranchId != parent.branchId) return@withTransaction false
+        checkBinding(parent)
+        val source = com.user.localagent.QueuedChatRequest.fromJson(parent.contextJson)
+        source.runId == parent.id && source.branchId == parent.branchId &&
+            source.officeStage == com.user.localagent.OfficeStage.WORKFLOW &&
+            source.modelId == child.modelId && source.externalAgentRevision == child.externalAgentRevision &&
+            source.capturedPcRevision == child.capturedPcRevision && source.allowExternalAgent == child.allowExternalAgent
+    }
+
+    internal suspend fun publishOfficeReply(child: com.user.localagent.QueuedChatRequest): String? = database.withTransaction {
+        if (!officeParentActive(child)) return@withTransaction null
+        val parent = validRun(checkNotNull(child.officeParentId))
+        val run = dao.run(child.runId) ?: return@withTransaction null
+        if (run.status != "completed") return@withTransaction null
+        checkBinding(run)
+        check(run.threadId == child.threadId && run.branchId == child.branchId &&
+            dao.thread(run.threadId)?.activeBranchId == run.branchId)
+        val room = checkNotNull(com.user.localagent.officeRoomForRun(child.threadId))
+        val saved = com.user.localagent.QueuedChatRequest.fromJson(run.contextJson)
+        check(saved.officeParentId == parent.id && saved.officeStage == child.officeStage)
+        val result = dao.assistantForRun(run.id) ?: return@withTransaction null
+        val text = fullMessageText(result.id).trim()
+        if (text.isEmpty()) return@withTransaction null
+        val id = com.user.localagent.officePublicationId(child.runId)
+        if (local.messageById(id) == null) {
+            insertMessage(MessageRecord(id = id, role = "office." + checkNotNull(room.agent).name,
+                text = text, threadId = parent.threadId, branchId = parent.branchId, originMessageId = result.id))
+        }
+        text
+    }
+
+    internal suspend fun awaitOfficeRun(id: String): ChatRunRecord? =
+        dao.observeScheduledRead(id).first { it == null || it.status !in setOf("queued", "running", "waiting_approval") }
+
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)
         val run=validRun(runId);check(run.status in setOf("running","waiting_approval")){"시작된 작업의 답변만 저장합니다."}
