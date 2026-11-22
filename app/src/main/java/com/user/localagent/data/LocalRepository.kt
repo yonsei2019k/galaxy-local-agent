@@ -187,12 +187,12 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
     internal suspend fun saveConnectedLearning(version: String, claims: List<KnowledgeClaim>, epoch: Long,
         authorized: suspend () -> Boolean): Int = database.withTransaction {
         if (connectedLearningChecked(version)) return@withTransaction 0
-        check(knowledgeEpoch() == epoch && authorized())
+        if (knowledgeEpoch() != epoch || !authorized()) throw KnowledgeSourceInvalidated("Connected source is no longer authorized")
         for (claim in claims) {
             val stored = saveKnowledgeClaim(claim, epoch)
             check(getKnowledge(stored.id)?.let { it.sourceId == claim.sourceId && it.sourceExcerpt == claim.sourceExcerpt } == true)
         }
-        check(authorized())
+        if (!authorized()) throw KnowledgeSourceInvalidated("Connected source is no longer authorized")
         database.knowledgeDao().meta(KnowledgeMeta("connected_learning_v1.$version", 1))
         claims.size
     }

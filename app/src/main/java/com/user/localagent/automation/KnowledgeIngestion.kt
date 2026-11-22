@@ -17,11 +17,13 @@ import com.user.localagent.briefing.BriefingArchive
 import com.user.localagent.core.ExtractedKnowledgeFact
 import com.user.localagent.core.KnowledgeExtraction
 import com.user.localagent.data.KnowledgeClaim
+import com.user.localagent.data.KnowledgeSourceInvalidated
 import com.user.localagent.data.DraftStore
 import com.user.localagent.data.LocalRepository
 import com.user.localagent.data.MessageCursor
 import com.user.localagent.data.NoteRecord
 import com.user.localagent.integrations.MessengerInbox
+import java.io.IOException
 import java.security.MessageDigest
 import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
@@ -69,7 +71,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
         // Reconcile missed Android signals and collect the system's retained app usage events.
         work.enqueueUniquePeriodicWork(PERIODIC,ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<KnowledgeIngestionWorker>(30,TimeUnit.MINUTES)
-                .setConstraints(constraints()).build())
+                .setConstraints(constraints()).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,INGESTION_BACKOFF_SECONDS,TimeUnit.SECONDS).build())
         requestInitialScan()
     }
     internal fun scheduleSmsWatch(append:Boolean=false){
@@ -81,10 +83,16 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
             if(append)ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<KnowledgeSmsWatchWorker>().setConstraints(watch.build()).build())
     }
-    fun requestInitialScan(append:Boolean=false){
-        if(!state().enabled)return
+    fun requestInitialScan(append:Boolean=false) = enqueueScan(append,null)
+
+    internal fun enqueueScan(append:Boolean,expectedGeneration:Long?) {
+        val current=state()
+        if(!current.enabled||expectedGeneration!=null&&current.generation!=expectedGeneration)return
         WorkManager.getInstance(context).enqueueUniqueWork(EVENT,if(append)ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<KnowledgeIngestionWorker>().setConstraints(constraints()).build())
+            OneTimeWorkRequestBuilder<KnowledgeIngestionWorker>()
+                .setInputData(workDataOf(GENERATION_INPUT to current.generation))
+                .setConstraints(constraints())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,INGESTION_BACKOFF_SECONDS,TimeUnit.SECONDS).build())
     }
     /** Capture bounded observations on receipt and enqueue the same incremental processor. */
     fun captureIncomingNotification(notification:StatusBarNotification) {
@@ -152,15 +160,25 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
             if(!KnowledgeExtraction.afterHistoricalErasure(source.at,prefs.getLong("erased_through",0))||!repository.knowledgeSourceAllowed(source.kind,source.id,source.at))return@withContext KnowledgeIngestionReport(0,0,false,"source_erased")
             for(fact in source.facts.take(6)){
                 currentCoroutineContext().ensureActive()
-                if(!state().enabled||state().generation!=generation||repository.knowledgeEpoch()!=epoch)throw IngestionInterrupted()
+                requireGeneration(generation)
+                if(repository.knowledgeEpoch()!=epoch)throw KnowledgeSourceInvalidated("Knowledge epoch changed")
                 repository.saveKnowledgeClaim(KnowledgeClaim(subject=if(fact.ownerProfile)"owner" else "record:${digest("${source.kind}|${source.id}").take(24)}",predicate=if(fact.ownerProfile)fact.predicate else fact.predicate+"."+digest(fact.value).take(16),value=fact.value,
                     status=if(fact.ownerProfile)"confirmed" else "observed",confidence=fact.confidence,sourceKind=source.kind,sourceId=source.id,sourceExcerpt=fact.evidence,updatedAt=source.at,tags=fact.tags),expectedEpoch=epoch)
                 saved++
             }
-            synchronized(SETTINGS_LOCK){if(state().enabled&&state().generation==generation)prefs.edit().putLong("processed",state().processedSources+1).putLong("claims",state().savedClaims+saved).putLong("last_success",System.currentTimeMillis()).putString("status","direct_source_checked").commit()}
+            synchronized(SETTINGS_LOCK){
+                requireGeneration(generation)
+                prefs.saveKnowledgeCheckpoint("processed" to (state().processedSources+1), "claims" to (state().savedClaims+saved),
+                    "last_success" to System.currentTimeMillis(), "status" to "direct_source_checked")
+            }
             KnowledgeIngestionReport(1,saved,false,"direct_source_checked")
         }catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){statusReport(generation,0,saved,true,"source_or_generation_changed")}
+        catch(error:Exception){
+            currentCoroutineContext().ensureActive()
+            val report=failureReport(generation,0,saved,error)
+            if(report.status==INGESTION_RETRY)enqueueScan(append=false,expectedGeneration=generation)
+            report
+        }
         finally {activeScan=null;SCAN_MUTEX.unlock()}
     }
     /** Erase graph knowledge and place all older sources behind a persistent no-reingestion boundary. */
@@ -194,10 +212,10 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
     }
 
     /** Explicit initial/manual scan API; background workers additionally require charging/idle constraints. */
-    suspend fun scanNow(manual:Boolean=true,maxSources:Int=100,includeDeviceSources:Boolean=false):KnowledgeIngestionReport=withContext(Dispatchers.IO){
+    suspend fun scanNow(manual:Boolean=true,maxSources:Int=100,includeDeviceSources:Boolean=false,expectedGeneration:Long?=null):KnowledgeIngestionReport=withContext(Dispatchers.IO){
         require(maxSources in 1..200)
         if(!SCAN_MUTEX.tryLock())return@withContext KnowledgeIngestionReport(0,0,true,"busy")
-        val generation=state().generation
+        val generation=expectedGeneration?:state().generation
         var processed=0;var claims=0;var more=false
         var drainOne: (suspend () -> LearningPass)? = null
         var learningStatus: String? = null
@@ -205,6 +223,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
         try {
             activeScan=currentCoroutineContext()[Job]
             if(!state().enabled)return@withContext KnowledgeIngestionReport(0,0,false,"disabled")
+            requireGeneration(generation)
             if(!deviceSafe(manual))return@withContext statusReport(generation,0,0,false,"deferred_device_state")
             val epoch=repository.knowledgeEpoch();val floor=prefs.getLong("erased_through",0)
             if(includeDeviceSources){
@@ -226,26 +245,37 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                 } }
             }
             val deadline=SystemClock.elapsedRealtime()+20000
-            suspend fun eligible(){currentCoroutineContext().ensureActive();if(!state().enabled||state().generation!=generation||repository.knowledgeEpoch()!=epoch)throw IngestionInterrupted()}
+            suspend fun eligible(){
+                currentCoroutineContext().ensureActive()
+                requireGeneration(generation)
+                if(repository.knowledgeEpoch()!=epoch)throw KnowledgeSourceInvalidated("Knowledge epoch changed")
+            }
             suspend fun persist(kind:String,id:String,at:Long,facts:List<ExtractedKnowledgeFact>){
                 fun permitted()=when(kind){"sms_provider"->smsAllowed();"kakao_notification"->kakaoAllowed();"email_notification"->AssistantNotificationListener.granted(context);else->true}
                 eligible()
-                check(permitted())
+                if(!permitted())throw KnowledgeSourceInvalidated("Source permission changed")
                 if(!KnowledgeExtraction.afterHistoricalErasure(at,floor)||!repository.knowledgeSourceAllowed(kind,id,at))return
                 for(fact in facts.take(6)){
                     eligible()
+                    if(!permitted())throw KnowledgeSourceInvalidated("Source permission changed")
                     val predicate=if(fact.ownerProfile)fact.predicate else fact.predicate+"."+digest(fact.value).take(16)
                     val saved=repository.saveKnowledgeClaim(KnowledgeClaim(subject=if(fact.ownerProfile)"owner" else "record:${digest("$kind|$id").take(24)}",predicate=predicate,value=fact.value,
                         status=if(fact.ownerProfile)"confirmed" else "observed",confidence=fact.confidence,sourceKind=kind,sourceId=id,sourceExcerpt=fact.evidence,
                         updatedAt=at,tags=fact.tags),expectedEpoch=epoch)
                     if(kind=="sms_provider"||kind=="kakao_notification"){
-                        check(permitted())
+                        if(!permitted())throw KnowledgeSourceInvalidated("Source permission changed")
                         check(repository.getKnowledge(saved.id)?.let{it.sourceKind==kind&&it.sourceId==id&&it.value==saved.value}==true)
                     }
                     claims++
                 }
             }
-            suspend fun checkpoint(edit:android.content.SharedPreferences.Editor){eligible();synchronized(SETTINGS_LOCK){if(state().enabled&&state().generation==generation)check(edit.commit())}}
+            suspend fun checkpoint(vararg values:Pair<String,Any>){
+                eligible()
+                synchronized(SETTINGS_LOCK){
+                    requireGeneration(generation)
+                    prefs.saveKnowledgeCheckpoint(*values)
+                }
+            }
             suspend fun stage(block:suspend ()->Unit):Boolean=try {block();true}
             catch(_:LearningQueueFull){more=true;false}
             var smsMissing=false
@@ -257,25 +287,29 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                     val after=prefs.getLong(smsCursor,-1)
                     val readSince=if(after>=0||manual)floor else maxOf(floor,System.currentTimeMillis()-TimeUnit.DAYS.toMillis(1))
                     val limit=minOf(if(manual)120 else 40,maxSources/2)
-                    if(limit>0)context.contentResolver.query(Telephony.Sms.CONTENT_URI,arrayOf("_id","date","body","thread_id"),
-                        "_id > ? AND date > ?",arrayOf(after.toString(),readSince.toString()),"_id ASC")?.use {rows->
-                        var read=0
-                        while(rows.moveToNext()){
-                            if(read>=limit||SystemClock.elapsedRealtime()>deadline){more=true;break}
-                            eligible()
-                            check(smsAllowed())
-                            val id=rows.getLong(0)
-                            val at=rows.getLong(1)
-                            val body=rows.getString(2).orEmpty()
-                            val sourceId="sms:"+digest("$id|$at")
-                            if(repository.knowledgeSourceAllowed("sms_provider",sourceId,at)&&!stage {
-                                learning.stage("sms_provider",sourceId,at,body,smsId=id,group=digest("sms:"+rows.getLong(3)))
-                            })break
-                            persist("sms_provider",sourceId,at,KnowledgeExtraction.observedTopics(body))
-                            checkpoint(prefs.edit().putLong(smsCursor,id))
-                            read++;processed++
+                    if(limit>0){
+                        val cursor=context.contentResolver.query(Telephony.Sms.CONTENT_URI,arrayOf("_id","date","body","thread_id"),
+                        "_id > ? AND date > ?",arrayOf(after.toString(),readSince.toString()),"_id ASC")?:throw IOException("SMS provider returned no cursor")
+                        cursor.use {rows->
+                            var read=0
+                            while(rows.moveToNext()){
+                                if(read>=limit||SystemClock.elapsedRealtime()>deadline){more=true;break}
+                                eligible()
+                                if(!smsAllowed())throw KnowledgeSourceInvalidated("SMS permission changed")
+                                val id=rows.getLong(0)
+                                val at=rows.getLong(1)
+                                val body=rows.getString(2).orEmpty()
+                                val sourceId="sms:"+digest("$id|$at")
+                                if(repository.knowledgeSourceAllowed("sms_provider",sourceId,at)&&!stage {
+                                    learning.stage("sms_provider",sourceId,at,body,smsId=id,group=digest("sms:"+rows.getLong(3)))
+                                })break
+                                persist("sms_provider",sourceId,at,KnowledgeExtraction.observedTopics(body))
+                                if(!smsAllowed())throw KnowledgeSourceInvalidated("SMS permission changed")
+                                checkpoint(smsCursor to id)
+                                read++;processed++
+                            }
                         }
-                    }?:error("SMS provider returned no cursor")
+                    }
                 }
             }
             if(includeDeviceSources&&AssistantNotificationListener.granted(context)){
@@ -328,7 +362,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                     for((version,at,sourceText) in unprocessed.take(20)){
                         if(processed>=maxSources||SystemClock.elapsedRealtime()>deadline){more=true;break}
                         eligible()
-                        check(kakaoAllowed()&&archive.authorization()==authority)
+                        if(!kakaoAllowed()||archive.authorization()!=authority)throw KnowledgeSourceInvalidated("Archive authorization changed")
                         if(at>floor&&repository.knowledgeSourceAllowed("kakao_notification","kakao:$version",at)&&!stage {
                             learning.stage("kakao_notification","kakao:$version",at,sourceText,archiveAuthority=authority)
                         })break
@@ -350,9 +384,13 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                 if(message.packageName==KAKAO||message.id in seen||!MessengerInbox.allowed(context,message.packageName))continue
                 if(processed>=notificationLimit||SystemClock.elapsedRealtime()>deadline){more=true;break}
                 eligible()
+                if(!AssistantNotificationListener.granted(context)||!MessengerInbox.allowed(context,message.packageName))
+                    throw KnowledgeSourceInvalidated("Notification permission changed")
                 persist("notification",message.id,message.at,KnowledgeExtraction.observedTopics(message.text))
+                if(!AssistantNotificationListener.granted(context)||!MessengerInbox.allowed(context,message.packageName))
+                    throw KnowledgeSourceInvalidated("Notification permission changed")
                 processed++;seen+=message.id
-                checkpoint(prefs.edit().putString("notification_seen",JsonArray(seen.toList().takeLast(256).map(::JsonPrimitive)).toString()))
+                checkpoint("notification_seen" to JsonArray(seen.toList().takeLast(256).map(::JsonPrimitive)).toString())
             }
             if(processed<maxSources&&SystemClock.elapsedRealtime()<=deadline){
                 val at=prefs.getLong("message_at",floor);val id=prefs.getString("message_id","").orEmpty()
@@ -363,7 +401,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                     if(processed>=maxSources||SystemClock.elapsedRealtime()>deadline){more=true;break}
                     eligible()
                     persist("user_message",message.id,message.createdAt,KnowledgeExtraction.directOwnerStatements(message.text,message.role))
-                    processed++;checkpoint(prefs.edit().putLong("message_at",message.createdAt).putString("message_id",message.id))
+                    processed++;checkpoint("message_at" to message.createdAt,"message_id" to message.id)
                 }
             }
             if(processed<maxSources&&SystemClock.elapsedRealtime()<=deadline){
@@ -384,7 +422,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                         }
                         persist(kind,note.id,note.updatedAt,observedNote(note,floor))
                     }
-                    processed++;checkpoint(prefs.edit().putLong("${noteCursor}_at",note.updatedAt).putString("${noteCursor}_id",note.id))
+                    processed++;checkpoint("${noteCursor}_at" to note.updatedAt,"${noteCursor}_id" to note.id)
                 }
             }
             eligible()
@@ -394,13 +432,14 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
                 learningStatus=pass.status.takeIf { it !in setOf("learning_idle","learning_batch_saved") }
             }
             val outcome=when {learningStatus!=null->checkNotNull(learningStatus);more->"incremental_checkpoint_saved";smsMissing->"sms_permission_missing";includeDeviceSources&&prefs.getBoolean("kakao_capture_gap",false)->"notification_capture_partial";else->"up_to_date"}
-            val update=prefs.edit().putLong("last_success",System.currentTimeMillis())
-                .putLong("processed",state().processedSources+processed).putLong("claims",state().savedClaims+claims)
-                .putBoolean("has_more",more).putString("status",outcome)
-            checkpoint(update)
+            checkpoint("last_success" to System.currentTimeMillis(),"processed" to (state().processedSources+processed),
+                "claims" to (state().savedClaims+claims),"has_more" to more,"status" to outcome)
             KnowledgeIngestionReport(processed,claims,more,outcome,learningPass?.checked?:0,learningPass?.saved?:0)
         }catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){statusReport(generation,processed,claims,true,"source_or_generation_changed")}
+        catch(error:Exception){
+            currentCoroutineContext().ensureActive()
+            failureReport(generation,processed,claims,error)
+        }
         finally {activeScan=null;SCAN_MUTEX.unlock()}
     }
     private fun currentSmsSource(source: LearningSource): Boolean {
@@ -424,6 +463,21 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
         }
         return KnowledgeExtraction.observedTopics(if(note.collection=="imported-chats")note.body.substringAfter('\n',"") else note.body)
     }
+    internal fun isCurrentGeneration(generation:Long)=state().let {it.enabled&&it.generation==generation}
+
+    private fun requireGeneration(generation:Long){
+        if(!isCurrentGeneration(generation))throw KnowledgeSourceInvalidated("Ingestion generation changed")
+    }
+
+    private fun failureReport(generation:Long,processed:Int,claims:Int,error:Exception):KnowledgeIngestionReport {
+        val status=ingestionFailureStatus(error,isCurrentGeneration(generation))
+        return statusReport(generation,processed,claims,status==INGESTION_RETRY,status)
+    }
+
+    internal fun recordRetryExhausted(generation:Long) {
+        statusReport(generation,0,0,true,"ingestion_retry_exhausted")
+    }
+
     private fun statusReport(generation:Long,processed:Int,claims:Int,more:Boolean,status:String):KnowledgeIngestionReport {
         synchronized(SETTINGS_LOCK){if(state().generation==generation&&state().enabled)prefs.edit().putString("status",status).putBoolean("has_more",more).commit()}
         return KnowledgeIngestionReport(processed,claims,more,status)
@@ -445,6 +499,7 @@ class KnowledgeIngestionController(context:Context,private val repository:LocalR
         private const val SMS_WATCH="knowledge-sms-arrival-v1"
         private val EMAIL_APPS=setOf("com.google.android.gm","com.nhn.android.mail","com.microsoft.office.outlook")
         private const val EVENT="knowledge-ingestion-incremental-v1"
+        internal const val GENERATION_INPUT="knowledge_generation"
         private val SETTINGS_LOCK=Any()
         private val SCAN_MUTEX=Mutex()
         @Volatile private var activeScan:Job?=null
@@ -455,15 +510,24 @@ class KnowledgeIngestionWorker(context:Context,parameters:WorkerParameters):Coro
     override suspend fun doWork():Result {
         val app=(applicationContext as? LocalAgentApplication)?.container?:return Result.failure()
         val controller=KnowledgeIngestionController(applicationContext,app.repository)
-        if(!controller.state().enabled)return Result.success()
-        return try {
-            val report=controller.scanNow(manual=false,includeDeviceSources=true)
-            if(report.hasMore&&report.status=="incremental_checkpoint_saved")controller.requestInitialScan(append=true)
-            else if(report.status in setOf("busy","learning_device_busy","deferred_device_state"))return Result.retry()
-            Result.success()
+        val generation=inputData.getLong(KnowledgeIngestionController.GENERATION_INPUT,controller.state().generation)
+        if(!controller.isCurrentGeneration(generation))return Result.success()
+        val work=try {
+            val report=controller.scanNow(manual=false,includeDeviceSources=true,expectedGeneration=generation)
+            val next=ingestionWork(report.status,report.hasMore,runAttemptCount,controller.isCurrentGeneration(generation))
+            if(next==IngestionWork.CONTINUE)controller.enqueueScan(append=true,expectedGeneration=generation)
+            next
+        }catch(error:Exception){
+            currentCoroutineContext().ensureActive()
+            val current=controller.isCurrentGeneration(generation)
+            val status=ingestionFailureStatus(error,current)
+            ingestionWork(status,status==INGESTION_RETRY,runAttemptCount,current)
         }
-        catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){Result.retry()}
+        return when(work){
+            IngestionWork.STOP,IngestionWork.CONTINUE->Result.success()
+            IngestionWork.RETRY->Result.retry()
+            IngestionWork.FAIL->{controller.recordRetryExhausted(generation);Result.failure()}
+        }
     }
 }
 

@@ -61,7 +61,7 @@ internal class DeviceActivityLearning(
             count++
         }
         eligible()
-        if (allowed()) check(prefs.edit().putLong("usage_cursor", if (count >= 150) lastTime + 1 else now).commit())
+        if (allowed()) prefs.saveKnowledgeCheckpoint("usage_cursor" to (if (count >= 150) lastTime + 1 else now))
         return count
     }
 
@@ -87,7 +87,7 @@ internal class DeviceActivityLearning(
                 save("call_log", "$id|$at", at, null,
                     "통화 기록 · $kind · ${it.getLong(3).coerceAtLeast(0)}초",
                     listOf("통화", kind, "통화 내역"), epoch)
-                check(prefs.edit().putLong("call_cursor", id).commit())
+                prefs.saveKnowledgeCheckpoint("call_cursor" to id)
                 count++
             }
         }

@@ -12,13 +12,16 @@ import com.user.localagent.inference.GenerationEvent
 import com.user.localagent.inference.GenerationStopReason
 import com.user.localagent.inference.InferenceOptions
 import com.user.localagent.inference.LocalInferenceEngine
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 
 @Serializable
@@ -96,32 +99,35 @@ internal class ConnectedRecordLearning(context: Context, private val repository:
             if (RuntimeGate.foreground.get() || container.runs.busy.value)
                 return LearningPass(0, 0, "learning_device_busy")
             container.engine.unloadPhoneResidency()
-            withTimeoutOrNull(90_000) {
+            withTimeout(90_000) {
                 engine.load(model.path, InferenceOptions(contextSize = 4096, backend = "CPU",
                     thinking = false, maxOutputTokens = 768, deviceOnly = true))
-                if (!engine.supportsStructuredOutput) return@withTimeoutOrNull null
+                if (!engine.supportsStructuredOutput) return@withTimeout null
                 val groups = sources.mapNotNull { it.group }.distinct()
                 val input = Json.encodeToString(sources.map { source -> mapOf(
                     "observedAtMillis" to source.at.toString(), "text" to source.text,
                     "relatedGroup" to source.group?.let { groups.indexOf(it).toString() }.orEmpty()) })
                 val text = StringBuilder()
                 var complete = false
+                var overflow = false
                 engine.generateStructuredEvents(input, INSTRUCTIONS, SCHEMA, emptyList()).collect { event ->
                     when (event) {
                         is GenerationEvent.Delta -> {
-                            check(text.length + event.text.length <= 8_192)
-                            text.append(event.text)
+                            if (!overflow && event.text.length <= 8_192 - text.length) text.append(event.text)
+                            else overflow = true
                         }
                         is GenerationEvent.Finished -> complete =
                             event.summary.reason == GenerationStopReason.EOG && !event.summary.mayBeTruncated
                     }
                 }
-                if (complete) validate(Json.decodeFromString<LearnedBatch>(text.toString()), sources) else null
+                if (complete && !overflow) {
+                    try { validate(Json.decodeFromString<LearnedBatch>(text.toString()), sources) }
+                    catch (_: IllegalArgumentException) { null }
+                } else null
             }
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (_: Exception) {
-            null
+        } catch (timeout: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            throw IOException("Connected learning did not finish within its deadline", timeout)
         } finally {
             withContext(NonCancellable) {
                 engine.cancel()

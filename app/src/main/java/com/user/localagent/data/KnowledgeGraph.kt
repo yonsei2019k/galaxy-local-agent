@@ -136,6 +136,8 @@ object KnowledgeMigrations {
     }
 }
 
+internal class KnowledgeSourceInvalidated(message: String) : IllegalStateException(message)
+
 /** Normalized indexed lexical graph, not embeddings or model-weight training. The containing DB is SQLCipher. */
 internal class KnowledgeStore(private val database:LocalDatabase) {
     private val dao=database.knowledgeDao()
@@ -144,9 +146,9 @@ internal class KnowledgeStore(private val database:LocalDatabase) {
     suspend fun allowed(kind:String,id:String):Boolean=dao.tombstoned(kind.trim().lowercase(Locale.ROOT),id)==0
     suspend fun get(id:String)=dao.byId(id)
     suspend fun save(input:KnowledgeClaim,expectedEpoch:Long?=null):KnowledgeClaim=database.withTransaction {
-        if(expectedEpoch!=null)check(epoch()==expectedEpoch){"개인 지식 삭제·초기화 후 시작된 작업만 저장할 수 있습니다."}
+        if(expectedEpoch!=null&&epoch()!=expectedEpoch)throw KnowledgeSourceInvalidated("개인 지식 삭제·초기화 후 시작된 작업만 저장할 수 있습니다.")
         val now=System.currentTimeMillis();val record=normalize(input,now)
-        if(expectedEpoch!=null)check(allowed(record.sourceKind,record.sourceId)){"잊은 자료에서 개인 지식을 다시 만들지 않습니다."}
+        if(expectedEpoch!=null&&!allowed(record.sourceKind,record.sourceId))throw KnowledgeSourceInvalidated("잊은 자료에서 개인 지식을 다시 만들지 않습니다.")
         val previous=dao.byKey(record.identityKey)
         val original=dao.byId(record.id)
         // The caller's stable ID cannot silently reassign an unrelated claim.
