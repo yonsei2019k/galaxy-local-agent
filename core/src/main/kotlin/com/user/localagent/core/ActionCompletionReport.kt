@@ -9,7 +9,7 @@ object ActionCompletionReport {
     val managedTools=setOf("patch_note","read_note","create_google_calendar_event","save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
         "prepare_sms","prepare_email","prepare_calendar_event","create_alarm","get_current_datetime","search_contacts",
         "inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")+
-        com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")
+        com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")+setOf(ScheduledReadToolCatalog.CREATE, ScheduledReadToolCatalog.CANCEL)
     private val auxiliaryReads=setOf("read_note","get_current_datetime","search_contacts","list_reminders","get_agent_capabilities")
     private val observationTools=setOf("read_note","inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")
     fun manages(required:Set<String>,outcomes:List<ObservedToolOutcome>)=required.any{it in managedTools}||outcomes.any{it.call.name in managedTools-auxiliaryReads}
@@ -47,6 +47,13 @@ object ActionCompletionReport {
                     else->listOf("query","name","label","url").forEach{key->if(value(key).isNotBlank())append("\n요청 값: ").append(value(key))}
                 }
             }else when(call.name){
+                ScheduledReadToolCatalog.CREATE, ScheduledReadToolCatalog.CANCEL -> {
+                    val report = renderScheduledRead(call, result)
+                    if (report == null) {
+                        append("해당 예약의 확인된 상태를 읽지 못했습니다.")
+                        observationIncomplete = true
+                    } else append(report)
+                }
                 "patch_note"->{
                     val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
                     if(receipt?.flag("storedAndReadBack")==true&&receipt.flag("readbackComplete")==true&&receipt.flag("unreadTextPreserved")==true&&
@@ -218,6 +225,33 @@ object ActionCompletionReport {
             append("\n목록 기록만으로 실제 알림 표시·수신을 확인한 것은 아닙니다.")
         }
         return Observation(text,incomplete)
+    }
+
+    private fun renderScheduledRead(call: ToolCall, result: ToolResult): String? {
+        val receipt = runCatching { Json.parseToJsonElement(result.content).jsonObject }.getOrNull()
+        val id = receipt.text("scheduleId")?.takeIf(ScheduledReadPolicy::isId) ?: return null
+        if (result.id != call.id || receipt.flag("runResultVerified") != false) return null
+        val status = receipt.text("status")
+        if (call.name == ScheduledReadToolCatalog.CREATE) {
+            return when (status) {
+                ScheduledReadPolicy.SCHEDULED ->
+                    "조회 예약을 등록했습니다. 실행 결과는 원래 대화에서 확인할 수 있습니다.\n예약 번호 $id"
+                "queued", "running", "waiting_approval", "completed", "cancelled", "failed", "interrupted", "paused" ->
+                    "같은 예약이 이미 있습니다. 현재 상태와 결과를 원래 대화에서 확인할 수 있습니다.\n예약 번호 $id"
+                else -> null
+            }
+        }
+        if (id != (call.arguments["scheduleId"] as? JsonPrimitive)?.takeIf { it.isString }?.content) return null
+        val message = when (status) {
+            "stop_requested" -> "진행 중인 실행에 중지를 요청했습니다. 최종 상태는 원래 대화에서 확인할 수 있습니다."
+            "cancelled" -> "해당 예약이 취소된 상태를 확인했습니다."
+            "completed", "failed", "interrupted", "paused" -> "이미 끝난 예약입니다. 기존 결과와 상태를 유지했습니다."
+            else -> return null
+        }
+        val cleanup = receipt.text("systemCleanup")
+        return if (status in setOf("stop_requested", "cancelled") && cleanup != "confirmed") {
+            "$message Android 예약 작업 정리는 아직 확인하지 못했습니다."
+        } else message
     }
 
     private fun JsonObject?.text(key:String):String?=(this?.get(key) as? JsonPrimitive)?.takeIf{it.isString}?.content
