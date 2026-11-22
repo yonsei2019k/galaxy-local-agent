@@ -6,6 +6,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.await
 import androidx.work.workDataOf
 import com.user.localagent.AppContainer
 import com.user.localagent.FailureLog
@@ -24,6 +25,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -49,15 +51,14 @@ internal class ScheduledReadWork(private val context: Context, private val app: 
             }
             ScheduledReadToolCatalog.CANCEL -> {
                 val id = text("scheduleId")
-                val record = recovery.cancel {
-                    val cancelled = app.runs.cancelScheduledRead(registrationRunId, id)
-                    WorkManager.getInstance(context).cancelUniqueWork(id)
-                    cancelled
-                }
-                val stopping = record.status == "running" && record.errorCode == ScheduledReadPolicy.STOP_REQUESTED
-                receipt(call, id, if (stopping) "stop_requested" else record.status, if (stopping)
-                    "해당 실행에 중단을 요청했습니다. 확인된 결과는 원래 대화에서 확인할 수 있습니다." else
-                    "해당 예약의 현재 상태를 확인했습니다.")
+                val record = recovery.cancel { app.runs.cancelScheduledRead(registrationRunId, id) }
+                scheduledReadCancellationReceipt(
+                    call, id, record.status, record.errorCode == ScheduledReadPolicy.STOP_REQUESTED,
+                    cancelSystemWork = { WorkManager.getInstance(context).cancelUniqueWork(id).await() },
+                    onUnconfirmed = { error ->
+                        FailureLog.record(context, "scheduled_read_cancel", error, "system_cleanup_unconfirmed")
+                    },
+                )
             }
             else -> error("지원하지 않는 읽기 예약 작업입니다.")
         }
@@ -134,4 +135,46 @@ internal class ScheduledReadRecovery(
     }
 
     suspend fun <T> cancel(action: suspend () -> T): T = mutex.withLock { action() }
+}
+
+
+internal suspend fun scheduledReadCancellationReceipt(
+    call: ToolCall,
+    id: String,
+    status: String,
+    stopRequested: Boolean,
+    cancelSystemWork: suspend () -> Unit,
+    onUnconfirmed: (Exception?) -> Unit,
+    timeoutMillis: Long = 5_000L,
+): ToolResult {
+    val stopping = stopRequested && status in setOf("running", "waiting_approval")
+    val cleanup = if (status == "cancelled" || stopping) {
+        val confirmed = try {
+            val finished = withTimeoutOrNull(timeoutMillis) {
+                cancelSystemWork()
+                true
+            } == true
+            if (!finished) onUnconfirmed(null)
+            finished
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            onUnconfirmed(failure)
+            false
+        }
+        if (confirmed) "confirmed" else "unconfirmed"
+    } else "not_requested"
+    val summary = when {
+        stopping -> "진행 중인 실행에 중지를 요청했습니다. 최종 상태는 원래 대화에서 확인할 수 있습니다."
+        status == "cancelled" -> "해당 예약이 취소된 상태를 확인했습니다."
+        else -> "이미 끝난 예약입니다. 기존 결과와 상태를 유지했습니다."
+    } + if (cleanup == "unconfirmed") " Android 예약 작업 정리는 아직 확인하지 못했습니다." else ""
+    return ToolResult(
+        call.id, true, buildJsonObject {
+            put("scheduleId", id)
+            put("status", if (stopping) "stop_requested" else status)
+            put("runResultVerified", false)
+            put("systemCleanup", cleanup)
+        }.toString(), VerificationState.VERIFIED, summary,
+    )
 }
