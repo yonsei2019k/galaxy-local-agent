@@ -74,6 +74,15 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace
     private var capturedAvailableTools:Set<String> = emptySet()
     fun bindAvailableTools(names:Set<String>){require(names.all{it in ToolRegistry.definitions});capturedAvailableTools=names.toSet()}
+    private var pairedBrowserFallback:com.user.localagent.compute.BrowserBackend?=null
+    internal fun bindPairedBrowserFallback(stillAllowed:suspend()->Boolean) {
+        val read=com.user.localagent.compute.BrowserAgentTools.pcReadFallback(context)
+        pairedBrowserFallback={operation,body->
+            check(connectionRunId!=null&&connectionIsRunLive()&&stillAllowed()){"PC_BROWSER_FALLBACK_NO_AUTHORITY"}
+            connectionVerifyAccess()
+            read(operation,body)
+        }
+    }
     private val reviewedTargets=mutableMapOf<String,Pair<String,Long>>()
     private fun reviewKey(call:ToolCall)=call.name+":"+JsonObject(call.arguments.toSortedMap())
     /** The approval names a real scoped record, and its revision must still match at the mutation. */
@@ -174,7 +183,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             }
             browserFor(call.name)?.let{browser->
                 check(connectionRunId==null||connectionIsRunLive()){"브라우저 요청이 중단됐습니다."}
-                return@withContext browser.execute(call,approvedScreenSnapshot)
+                return@withContext browser.execute(call,approvedScreenSnapshot,pairedBrowserFallback)
             }
             if(call.name in KakaoScreenToolCatalog.names){
                 check(connectionRunId!=null&&connectionIsRunLive()){"카카오톡 조회의 원래 실행이 끝났습니다."}

@@ -20,6 +20,53 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppWebAgentDispatchTest {
+    private fun open(url:String)=ToolCall("open",AppBrowserToolCatalog.OPEN,buildJsonObject{put("url",url)})
+
+    @Test
+    fun failedPhoneReadUsesSamePublicPageOnPcWithoutTransferringControls()=runBlocking {
+        val url="https://example.com/help"
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,_->buildJsonObject{put("error","PAGE_UNREADABLE")}}
+        val result=tools.execute(open(url),pcFallback={op,body->
+            assertEquals("open",op)
+            assertEquals(url,body.getValue("url").jsonPrimitive.content)
+            buildJsonObject{put("url",url);put("text","Public evidence");put("snapshotId","foreign-ref")}
+        })
+        assertEquals(VerificationState.VERIFIED,result.verification)
+        assertTrue(result.content.contains("PC"))
+        assertFalse(result.content.contains("foreign-ref"))
+    }
+
+    @Test
+    fun phoneAuthUsesOnlyOriginalOriginAndNeverOpensPcForAnAuthenticationUrl()=runBlocking {
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,_->buildJsonObject{put("error","PAGE_TIMEOUT")}}
+        val url="https://example.com/help"
+        val result=tools.execute(open(url),pcFallback={_,_->buildJsonObject{
+            put("loginRequired",true);put("url","https://signin.example.net/login?token=secret");put("text","private view")
+        }})
+        assertFalse(result.success)
+        assertTrue(result.effectNotApplied)
+        assertTrue(result.content.contains("https://example.com"))
+        assertFalse(result.content.contains("private view"))
+        assertFalse(result.content.contains("secret"))
+        for(blocked in listOf("https://example.com/help?token=secret","https://example.com/auth/continue","http://example.com/help")){
+            var invoked=false
+            val denied=tools.execute(open(blocked),pcFallback={_,_->invoked=true;buildJsonObject{}})
+            assertFalse(invoked)
+            assertFalse(denied.success)
+            assertTrue(denied.content.contains("PAGE_TIMEOUT"))
+        }
+    }
+
+    @Test
+    fun retryNeverClaimsAnUnrelatedPcPageAsTheRequestedObservation()=runBlocking {
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,_->buildJsonObject{put("error","PAGE_TIMEOUT")}}
+        val result=tools.execute(open("https://example.com/help"),pcFallback={_,_->buildJsonObject{
+            put("url","https://other.example/help");put("text","Unrelated page")
+        }})
+        assertFalse(result.success)
+        assertTrue(result.content.contains("PAGE_TIMEOUT"))
+    }
+
     @Test
     fun onlyTheHostsApprovalReachesTheAppBackend() = runBlocking {
         val calls=mutableListOf<JsonObject>()

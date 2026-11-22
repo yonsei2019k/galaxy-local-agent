@@ -23,7 +23,7 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
             "direction" to Argument("string",false,10,"scroll direction: down or up.")),
             "Do one action on the $where page and return the re-read page. Pay/order/book/send/delete style clicks and typing outside "+
             "search boxes wait for owner approval. Login, payment card and verification fields are refused: the owner enters those. "+
-            "The re-read page is observation, not proof the site completed the task.",90_000))
+            "Authentication takes place on the owner's phone. The re-read page is observation, not proof the site completed the task.",90_000))
     val names=definitions.map{it.name}.toSet()
 
     fun validate(call:ToolCall){
@@ -39,7 +39,7 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
     }
 }
 
-/** Headless Chrome on the owner's paired PC (no window); mainly for use at home. */
+/** Headless Chrome on the owner's paired PC. Authentication stays on the phone. */
 object PcBrowserToolCatalog:BrowserToolCatalog("open_pc_browser_page","read_pc_browser_page","act_on_pc_browser_page",
     "the paired PC's background browser (no window on the PC; works while the PC is on)") {
     const val OPEN="open_pc_browser_page";const val READ="read_pc_browser_page";const val ACTION="act_on_pc_browser_page" // "pc_" names are reserved for PC-side tools in the cloud bridge

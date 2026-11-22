@@ -184,7 +184,8 @@ class Handler(BaseHTTPRequestHandler):
    except RemoteTestError as error:self.reply({'error':error.code},error.status);return
   if path.startswith('/v1/browser/'):
    # Paired phone or loopback. Policy (public pages only, no sensitive typing, approval for irreversible clicks) lives in BrowserAgent.
-   operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close}.get(path)
+   operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close,
+     '/v1/browser/public-read':BROWSER.public_read}.get(path)
    if self.command!='POST' or operation is None:raise ValueError('BROWSER_ROUTE')
    self.connection.settimeout(90)
    request=self.body(8192)
@@ -378,4 +379,6 @@ if __name__=='__main__':
  (HOME/'worker.pid').write_text(str(__import__('os').getpid()))
  threading.Thread(target=discovery,daemon=True).start()
  try:server.serve_forever(poll_interval=.5)
- finally:server.server_close();ENGINE.close()
+ finally:
+  try:server.server_close();ENGINE.close()
+  finally:BROWSER.dispose()

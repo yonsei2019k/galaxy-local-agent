@@ -112,7 +112,7 @@ import kotlinx.coroutines.*
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
                     Column(Modifier.weight(1f)){
                         Text("PC에서 웹 작업",style=MaterialTheme.typography.labelLarge)
-                        Text("PC 화면에 창을 띄우지 않고 웹 작업을 해요. 결제·주문·예약 확정·전송이나 검색 외 입력은 휴대폰에서 승인해요.",style=MaterialTheme.typography.bodySmall)
+                        Text("PC 화면에 창을 띄우지 않고 웹 작업을 해요. 로그인과 인증은 휴대폰에서 직접 진행해요. 결제·주문·예약 확정·전송이나 검색 외 입력도 휴대폰에서 승인해요.",style=MaterialTheme.typography.bodySmall)
                     }
                     Switch(checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
                 }

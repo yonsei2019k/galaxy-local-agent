@@ -1661,6 +1661,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         var privatePlan=false
         var preparedSeen=false
         var screenApprovalInvalidated=false
+        var phoneBrowserAuthentication=false
         var taskGoal:com.user.localagent.core.TaskGoal?=null
         val actual=linkedMapOf<String,PhoneAgentExecution>()
         var nativeDeadlineAt=Long.MAX_VALUE
@@ -1678,6 +1679,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 external.enabled&&external.revision==request.externalAgentRevision&&pc.revision==request.capturedPcRevision,
                 tools-currentDisabled,active=active,cancelled=!currentCoroutineContext().isActive,awaitingApproval=approval.value!=null)
         }
+        if(com.user.localagent.core.PcBrowserToolCatalog.OPEN in tools&&
+            com.user.localagent.core.AppBrowserToolCatalog.OPEN in tools)
+            checkNotNull(requestTools).bindPairedBrowserFallback {
+                val live=authority()
+                live.permits(capture)&&com.user.localagent.core.PcBrowserToolCatalog.OPEN in live.phoneTools
+            }
         fun nativeBinding()=buildJsonObject{
             put("runId",request.runId);put("threadId",request.threadId);put("branchId",request.branchId)
             put("projectId",request.projectId);put("scopeId",binding)
@@ -1731,6 +1738,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if(com.user.localagent.core.ScreenControlToolCatalog.approvalInvalidated(entry.proposal.tool,
                         entry.result.verification,entry.result.verificationSummary,entry.result.effectNotApplied))
                     screenApprovalInvalidated=true
+                if(entry.result.verificationSummary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED)
+                    phoneBrowserAuthentication=true
                 check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
@@ -1799,7 +1808,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         publishActionFinal(request,emptySet(),"개인 자료를 읽기 전에 멈췄습니다. 이 실행의 저장된 권한 범위에서는 모델을 바꿀 수 없습니다. 개인정보 · 로컬에서 이어갈 수 있습니다.",true,"private_plan_requires_local")
                         return@withTimeout value
                     }
-                    if(screenApprovalInvalidated)return@withTimeout value
+                    if(screenApprovalInvalidated||phoneBrowserAuthentication)return@withTimeout value
                     if(pauseGoalBudgetIfExhausted(request))return@withTimeout value
                     if(preparedSeen)return@withTimeout value
                     if(controller.phase !in setOf(ExternalAgentController.Phase.ACTIVE,ExternalAgentController.Phase.RESULT_PENDING))return@withTimeout value
@@ -1808,6 +1817,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 @Suppress("UNREACHABLE_CODE") error("BRIDGE_PROVIDER_LOOP")
             }
             if(privatePlan || requestAutopilotPauseReason!=null)return
+            if(phoneBrowserAuthentication&&pauseForBrowserAuthentication(request))return
             if(screenApprovalInvalidated){
                 publishActionFinal(request,requestAuthorizedTools,
                     com.user.localagent.core.ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE,true)
@@ -2945,6 +2955,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             request.capturedPcTextDefault==null&&!request.allowCloudText&&!request.allowExternalAgent&&
             request.continuation?.modelId.let { it==null||it=="qwen-4b" }
     private suspend fun publishCheckedAnswer(request:QueuedChatRequest,required:Set<String>,raw:String,written:WrittenAnswer,blockedReason:String?){
+        if(blockedReason!=null&&pauseForBrowserAuthentication(request))return
         if(blockedReason!=null&&pauseForScreenSetup(request))return
         val final=if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,blockedReason)else blockedReason?:raw.ifBlank{"모델이 빈 답변을 반환했습니다."}
         if(written.messageId==null)answer(final)else lines.value+=ChatLine(written.messageId,"assistant",written.text)
@@ -2952,6 +2963,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean,
         pauseCode:String="execution_not_verified"){
+        if(paused&&pauseCode=="execution_not_verified"&&pauseForBrowserAuthentication(request))return
         if(paused&&pauseCode=="execution_not_verified"&&pauseForScreenSetup(request))return
         answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,reason)else reason)
         if(paused){
@@ -2959,6 +2971,22 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             app.repository.chat.updateRun(request.runId,"paused",errorCode=pauseCode)
             status.value=if(pauseCode=="cloud_clarification_read_only")"추가 정보 대기 중" else "작업 일시정지"
         }
+    }
+    private suspend fun pauseForBrowserAuthentication(request:QueuedChatRequest):Boolean {
+        val outcome=observedOutcomes.lastOrNull{it.call.name in com.user.localagent.core.AppBrowserToolCatalog.names||
+            it.call.name in com.user.localagent.core.PcBrowserToolCatalog.names}?:return false
+        if(outcome.result.success||outcome.result.verificationSummary!=com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED)
+            return false
+        val site=runCatching{Json.parseToJsonElement(outcome.result.content).jsonObject["phoneBrowserOrigin"]?.jsonPrimitive?.contentOrNull}.getOrNull()
+        val requiresReadback=observedOutcomes.any{!it.result.effectNotApplied&&!com.user.localagent.core.ToolReadPolicy.isReadOnly(it.call.name)}
+        val where=site?.let{" ($it)"}.orEmpty()
+        val next=if(requiresReadback)"인증 뒤 이전 동작의 결과를 먼저 확인해 주세요."
+            else "인증한 뒤 이 대화에서 이어서 요청해 주세요."
+        answer("이 사이트는 인증이 필요해요$where. 휴대폰의 집합 설정에서 ‘앱 브라우저 열기 · 로그인’을 열어 직접 인증해 주세요. $next")
+        persistStepEvidence()
+        app.repository.chat.updateRun(request.runId,"paused",errorCode="browser_auth_on_phone")
+        status.value="휴대폰 인증 대기"
+        return true
     }
     private suspend fun pauseForScreenSetup(request:QueuedChatRequest):Boolean {
         val setup=com.user.localagent.integrations.ScreenControl.SetupNeeded.forPause(observedOutcomes)?:return false

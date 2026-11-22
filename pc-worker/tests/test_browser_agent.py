@@ -1,4 +1,5 @@
 import sys, unittest
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deployed'))
 import browser_agent as b
@@ -45,6 +46,45 @@ class Policy(unittest.TestCase):
 
 
 class Shapes(unittest.TestCase):
+    def test_public_read_uses_its_own_profile_and_returns_no_action_targets(self):
+        owner_browser = b.BrowserAgent(profile='Z:/existing-profile')
+        observed = {'url': 'https://example.com/', 'title': 'Public', 'text': 'Evidence',
+                    'snapshotId': 'bound-to-pc', 'elements': [{'ref': 'e1'}]}
+
+        def open_once(reader, request):
+            self.assertNotEqual(owner_browser.profile, reader.profile)
+            self.assertEqual(request, {'url': 'https://example.com/'})
+            return observed
+
+        with patch.object(b.BrowserAgent, 'open', open_once):
+            self.assertEqual(owner_browser.public_read({'url': 'https://example.com/'}),
+                             {'url': 'https://example.com/', 'title': 'Public', 'text': 'Evidence'})
+
+    def test_navigation_error_is_never_returned_as_page_evidence(self):
+        agent = b.BrowserAgent(profile='Z:/never-used')
+        agent._ensure = lambda: None
+        agent.page = type('Page', (), {'call': lambda *args: {'errorText': 'net::ERR_CERT_AUTHORITY_INVALID'}})()
+        with self.assertRaises(b.BrowserError) as error:
+            agent.open({'url': 'https://example.com/'})
+        self.assertEqual(error.exception.code, 'PAGE_NAVIGATION_FAILED')
+        self.assertIsNone(agent.snapshot)
+
+    def test_login_snapshot_returns_no_credentials_or_navigation_targets(self):
+        agent = b.BrowserAgent(profile='Z:/never-used')
+        agent.page = type('Page', (), {'evaluate': lambda *args, **kwargs: {
+            'url': 'https://example.com/login?state=opaque', 'text': 'private view',
+            'elements': [{'editable': True, 'autocomplete': 'one-time-code'}],
+        }})()
+        self.assertEqual(agent._read(), {'loginRequired': True, 'dataOnly': True})
+        self.assertIsNone(agent.snapshot)
+
+    def test_public_read_rejects_urls_with_authentication_state(self):
+        agent = b.BrowserAgent(profile='Z:/never-used')
+        for url in ('http://example.com/', 'https://example.com/?state=opaque', 'https://example.com/#code'):
+            with self.assertRaises(b.BrowserError) as error:
+                agent.public_read({'url': url})
+            self.assertEqual(error.exception.code, 'URL_NOT_ALLOWED')
+
     def test_bad_requests_are_rejected_before_touching_a_browser(self):
         agent = b.BrowserAgent(profile='Z:/never-used', chrome='Z:/missing.exe')
         with self.assertRaises(b.BrowserError) as e: agent.open({'url': 'http://127.0.0.1/'})

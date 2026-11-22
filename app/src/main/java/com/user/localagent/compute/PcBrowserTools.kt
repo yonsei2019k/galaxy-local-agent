@@ -2,7 +2,10 @@ package com.user.localagent.compute
 
 import android.content.Context
 import com.user.localagent.core.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
+import java.net.URI
 
 /** Owner switch per browser: on by default (each browser profile starts with no logins); turning it off persists. */
 class BrowserAgentSettings private constructor(context:Context,name:String) {
@@ -29,10 +32,18 @@ typealias BrowserBackend = suspend (operation:String,body:JsonObject)->JsonObjec
 class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where:String,private val enabled:()->Boolean,private val backend:BrowserBackend) {
     companion object {
         private const val APP_APPROVED_SNAPSHOT="approvedAppSnapshot"
-        fun pc(context:Context)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+        internal const val PHONE_AUTH_REQUIRED="PHONE_BROWSER_AUTH_REQUIRED"
+        internal fun pcReadFallback(context:Context):BrowserBackend = {operation,body->
+            check(operation=="open"&&BrowserAgentSettings.pc(context).enabled())
+            pcRequest(context,"public-read",body)
+        }
+        private suspend fun pcRequest(context:Context,operation:String,body:JsonObject):JsonObject {
             val transport=PcTransport(context)
             val config=transport.available(waitForRestart=true)?:error("PC에 연결하지 못했습니다. 집 밖이면 휴대폰의 Tailscale을 켜주세요.")
-            transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
+            return transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
+        }
+        fun pc(context:Context)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+            pcRequest(context,operation,body)
         }
         fun app(context:Context)=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
             val web=com.user.localagent.integrations.AppWebAgent.get(context)
@@ -45,6 +56,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     }
     private data class Element(val label:String,val tag:String,val type:String,val needsApproval:Boolean)
     private var last:Triple<String,String,Map<String,Element>>?=null // snapshotId, url, elements
+    private var initialOrigin:String?=null
 
     fun review(call:ToolCall):Pair<Boolean,String?> {
         if(call.name!=catalog.action)return false to null
@@ -69,7 +81,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         return needs to review
     }
 
-    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult {
+    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
         val pcAction=catalog==PcBrowserToolCatalog&&call.name==catalog.action
@@ -90,6 +102,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 "act" to JsonObject(arguments)
             }
         }
+        if(operation=="open"){
+            last=null
+            initialOrigin=origin(body.getValue("url").jsonPrimitive.content)
+        }
         var result=backend(operation,body)
         if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required"&&call.name==catalog.action){
             // A worker challenge is not owner consent. Echo only its token for a host-approved target.
@@ -100,7 +116,22 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             result=backend(operation,JsonObject(body+("approvalId" to token)))
             if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required")return refused(call,"APPROVAL_MISMATCH")
         }
-        val error=result["error"]?.jsonPrimitive?.contentOrNull
+        if(result["loginRequired"]==JsonPrimitive(true))return authenticationRequired(call)
+        val phoneError=result["error"]?.jsonPrimitive?.contentOrNull
+        if(catalog==AppBrowserToolCatalog&&operation=="open"&&pcFallback!=null&&
+            phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE")&&fallbackUrlAllowed(body.getValue("url").jsonPrimitive.content)){
+            val recovered=try {withTimeoutOrNull(40_000){pcFallback(operation,body)}}
+                catch(cancel:CancellationException){throw cancel}
+                catch(_:Exception){null}
+            if(recovered?.get("loginRequired")==JsonPrimitive(true))return authenticationRequired(call)
+            if(recovered!=null&&samePage(body.getValue("url").jsonPrimitive.content,recovered)&&
+                recovered["text"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true){
+                // The observation came from the PC. Its refs and snapshot never authorize a handset action.
+                return ToolResult(call.id,true,compact(JsonObject(recovered- setOf("snapshotId","elements")),"PC 백그라운드 브라우저"),
+                    VerificationState.VERIFIED,"휴대폰 페이지 조회 실패 후 같은 공개 페이지를 PC에서 읽음")
+            }
+        }
+        val error=phoneError
         if(error!=null){
             if(catalog==AppBrowserToolCatalog&&error=="ACTION_OUTCOME_UNKNOWN"){
                 last=null
@@ -115,12 +146,45 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             if(result["performed"]==null)"$where 페이지를 실제로 읽음" else "$where 동작 후 페이지를 다시 읽음 · 사이트의 최종 처리는 미보증")
     }
 
+    private fun authenticationRequired(call:ToolCall):ToolResult {
+        last=null
+        val noChange=call.name!=catalog.action
+        return ToolResult(call.id,false,buildJsonObject {
+            put("error",PHONE_AUTH_REQUIRED)
+            initialOrigin?.let{put("phoneBrowserOrigin",it)}
+            put("hint","인증은 휴대폰의 집합 앱 브라우저에서 직접 진행해 주세요. 로그인이나 인증값을 채팅에 입력할 필요가 없습니다.")
+        }.toString(),if(noChange)VerificationState.FAILED else VerificationState.UNVERIFIED,
+            PHONE_AUTH_REQUIRED,effectNotApplied=noChange)
+    }
+
+    private fun origin(url:String):String? {
+        if(!WebAgentPolicy.urlAllowed(url))return null
+        val uri=URI(url)
+        if(!uri.scheme.equals("https",true)||uri.port !in setOf(-1,443))return null
+        return URI("https",null,uri.host,-1,null,null,null).toASCIIString()
+    }
+
+    private fun fallbackUrlAllowed(url:String):Boolean {
+        if(origin(url)==null)return false
+        val uri=URI(url)
+        return uri.rawQuery==null&&uri.rawFragment==null&&uri.rawPath.split('/').none{
+            it.length>64||it.lowercase() in setOf("login","signin","auth","oauth","authorize","token","session","verify","otp")
+        }
+    }
+
+    private fun samePage(url:String,result:JsonObject):Boolean {
+        if(result["error"]!=null||result["blocked"]==JsonPrimitive(true))return false
+        val actual=result["url"]?.jsonPrimitive?.contentOrNull?:return false
+        return fallbackUrlAllowed(actual)&&origin(actual)==origin(url)&&
+            URI(actual).rawPath.trimEnd('/')==URI(url).rawPath.trimEnd('/')
+    }
+
     private fun refused(call:ToolCall,error:String)=ToolResult(call.id,false,
         buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
 
     private fun hint(code:String)=when(code){
         "SNAPSHOT_STALE"->"페이지가 바뀌었습니다. ${catalog.read}로 다시 읽은 뒤 새 snapshotId와 ref를 사용하세요."
-        "FIELD_NOT_ALLOWED","TEXT_NOT_ALLOWED"->"로그인·결제·인증 칸은 소유자가 직접 입력해야 합니다. 소유자에게 요청하세요."
+        "FIELD_NOT_ALLOWED","TEXT_NOT_ALLOWED"->"로그인·결제·인증은 휴대폰에서 소유자가 직접 진행해야 합니다."
         "URL_NOT_ALLOWED"->"공개 http(s) 웹페이지만 열 수 있습니다."
         "APPROVAL_MISMATCH"->"승인한 대상과 현재 페이지가 다릅니다. 다시 읽고 다시 요청하세요."
         "ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"->"그 요소를 사용할 수 없습니다. 다시 읽어 ref와 선택지를 확인하세요."
@@ -140,10 +204,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     }
 
     /** Bounded model view: page text plus one line per element. */
-    private fun compact(result:JsonObject):String=buildJsonObject{
+    private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
         listOf("snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","blocked","message")
             .forEach{key->result[key]?.let{put(key,it)}}
-        put("browser",where)
+        put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))
         put("elements",JsonArray(result["elements"]?.jsonArray.orEmpty().take(120).mapNotNull{item->runCatching{
             val e=item.jsonObject
