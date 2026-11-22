@@ -8,8 +8,10 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.user.localagent.AppContainer
+import com.user.localagent.FailureLog
 import com.user.localagent.LocalAgentApplication
 import com.user.localagent.core.ScheduledReadPolicy
+import com.user.localagent.core.ScheduledReadRequest
 import com.user.localagent.core.ScheduledReadToolCatalog
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolResult
@@ -52,8 +54,8 @@ internal class ScheduledReadWork(private val context: Context, private val app: 
     }
 
     suspend fun restore() {
-        for ((id, plan) in app.repository.chat.pendingScheduledReads()) {
-            arm(id, plan.atEpochMillis)
+        restorePendingScheduledReads(app.repository.chat.pendingScheduledReads(), ::arm) { error ->
+            FailureLog.record(context, "scheduled_read_restore", error, "schedule_rearm_failed")
         }
     }
 
@@ -90,6 +92,22 @@ class ScheduledReadWorker(context: Context, parameters: WorkerParameters) : Coro
             throw cancelled
         } catch (_: Exception) {
             if (runAttemptCount < 5) Result.retry() else Result.failure()
+        }
+    }
+}
+
+internal suspend fun restorePendingScheduledReads(
+    reservations: Iterable<Pair<String, ScheduledReadRequest>>,
+    arm: suspend (String, Long) -> Unit,
+    onFailure: (Exception) -> Unit,
+) {
+    for ((id, plan) in reservations) {
+        try {
+            arm(id, plan.atEpochMillis)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            onFailure(error)
         }
     }
 }
