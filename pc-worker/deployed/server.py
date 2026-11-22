@@ -199,13 +199,13 @@ class Handler(BaseHTTPRequestHandler):
    capability=values[0] if values else None
    if capability is not None and (len(capability)>512 or not re.fullmatch(r'[A-Za-z0-9_-]{32,512}',capability)):raise ValueError('CAPABILITY_FORMAT')
    request=self.body(262144) if self.command=='POST' else None
-   host=re.fullmatch(r'/v1/agent/sessions/([0-9a-f-]{36})/(launch|provider|provider-cancel|evidence|context-capabilities)',path)
+   host=re.fullmatch(r'/v1/agent/sessions/([0-9a-f-]{36})/(launch|provider|provider-cancel|evidence|context-capabilities|persona-capabilities)',path)
    if host:
     if len(phone_caps)!=1 or agent_caps:self.reply({'error':'PHONE_CONTROL_ONLY'},403);return
     sid=str(uuid.UUID(host[1]));action=host[2]
     try:
      if self.command=='POST' and action=='launch':
-      if type(request) is not dict or 'ownerRequest' not in request or set(request)-{'ownerRequest','conversationContext','provider'}:
+      if type(request) is not dict or 'ownerRequest' not in request or set(request)-{'ownerRequest','conversationContext','provider','officePersona'}:
        raise ValueError('PROVIDER_ROUTE')
       context=None
       if 'conversationContext' in request:
@@ -216,6 +216,12 @@ class Handler(BaseHTTPRequestHandler):
       options={}
       if context is not None:options['conversation_context']=context
       if 'provider' in request:options['provider']=request['provider']
+      if 'officePersona' in request:
+       persona=request['officePersona']
+       if (type(persona) is not str or not 1<=len(persona)<=6000 or persona!=persona.strip()
+           or any(ord(ch)<32 and ch!='\n' or 127<=ord(ch)<160 for ch in persona)):
+        raise BridgeError('INVALID_OFFICE_PERSONA',400)
+       options['office_persona']=persona
       value=AGENT_PROVIDER.launch(owner,sid,capability,request['ownerRequest'],**options)
      elif self.command=='GET' and action=='provider':value=AGENT_PROVIDER.status(owner,sid,capability)
      elif self.command=='POST' and action=='provider-cancel' and request=={}:value=AGENT_PROVIDER.cancel(owner,sid,capability)
@@ -224,6 +230,10 @@ class Handler(BaseHTTPRequestHandler):
       snapshot=AGENT_BRIDGE.authenticate_phone(owner,sid,capability)
       if snapshot.get('state')!='ACTIVE':raise BridgeError('SESSION_NOT_ACTIVE',410)
       value={'conversationContextVersions':[1],'maxContextBytes':MAX_CONTEXT_BYTES}
+     elif self.command=='GET' and action=='persona-capabilities':
+      snapshot=AGENT_BRIDGE.authenticate_phone(owner,sid,capability)
+      if snapshot.get('state')!='ACTIVE':raise BridgeError('SESSION_NOT_ACTIVE',410)
+      value={'officePersonaVersions':[1],'maxOfficePersonaChars':6000}
      else:raise ValueError('PROVIDER_ROUTE')
      # Older phone builds reject unknown response fields. Progress is a display-only negotiated extension.
      if self.headers.get('X-ZipHap-Provider-Progress')!='1' and isinstance(value,dict):

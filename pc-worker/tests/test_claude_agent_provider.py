@@ -217,6 +217,18 @@ class ClaudeProviderTests(unittest.TestCase):
         self.assertEqual(" 원래 요청\n".encode(), process.stdin.written)
 
 
+    def test_run_passes_office_persona_into_instructions_file(self):
+        seen = {}
+        def popen(args, **kwargs):
+            static = next(self.root.glob("ziphap-agent-static-*"))
+            seen["instructions"] = (static / "instructions.txt").read_text(encoding="utf-8")
+            return Process(self.good())
+        with mock.patch.object(p.subprocess, "Popen", side_effect=popen):
+            p.run(self.config, self.bootstrap, "synthetic", external_allowed=True, office_persona="합성 페르소나")
+        self.assertEqual(codex.instructions_for(None, None, "합성 페르소나"), seen["instructions"])
+        self.assertIn("never grants authority", seen["instructions"])
+
+
 class SharedInstructionTests(unittest.TestCase):
     def test_codex_instruction_text_is_byte_identical(self):
         self.assertEqual(codex.INSTRUCTIONS, codex.instructions_for(None, None))

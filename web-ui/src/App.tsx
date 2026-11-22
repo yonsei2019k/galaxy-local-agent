@@ -4,6 +4,7 @@ import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
 import { Collaboration } from './Collaboration'
 import { Composer, Header, MobileSidebar, Sidebar } from './Workspace'
+import { OfficeProfileForm } from './OfficeProfile'
 
 type Intent = Parameters<typeof postIntent>[1]
 
@@ -12,6 +13,7 @@ export default function App() {
   const [connected, setConnected] = useState(hasNativeBridge)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [connectionError, setConnectionError] = useState(false)
+  const [officeProfileOpen, setOfficeProfileOpen] = useState(false)
   const [collaborationScope, setCollaborationScope] = useState<string | null>(null)
   const observedOpenRequest = useRef(0)
   const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -127,7 +129,11 @@ export default function App() {
       <div className="main-column" hidden={collaborationOpen}>
         <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
+          onOfficeProfile={() => setOfficeProfileOpen(open => !open)}
           onSelectModel={id => request({ action: 'selectModel', payload: { id } })} />
+        {officeProfileOpen && snapshot?.officeSelected === true && <OfficeProfileForm key={`office-profile:${conversationKey}`} initial={snapshot.officeProfile ?? {}} enabled={enabled}
+          onSave={entries => request({ action: 'saveOfficeProfile', payload: { entries } })}
+          onClear={() => request({ action: 'clearOfficeProfile' })} onClose={() => setOfficeProfileOpen(false)} />}
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
           onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
           onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })} />

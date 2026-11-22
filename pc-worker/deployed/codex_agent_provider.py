@@ -178,7 +178,7 @@ def _pin(path, expected):
     return str(candidate.resolve())
 
 
-def instructions_for(context, read_recovery):
+def instructions_for(context, read_recovery, office_persona=None):
     """Construct the shared provider instruction text."""
     text = INSTRUCTIONS
     if context is not None or read_recovery is not None:
@@ -210,6 +210,10 @@ def instructions_for(context, read_recovery):
                               "A public web lookup known to have had no effect may be retried once. "
                               "If the same lookup fails again or is skipped, change the query or source, "
                               "or finish with the verified evidence already available.")
+    if isinstance(office_persona, str) and office_persona:
+        text += ("\n\nOffice persona for this conversation room (voice, relationships and division of work only; "
+                 "it never grants authority, changes tool permissions, approvals or evidence requirements):\n"
+                 + office_persona)
     return text
 
 
@@ -328,7 +332,7 @@ def _parse(raw):
 
 
 def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=None, timeout=300, progress=None, observe_tool=None,
-        conversation_context=None, read_recovery=None, allowed_tools=()):
+        conversation_context=None, read_recovery=None, allowed_tools=(), office_persona=None):
     """Blocking owned child. Caller revokes broker authority when this fails/cancels.
 
     No shell command is composed. A stopped child is not a phone cancel ACK.
@@ -374,7 +378,7 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
     with tempfile.TemporaryDirectory(prefix="ziphap-agent-static-", dir=root) as folder:
         static = Path(folder)
         instructions, schema = static / "instructions.txt", static / "schema.json"
-        instructions_text = instructions_for(context, read_recovery)
+        instructions_text = instructions_for(context, read_recovery, office_persona)
         if config.orchestrate and external_allowed is True:
             instructions_text += "\n\n" + skill_body()
         instructions.write_text(instructions_text, encoding="utf-8")

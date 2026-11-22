@@ -234,6 +234,12 @@ class MainActivity : ComponentActivity() {
         val selectedThreadId by chat.selectedThreadId.collectAsState()
         // Freeze the value, not the delegated State getter, in callbacks retained by an old IME.
         val composerThreadId=selectedThreadId
+        var officeProfileEntries by remember{mutableStateOf<Map<String,com.user.localagent.core.office.OfficePrivateProfile.Entry>>(emptyMap())}
+        var officeProfileRevision by remember{mutableIntStateOf(0)}
+        val officeOpen=composerThreadId==ZipHapRoom.OFFICE.threadId
+        LaunchedEffect(officeOpen,officeProfileRevision){
+            officeProfileEntries=if(officeOpen)withContext(Dispatchers.IO){runCatching{app.officeProfile.read()?.entries}.getOrNull()}.orEmpty() else emptyMap()
+        }
         val roomDraft by chat.draft.collectAsState()
         val queuedRequests by chat.queued.collectAsState()
         val activeExecutions by chat.activeExecutions.collectAsState()
@@ -325,7 +331,10 @@ class MainActivity : ComponentActivity() {
                         put("text",message.text.take(32000))
                         author?.let { put("authorLabel", it.label) }
                     })}})
-                    put("officeSelected",composerThreadId==ZipHapRoom.OFFICE.threadId)
+                    put("officeSelected",officeOpen)
+                    if(officeOpen)put("officeProfile",buildJsonObject{officeProfileEntries.forEach{(seat,entry)->put(seat,buildJsonObject{
+                        entry.birthDate?.let{put("birthDate",it)};entry.schoolGrade?.let{put("schoolGrade",it)}
+                    })}})
                     put("staffRooms",buildJsonArray{staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}})
                     put("threads",buildJsonArray{
                         staffRooms.forEach{thread->add(threadJson(thread.id,thread.title))}
@@ -383,6 +392,23 @@ class MainActivity : ComponentActivity() {
                             "selectThread"->payload.getValue("id").jsonPrimitive.content.takeIf{id->roomThreads.any{it.id==id&&!it.archived&&it.deletedAt==null}}?.let(chat::selectThread)
                             "renameThread"->chat.renameThread(composerThreadId,payload.getValue("title").jsonPrimitive.content)
                             "openOffice"->chat.openFixedOfficeRooms()
+                            "saveOfficeProfile","clearOfficeProfile"->if(officeOpen){
+                                val saving=command.action=="saveOfficeProfile"
+                                val entries=if(saving)runCatching{payload.getValue("entries").jsonObject.mapValues{(_,value)->
+                                    val o=value.jsonObject
+                                    com.user.localagent.core.office.OfficePrivateProfile.Entry(
+                                        o["birthDate"]?.jsonPrimitive?.content?.takeIf{it.isNotEmpty()},o["schoolGrade"]?.jsonPrimitive?.content?.takeIf{it.isNotEmpty()})
+                                }.filterValues{it.birthDate!=null||it.schoolGrade!=null}}.getOrNull() else emptyMap()
+                                this@MainActivity.lifecycleScope.launch{
+                                    val ok=entries!=null&&withContext(Dispatchers.IO){runCatching{
+                                        if(saving&&entries.isNotEmpty())app.officeProfile.write(com.user.localagent.core.office.OfficePrivateProfile(entries))
+                                        else app.officeProfile.clear()
+                                    }.isSuccess}
+                                    officeProfileRevision++
+                                    status.value=if(!ok)"직원 정보를 저장하지 못했습니다. 입력값을 확인해 주세요."
+                                        else if(saving&&entries!!.isNotEmpty())"직원 정보를 이 휴대폰에 암호화해 저장했습니다." else "직원 정보를 지웠습니다."
+                                }
+                            }
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
                             "attach"->{val room=roomThreads.firstOrNull{it.id==composerThreadId};if(room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}}
                             "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})}

@@ -26,7 +26,7 @@ interface AgentBridgeTransport {
 class PcAgentBridgeTransport(context:Context,private val parentRunId:String,private val beforeLaunchUpload:()->Unit={}):AgentBridgeTransport {
     companion object {
         const val PHONE_CAPABILITY_HEADER="X-ZipHap-Phone-Capability"
-        internal fun acceptsPath(path:String)=path.matches(Regex("/v1/agent/sessions(?:/[a-f0-9-]{36}(?:/(?:claim|result|cancel|close|plan-ack|launch|provider|provider-cancel|evidence|context-capabilities))?)?"))
+        internal fun acceptsPath(path:String)=path.matches(Regex("/v1/agent/sessions(?:/[a-f0-9-]{36}(?:/(?:claim|result|cancel|close|plan-ack|launch|provider|provider-cancel|evidence|context-capabilities|persona-capabilities))?)?"))
         internal fun timeoutStage(path:String,method:String):String {
             val operation=when {
                 path=="/v1/agent/sessions" -> "REGISTER"

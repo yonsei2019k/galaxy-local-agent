@@ -77,7 +77,7 @@ class SingleChatUpgradeDeviceValidation {
                     const menu = document.querySelector('dialog[open]');
                     const staff = menu?.querySelector('[aria-label="직원 채팅방"]');
                     return !!staff && Array.from(staff.querySelectorAll('button')).map(b => b.textContent.trim()).join('|')
-                        === '회장 이수빈|본부장 김호영|대리 김규민|대리 김서율'
+                        === '회장 이수빈|과장 김호영|대리 김규민|대리 김서율'
                         && !/PC 원격 (시험|정리)/.test(menu.textContent)
                         && !Array.from(menu.querySelectorAll('button')).some(b => b.textContent.trim() === '프로젝트');
                 })()""") == "true"

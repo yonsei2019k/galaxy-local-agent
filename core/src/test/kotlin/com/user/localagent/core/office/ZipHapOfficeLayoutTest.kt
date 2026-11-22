@@ -8,7 +8,7 @@ class ZipHapOfficeLayoutTest {
         assertEquals(5,ZipHapRoom.entries.size)
         assertEquals(OfficeSeat.CHAIR,ZipHapRoom.MAIN.agent)
         assertNull(ZipHapRoom.OFFICE.agent)
-        assertEquals(listOf("본부장 김호영","대리 김규민","대리 김서율"),
+        assertEquals(listOf("과장 김호영","대리 김규민","대리 김서율"),
             ZipHapRoom.entries.drop(2).map{it.label})
     }
 

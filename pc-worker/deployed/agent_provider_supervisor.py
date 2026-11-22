@@ -75,6 +75,7 @@ class _Child:
     progress_updates: int = 0
     context_digest: str = field(default="", repr=False)
     provider: str = "codex"
+    office_persona: str | None = field(default=None, repr=False)
 
 
 class AgentProviderSupervisor:
@@ -167,7 +168,7 @@ class AgentProviderSupervisor:
         except (TypeError, ValueError):
             return False
 
-    def launch(self, owner, sid, capability, request, conversation_context=None, *, provider="codex"):
+    def launch(self, owner, sid, capability, request, conversation_context=None, *, provider="codex", office_persona=None):
         if type(provider) is not str or provider not in self.providers:
             raise BridgeError("PROVIDER_UNKNOWN", 400)
         config, runner = self.providers[provider]
@@ -177,6 +178,14 @@ class AgentProviderSupervisor:
             valid_request = False
         if not valid_request:
             raise BridgeError("PROVIDER_REQUEST", 400)
+        if office_persona is not None and (
+                type(office_persona) is not str or not 1 <= len(office_persona) <= 6000
+                or office_persona != office_persona.strip()
+                or any(ord(ch) < 32 and ch != "\n" or 127 <= ord(ch) < 160 for ch in office_persona)):
+            raise BridgeError("INVALID_OFFICE_PERSONA", 400)
+        # Persona is cosmetic: only a runner that explicitly declares the keyword receives it.
+        if office_persona is not None and not self._supports_keyword(runner, "office_persona", variadic=False):
+            office_persona = None
         try:
             context = validate_conversation_context(conversation_context)
             context_digest = conversation_context_digest(context)
@@ -209,7 +218,8 @@ class AgentProviderSupervisor:
             bootstrap = self.bridge.bootstrap_agent(owner, sid, local_authenticated=True)
             tools = frozenset(item.get("name") for item in snapshot.get("tools", [])
                               if type(item) is dict and type(item.get("name")) is str)
-            child = _Child(digest, owner, capability, tools, context_digest=context_digest, provider=provider)
+            child = _Child(digest, owner, capability, tools, context_digest=context_digest, provider=provider,
+                           office_persona=office_persona)
             self.children[sid] = child
             threading.Thread(target=self._run, args=(child, owner, sid, capability, request, bootstrap, context, config, runner),
                              name="ziphap-cloud-child", daemon=True).start()
@@ -234,6 +244,8 @@ class AgentProviderSupervisor:
                 kwargs["progress"] = lambda value: self._progress(child, value)
             if conversation_context is not None and self._supports_keyword(runner, "conversation_context", variadic=False):
                 kwargs["conversation_context"] = conversation_context
+            if child.office_persona is not None and self._supports_keyword(runner, "office_persona", variadic=False):
+                kwargs["office_persona"] = child.office_persona
             if self._supports_keyword(runner, "allowed_tools", variadic=False):
                 kwargs["allowed_tools"] = child.tool_names
             total_calls = total_ms = 0

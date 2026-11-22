@@ -169,7 +169,7 @@ describe('native conversation', () => {
 
   it('keeps fixed staff order and only marks the active room while omitting other rooms from the menu', () => {
     mount()
-    const staffRooms = ['회장 이수빈', '본부장 김호영', '대리 김규민', '대리 김서율']
+    const staffRooms = ['회장 이수빈', '과장 김호영', '대리 김규민', '대리 김서율']
       .map((title, index) => ({ id: `seat-${index}`, title, selected: false, working: index === 2 }))
     const threads = [...base.threads, ...staffRooms, { id: 'synthetic-qa', title: 'PC 원격 시험', selected: false }]
     snapshot({ ...base, threads, staffRooms })
@@ -185,7 +185,7 @@ describe('native conversation', () => {
 
   it('puts shared rooms together and uses the newly saved staff title on the same room', () => {
     mount()
-    const original = { id: 'thread-a', title: '본부장 김호영', selected: true }
+    const original = { id: 'thread-a', title: '과장 김호영', selected: true }
     snapshot({ ...base, threads: [original], staffRooms: [original] })
     const shared = host.querySelector('.desktop-sidebar [aria-label="공용 채팅방"]')!
     expect(Array.from(shared.querySelectorAll('button'), row => row.textContent?.trim())).toEqual(['사무실', '협력사 핫라인'])
@@ -501,5 +501,46 @@ describe('native collaboration', () => {
     expect(button('협업 메시지 보내기').disabled).toBe(true)
     snapshot({ ...replacement, collab: { ...replacement.collab, sendReceipt: { ...staleReceipt, bindingEpoch: 8, clientMessageId: current.payload.clientMessageId } } })
     expect(editor().value).toBe('')
+  })
+})
+
+describe('office staff profile form', () => {
+  const office = { ...base, officeSelected: true, officeProfile: { CHAIR: { birthDate: '2000-01-01', schoolGrade: '초3' } } }
+
+  function setInput(label: string, value: string) {
+    const element = host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)
+    if (!element) throw new Error(`Input missing: ${label}`)
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(element, value)
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  it('shows the button only in the Office room, prefills and posts a strict save', () => {
+    mount()
+    snapshot(base)
+    expect(() => button('직원 정보')).toThrow()
+    snapshot(office)
+    click('직원 정보')
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="회장 이수빈 생년월일"]')?.value).toBe('2000-01-01')
+    setInput('대리 김규민 학년', '중1')
+    click('저장')
+    expect(requests().at(-1)).toMatchObject({ action: 'saveOfficeProfile', payload: {
+      entries: { CHAIR: { birthDate: '2000-01-01', schoolGrade: '초3' }, ASSOCIATE_GYUMIN: { schoolGrade: '중1' } } } })
+  })
+
+  it('refuses invalid input and unscoped or malformed snapshots and actions', () => {
+    mount()
+    snapshot(office)
+    click('직원 정보')
+    setInput('회장 이수빈 학년', '가'.repeat(21))
+    click('저장')
+    expect(requests().some(item => item.action === 'saveOfficeProfile')).toBe(false)
+    expect(readSnapshot({ ...base, officeProfile: {} })).toBeNull()
+    expect(readSnapshot({ ...office, officeProfile: { STRANGER: { schoolGrade: 'x' } } })).toBeNull()
+    expect(readSnapshot({ ...office, officeProfile: { CHAIR: { schoolGrade: 'x'.repeat(21) } } })).toBeNull()
+    expect(postIntent(base, { action: 'clearOfficeProfile' })).toBe(false)
+    expect(postIntent(office, { action: 'saveOfficeProfile', payload: { entries: { STRANGER: {} } } })).toBe(false)
+    expect(postIntent(office, { action: 'clearOfficeProfile' })).toBe(true)
   })
 })

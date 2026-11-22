@@ -87,7 +87,7 @@ def _valid_final(value):
 
 
 def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=None, timeout=300, progress=None,
-        observe_tool=None, conversation_context=None, read_recovery=None, allowed_tools=()):
+        observe_tool=None, conversation_context=None, read_recovery=None, allowed_tools=(), office_persona=None):
     """Blocking owned child. Same guarantees as codex_agent_provider.run."""
     try:
         context = validate_conversation_context(conversation_context)
@@ -130,7 +130,7 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
     emit("starting")
     with tempfile.TemporaryDirectory(prefix="ziphap-agent-static-", dir=root) as folder:
         static = Path(folder)
-        instructions = instructions_for(context, read_recovery)
+        instructions = instructions_for(context, read_recovery, office_persona)
         if config.orchestrate and external_allowed is True:
             instructions += "\n\n" + skill_body()
         (static / "instructions.txt").write_text(instructions, encoding="utf-8")

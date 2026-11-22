@@ -36,4 +36,17 @@ class ReactBridgePolicyTest {
         assertNull(ReactBridgePolicy.parse(wire("collabSend",post.replace("codex","executor"))))
         assertNull(ReactBridgePolicy.parse(wire("collabSend",post.dropLast(1)+",\"approved\":true}")))
     }
+    @Test fun officeProfileActionsAreStrictlyShaped(){
+        val ok="""{"entries":{"CHAIR":{"birthDate":"2000-01-01","schoolGrade":"초3"},"DIRECTOR":{}}}"""
+        assertNotNull(ReactBridgePolicy.parse(wire("saveOfficeProfile",ok)))
+        assertNotNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{}}""")))
+        assertNotNull(ReactBridgePolicy.parse(wire("clearOfficeProfile","{}")))
+        assertNull(ReactBridgePolicy.parse(wire("clearOfficeProfile","""{"entries":{}}""")))
+        assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{"STRANGER":{"schoolGrade":"x"}}}""")))
+        assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{"CHAIR":{"schoolGrade":"${"가".repeat(21)}"}}}""")))
+        assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{"CHAIR":{"birthDate":20000101}}}""")))
+        assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{"CHAIR":{"nickname":"x"}}}""")))
+        assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{"CHAIR":{"schoolGrade":"a\u0007b"}}}""")))
+        assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{},"approved":true}""")))
+    }
 }

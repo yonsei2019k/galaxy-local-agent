@@ -436,7 +436,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             val prior=dao.thread(id)
             if(prior!=null){
                 check(dao.metaValue(marker)==1L&&prior.deletedAt==null){"사무실 대화의 저장 상태를 확인해주세요."}
-                if(prior.archived)prior.copy(archived=false).also{dao.thread(it)}else prior
+                val retitled=room.agent?.takeIf{prior.title in it.legacyLabels}?.let{prior.copy(title=room.label)}?:prior
+                if(prior.archived||retitled!==prior)retitled.copy(archived=false).also{dao.thread(it)}else prior
             }else{
                 check(dao.metaValue(marker)==null){"삭제된 사무실 대화는 자동으로 다시 만들지 않습니다."}
                 val label=if(room==com.user.localagent.core.office.ZipHapRoom.MAIN)

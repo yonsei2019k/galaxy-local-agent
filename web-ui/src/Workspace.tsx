@@ -76,13 +76,14 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onRename }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onRename, onOfficeProfile }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
   onManage(): void
   onSelectModel(id: string): void
   onRename(title: string): boolean
+  onOfficeProfile?(): void
 }) {
   const nextModel = snapshot?.models.find(model => model.id === snapshot.modelId)
   const selectedLabel = snapshot?.modelLabel || nextModel?.label || '답변 방식'
@@ -95,6 +96,8 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
         <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || 'ZipHap.Agent'}</span>
+        {snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
+          onClick={onOfficeProfile}>직원 정보</button>}
         {currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={() => setTitleDraft(currentThread.title)}>이름 변경</button>}
         {titleDraft !== null && <form className="rename-thread-form" onSubmit={event => {
