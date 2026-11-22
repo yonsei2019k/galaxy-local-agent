@@ -57,10 +57,12 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private data class Element(val label:String,val tag:String,val type:String,val needsApproval:Boolean)
     private var last:Triple<String,String,Map<String,Element>>?=null // snapshotId, url, elements
     private var initialOrigin:String?=null
+    private var recoveredTarget:String?=null
 
     fun review(call:ToolCall):Pair<Boolean,String?> {
         if(call.name!=catalog.action)return false to null
         catalog.validate(call)
+        if(recoveredTarget!=null)return false to null
         val action=call.arguments.getValue("action").jsonPrimitive.content
         val snapshot=last?.takeIf{it.first==call.arguments.getValue("snapshotId").jsonPrimitive.content}
         val element=call.arguments["ref"]?.jsonPrimitive?.content?.let{snapshot?.third?.get(it)}
@@ -84,6 +86,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
+        if(call.name==catalog.action&&recoveredTarget!=null)return refused(call,"SNAPSHOT_STALE")
         val pcAction=catalog==PcBrowserToolCatalog&&call.name==catalog.action
         val observed=last
         val ref=call.arguments["ref"]?.jsonPrimitive?.contentOrNull
@@ -104,6 +107,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         }
         if(operation=="open"){
             last=null
+            recoveredTarget=null
             initialOrigin=origin(body.getValue("url").jsonPrimitive.content)
         }
         var result=backend(operation,body)
@@ -116,20 +120,18 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             result=backend(operation,JsonObject(body+("approvalId" to token)))
             if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required")return refused(call,"APPROVAL_MISMATCH")
         }
-        if(result["loginRequired"]==JsonPrimitive(true))return authenticationRequired(call)
+        val target=recoveredTarget
+        if(result["loginRequired"]==JsonPrimitive(true)&&!(operation=="read"&&target!=null))
+            return authenticationRequired(call)
         val phoneError=result["error"]?.jsonPrimitive?.contentOrNull
-        if(catalog==AppBrowserToolCatalog&&operation=="open"&&pcFallback!=null&&
-            phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE")&&fallbackUrlAllowed(body.getValue("url").jsonPrimitive.content)){
-            val recovered=try {withTimeoutOrNull(40_000){pcFallback(operation,body)}}
-                catch(cancel:CancellationException){throw cancel}
-                catch(_:Exception){null}
-            if(recovered?.get("loginRequired")==JsonPrimitive(true))return authenticationRequired(call)
-            if(recovered!=null&&samePage(body.getValue("url").jsonPrimitive.content,recovered)&&
-                recovered["text"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true){
-                // The observation came from the PC. Its refs and snapshot never authorize a handset action.
-                return ToolResult(call.id,true,compact(JsonObject(recovered- setOf("snapshotId","elements")),"PC 백그라운드 브라우저"),
-                    VerificationState.VERIFIED,"휴대폰 페이지 조회 실패 후 같은 공개 페이지를 PC에서 읽음")
-            }
+        if(operation=="read"&&target!=null){
+            if(!readablePage(target,result))
+                return recoverPublicPage(call,target,pcFallback)?:refused(call,"PC_RECOVERY_UNAVAILABLE")
+            recoveredTarget=null
+        }
+        if(catalog==AppBrowserToolCatalog&&operation=="open"&&phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE")){
+            val url=body.getValue("url").jsonPrimitive.content
+            if(fallbackUrlAllowed(url))recoverPublicPage(call,url,pcFallback)?.let{return it}
         }
         val error=phoneError
         if(error!=null){
@@ -146,8 +148,23 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             if(result["performed"]==null)"$where 페이지를 실제로 읽음" else "$where 동작 후 페이지를 다시 읽음 · 사이트의 최종 처리는 미보증")
     }
 
+    private suspend fun recoverPublicPage(call:ToolCall,url:String,pcFallback:BrowserBackend?):ToolResult? {
+        if(pcFallback==null)return null
+        val recovered=try {
+            withTimeoutOrNull(40_000){pcFallback("open",buildJsonObject{put("url",url)})}
+        }catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){null}
+        if(recovered?.get("loginRequired")==JsonPrimitive(true))return authenticationRequired(call)
+        if(recovered==null||!readablePage(url,recovered))return null
+        recoveredTarget=url
+        // Reobserve the bound URL. The PC result never supplies a handset action target.
+        return ToolResult(call.id,true,compact(JsonObject(recovered-setOf("snapshotId","elements")),"PC 백그라운드 브라우저"),
+            VerificationState.VERIFIED,"같은 공개 페이지를 PC 백그라운드 브라우저에서 읽음")
+    }
+
     private fun authenticationRequired(call:ToolCall):ToolResult {
         last=null
+        recoveredTarget=null
         val noChange=call.name!=catalog.action
         return ToolResult(call.id,false,buildJsonObject {
             put("error",PHONE_AUTH_REQUIRED)
@@ -179,6 +196,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             URI(actual).rawPath.trimEnd('/')==URI(url).rawPath.trimEnd('/')
     }
 
+    private fun readablePage(url:String,result:JsonObject):Boolean =
+        result["loginRequired"]!=JsonPrimitive(true)&&samePage(url,result)&&
+            result["text"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true
+
     private fun refused(call:ToolCall,error:String)=ToolResult(call.id,false,
         buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
 
@@ -189,6 +210,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "APPROVAL_MISMATCH"->"승인한 대상과 현재 페이지가 다릅니다. 다시 읽고 다시 요청하세요."
         "ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"->"그 요소를 사용할 수 없습니다. 다시 읽어 ref와 선택지를 확인하세요."
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
+        "PC_RECOVERY_UNAVAILABLE"->"현재 요청에서 같은 페이지의 새 조회 결과를 확인하지 못했습니다."
         "ACTION_OUTCOME_UNKNOWN"->"동작이 실행됐는지 확인되지 않았습니다. 다시 실행하기 전에 페이지에서 결과를 확인하세요."
         else->"브라우저 요청이 거부됐습니다."
     }

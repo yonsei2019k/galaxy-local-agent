@@ -21,6 +21,68 @@ import org.junit.Test
 
 class AppWebAgentDispatchTest {
     private fun open(url:String)=ToolCall("open",AppBrowserToolCatalog.OPEN,buildJsonObject{put("url",url)})
+    private fun read()=ToolCall("read",AppBrowserToolCatalog.READ,buildJsonObject{})
+
+    @Test
+    fun plannedReadReobservesTheSamePageAndNeverUsesStalePhoneControls()=runBlocking {
+        val url="https://example.com/help"
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+            if(op=="open")buildJsonObject{put("error","PAGE_TIMEOUT")}
+            else buildJsonObject{put("url","https://example.com/unrelated");put("text","Old handset page")}
+        }
+        var reads=0
+        val fallback:com.user.localagent.compute.BrowserBackend={action,body->
+            assertEquals("open",action)
+            assertEquals(url,body.getValue("url").jsonPrimitive.content)
+            buildJsonObject { put("url",url);put("text","Observation ${++reads}");put("snapshotId","pc-ref") }
+        }
+        val opened=tools.execute(open(url),pcFallback=fallback)
+        val refreshed=tools.execute(read(),pcFallback=fallback)
+        assertTrue(opened.content.contains("Observation 1"))
+        assertTrue(refreshed.content.contains("Observation 2"))
+        assertFalse(refreshed.content.contains("Old handset page"))
+        assertFalse(refreshed.content.contains("pc-ref"))
+        assertFalse(tools.execute(click(AppBrowserToolCatalog.ACTION)).success)
+        assertFalse(tools.execute(read()).success)
+    }
+
+    @Test
+    fun nextOpenClearsOldTargetAndFreshPcAuthenticationPausesTheRead()=runBlocking {
+        val url="https://example.com/help"
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+            if(op=="open")buildJsonObject{put("error","PAGE_TIMEOUT")}
+            else buildJsonObject{put("url","https://other.example/");put("text","Unrelated")}
+        }
+        val fallback:com.user.localagent.compute.BrowserBackend={_,_->buildJsonObject{put("url",url);put("text","Public")}}
+        assertTrue(tools.execute(open(url),pcFallback=fallback).success)
+        val auth=tools.execute(read(),pcFallback={_,_->buildJsonObject{put("loginRequired",true)}})
+        assertFalse(auth.success)
+        assertTrue(auth.content.contains("https://example.com"))
+        assertTrue(tools.execute(open(url),pcFallback=fallback).success)
+        assertFalse(tools.execute(open("https://example.com/?state=opaque"),pcFallback=fallback).success)
+        var usedPriorTarget=false
+        tools.execute(read(),pcFallback={_,_->usedPriorTarget=true;buildJsonObject{}})
+        assertFalse(usedPriorTarget)
+    }
+
+    @Test
+    fun recoveredOpenUsesFreshHandsetReadWhenTheExpectedPageLoads()=runBlocking {
+        val url="https://example.com/help"
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+            if(op=="open")buildJsonObject{put("error","PAGE_TIMEOUT")}
+            else buildJsonObject{put("url",url);put("text","New handset evidence");put("snapshotId","handset-ref")}
+        }
+        var pcReads=0
+        val fallback:com.user.localagent.compute.BrowserBackend={_,_->
+            pcReads++
+            buildJsonObject{put("url",url);put("text","PC evidence")}
+        }
+        assertTrue(tools.execute(open(url),pcFallback=fallback).success)
+        val result=tools.execute(read(),pcFallback=fallback)
+        assertEquals(1,pcReads)
+        assertTrue(result.content.contains("New handset evidence"))
+        assertTrue(result.content.contains("handset-ref"))
+    }
 
     @Test
     fun failedPhoneReadUsesSamePublicPageOnPcWithoutTransferringControls()=runBlocking {
