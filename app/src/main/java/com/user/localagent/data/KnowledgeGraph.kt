@@ -14,6 +14,12 @@ import java.util.UUID
 internal fun normalizedKnowledgeText(value:String):String =
     Normalizer.normalize(value,Normalizer.Form.NFKC).lowercase(Locale.ROOT)
 
+internal fun analysisTailQuery(query:String):Regex? {
+    val phrase=normalizedKnowledgeText(query).trim()
+    if(phrase.length !in 2..80||phrase.none {it.isLetterOrDigit()}||phrase.any {it.isISOControl()})return null
+    return Regex("(?<![\\p{L}\\p{N}])"+Regex.escape(phrase)+"(?![\\p{L}\\p{N}])")
+}
+
 private val KNOWLEDGE_ALIASES=mapOf("이름" to listOf("name","preferred_name"),"직업" to listOf("occupation","profession","job"),"직장" to listOf("workplace","organization"),"가족" to listOf("family","spouse","children"),"아이" to listOf("children"),"아들" to listOf("children","son"),"딸" to listOf("children","daughter"),"선호" to listOf("preference","response_preference"),"메일" to listOf("email","work_email"),"연락처" to listOf("phone","email"),
     "약속" to listOf("일정","예약","appointment"),"답장" to listOf("회신","할일","task"),
     "바뀐" to listOf("변경","changed"),"취소" to listOf("cancelled"))

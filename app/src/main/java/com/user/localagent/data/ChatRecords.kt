@@ -55,6 +55,8 @@ data class ChatDraftRecord(@PrimaryKey val threadId:String,val text:String,val m
     val revision:Long=0,val updatedAt:Long=System.currentTimeMillis(),val scrollMessageId:String?=null,val scrollOffset:Int=0)
 @Entity(tableName="source_scopes",primaryKeys=["resourceKind","resourceId"],indices=[Index("scopeKey"),Index("threadId")])
 data class SourceScopeRecord(val resourceKind:String,val resourceId:String,val scopeKey:String,val threadId:String?=null)
+data class AnalysisTailCandidate(val id:String,val tail:String)
+
 @Entity(tableName="knowledge_scopes",indices=[Index("scopeKey")])
 data class KnowledgeScopeRecord(@PrimaryKey val claimId:String,val scopeKey:String)
 data class ChatAccessScope(val threadId:String,val projectId:String?,val scopeKey:String,val useOwnerMemory:Boolean,val threadRevision:Long=0,val memoryEnabled:Boolean=true)
@@ -181,6 +183,16 @@ class ChatConverters {
           AND (instr(c.tags,'"changed"')>0 OR instr(c.tags,'"cancelled"')>0)
         ORDER BY c.updatedAt DESC,c.id LIMIT 1
     """) suspend fun laterKnowledgeCorrection(anchorId:String,scopeKey:String,includeOwner:Boolean):KnowledgeClaim?
+    @Query("""
+        WITH recent AS (
+            SELECT c.id FROM knowledge_claims c LEFT JOIN knowledge_scopes s ON s.claimId=c.id
+            WHERE c.sourceKind='analysis_finding' AND c.status IN ('confirmed','observed')
+              AND ((s.scopeKey IS NULL AND :includeOwner=1) OR s.scopeKey=:scopeKey)
+            ORDER BY c.updatedAt DESC,c.id LIMIT 24
+        )
+        SELECT c.id,substr(c.value,-1536) AS tail FROM recent JOIN knowledge_claims c ON c.id=recent.id
+        ORDER BY c.updatedAt DESC,c.id
+    """) suspend fun recentAnalysisTails(scopeKey:String,includeOwner:Boolean):List<AnalysisTailCandidate>
     @Query("SELECT c.* FROM knowledge_claims c JOIN knowledge_scopes s ON s.claimId=c.id WHERE s.scopeKey=:scopeKey") suspend fun scopeClaims(scopeKey:String):List<KnowledgeClaim>
     @Query("SELECT n.* FROM notes n LEFT JOIN source_scopes s ON s.resourceKind='note' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun notes(scopeKey:String):Flow<List<NoteRecord>>
     @Query("SELECT n.* FROM memories n LEFT JOIN source_scopes s ON s.resourceKind='memory' AND s.resourceId=n.id WHERE (:scopeKey='owner' AND s.resourceId IS NULL) OR s.scopeKey=:scopeKey ORDER BY n.updatedAt DESC") fun memories(scopeKey:String):Flow<List<MemoryRecord>>

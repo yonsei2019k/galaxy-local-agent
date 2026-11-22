@@ -913,6 +913,7 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
             if(overlap==0&&paired<2&&!exactShort)null else claim to (overlap*5+paired+if(exactShort)5 else 0)
         }.sortedWith(compareByDescending<Pair<KnowledgeClaim,Int>> {it.second}
             .thenByDescending {it.first.status=="confirmed"}.thenByDescending {it.first.updatedAt}).map {it.first}
+        if(scored.isEmpty())return savedAnalysisTailMatches(normalized,key,includeOwner,limit)
         val corrections=scored.take(2).mapNotNull {earlier->
             if("record_semantic" !in earlier.tags)return@mapNotNull null
             chatDao.laterKnowledgeCorrection(earlier.id,key,includeOwner)?.let {listOf(it,earlier)}
@@ -922,6 +923,19 @@ class LocalRepository internal constructor(private val database:LocalDatabase,pr
         val subjects=scored.take(3).mapNotNull {it.objectSubject}.distinct()
         val related=if(subjects.isEmpty())emptyList()else chatDao.relatedKnowledge(subjects,key,includeOwner,limit)
         return (preferred+related).distinctBy {it.id}.take(limit).map(::displayKnowledge)
+    }
+    private suspend fun savedAnalysisTailMatches(
+        query:String,key:String,includeOwner:Boolean,limit:Int,
+    ):List<KnowledgeClaim> {
+        val pattern=analysisTailQuery(query)?:return emptyList()
+        return database.withTransaction {
+            if(!memoryAccessEnabled())return@withTransaction emptyList()
+            chatDao.recentAnalysisTails(key,includeOwner)
+                .filter {pattern.containsMatchIn(normalizedKnowledgeText(it.tail))}
+                .take(limit)
+                .mapNotNull {database.knowledgeDao().byId(it.id)}
+                .map(::displayKnowledge)
+        }
     }
     private fun escapeLike(value:String)=value.replace("!","!!").replace("%","!%").replace("_","!_")
     private fun approvedMemoryKind(kind:String)=kind.lowercase(java.util.Locale.ROOT) in setOf("fact","preference","correction","approved","approved_fact","approved_preference","approved_correction")
