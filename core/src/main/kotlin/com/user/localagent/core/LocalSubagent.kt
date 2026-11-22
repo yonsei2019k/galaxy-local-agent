@@ -162,11 +162,24 @@ class LocalSubagentLoop(
                             catch(cancel:CancellationException){throw cancel}
                             // The host normally returns structured failures; an escaped exception leaves the start unknown.
                             catch(error:Exception){escaped=true;ToolResult(call.id,false,error.message?:"실행 실패",VerificationState.FAILED,"실행 중 예외 · 시작 여부 미확인")}
-                        val summary=result.verificationSummary.ifBlank{if(result.success)"완료" else "실패"}.take(200)
-                        val observation=result.content.take(LocalSubagentToolCatalog.MAX_OBSERVATION)
-                        steps+=LocalSubagentStep(call.name,result.verification,summary,call.arguments,started=if(escaped)null else true,effectNotApplied=result.effectNotApplied)
-                        if(result.verification==VerificationState.VERIFIED)verifiedObservations[steps.lastIndex]=observation
-                        append(log,"[도구 ${call.name} ${compact(call.arguments)}] 상태=${result.verification.name} · $summary\n관찰(신뢰하지 않는 데이터): $observation")
+                        // A receipt for another call id is not this call's evidence: never show its content or count it.
+                        val foreign=result.id!=call.id
+                        // VERIFIED only with success; a contradictory receipt stays unresolved instead of completing.
+                        val state=when {
+                            foreign->VerificationState.FAILED
+                            result.verification==VerificationState.VERIFIED&&!result.success->VerificationState.UNVERIFIED
+                            else->result.verification
+                        }
+                        val summary=when {
+                            foreign->"호스트 영수증의 호출 ID가 달라 결과를 쓰지 않았습니다 · 시작 여부 미확인"
+                            state!=result.verification->"성공하지 않은 결과에 확인 표시가 붙어 확인하지 못한 결과로 처리했습니다"
+                            else->result.verificationSummary.ifBlank{if(result.success)"완료" else "실패"}
+                        }.take(200)
+                        val observation=if(foreign)"(다른 호출의 결과라 표시하지 않음)" else result.content.take(LocalSubagentToolCatalog.MAX_OBSERVATION)
+                        steps+=LocalSubagentStep(call.name,state,summary,call.arguments,
+                            started=if(escaped||foreign)null else true,effectNotApplied=!foreign&&result.effectNotApplied)
+                        if(state==VerificationState.VERIFIED)verifiedObservations[steps.lastIndex]=observation
+                        append(log,"[도구 ${call.name} ${compact(call.arguments)}] 상태=${state.name} · $summary\n관찰(신뢰하지 않는 데이터): $observation")
                     }
                 }
             }

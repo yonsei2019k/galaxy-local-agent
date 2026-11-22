@@ -348,4 +348,31 @@ class LocalSubagentTest {
             assertEquals(0,f.executed.size)
         }
     }
+
+    @Test fun foreignReceiptIdIsNeverEvidenceOrShown()=runTest {
+        val f=Fixture(listOf(toolCall,final("완료라고 주장"))){call->ToolResult(call.id+"-other",true,"FOREIGN-OBSERVATION",VerificationState.VERIFIED,"확인됨")}
+        val outcome=f.loop.run("작업",tools,"p")
+        assertTrue(outcome.completed)
+        assertEquals(VerificationState.FAILED,outcome.steps.single().state)
+        assertEquals(null,outcome.steps.single().started)
+        assertFalse(f.prompts.any{it.contains("FOREIGN-OBSERVATION")})
+        val result=LocalSubagentLoop.toolResult("parent",outcome)
+        assertFalse(result.success)
+        assertTrue(result.verification!=VerificationState.VERIFIED)
+        assertFalse(result.content.contains("FOREIGN-OBSERVATION"))
+    }
+
+    @Test fun verifiedWithoutSuccessIsNotCompletion()=runTest {
+        val f=Fixture(listOf(toolCall,final("완료라고 주장"))){call->ToolResult(call.id,false,"contradictory",VerificationState.VERIFIED,"확인됨")}
+        val outcome=f.loop.run("작업",tools,"p")
+        assertEquals(VerificationState.UNVERIFIED,outcome.steps.single().state)
+        val result=LocalSubagentLoop.toolResult("parent",outcome)
+        assertFalse(result.success)
+        assertTrue(result.verification!=VerificationState.VERIFIED)
+        // A contradictory receipt is not a verified read, so a repeat of the same call is executed again.
+        val g=Fixture(listOf(toolCall,toolCall,final("끝"))){call->if(call.id.endsWith("-1"))ToolResult(call.id,false,"x",VerificationState.VERIFIED,"확인됨") else verified(call)}
+        val again=g.loop.run("작업",tools,"q")
+        assertEquals(2,g.executed.size)
+        assertEquals(VerificationState.VERIFIED,LocalSubagentLoop.toolResult("parent",again).verification)
+    }
 }
