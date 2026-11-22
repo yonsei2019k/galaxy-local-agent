@@ -1368,12 +1368,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             value.projectId,value.externalAgentRevision,value.capturedPcRevision,value.modelId,value.allowExternalAgent,value.mode)
         val chat=app.repository.chat
         val currentBinding=binding(request)
-        val window=chat.pagedMessages(request.threadId,request.branchId,32).first()
-        val anchor=window.indexOfFirst{it.id==request.userMessageId&&it.role=="user"}
-        if(anchor<0)return null
+        val window=chat.contextBeforeUserMessage(request.threadId,request.branchId,request.userMessageId,32)
         val turns=mutableListOf<CloudConversationContext.Turn>()
         var previous:CloudConversationContext.PreviousTask?=null
-        for(message in window.take(anchor)) {
+        for(message in window) {
             if(message.role !in setOf("user","assistant"))continue
             val run=message.runId?.let{chat.run(it)}?:if(message.role=="user")chat.runForUserMessage(message.id)else null
             if(run==null||run.id==request.runId||run.threadId!=request.threadId||run.branchId!=request.branchId||

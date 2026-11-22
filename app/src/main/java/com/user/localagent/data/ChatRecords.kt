@@ -122,6 +122,19 @@ class ChatConverters {
     @Query("SELECT COUNT(*) FROM messages m JOIN chat_branch_messages b ON b.messageId=m.id WHERE b.branchId=:branchId AND m.threadId=:threadId AND b.position>=:position") suspend fun historyCountFromAnchor(threadId:String,branchId:String,position:Long):Int
     @Query("SELECT m.* FROM messages m JOIN chat_branch_messages b ON b.messageId=m.id WHERE b.branchId=:branchId AND m.threadId=:threadId AND (:before IS NULL OR b.position<:before) ORDER BY b.position DESC LIMIT :limit") suspend fun messagePage(threadId:String,branchId:String,before:Long?,limit:Int):List<MessageRecord>
     @Query("SELECT * FROM chat_branch_messages WHERE branchId=:branchId ORDER BY position") suspend fun refs(branchId:String):List<BranchMessageRef>
+    @Query("""
+        SELECT m.* FROM messages m
+        JOIN chat_branch_messages b ON b.messageId = m.id
+        WHERE b.branchId = :branchId AND m.threadId = :threadId
+          AND b.position < (
+              SELECT a.position FROM chat_branch_messages a
+              JOIN messages anchor ON anchor.id = a.messageId
+              WHERE a.branchId = :branchId AND a.messageId = :anchorMessageId
+                AND anchor.threadId = :threadId AND anchor.role = 'user'
+          )
+        ORDER BY b.position DESC LIMIT :limit
+    """)
+    suspend fun messagesBeforeUserAnchor(threadId: String, branchId: String, anchorMessageId: String, limit: Int): List<MessageRecord>
     @Query("SELECT position FROM chat_branch_messages WHERE branchId=:branchId AND messageId=:messageId") suspend fun position(branchId:String,messageId:String):Long?
     @Query("UPDATE chat_branch_messages SET position=-position WHERE branchId=:branchId AND position>:after") suspend fun shiftPositionsTemporary(branchId:String,after:Long)
     @Query("UPDATE chat_branch_messages SET position=-position+1 WHERE branchId=:branchId AND position<0") suspend fun restoreShiftedPositions(branchId:String)
@@ -642,6 +655,15 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val found=dao.messagePage(threadId,branch,beforePosition,limit+1)
         val selected=found.take(limit).map {it.copy(text=fullMessageText(it.id))}
         return ChatMessagePage(selected,if(found.size>limit)selected.lastOrNull()?.let {dao.position(branch,it.id)}else null)
+    }
+    /** Capture the bounded history before the queued request, in branch order. */
+    internal suspend fun contextBeforeUserMessage(
+        threadId: String, branchId: String, anchorMessageId: String, limit: Int,
+    ): List<MessageRecord> = database.withTransaction {
+        require(limit in 1..32)
+        activeBranch(threadId, branchId)
+        dao.messagesBeforeUserAnchor(threadId, branchId, anchorMessageId, limit).asReversed()
+            .map { message -> message.copy(text = fullMessageText(message.id)) }
     }
     /** UTF-8 complete branch history. Caller selects an explicit export destination. */
     suspend fun exportText(threadId:String,branchId:String?=null,output:OutputStream):Int {
