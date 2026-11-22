@@ -1886,9 +1886,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestReadbackObligations=com.user.localagent.core.RequiredReadbackObligations.capture(selected,context,requestSteps,evidence.mutations,evidence.reads,evidence.aligned,signatures)
         val updated=stored.copy(previousSteps=requestSteps.toList(),readbackObligations=requestReadbackObligations)
         val merged=JsonObject(original+Json.parseToJsonElement(updated.toJson()).jsonObject)
-        val next = if (closedSubagentId == null) merged else {
-            check(merged[LOCAL_SUBAGENT_IN_FLIGHT]?.jsonPrimitive?.contentOrNull == closedSubagentId)
-            JsonObject(merged - LOCAL_SUBAGENT_IN_FLIGHT)
+        val next = when {
+            closedSubagentId == null -> merged
+            (merged[LOCAL_SUBAGENT_IN_FLIGHT] as? JsonPrimitive)?.contentOrNull == closedSubagentId ->
+                JsonObject(merged - LOCAL_SUBAGENT_IN_FLIGHT)
+            else -> {
+                FailureLog.record(this.context, "local_subagent", null, "termination_binding_changed")
+                merged
+            }
         }
         app.repository.chat.updateRunContext(run.id,next.toString())
     }
@@ -2892,9 +2897,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         suspend fun commit(observed: ToolResult, subagentId: String? = null) = withContext(NonCancellable) {
             observedOutcomes += com.user.localagent.core.ObservedToolOutcome(call, observed)
             requestSteps += HarnessStep(call, goalToolStepEvidence(call, observed))
+            try {
+                persistStepEvidence(subagentId)
+            } catch (error: Exception) {
+                requestSteps.removeAt(requestSteps.lastIndex)
+                observedOutcomes.removeAt(observedOutcomes.lastIndex)
+                throw error
+            }
             val recorded = traceAttempt?.let { workTraceSession?.outcome(it, observed) } == true
             recordOutcomeSafely(call.name, observed.success, "${observed.verification.name} · ${observed.verificationSummary}", auditAlreadyStored = recorded)
-            persistStepEvidence(subagentId)
         }
         val keepAlive = com.user.localagent.voice.RunKeepAlive.await(request.runId)
         if (!keepAlive.active) {
@@ -2913,14 +2924,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
 
         val previousStatus=status.value
         localSubagentActive=true
-        fun requireForegroundService() {
-            check(com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active) {
-                "휴대폰 백그라운드 실행 유지가 끝나 하위 작업을 멈췄습니다."
-            }
-        }
+        fun foregroundServiceActive() = com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active
+        val serviceEnded = "휴대폰 백그라운드 실행 유지가 끝나 하위 작업을 멈췄습니다."
         val loop=com.user.localagent.core.LocalSubagentLoop(
                 generate={system,user,schema->
-                    requireForegroundService()
+                    check(foregroundServiceActive()) { serviceEnded }
                     val text=StringBuilder()
                     val events=if(engine.supportsStructuredOutput)engine.generateStructuredEvents(user,system,schema) else engine.generateChatEvents(user,system)
                     var complete=false
@@ -2933,8 +2941,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 },
                 // runTool restores the parent's in-flight state, so one parent call stays in flight throughout.
                 execute={inner->
-                    requireForegroundService()
-                    runTool(inner)
+                    if (foregroundServiceActive()) runTool(inner) else
+                        ToolResult(inner.id, false, serviceEnded, VerificationState.FAILED, serviceEnded, effectNotApplied = true)
                 },
             )
         val timeout=ToolRegistry.definitions.getValue(call.name).timeoutMillis
@@ -2946,8 +2954,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 ?:com.user.localagent.core.LocalSubagentOutcome(false,"","하위 에이전트 시간 초과(${timeout/60_000}분).",loop.observed)
         } catch(cancel:CancellationException) {
             // Owner stop / steer / goal stop: keep reads verified before the stop, then propagate the cancellation.
-            commit(com.user.localagent.core.LocalSubagentLoop.toolResult(call.id,
-                com.user.localagent.core.LocalSubagentOutcome(false,"","하위 에이전트가 중지되었습니다.",loop.observed)), subagentId)
+            try {
+                commit(com.user.localagent.core.LocalSubagentLoop.toolResult(call.id,
+                    com.user.localagent.core.LocalSubagentOutcome(false,"","하위 에이전트가 중지되었습니다.",loop.observed)), subagentId)
+            } catch (error: Exception) {
+                CancelledAnswerFinalizer.preserveFailure(cancel, error) {
+                    FailureLog.record(context, "local_subagent", it, "cancellation_checkpoint_unavailable")
+                }
+            }
             throw cancel
         } catch(error:Exception) {
             // Incomplete/oversized generation: the attempt ends, but reads verified before it stay as evidence.
