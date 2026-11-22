@@ -11,6 +11,11 @@ def running():
     if not pid.exists():return False
     out=subprocess.run(['tasklist','/FI',f'PID eq {pid.read_text().strip()}','/FI','IMAGENAME eq pythonw.exe','/NH'],capture_output=True,text=True,creationflags=0x08000000).stdout
     return 'pythonw.exe' in out
+# Check both subscription CLIs without making a model request at sign-in.
+probe=WORKER/'provider_startup.py'
+if probe.is_file():
+    subprocess.Popen([str(HOME/'python/pythonw.exe'),'-E','-s',str(probe)],cwd=WORKER,env=ENV,
+                     creationflags=0x08000008,close_fds=True)
 delay=2
 while True:
     if running():delay=2

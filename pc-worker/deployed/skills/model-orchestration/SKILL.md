@@ -4,6 +4,8 @@ description: Use for bounded repeated extraction, visual navigation, and multi-s
 ---
 Use the host-selected execution profile for this run. Keep the original request, permissions, and exact verified observations when continuing work.
 
+Keep the selected subscription provider for the entire request. A recovery run may select another model within that provider using host-verified progress.
+
 - For bounded extraction, return the requested fields and cite exact input evidence. Mark gaps and conflicts explicitly. Do not explore extra sources.
 - For visual work, inspect current page or screen evidence before acting. Recheck the selected target after transitions and report visibility limits.
 - For multi-step work, prioritize steps that resolve real uncertainty. Distinguish what you observed from what you proposed. Stop if effects cannot be verified, and ask only for missing decisions the authorized sources cannot supply.

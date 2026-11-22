@@ -539,13 +539,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val binding=app.workspaceFor(thread.projectId).bindingFingerprint()
             val pcBinding=capturePcDataBindingForNewRun(threadId)
             val pcTextAuthority=com.user.localagent.compute.PcComputeSettings.get(context).captureTextAuthority()
-            val externalAuthority=ExternalAgentSettings.get(context,model).capture()
+            val automaticModel=if(remoteAuthority==null)ExternalAgentSettings.automaticModel(
+                ExternalAgentSettings.get(context,ExternalAgentSettings.CLAUDE_MODEL_ID).capture().enabled
+            ) else ExternalAgentSettings.MODEL_ID
+            val externalAuthority=ExternalAgentSettings.get(context,if(model=="auto")automaticModel else model).capture()
             // Only fresh requests inherit the owner-approved subscription-first default.
             val imageOnly=snapshot.isNotEmpty() && snapshot.all {it.mimeType.startsWith("image/")}
             val selection=if(model=="auto" && remoteAuthority==null && app.repository.chat.awaitingPrivateReply(threadId,thread.activeBranchId))
                 com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION else model
             val resolvedModel=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(
-                selection,if(selection==ExternalAgentSettings.CLAUDE_MODEL_ID)selection else ExternalAgentSettings.MODEL_ID,text,imageOnly,
+                selection,if(ExternalAgentSettings.isCloud(selection))selection else automaticModel,text,imageOnly,
                 allowCloudPersonalData=mode!=AgentWorkMode.RESEARCH.wireName&&externalAuthority.allowsPersonalData)
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,resolvedModel,thinking,runId=reservedRunId,
                 expectedPreviousRunId=previousRunId,remoteTestThreadRevision=remoteThreadRevision,

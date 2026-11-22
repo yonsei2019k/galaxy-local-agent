@@ -69,6 +69,25 @@ def agent_profile(catalog, allowed_tools=(), recovery=None):
     return available_profile(catalog, (SOL, "medium"))
 
 
+def claude_profile(allowed_tools=(), recovery=None):
+    """Route by the host's authorized scope and observations, never by prompt text."""
+    recovery = recovery or {}
+    if recovery.get("browserObservationComplete") is True:
+        return "sonnet", "medium"
+    if recovery.get("readObservationsComplete") is True:
+        if (len(recovery.get("observedReads", ())) == 1 and not recovery.get("failedReads")
+                and not recovery.get("observationsOmitted")):
+            return "haiku", None
+        return "sonnet", "medium"
+    remaining = set(recovery.get("acceptedTools", ())) - PLAN_TOOLS
+    tools = remaining or (set(allowed_tools) - PLAN_TOOLS)
+    if tools and tools <= VISUAL_TOOLS:
+        return "sonnet", "medium"
+    if len(remaining) >= 3:
+        return "opus", "high"
+    return "sonnet", "high" if len(remaining) == 2 else "medium"
+
+
 def briefing_profile(catalog, record_count, recent_count):
     if record_count + recent_count <= 8:
         return available_profile(catalog, (LUNA, "low"), (SOL, "medium"))

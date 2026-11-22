@@ -26,6 +26,7 @@ class ExternalAgentSettings private constructor(context:Context, modelId:String)
         const val MODEL_ID="paired-pc-cloud-agent-v1"
         const val CLAUDE_MODEL_ID="paired-pc-claude-agent-v1"
         fun isCloud(modelId:String)=modelId==MODEL_ID||modelId==CLAUDE_MODEL_ID
+        fun automaticModel(claudeAuthorized:Boolean)=if(claudeAuthorized)CLAUDE_MODEL_ID else MODEL_ID
         fun provider(modelId:String)=if(modelId==CLAUDE_MODEL_ID)"claude" else "codex"
         fun label(modelId:String)=if(modelId==CLAUDE_MODEL_ID)"Claude" else "Codex"
         const val TITLE="클라우드 · 휴대폰 도구"

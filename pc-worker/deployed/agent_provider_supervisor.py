@@ -55,7 +55,7 @@ def load_config(home, provider="codex"):
             return None
         return ProviderConfig(Path(data["executable"]), data["executableSha256"], Path(data["python"]),
                               Path(data["mcpScript"]), data["mcpScriptSha256"], Path(data["runtimeDirectory"]),
-                              Path(data["workspace"]), data.get("model"), orchestrate=provider == "codex", config_dir=Path(config_dir) if config_dir else None)
+                              Path(data["workspace"]), data.get("model"), orchestrate=True, config_dir=Path(config_dir) if config_dir else None)
     except (OSError, ValueError, UnicodeError, TypeError):
         return None
 

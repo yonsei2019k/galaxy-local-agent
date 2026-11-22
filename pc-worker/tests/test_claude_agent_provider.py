@@ -242,7 +242,7 @@ class SupervisorConfigTests(unittest.TestCase):
         self.assertIsNone(sup.load_config(home))
         config = sup.load_config(home, "claude")
         self.assertEqual(home / "cfg", config.config_dir)
-        self.assertFalse(config.orchestrate)
+        self.assertTrue(config.orchestrate)
         wrong = self.write("agent-provider-claude.json", executable="@HOME/codex.exe")
         self.assertIsNone(sup.load_config(wrong, "claude"))
         relative = self.write("agent-provider-claude.json", claudeConfigDir="relative")

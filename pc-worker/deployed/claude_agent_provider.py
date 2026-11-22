@@ -21,6 +21,8 @@ from codex_agent_provider import (BOOTSTRAP_ENV, FINAL_SCHEMA, MAX_LINE,
 from provider_conversation_context import (ConversationContextError, provider_input,
                                            validate_conversation_context)
 
+from model_orchestration import claude_profile, skill_body
+
 TOOL_PREFIX = "mcp__ziphap_device__"
 # --json-schema makes Claude Code add this built-in tool to return the final object (observed with 2.1.330:
 # init tools == ["StructuredOutput"] when no MCP server is configured). It has no effect outside the report.
@@ -31,7 +33,7 @@ STRIPPED_ENV = ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROP
                 "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", BOOTSTRAP_ENV)
 
 
-def build_launch(config, bootstrap, static, external_allowed=False):
+def build_launch(config, bootstrap, static, external_allowed=False, *, allowed_tools=(), read_recovery=None):
     """Write static instructions/mcp.json into `static`; return (args, environment)."""
     if external_allowed is not True:
         raise ProviderError("EXTERNAL_AGENT_NOT_ALLOWED")
@@ -64,7 +66,14 @@ def build_launch(config, bootstrap, static, external_allowed=False):
             "--json-schema", json.dumps(FINAL_SCHEMA, separators=(",", ":"))]
     if config.model is not None:
         args += ["--model", config.model]
-    environment = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
+    elif config.orchestrate:
+        model, effort = claude_profile(allowed_tools, read_recovery)
+        args += ["--model", model]
+        if effort is not None:
+            args += ["--effort", effort]
+    environment = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV
+                   and k not in {"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"}
+                   and not (k.startswith("ANTHROPIC_DEFAULT_") and k.endswith("_MODEL"))}
     if config_dir is not None:
         environment["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return args, environment
@@ -78,7 +87,7 @@ def _valid_final(value):
 
 
 def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=None, timeout=300, progress=None,
-        observe_tool=None, conversation_context=None, read_recovery=None):
+        observe_tool=None, conversation_context=None, read_recovery=None, allowed_tools=()):
     """Blocking owned child. Same guarantees as codex_agent_provider.run."""
     try:
         context = validate_conversation_context(conversation_context)
@@ -121,8 +130,12 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
     emit("starting")
     with tempfile.TemporaryDirectory(prefix="ziphap-agent-static-", dir=root) as folder:
         static = Path(folder)
-        (static / "instructions.txt").write_text(instructions_for(context, read_recovery), encoding="utf-8")
-        args, environment = build_launch(config, bootstrap, static, external_allowed)
+        instructions = instructions_for(context, read_recovery)
+        if config.orchestrate and external_allowed is True:
+            instructions += "\n\n" + skill_body()
+        (static / "instructions.txt").write_text(instructions, encoding="utf-8")
+        args, environment = build_launch(config, bootstrap, static, external_allowed,
+                                         allowed_tools=allowed_tools, read_recovery=read_recovery)
         readers_stop = threading.Event()
         threads = []
         tree = None
