@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -46,6 +46,8 @@ internal object ReactBridgePolicy {
             else->emptySet()
         }
         require(payload.keys==allowed)
+        if(action=="navigate")require(payload.getValue("panel").jsonPrimitive.content in
+            setOf("chat","settings","images","tools","projects","history","collab","capabilities","connections","privacy"))
         if(action=="saveOfficeProfile")requireOfficeEntries(payload.getValue("entries"))
         else for((key,value) in payload){
             val p=value.jsonPrimitive

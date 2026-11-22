@@ -2,7 +2,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
 import type { IconName } from './Icon'
-import type { ConversationMessage, ResultPreview, Snapshot, Task } from './bridge'
+import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { isLiveTaskPhase } from './composer'
 
 const phasePresentation: Record<string, { title: string; tone: string; icon: IconName }> = {
@@ -28,7 +28,14 @@ export function BrandMark({ className }: { className?: string }) {
   return <span className={`brand-mark ${className ?? ''}`}><Icon name="robot" /></span>
 }
 
-function Welcome() {
+function Welcome({ staff, guide, calendarGranted, onNavigate, onDismiss, onCalendar }: {
+  staff?: string
+  guide: boolean
+  calendarGranted: boolean
+  onNavigate(panel: Panel): void
+  onDismiss(): void
+  onCalendar(): void
+}) {
   const [mascotAvailable, setMascotAvailable] = useState(true)
   return (
     <div className="welcome">
@@ -37,7 +44,18 @@ function Welcome() {
           ? <img className="mascot" src={`${import.meta.env.BASE_URL}ziphap-mascot.png`} alt="" onError={() => setMascotAvailable(false)} />
           : <BrandMark className="mascot-fallback" />}
       </div>
-      <h1>무엇을 도와드릴까요?</h1>
+      <h1>{staff ? `${staff}에게 말 걸기` : '무엇을 도와드릴까요?'}</h1>
+      {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+      {guide && <section className="office-guide" aria-label="사무실 처음 안내">
+        <p>일정 확인, 자료 찾기, PC 작업을 여기서 말로 부탁해 보세요. 필요한 연결은 그때 확인합니다.</p>
+        <div className="office-guide-actions">
+          {!calendarGranted && <button type="button" onClick={onCalendar}>휴대폰 일정 읽기 허용</button>}
+          <button type="button" onClick={() => onNavigate('capabilities')}>할 수 있는 일 보기</button>
+          <button type="button" onClick={() => onNavigate('connections')}>앱과 컴퓨터 연결</button>
+          <button type="button" onClick={() => onNavigate('privacy')}>개인정보와 권한</button>
+          <button type="button" onClick={onDismiss}>바로 시작</button>
+        </div>
+      </section>}
     </div>
   )
 }
@@ -103,12 +121,15 @@ function TaskCard({ task }: { task: Task }) {
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMenu }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMenu, onNavigate, onDismissOfficeGuide, onOfficeCalendar }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
   onCopy(messageId: string): void
   onMessageMenu(messageId: string): void
+  onNavigate(panel: Panel): void
+  onDismissOfficeGuide(): void
+  onOfficeCalendar(): void
 }) {
   const view = useRef<HTMLElement>(null)
   const pinnedToEnd = useRef(true)
@@ -120,6 +141,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
   const empty = messages.length === 0 && tasks.length === 0
   const loading = connected && !snapshot?.ready
+  const staff = snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
 
   const scrollToEnd = useCallback(() => {
     if (view.current) view.current.scrollTop = view.current.scrollHeight
@@ -150,7 +172,10 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
         pinnedToEnd.current = pinned
         setScrolledUp(!pinned)
       }}>
-        {loading ? <div className="loading" role="status"><Icon name="clock" /> 대화를 불러오는 중</div> : empty ? <Welcome /> : (
+        {loading ? <div className="loading" role="status"><Icon name="clock" /> 대화를 불러오는 중</div> : empty ?
+          <Welcome staff={staff} guide={enabled && snapshot?.showOfficeGuide === true}
+            calendarGranted={snapshot?.officeCalendarReadGranted === true}
+            onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
             {previousTasks.length > 0 && <details className="task-evidence">
               <summary><Icon name="history" /> 이전 작업 기록 <Icon name="down" className="details-chevron" /></summary>

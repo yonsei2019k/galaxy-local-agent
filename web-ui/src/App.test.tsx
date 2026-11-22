@@ -183,12 +183,13 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'seat-2' } })
   })
 
-  it('puts shared rooms together and uses the newly saved staff title on the same room', () => {
+  it('puts the main chat above employees and preserves the saved employee name', () => {
     mount()
     const original = { id: 'thread-a', title: '과장 김호영', selected: true }
     snapshot({ ...base, threads: [original], staffRooms: [original] })
-    const shared = host.querySelector('.desktop-sidebar [aria-label="공용 채팅방"]')!
-    expect(Array.from(shared.querySelectorAll('button'), row => row.textContent?.trim())).toEqual(['사무실', '협력사 핫라인'])
+    const sidebar = host.querySelector('.desktop-sidebar')!
+    expect(Array.from(sidebar.querySelectorAll('button'), row => row.textContent?.trim()).slice(0, 3))
+      .toEqual(['사무실', '과장 김호영', '협력사 핫라인'])
     click('사무실')
     expect(requests().at(-1)).toMatchObject({ action: 'openOffice', threadId: 'thread-a' })
     const renamed = { ...original, title: '김호영 과장' }
@@ -196,6 +197,24 @@ describe('native conversation', () => {
     expect(host.querySelector('.topbar-title')?.textContent).toBe('김호영 과장')
     click('김호영 과장')
     expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'thread-a' } })
+  })
+
+  it('keeps the office composer usable and uses native actions for optional setup', () => {
+    mount()
+    snapshot({ ...base, officeSelected: true, showOfficeGuide: true, officeCalendarReadGranted: false, messages: [], tasks: [] })
+    expect((host.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(false)
+    click('할 수 있는 일 보기')
+    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'capabilities' } })
+    click('휴대폰 일정 읽기 허용')
+    expect(requests().at(-1)).toMatchObject({ action: 'requestOfficeCalendar', payload: {} })
+    click('바로 시작')
+    expect(requests().at(-1)).toMatchObject({ action: 'dismissOfficeGuide', payload: {} })
+    snapshot({ ...base, officeSelected: true, showOfficeGuide: true, officeCalendarReadGranted: true, messages: [], tasks: [] })
+    expect(host.textContent).not.toContain('휴대폰 일정 읽기 허용')
+    snapshot({ ...base, officeSelected: true, showOfficeGuide: false, messages: [], tasks: [] })
+    expect(host.querySelector('.office-guide')).toBeNull()
+    expect(readSnapshot({ ...base, officeSelected: false, showOfficeGuide: true })).toBeNull()
+    expect(postIntent(base, { action: 'requestOfficeCalendar' })).toBe(false)
   })
 
   it('renders assistant output and evidence as text and copies the selected answer by native identity', () => {

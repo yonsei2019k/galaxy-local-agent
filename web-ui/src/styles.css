@@ -312,6 +312,11 @@ svg { width: 20px; height: 20px; flex: none; }
 .mascot-fallback svg { width: 63%; height: 63%; }
 .welcome h1 { margin: 0; font-size: clamp(26px, 6vw, 40px); line-height: 1.24; font-weight: 800; letter-spacing: -.05em; word-break: keep-all; text-wrap: balance; }
 .welcome p { max-width: 34em; margin: 12px 0 0; color: var(--muted); font-size: clamp(13px, 3.6vw, 15px); line-height: 1.6; word-break: keep-all; text-wrap: balance; }
+.office-guide { width: min(100%, 33rem); margin-block-start: 12px; }
+.office-guide p { margin-inline: auto; }
+.office-guide-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-block-start: 12px; }
+.office-guide-actions button { min-height: var(--tap); padding: 6px 12px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--accent); font: inherit; }
+.office-guide-actions button:hover, .office-guide-actions button:focus-visible { background: var(--accent-soft); }
 .loading { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 100%; color: var(--muted); font-size: 14px; }
 .loading svg { width: 17px; height: 17px; }
 

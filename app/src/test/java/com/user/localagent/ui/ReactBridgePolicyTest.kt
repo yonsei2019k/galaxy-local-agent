@@ -49,4 +49,11 @@ class ReactBridgePolicyTest {
         assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{"CHAIR":{"schoolGrade":"a\u0007b"}}}""")))
         assertNull(ReactBridgePolicy.parse(wire("saveOfficeProfile","""{"entries":{},"approved":true}""")))
     }
+    @Test fun officeGuideCanOpenApprovedSurfacesButCannotChoosePermissionOrAuthority(){
+        assertNotNull(ReactBridgePolicy.parse(wire("dismissOfficeGuide","{}")))
+        assertNotNull(ReactBridgePolicy.parse(wire("requestOfficeCalendar","{}")))
+        assertNull(ReactBridgePolicy.parse(wire("requestOfficeCalendar","""{"permission":"android.permission.WRITE_CALENDAR"}""")))
+        assertNotNull(ReactBridgePolicy.parse(wire("navigate","""{"panel":"capabilities"}""")))
+        assertNull(ReactBridgePolicy.parse(wire("navigate","""{"panel":"enable_arbitrary_mcp"}""")))
+    }
 }

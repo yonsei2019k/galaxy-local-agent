@@ -80,6 +80,11 @@ class MainActivity : ComponentActivity() {
     private var attachmentJobThreadId:String?=null
     private var attachmentScope:Triple<String,Long,String>?=null
     private val attachmentPreparing=MutableStateFlow(false)
+    private val officeCalendarReadGranted=MutableStateFlow(false)
+    private val officeCalendarPermission=registerForActivityResult(ActivityResultContracts.RequestPermission()){granted->
+        officeCalendarReadGranted.value=granted
+        status.value=if(granted)"휴대폰 일정을 읽을 수 있어요."else"일정 접근을 허용하지 않았어요."
+    }
 
     private val modelOptions get()=app.runs.modelOptions
     private val preferredModelId get()=app.runs.preferredModelId
@@ -143,7 +148,11 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {repeatOnLifecycle(Lifecycle.State.STARTED){while(isActive){if(!app.runs.hasActiveRuns.value && !RuntimeGate.benchmark.get()&&!app.smsAnalysis.state.value.running&&!app.webResearch.state.value.running&&!app.imageStudio.state.value.running)app.updates.checkAndApply();delay(60_000)}}}
         setContent { ZipHapTheme { AppScreen() } }
     }
-    override fun onStart(){super.onStart();RuntimeGate.foreground.set(true)}
+    override fun onStart(){
+        super.onStart()
+        RuntimeGate.foreground.set(true)
+        officeCalendarReadGranted.value=checkSelfPermission(Manifest.permission.READ_CALENDAR)==android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
     override fun onSaveInstanceState(outState:Bundle){
         outState.putString("folder-project-id",folderProjectId)
         attachmentScope?.let {(id,revision,branch)->outState.putString("attachment-thread-id",id);outState.putLong("attachment-thread-revision",revision);outState.putString("attachment-branch-id",branch)}
@@ -237,6 +246,16 @@ class MainActivity : ComponentActivity() {
         var officeProfileEntries by remember{mutableStateOf<Map<String,com.user.localagent.core.office.OfficePrivateProfile.Entry>>(emptyMap())}
         var officeProfileRevision by remember{mutableIntStateOf(0)}
         val officeOpen=composerThreadId==ZipHapRoom.OFFICE.threadId
+        val calendarGranted by officeCalendarReadGranted.collectAsState()
+        val guideSettings=remember{getSharedPreferences("office-introduction",MODE_PRIVATE)}
+        var officeGuideDismissed by remember{mutableStateOf(guideSettings.getBoolean("dismissed",false))}
+        fun dismissOfficeGuide(){
+            if(!officeGuideDismissed){
+                guideSettings.edit().putBoolean("dismissed",true).apply()
+                officeGuideDismissed=true
+            }
+        }
+        var capabilityShelfOpen by rememberSaveable{mutableStateOf(false)}
         LaunchedEffect(officeOpen,officeProfileRevision){
             officeProfileEntries=if(officeOpen)withContext(Dispatchers.IO){runCatching{app.officeProfile.read()?.entries}.getOrNull()}.orEmpty() else emptyMap()
         }
@@ -263,11 +282,6 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(selectedThreadId){if(goalEditorThreadId!=selectedThreadId)goalEditorThreadId=null}
         val roomThreads by app.repository.chat.threads.collectAsState(initial=emptyList())
         val menuThreads by app.repository.chat.menuThreads.collectAsState(initial=emptyList())
-        LaunchedEffect(Unit){
-            try{app.repository.chat.openFixedOfficeRooms()}
-            catch(cancel:CancellationException){throw cancel}
-            catch(error:Exception){FailureLog.record(this@MainActivity,"office_room_setup",error)}
-        }
         val currentBranchId=roomThreads.firstOrNull{it.id==selectedThreadId}?.activeBranchId.orEmpty()
         var messageMenuId by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
         var messageEdit by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
@@ -334,6 +348,8 @@ class MainActivity : ComponentActivity() {
                         author?.let { put("authorLabel", it.label) }
                     })}})
                     put("officeSelected",officeOpen)
+                    put("showOfficeGuide",officeOpen&&!officeGuideDismissed&&messages.isEmpty())
+                    if(officeOpen)put("officeCalendarReadGranted",calendarGranted)
                     if(officeOpen)put("officeProfile",buildJsonObject{officeProfileEntries.forEach{(seat,entry)->put(seat,buildJsonObject{
                         entry.birthDate?.let{put("birthDate",it)};entry.schoolGrade?.let{put("schoolGrade",it)}
                     })}})
@@ -345,9 +361,16 @@ class MainActivity : ComponentActivity() {
                     put("models",buildJsonArray{modelChoices.forEach{(id,label)->add(buildJsonObject{put("id",id);put("label",label)})}})
                     put("attachments",buildJsonArray{attachments.forEach{add(buildJsonObject{put("id",it.id);put("name",it.name)})}})
                     put("collab",collaborationState)
-                    put("tasks",buildJsonArray{activeExecutions.filter{it.threadId==composerThreadId}.forEach{run->add(buildJsonObject{
-                        put("id",run.runId);put("phase",if(run.waitingForApproval)"approval"else "running")
-                        put("label",if(run.waitingForApproval)"승인 확인 필요"else "작업 진행 중");put("detail",run.status)
+                    put("tasks",buildJsonArray{
+                        queuedRequests.filter{q->q.threadId==composerThreadId&&activeExecutions.none{it.runId==q.runId}}.take(8).forEach{request->
+                            add(buildJsonObject{
+                                put("id",request.runId);put("phase","queued");put("label","차례를 기다리는 일");put("detail",request.text.lineSequence().first().take(120));put("canCancel",false)
+                            })
+                        }
+                        activeExecutions.filter{it.threadId==composerThreadId}.forEach{run->add(buildJsonObject{
+                        val phase=when{run.waitingForApproval->"approval";run.waitingForResource!=null->"waiting_resource";else->"running"}
+                        put("id",run.runId);put("phase",phase)
+                        put("label",when(phase){"approval"->"확인이 필요한 일";"waiting_resource"->"사용 가능한 실행 환경 대기";else->"맡은 일 진행 중"});put("detail",run.status)
                         put("canCancel",run.runId==runForRoom)
                         put("evidence",buildJsonArray{publicActivityWindow(roomActivities.values.firstOrNull{it.runId==run.runId&&it.threadId==composerThreadId}?.events.orEmpty()).forEach{event->add(buildJsonObject{
                             put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
@@ -379,6 +402,7 @@ class MainActivity : ComponentActivity() {
                                 else if(token !in submittedTokens&&chat.sendFromReact(text,composerThreadId,currentBranchId,token)){
                                     submittedTokens+=token;while(submittedTokens.size>128)submittedTokens.remove(submittedTokens.first())
                                     if(chat.draft.value==text)chat.updateDraft("",composerThreadId)
+                                    if(officeOpen)dismissOfficeGuide()
                                 }
                                 composerEpoch++
                             }
@@ -394,6 +418,8 @@ class MainActivity : ComponentActivity() {
                             "selectThread"->payload.getValue("id").jsonPrimitive.content.takeIf{id->roomThreads.any{it.id==id&&!it.archived&&it.deletedAt==null}}?.let(chat::selectThread)
                             "renameThread"->chat.renameThread(composerThreadId,payload.getValue("title").jsonPrimitive.content)
                             "openOffice"->chat.openFixedOfficeRooms()
+                            "dismissOfficeGuide"->if(officeOpen)dismissOfficeGuide()
+                            "requestOfficeCalendar"->if(officeOpen&&!officeCalendarReadGranted.value)officeCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
                             "saveOfficeProfile","clearOfficeProfile"->if(officeOpen){
                                 val saving=command.action=="saveOfficeProfile"
                                 val entries=if(saving)runCatching{payload.getValue("entries").jsonObject.mapValues{(_,value)->
@@ -413,7 +439,17 @@ class MainActivity : ComponentActivity() {
                             }
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
                             "attach"->{val room=roomThreads.firstOrNull{it.id==composerThreadId};if(room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}}
-                            "navigate"->{val panel=payload.getValue("panel").jsonPrimitive.content;collaborationVisible=panel=="collab";if(collaborationVisible)collaboration.refresh()else openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})}
+                            "navigate"->{
+                                val panel=payload.getValue("panel").jsonPrimitive.content
+                                collaborationVisible=panel=="collab"
+                                when(panel){
+                                    "collab"->collaboration.refresh()
+                                    "capabilities"->capabilityShelfOpen=true
+                                    "connections"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.CONNECTIONS}
+                                    "privacy"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.PRIVACY}
+                                    else->openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})
+                                }
+                            }
                             "collabRefresh"->collaboration.refresh(payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "collabSend"->collaboration.post(payload.getValue("clientMessageId").jsonPrimitive.content,payload.getValue("text").jsonPrimitive.content,payload.getValue("recipient").jsonPrimitive.content,payload.getValue("bindingEpoch").jsonPrimitive.long)
                             "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&(it.role=="assistant"||officeAuthor(it.role)!=null)})chat.copyMessage(id)}
@@ -552,6 +588,17 @@ class MainActivity : ComponentActivity() {
             onDismiss={queueOpen=false},onEdit=chat::editQueued,onMove=chat::reorderQueued,onCancel=chat::cancelQueued,
             onManageGoal={threadId->queueOpen=false;chat.selectThread(threadId)},
         )
+        if(capabilityShelfOpen)OfficeCapabilityShelf(app,onDismiss={capabilityShelfOpen=false},
+            onConnections={capabilityShelfOpen=false;openPanel(4);manualSettings=true;settingsPage=SettingsPage.CONNECTIONS},
+            onImages={capabilityShelfOpen=false;openPanel(7)},
+            calendarReadGranted=calendarGranted,onCalendarRead={
+                capabilityShelfOpen=false
+                if(!officeCalendarReadGranted.value)officeCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
+            },
+            onDraft={text->
+                if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||chat.draft.value.isNotBlank())false
+                else {chat.updateDraft(text,composerThreadId);capabilityShelfOpen=false;true}
+            })
         if(skillLibraryOpen)SkillLibraryDialog(chat.bundledSkills,toolStatuses=skillCapabilities,onDismiss={skillLibraryOpen=false})
         goalEditorThreadId?.takeIf{it==selectedThreadId&&it.isNotBlank()}?.let {goalThread->
             GoalEditorDialog(goal=roomGoal?.takeIf{it.threadId==goalThread},threadId=goalThread,
