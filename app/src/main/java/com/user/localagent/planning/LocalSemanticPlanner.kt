@@ -58,6 +58,7 @@ class LocalSemanticPlanner internal constructor(
         chosen: ChosenInference,
         availableTools: Set<String> = ToolRegistry.definitions.keys,
         localContext: JsonObject = buildJsonObject {},
+        onModelLoaded: (suspend (Long) -> Unit)? = null,
     ): SemanticPlanningResult {
         if (ownerRequest.isBlank()) fail("empty_request", "작업을 계획할 현재 요청이 비어 있습니다.")
         if ((chosen.model as? com.user.localagent.models.LocalWeight)?.installed?.verified == false)
@@ -89,7 +90,12 @@ class LocalSemanticPlanner internal constructor(
         try {
             return withTimeout(budget.totalMs) {
                 emit("loading")
-                planningStage("loading",budget.loadMs,budget.heartbeatMs,{emit("loading")}){requestEngine.loadTarget(chosen.model, options);Unit}
+                val loadStarted = System.nanoTime()
+                planningStage("loading", budget.loadMs, budget.heartbeatMs, { emit("loading") }) {
+                    requestEngine.loadTarget(chosen.model, options)
+                    Unit
+                }
+                onModelLoaded?.invoke((System.nanoTime() - loadStarted) / 1_000_000L)
                 var constrained = requestEngine.supportsStructuredOutput
                 var retainedHistory = history.toList()
                 var retainedContext = localContext

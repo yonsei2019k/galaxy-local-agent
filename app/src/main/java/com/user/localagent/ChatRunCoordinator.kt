@@ -1079,7 +1079,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         }
                     }else""
                     // Loading the same model is idempotent; the engine serializes replacement.
-                    executionEngine.loadTarget(selected, requestOptions)
+                    suspend fun loadSelectedTarget() {
+                        val trace = workTraceSession?.takeIf { request.scheduledReadTool != null }
+                        val started = System.nanoTime()
+                        executionEngine.loadTarget(selected, requestOptions)
+                        trace?.modelPrepared("예약 실행", (System.nanoTime() - started) / 1_000_000L)
+                    }
+                    loadSelectedTarget()
                     var query=text
                     val toolEvidence=mutableListOf<JsonObject>()
                     val actionTools=if(!request.allowTools)emptySet()else semantic?.let {planTools(it,semanticOfferedTools)}?:if(actionMode&&!directLoop)emptySet()else semanticOfferedTools
@@ -1114,7 +1120,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         status.value="다음 행동 판단 · ${round+1}/${com.user.localagent.core.WorkSegments.TOTAL_ROUNDS} · 실행 ${requestSteps.size}/${taskGoal.stepBudget}"
                         budgetRound=round
                         val history=if(workMode==AgentWorkMode.RESEARCH)emptyList()else lines.value.dropLast(1).takeLast(12).dropWhile {it.role!="user"}.map {InferenceTurn(it.role,it.requestText?:it.text)}
-                        executionEngine.loadTarget(selected,requestOptions)
+                        loadSelectedTarget()
                         val readback=assessReadbacks(request,taskGoal,allowedTools,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS-round)
                         val readbacksComplete=!readback.applicable||readback.readbackSatisfied
                         if(readback.blockers.isNotEmpty()){
@@ -1929,7 +1935,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             request.goal?.let {put("ownerStartedGoal",it.toJson())}
             if(request.previousSteps.isNotEmpty())put("previousHostVerifiedEvidence",previousEvidenceContext(request.previousSteps))
         }
-        semanticPlannerFor(request).plan(text,recent,semanticChoice!!,semanticOfferedTools,localContext).also {
+        val trace = workTraceSession?.takeIf { request.scheduledReadTool != null }
+        val onModelLoaded: (suspend (Long) -> Unit)? = if (trace == null) null else { elapsed ->
+            trace.modelPrepared("예약 계획", elapsed)
+        }
+        semanticPlannerFor(request).plan(text,recent,semanticChoice!!,semanticOfferedTools,localContext,onModelLoaded).also {
             workTraceSession?.finishGeneration(executionEngine.lastGeneration.value,false,false)
             lastSemanticAction.value=it.plan.action.name;lastSemanticModelId.value=it.modelId
             recordAudit("semantic_plan",true,"${it.plan.action.name} · ${it.modelId} · ${it.attempts}회 · 의미 계획 검증됨")

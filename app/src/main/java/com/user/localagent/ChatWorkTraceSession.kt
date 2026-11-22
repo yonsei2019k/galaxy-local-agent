@@ -17,6 +17,14 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.*
 import java.util.UUID
 
+internal fun scheduledReadGenerationTiming(summary: GenerationSummary): String = buildString {
+    summary.elapsedMillis?.takeIf { it >= 0 }?.let { append(" · 생성 ${it}ms") }
+    summary.prefillTokens?.takeIf { it >= 0 }?.let { append(" · 입력 $it 토큰") }
+    summary.timeToFirstVisibleTokenSeconds?.takeIf { it.isFinite() && it in 0.0..86_400.0 }?.let {
+        append(" · 첫 표시 ${(it * 1_000).toLong()}ms")
+    }
+}
+
 /** Host observations only. Logging never authorizes or repeats a user action. */
 internal class ChatWorkTraceSession private constructor(
     private val store:WorkTraceStore,private val binding:WorkTraceBinding,
@@ -74,11 +82,16 @@ internal class ChatWorkTraceSession private constructor(
         if(visibleAnswer)stage(WorkTraceCode.ANSWER_STARTED)
     }
 
+    suspend fun modelPrepared(stageName: String, elapsedMillis: Long) {
+        stage(WorkTraceCode.CONTEXT_READY, "$stageName 모델 준비 호출 ${elapsedMillis}ms")
+    }
+
     suspend fun finishGeneration(summary:GenerationSummary?,paused:Boolean,visibleAnswer:Boolean){
         val detail=summary?.let {"종료 ${it.reason.name} · 근거 ${it.evidence.name}"+
             (it.decodeTokens?.let{tokens->" · 마지막 구간 $tokens 토큰"}?:" · 토큰 수 미제공")}
             ?:"생성 종료 근거를 제공받지 못했습니다."
-        stage(WorkTraceCode.INFERENCE_FINISHED,detail)
+        val timing = if (request.scheduledReadTool != null && summary != null) scheduledReadGenerationTiming(summary) else ""
+        stage(WorkTraceCode.INFERENCE_FINISHED, detail + timing)
         if(paused)stage(WorkTraceCode.ANSWER_PAUSED)
         else if(visibleAnswer)stage(WorkTraceCode.ANSWER_FINISHED)
     }
