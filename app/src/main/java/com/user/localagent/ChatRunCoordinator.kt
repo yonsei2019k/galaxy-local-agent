@@ -2359,8 +2359,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestResearch=com.user.localagent.web.WebResearchController(context,requestRepository!!)
     }
 
+    private suspend fun endScreenWork(runId:String) = withContext(NonCancellable+Dispatchers.Main.immediate){
+        com.user.localagent.integrations.ScreenBridgeService.current()?.endScreenWork(runId)
+        Unit
+    }
+
     private suspend fun finishRequestResources(request:QueuedChatRequest,lease:java.io.Closeable?,liveComputeProgress:Job?,updateLease:java.io.Closeable?,interruptedTerminalState:String?,prerequisitePauseReason:InferencePrerequisiteReason?){
         try {
+            endScreenWork(request.runId)
             withContext(NonCancellable){liveComputeProgress?.cancelAndJoin()}
             withContext(NonCancellable+Dispatchers.IO){runCatching {app.chatAttachments.releaseRequest(request.runId)}}
             withContext(NonCancellable){
@@ -2967,6 +2973,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val choices=tools.recipientChoices(call)
         if(choices.isEmpty())return call to false
         val request=checkNotNull(activeRequest)
+        endScreenWork(request.runId)
         val decision=CompletableDeferred<Boolean>()
         val action=PendingAction(call,decision,runId=request.runId,threadId=request.threadId,projectId=request.projectId,
             reviewText="여러 연락처 중 수신자를 선택해주세요. 선택 전에는 문자 앱을 열지 않습니다.\n문자 내용:\n"+call.arguments.getValue("message").jsonPrimitive.content,recipientChoices=choices)
@@ -3185,7 +3192,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         ToolRegistry.validate(call)
         enforceGoalToolFence(checkNotNull(activeRequest),call)
         check(requestSteps.size<com.user.localagent.core.WorkSegments.STEP_BUDGET){"실행 예산 ${com.user.localagent.core.WorkSegments.STEP_BUDGET}회에 도달했습니다. 확인된 작업 뒤에서 중단합니다."}
-        if(call.name in com.user.localagent.core.ScreenControlToolCatalog.names)
+        val screenTool=call.name in com.user.localagent.core.ScreenControlToolCatalog.names
+        if(screenTool)
             com.user.localagent.integrations.ScreenControl(context).requireReady()
         val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
@@ -3202,6 +3210,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             traceAttempt?.let{workTraceSession?.approval(it,com.user.localagent.data.WorkTraceCode.APPROVAL_WAITING)}
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)
+            endScreenWork(request.runId)
             val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId,reviewText=targetReview);approval.value=action
             val allowed=try { deferred.await() } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
@@ -3225,6 +3234,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         traceAttempt?.let{workTraceSession?.start(it)}
         currentCoroutineContext().ensureActive()
         enforceGoalToolFence(checkNotNull(activeRequest),call)
+        if(screenTool)withContext(Dispatchers.Main.immediate){
+            com.user.localagent.integrations.ScreenBridgeService.current()?.markScreenWork(bound.id)
+        }
         externalEffectGuard?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
         val intent=tools.prepareIntent(call)
         if(intent != null) {

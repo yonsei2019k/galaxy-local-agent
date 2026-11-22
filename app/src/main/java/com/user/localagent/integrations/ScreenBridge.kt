@@ -6,10 +6,17 @@ import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
+import android.os.PowerManager
+import android.view.ViewGroup
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
@@ -127,7 +134,23 @@ class ScreenBridgeService : AccessibilityService() {
     private val controller by lazy { ScreenBridgeController(this) }
     private var inspector: LinearLayout? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    override fun onServiceConnected() { active = WeakReference(this); invalidate(); registerVoiceButton() }
+    private val screenRuns = mutableMapOf<String, Runnable>()
+    private var screenIndicator: TextView? = null
+    private var observingScreenOff = false
+    private val screenOff = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) clearScreenWork()
+        }
+    }
+    override fun onServiceConnected() {
+        active = WeakReference(this)
+        if (!observingScreenOff) {
+            ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+            observingScreenOff = true
+        }
+        invalidate()
+        registerVoiceButton()
+    }
     /** The accessibility button (nav bar / floating) opens the voice command sheet from any app. */
     private fun registerVoiceButton() {
         runCatching {
@@ -143,8 +166,69 @@ class ScreenBridgeService : AccessibilityService() {
         // Ignore only our own inspector's metadata events; never read text or content descriptions.
         if (event?.packageName?.toString() != packageName) invalidate()
     }
-    override fun onInterrupt() { closeInspector(); invalidate() }
-    override fun onDestroy() { mainHandler.removeCallbacksAndMessages(null); closeInspector(); invalidate(); if (active.get() === this) active.clear(); super.onDestroy() }
+    override fun onInterrupt() { clearScreenWork(); closeInspector(); invalidate() }
+    override fun onDestroy() {
+        if (observingScreenOff) unregisterReceiver(screenOff)
+        clearScreenWork()
+        mainHandler.removeCallbacksAndMessages(null)
+        closeInspector()
+        invalidate()
+        if (active.get() === this) active.clear()
+        super.onDestroy()
+    }
+
+    internal fun markScreenWork(runId: String) {
+        requireMainThread()
+        if (!getSystemService(PowerManager::class.java).isInteractive ||
+            getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
+        if (screenIndicator == null) {
+            val indicator = TextView(this).apply {
+                text = getString(R.string.screen_work_in_progress)
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                background = GradientDrawable().apply {
+                    setColor(Color.rgb(34, 56, 169))
+                    cornerRadius = dp(16).toFloat()
+                }
+            }
+            val params = WindowManager.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = dp(8)
+                title = "ZipHap screen work"
+            }
+            try {
+                getSystemService(WindowManager::class.java).addView(indicator, params)
+                screenIndicator = indicator
+            } catch (error: RuntimeException) {
+                com.user.localagent.FailureLog.record(this, "screen_work_indicator", error, "WINDOW_UNAVAILABLE")
+                return
+            }
+        }
+        screenRuns.remove(runId)?.let(mainHandler::removeCallbacks)
+        val expiry = Runnable { endScreenWork(runId) }
+        screenRuns[runId] = expiry
+        mainHandler.postDelayed(expiry, SCREEN_WORK_IDLE_MS)
+    }
+
+    internal fun endScreenWork(runId: String) {
+        requireMainThread()
+        screenRuns.remove(runId)?.let(mainHandler::removeCallbacks)
+        if (screenRuns.isEmpty()) clearScreenWork()
+    }
+
+    private fun clearScreenWork() {
+        screenRuns.values.forEach(mainHandler::removeCallbacks)
+        screenRuns.clear()
+        screenIndicator?.let { runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(it) } }
+        screenIndicator = null
+    }
     fun revokePending() { requireMainThread(); prepared = null; approvalHash = null }
     private fun invalidate() { version.incrementAndGet(); schema = null; prepared = null; approvalHash = null }
     private fun requireMainThread() { check(Looper.myLooper() == Looper.getMainLooper()) { "Screen bridge must be called on the main thread" } }
@@ -380,6 +464,7 @@ class ScreenBridgeService : AccessibilityService() {
         ScreenAdapters.forbidden.none { it in viewId.lowercase(java.util.Locale.ROOT) }
     private fun digest(token: String) = MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
     companion object {
+        private const val SCREEN_WORK_IDLE_MS = 180_000L
         @Volatile private var active = WeakReference<ScreenBridgeService>(null)
         internal fun current(): ScreenBridgeService? = active.get()
     }
