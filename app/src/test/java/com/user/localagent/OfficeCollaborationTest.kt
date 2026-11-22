@@ -3,6 +3,7 @@ package com.user.localagent
 import com.user.localagent.core.ConversationPrivacy
 import com.user.localagent.core.office.OfficeSeat
 import com.user.localagent.core.office.ZipHapRoom
+import com.user.localagent.inference.InferenceOptions
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -37,5 +38,18 @@ class OfficeCollaborationTest {
         assertEquals(1800, text.getValue("colleagueReplies").jsonObject.getValue(OfficeSeat.CHAIR.label).jsonPrimitive.content.length)
         assertEquals(OfficeSeat.DIRECTOR, officeAuthor("office.DIRECTOR"))
         assertNull(officeAuthor("회장 이수빈"))
+    }
+
+    @Test fun writerDoesNotCreateAResumeCheckpointForAnOfficeChild() {
+        val request = child()
+        val snapshot = ContinuationSnapshot(
+            "assistant", request.modelId, request.text, "합성 지시", emptyList(), InferenceOptions(), 2,
+        )
+
+        assertNull(writerCheckpoint(request, snapshot, null))
+        assertThrows(IllegalArgumentException::class.java) { request.copy(continuation = snapshot) }
+        val ordinary = request.copy(officeStage = null, officeParentId = null)
+        val stored = QueuedChatRequest.fromJson(checkNotNull(writerCheckpoint(ordinary, snapshot, null)))
+        assertEquals(snapshot.messageId, stored.continuation?.messageId)
     }
 }

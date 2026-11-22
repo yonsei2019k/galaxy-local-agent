@@ -164,7 +164,8 @@ internal fun reachesAnswerPartBudget(saved:Int,incoming:Int,budget:Int=ANSWER_PA
     require(saved>=0&&incoming>=0&&budget>0)
     return saved.toLong()+incoming>=budget
 }
-private fun writerCheckpoint(request:QueuedChatRequest,snapshot:ContinuationSnapshot,summary:GenerationSummary?):String {
+internal fun writerCheckpoint(request:QueuedChatRequest,snapshot:ContinuationSnapshot,summary:GenerationSummary?):String? {
+    if (request.officeStage != null) return null
     val fields=Json.parseToJsonElement(request.copy(continuation=snapshot).toJson()).jsonObject
     return buildJsonObject {
         fields.forEach {(key,value)->put(key,value)}
@@ -185,6 +186,12 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
     private val resourcePressureOverride:(()->Boolean)?=null) {
     private val chat=app.repository.chat
     private val context=app.applicationContext
+
+    private suspend fun saveCheckpoint(snapshot: ContinuationSnapshot, summary: GenerationSummary?): Boolean {
+        val payload = writerCheckpoint(request, snapshot, summary) ?: return false
+        chat.updateRunContext(request.runId, payload)
+        return true
+    }
 
     /** One invocation's write-ahead state; never shared by concurrent requests. */
     private class WriteProgress {
@@ -256,11 +263,15 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     visibleChars=error.visibleChars,errorCode="ANSWER_PART_STORAGE_BUDGET")?:GenerationSummary(
                     java.util.UUID.randomUUID().toString(),GenerationStopReason.RESOURCE_LIMIT,GenerationEvidence.HOST,null,
                     initialOptions.maxOutputTokens,visibleChars=error.visibleChars,errorCode="ANSWER_PART_STORAGE_BUDGET")
-                withContext(NonCancellable){checkpoint?.let {chat.updateRunContext(request.runId,writerCheckpoint(request,it,lastSummary))}}
+                withContext(NonCancellable){checkpoint?.let {saveCheckpoint(it,lastSummary)}}
             }
             catch(error:AnswerResourcePause){paused=true;finalDetail="발열·메모리 상태로 저장 후 일시정지"}
             catch(error:Throwable){failure=error;paused=true;finalDetail=if(error is CancellationException)"사용자 요청으로 중단"else"오류 후 작성 내용 저장됨";if(error is CancellationException)FailureLog.record(context,"writer_cancel_catch",error,"WRITER_CANCEL_CAUGHT");throw error}
             finally {
+                if (paused && failure == null && !rawOnly && request.officeStage != null) {
+                    finalDetail = if (hasSavedBody) "받은 사무실 답변을 저장했습니다 · 작성 미완료"
+                        else "사무실 답변 작성을 완료하지 못했습니다"
+                }
                 FailureLog.record(context,"writer_finalization_gate",failure,CancelledAnswerFinalizer.finalizationCode(failure is CancellationException,hasSavedBody,rawOnly,messageId!=null,acknowledgedParts.isNotEmpty(),paused,checkpoint!=null))
                 withContext(NonCancellable){messageId?.takeIf {!rawOnly&&(hasSavedBody||paused&&checkpoint!=null)}?.let {id->
                     val cancellation=failure as? CancellationException
@@ -363,8 +374,7 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                     if(messageId==null)messageId=chat.beginAssistant(request.runId).id
                     if(segmentId==null)segmentId=chat.beginSegment(request.runId,messageId!!,partNumber).id
                     val saved=ContinuationSnapshot(messageId!!,model.id,user,system,turns,options.copy(thinking=false),nextPart)
-                    chat.updateRunContext(request.runId,writerCheckpoint(request,saved,null))
-                    checkpoint=saved
+                    if (saveCheckpoint(saved, null)) checkpoint = saved
                 }
                 suspend fun flush(){
                     if(pending.isEmpty()||!display||prose!=true)return
@@ -495,14 +505,14 @@ internal class LongAnswerWriter(private val app:AppContainer,private val request
                 if(partText.isNotEmpty())entire.append(partText)
                 if(lastSummary?.mayBeTruncated==true&&messageId==null)ensureSegment()
                 segmentId?.let {chat.finishSegment(it,"completed")}
-                checkpoint?.let {chat.updateRunContext(request.runId,writerCheckpoint(request,it,lastSummary))}
+                checkpoint?.let {saveCheckpoint(it,lastSummary)}
                 messageId?.let {chat.checkpointMessage(request.runId,it)}
                 if(partText.isNotEmpty())parts+=UiAnswerPart(partNumber,partText)
                 if(continuing&&raw.isNotBlank()&&partText.isEmpty()){
                     paused=true;finalDetail="이전 구간의 정확한 반복을 재저장하지 않고 멈췄습니다 · 필요하면 이어쓰기"
                     break
                 }
-                if(lastSummary?.requiresManualContinuation==true&&hasSavedBody&&checkpoint!=null){
+                if(lastSummary?.requiresManualContinuation==true&&hasSavedBody&&(checkpoint!=null||request.officeStage!=null)){
                     paused=true;finalDetail="엔진이 종료 사유를 제공하지 않았습니다 · 본문 저장됨 · 필요하면 이어쓰기"
                     break
                 }
