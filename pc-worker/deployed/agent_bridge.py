@@ -344,6 +344,7 @@ class _Session:
     plan: dict | None = field(default=None, repr=False)
     browser_recovery_tools: frozenset[str] | None = None
     recall_recovery_tools: frozenset[str] | None = None
+    read_recovery_tools: frozenset[str] | None = None
     finalize_reads_only: bool = False
     rejected_calls: int = 0
 
@@ -689,7 +690,24 @@ class AgentBridge:
             if settled_only:
                 return None
             context = {"planAccepted": True, "acceptedTools": plan["requiredTools"], "failedReads": failed, "observedReads": observed}
-            return copy.deepcopy(context) if len(canonical(context)) <= 16384 else None
+            if required <= reads:
+                # A confirmed input-free read has no alternate target. Argument-bearing
+                # tools may still read another target inside the original accepted plan.
+                completed, remaining, alternates = [], [], []
+                for name in plan["requiredTools"]:
+                    if name not in verified_tools:
+                        remaining.append(name)
+                        continue
+                    completed.append(name)
+                    schema = session.tools[name]["inputSchema"]
+                    if schema.get("properties") or schema.get("oneOf"):
+                        alternates.append(name)
+                context.update(completedReadTools=completed, remainingReads=remaining, alternateTargetReads=alternates)
+            if len(canonical(context)) > 16384:
+                return None
+            if required <= reads:
+                session.read_recovery_tools = frozenset(remaining + alternates)
+            return copy.deepcopy(context)
 
     def task_evidence(self, owner, session_id, capability):
         """Phone-authenticated metadata/PC evidence only, not AgentReport completion.
@@ -796,6 +814,14 @@ class AgentBridge:
                                  "WORKSPACE_PROFILE", 403)
                         _require(s.active is None, "CALL_ALREADY_ACTIVE", 409)
                         _validate(arguments, s.tools[tool]["inputSchema"])
+                        if s.read_recovery_tools is not None:
+                            if any(c.payload_digest == payload and c.state == "COMPLETED"
+                                   and c.source == "PHONE_EXECUTOR" and c.result and c.result["success"]
+                                   and c.result["verification"] == "VERIFIED" and not c.result["effectNotApplied"]
+                                   for c in s.calls.values()):
+                                s.rejected_calls += 1  # No new call or revision for a verified duplicate.
+                                return 200, {"callId": cid, "state": "SKIPPED", "reason": "RECOVERY_READ_REPEAT"}
+                            _require(tool in s.read_recovery_tools, "PLAN_TOOL_NOT_SELECTED", 403)
                     except BridgeError as rejected:
                         if rejected.code in _COUNTED_REJECTIONS or rejected.code.startswith("ARGUMENT_"):
                             s.rejected_calls += 1  # Separate counter; never bumps revision or calls.

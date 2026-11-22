@@ -312,6 +312,31 @@ class GatewayTests(unittest.TestCase):
         self.assertFalse(gateway.call_tool("read_webpage", {"id": "alternative"})["isError"])
         self.assertEqual(2, len(transport.submissions()))
 
+    def test_recovery_repeat_is_terminal_for_exact_receipt_and_does_not_lock_next_read(self):
+        gateway, transport, _ = fixture()
+        transport.responses = [{"callId": CALL, "state": "SKIPPED", "reason": "RECOVERY_READ_REPEAT"}, receipt()]
+        duplicate = gateway.call_tool("read_note", {"id": "already checked"})
+        self.assertTrue(duplicate["isError"])
+        self.assertIn("RECOVERY_READ_REPEAT", duplicate["content"][0]["text"])
+        self.assertIsNone(gateway.uncertain_call)
+        self.assertFalse(gateway.call_tool("read_note", {"id": "other target"})["isError"])
+        self.assertEqual(2, len(transport.submissions()))
+
+    def test_recovery_read_skip_does_not_settle_a_mutating_call(self):
+        transport, clock = FakeTransport(), Clock()
+        transport.status["tools"][0]["name"] = "save_note"
+        gateway = mcp.Gateway(binding(), transport, clock.now, clock.now, clock.wait, lambda: CALL)
+        gateway.list_tools()
+        transport.responses = [{"callId": CALL, "state": "SKIPPED", "reason": "RECOVERY_READ_REPEAT"}]
+        self.assert_code("INVALID_CALL_RECEIPT", gateway.call_tool, "save_note", {"id": "test"})
+        self.assertEqual(CALL, gateway.uncertain_call)
+
+    def test_unbound_recovery_repeat_preserves_uncertain_call(self):
+        gateway, transport, _ = fixture()
+        transport.responses = [{"callId": OTHER, "state": "SKIPPED", "reason": "RECOVERY_READ_REPEAT"}]
+        self.assert_code("INVALID_CALL_RECEIPT", gateway.call_tool, "read_note", {"id": "test"})
+        self.assertEqual(CALL, gateway.uncertain_call)
+
     def test_known_public_failure_can_try_another_read_but_invalid_skip_cannot(self):
         transport, clock = FakeTransport(), Clock()
         transport.status["tools"][0]["name"] = "read_webpage"

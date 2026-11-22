@@ -613,6 +613,51 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.post_result(proposed, ack)
         self.assertIsNone(context())
 
+    def test_recovery_separates_verified_reads_and_refuses_exact_repeats(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        read = note_tool() | {"name": "read_note"}
+        self.grant["phoneTools"] = [clock_tool(), read, clock_tool() | {"name": "read_webpage"}, note_tool()]
+        self._register()
+        required = ["get_current_datetime", "read_note", "read_webpage"]
+        self.accept(self.plan(required))
+        note = {"title": "synthetic", "content": "first"}
+        confirmed = []
+        for name, args in [("get_current_datetime", {}), ("read_note", note)]:
+            proposed, (status, _) = self.propose(name, args)
+            self.assertEqual(202, status)
+            _, ack = self.claim(proposed)
+            self.post_result(proposed, ack)
+            confirmed.append(proposed)
+
+        recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertEqual(required, recovery["acceptedTools"])
+        self.assertEqual(required[:2], recovery["completedReadTools"])
+        self.assertEqual(["read_webpage"], recovery["remainingReads"])
+        self.assertEqual(["read_note"], recovery["alternateTargetReads"])
+        self.assertEqual(required[:2], [row["tool"] for row in recovery["observedReads"]])
+        before = self.phone_request("GET")[1]
+        for call in confirmed:
+            proposed, (status, response) = self.propose(call["tool"], dict(reversed(list(call["arguments"].items()))))
+            self.assertEqual(200, status)
+            self.assertEqual({"callId": proposed["callId"], "state": "SKIPPED", "reason": "RECOVERY_READ_REPEAT"},
+                             response)
+        self.assertEqual(before, self.phone_request("GET")[1])
+        self.assertEqual("COMPLETED", self.propose(cid=confirmed[0]["callId"])[1][1]["state"])
+        self.assertEqual(403, self.propose("save_note", {"content": "outside accepted scope"})[1][0])
+        self.assertEqual(202, self.propose("read_note", note | {"content": "other target"})[1][0])
+
+    def test_read_recovery_keeps_failed_lookup_retryable(self):
+        self.accept()
+        first, _ = self.propose()
+        _, ack = self.claim(first)
+        self.post_result(first, ack, {"success": False, "content": "synthetic",
+                                     "verification": "FAILED", "effectNotApplied": True})
+        recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
+        self.assertEqual([], recovery["completedReadTools"])
+        self.assertEqual(["get_current_datetime"], recovery["remainingReads"])
+        self.assertEqual(202, self.propose()[1][0])
+
     def test_settled_read_finalization_reuses_the_receipt_and_blocks_new_calls(self):
         recovery = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone, settled_only=True)
         self.assertIsNone(recovery())
@@ -668,10 +713,13 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.post_result(proposed, ack)
         recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone)
         self.assertEqual(verified()["content"], recovery["observedReads"][0]["result"])
+        self.assertNotIn("remainingReads", recovery)
         patch_call, _ = self.propose("patch_note", {"content": "synthetic"})
         _, ack = self.claim(patch_call)
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
         self.post_result(patch_call, ack)
         self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone))
+        self.assertEqual(202, self.propose("search_notes")[1][0])  # Readback after a verified change.
 
     def test_plan_shapes_unoffered_tools_utf16_bounds_and_nonascii_ack_fail_closed(self):
         invalid = [self.plan(["shell"]), self.plan(["get_current_datetime"] * 2),

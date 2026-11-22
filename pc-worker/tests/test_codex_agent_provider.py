@@ -114,6 +114,12 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("quoted fixture only", repr(spawned.call_args))
         self.assertEqual({self.exe,self.script}, set(self.root.iterdir()))
 
+    def test_shared_recovery_instructions_distinguish_eligible_reads_from_plan(self):
+        instructions = p.instructions_for(None, {"planAccepted": True, "remainingReads": []})
+        self.assertIn("records the original plan", instructions)
+        self.assertIn("When both eligible lists are empty", instructions)
+        self.assertIn("Only if planAccepted is false", instructions)
+
     def test_context_stdin_is_separate_from_current_request_and_never_written_to_disk_or_args(self):
         process = Process(self.events()); process.stdin = RecordedStdin()
         context = context_fixture()

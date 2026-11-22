@@ -580,6 +580,12 @@ class Gateway:
                 return {"content": [{"type": "text", "text":
                         "PUBLIC_READ_REPEAT: This exact lookup already ran. Use any earlier verified result, "
                         "choose a different query or source, or report what remains unverified."}], "isError": True}
+            if name in PUBLIC_WEB_READS | {"calculate", "date_calculate", "get_current_datetime",
+                                          "search_notes", "read_note", "read_screen"} and response == {
+                    "callId": call_id, "state": "SKIPPED", "reason": "RECOVERY_READ_REPEAT"}:
+                return {"content": [{"type": "text", "text":
+                        "RECOVERY_READ_REPEAT: Use the verified observation already returned for this lookup, "
+                        "or choose a different permitted target."}], "isError": True}
             sequence = None
             while True:
                 if cancel.is_set():
