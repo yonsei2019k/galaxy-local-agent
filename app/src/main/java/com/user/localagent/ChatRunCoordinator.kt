@@ -308,7 +308,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(request?.scheduledReadTool!=null){
             scope.launch {
                 try {app.repository.chat.interruptScheduledRead(request.runId,request.threadId)}
-                finally {cancelOwnedExecution()}
+                finally {stopScheduledRun(request.runId,request.threadId)}
             }
         }else cancelOwnedExecution()
     }
@@ -642,7 +642,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     private fun stopScheduledRun(id: String, threadId: String) {
-        executionForRun(id)?.takeIf {it.activeRequest?.threadId==threadId}?.cancelOwnedExecution()
+        executionForRun(id)?.takeIf { worker ->
+            worker.activeRequest?.let { it.runId==id&&it.threadId==threadId }==true
+        }?.cancelOwnedExecution()
     }
 
     internal fun drain(){

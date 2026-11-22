@@ -160,8 +160,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?,skillAvailableTools:Set<String>):ToolResult = withContext(Dispatchers.IO) {
         try {
             ToolRegistry.validate(call)
-            if(call.name==ScheduledReadToolCatalog.CREATE||call.name==ScheduledReadToolCatalog.CANCEL)
+            if(call.name==ScheduledReadToolCatalog.CREATE||call.name==ScheduledReadToolCatalog.CANCEL){
+                check(call.name in capturedAvailableTools){"현재 요청에서 허용된 예약 도구가 아닙니다."}
                 return@withContext checkNotNull(scheduledRead){"예약은 진행 중인 원래 대화에 연결해야 합니다."}.invoke(call)
+            }
             if(call.name in NoteReadPatchToolCatalog.names){
                 check(call.name in capturedAvailableTools){"NOTE_TOOL_NOT_CAPTURED"}
                 return@withContext checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.execute(if(call.name=="patch_note")resolveOwnerText(call)else call)
