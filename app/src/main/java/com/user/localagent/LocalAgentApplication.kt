@@ -18,6 +18,10 @@ open class LocalAgentApplication : Application() {
         com.user.localagent.updates.UpdateManager(this).apply {setBusy(false);schedule()}
         container.callFollowUp.restore()
         maintenance.launch {container.knowledgeIngestion.schedule()}
+        maintenance.launch {
+            try {container.scheduledReads.restore()} catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){ /* Dormant rows remain available to retry on next process start. */ }
+        }
         com.user.localagent.analysis.AnalysisMemoryWorker.enqueue(this)
         container.remoteTests.start(maintenance)
         maintenance.launch {runCatching {com.user.localagent.audio.AudioChunkDecoder.cleanupOrphanedSessions(this@LocalAgentApplication)}}

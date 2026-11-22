@@ -32,6 +32,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
     val engine = com.user.localagent.inference.AutomaticComputeEngine(context.applicationContext)
     val orchestration = LocalOrchestration(context.applicationContext,models,engine)
     val scheduler = ReminderScheduler(context.applicationContext)
+    internal val scheduledReads by lazy {com.user.localagent.scheduling.ScheduledReadWork(appContext,this)}
     val conversationImports = ConversationImport(context.applicationContext,repository)
     val phoneRecords = PhoneRecords(context.applicationContext)
     val privateDataPickerOrigins=com.user.localagent.audio.PrivateDataPickerOrigins()
@@ -165,7 +166,8 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
             connectionHubOverride=connectionHub,
             kakaoReadBinding=kakaoReadBinding,
             connectionComputeEngine=requestEngine as? com.user.localagent.inference.ComputeExecutionEngine,
-            noteReadPatch=noteHost,ownerRequest=ownerRequest,contactLookup=contactLookup,projectWorkspaceProvider={workspace}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
+            noteReadPatch=noteHost,ownerRequest=ownerRequest,contactLookup=contactLookup,projectWorkspaceProvider={workspace},
+            scheduledRead={call->verifyAnalysisAccess();scheduledReads.execute(call,checkNotNull(requestRunId))}){call->com.user.localagent.analysis.PrivateAnalysisHost.withLiveAccess(::verifyAnalysisAccess,{requestImages.generateInCurrentRequest(call.arguments.getValue("prompt").jsonPrimitive.content,
                 call.arguments["negativePrompt"]?.jsonPrimitive?.content.orEmpty(),call.arguments["steps"]?.jsonPrimitive?.intOrNull,
                 call.arguments["seed"]?.jsonPrimitive?.longOrNull?:-1,referenceUri=chatAttachments.currentRequestReferenceUri(requestRunId)).toolResult()})}
     }

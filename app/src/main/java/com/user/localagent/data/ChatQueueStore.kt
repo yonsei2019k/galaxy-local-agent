@@ -22,6 +22,7 @@ internal class ChatQueueStore(private val database:LocalDatabase) {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)
         require(contextJson.length<=2_000_000)
         val run=queued(runId);val old=payload(run);val replacement=Json.parseToJsonElement(contextJson).jsonObject
+        check(!com.user.localagent.core.ScheduledReadPolicy.isId(runId)){"예약한 원래 요청을 수정할 수 없습니다. 예약을 취소하고 다시 등록해주세요."}
         require(old["goal"]==null||old["goal"]==JsonNull){"목표 연결 요청은 취소 후 목표 관리에서 수정하고 다시 추진해주세요."}
         require(replacement["text"]?.jsonPrimitive?.contentOrNull==text){"대기 요청 본문과 저장 문맥이 일치하지 않습니다."}
         requireString(replacement,"runId",run.id);requireString(replacement,"threadId",run.threadId)

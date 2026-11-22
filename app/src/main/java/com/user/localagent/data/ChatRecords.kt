@@ -3,6 +3,13 @@ package com.user.localagent.data
 import androidx.room.*
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.user.localagent.QueuedChatRequest
+import com.user.localagent.core.ConversationPrivacy
+import com.user.localagent.core.ScheduledReadAdmission
+import com.user.localagent.core.ScheduledReadCancellation
+import com.user.localagent.core.ScheduledReadPolicy
+import com.user.localagent.core.ScheduledReadRequest
+import com.user.localagent.core.ScheduledReadScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -101,8 +108,10 @@ class ChatConverters {
     @Query("UPDATE chat_threads SET allowOwnerLearning=:enabled WHERE projectId=:projectId AND deletedAt IS NULL") suspend fun updateProjectLearningFlags(projectId:String,enabled:Boolean):Int
     @Query("SELECT * FROM messages WHERE runId=:runId AND role='assistant' ORDER BY createdAt,id LIMIT 1") suspend fun assistantForRun(runId:String):MessageRecord?
     @Query("SELECT * FROM chat_runs WHERE threadId=:threadId ORDER BY createdAt,id") suspend fun runsForThread(threadId:String):List<ChatRunRecord>
-    @Query("SELECT * FROM chat_runs WHERE threadId=:threadId AND branchId=:branchId ORDER BY createdAt DESC,id DESC LIMIT 1")
+    @Query("SELECT * FROM chat_runs WHERE threadId=:threadId AND branchId=:branchId AND (id NOT LIKE 'scheduled-read-%' OR userMessageId IS NOT NULL) ORDER BY createdAt DESC,id DESC LIMIT 1")
     suspend fun latestBranchRun(threadId:String,branchId:String):ChatRunRecord?
+    @Query("SELECT * FROM chat_runs WHERE status='scheduled' AND id LIKE 'scheduled-read-%' ORDER BY createdAt,id") suspend fun scheduledReads():List<ChatRunRecord>
+    @Query("SELECT * FROM chat_runs WHERE id=:id") fun observeScheduledRead(id:String):Flow<ChatRunRecord?>
     @Query("SELECT * FROM chat_runs WHERE status='queued' ORDER BY createdAt,id") suspend fun queuedRuns():List<ChatRunRecord>
     @Query("SELECT * FROM chat_runs WHERE status IN ('queued','paused','interrupted','cancelled','failed') ORDER BY createdAt,id") suspend fun queueCandidates():List<ChatRunRecord>
     @Query("SELECT * FROM (SELECT * FROM tool_runs WHERE name NOT IN ('work_trace_v1','work_receipt_v1') AND threadId=:threadId AND (:runId IS NULL OR runId=:runId) ORDER BY at DESC,id DESC LIMIT 1000) ORDER BY at,id") fun toolRunsForThread(threadId:String,runId:String?):Flow<List<ToolRunRecord>>
@@ -553,6 +562,101 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val run=createRun(threadId,branchId,user.id,modelId,4096,thinking,runId=runId)
         updateRunContext(run.id,contextFactory(user,run))
     }
+    internal suspend fun scheduleRead(registrationRunId: String, title: String, prompt: String, at: Long, tool: String): ChatRunRecord =
+        database.withTransaction {
+            val source = validRun(registrationRunId)
+            check(source.status == "running" && !ScheduledReadPolicy.isId(source.id))
+            val (scope, disabled) = scheduledScope(source) ?: error("예약할 원래 대화가 변경되었습니다.")
+            val plan = ScheduledReadRequest(title, prompt, at, tool, scope)
+            check(plan.allows(scope, tool, disabled)){"현재 대화에서 허용한 기기 내 조회만 예약할 수 있습니다."}
+            val id = plan.idFor(registrationRunId)
+            dao.run(id)?.let { return@withTransaction it }
+            require(at > now()) { "미래 시각에 한 번 실행하도록 예약해주세요." }
+            val record = createRun(source.threadId, source.branchId, modelId=ConversationPrivacy.LOCAL_SELECTION,
+                contextJson=Json.encodeToString(plan), runId=id).copy(status=ScheduledReadPolicy.SCHEDULED)
+            dao.run(record)
+            record
+        }
+
+    internal suspend fun pendingScheduledReads(): List<Pair<String, ScheduledReadRequest>> = dao.scheduledReads().mapNotNull {
+        runCatching { it.id to Json.decodeFromString<ScheduledReadRequest>(it.contextJson) }.getOrNull()
+    }
+
+    /** The same encrypted run row changes from dormant to queued exactly once, in the message transaction. */
+    internal suspend fun promoteScheduledRead(id: String, at: Long = now()): ChatRunRecord? = database.withTransaction {
+        require(ScheduledReadPolicy.isId(id))
+        val record = dao.run(id) ?: return@withTransaction null
+        if (record.status != ScheduledReadPolicy.SCHEDULED) return@withTransaction record
+        val plan = Json.decodeFromString<ScheduledReadRequest>(record.contextJson)
+        val current = scheduledScope(record)
+        when (plan.admission(record.status, at, current?.first, current?.second.orEmpty())) {
+            ScheduledReadAdmission.WAIT, ScheduledReadAdmission.CLOSED -> record
+            ScheduledReadAdmission.REVOKED -> record.copy(status="paused", errorCode="scheduled_scope_changed", updatedAt=now())
+                .also { dao.run(it) }
+            ScheduledReadAdmission.READY -> {
+                val user = addMessage(record.threadId, record.branchId, "user", plan.prompt)
+                val payload = QueuedChatRequest(record.id, record.threadId, record.branchId, record.projectId,
+                    plan.prompt, record.modelId, false, emptyList(), user.id, scheduledReadTool=plan.tool)
+                val queued = record.copy(status="queued", userMessageId=user.id, contextJson=payload.toJson(), updatedAt=now())
+                dao.run(queued)
+                beginAssistant(queued.id)
+                queued
+            }
+        }
+    }
+
+    internal suspend fun pauseRejectedScheduledRead(id: String) = database.withTransaction {
+        require(ScheduledReadPolicy.isId(id))
+        dao.run(id)?.takeIf { it.status == "queued" }?.let { row ->
+            dao.run(row.copy(status="paused", errorCode="scheduled_scope_changed", updatedAt=now()))
+        }
+    }
+
+    internal suspend fun awaitScheduledRead(id: String) {
+        dao.observeScheduledRead(id).first { row -> row == null || row.status !in setOf("queued", "running", "waiting_approval") }
+    }
+
+    internal suspend fun cancelScheduledRead(callerRunId: String, id: String): ChatRunRecord = database.withTransaction {
+        require(ScheduledReadPolicy.isId(id))
+        val caller = validRun(callerRunId)
+        check(caller.status == "running" && !ScheduledReadPolicy.isId(callerRunId))
+        val row = dao.run(id)?.takeIf {
+            it.threadId == caller.threadId && it.branchId == caller.branchId && it.projectId == caller.projectId
+        } ?: error("이 대화에서 취소할 수 있는 예약을 찾지 못했습니다.")
+        when (ScheduledReadPolicy.cancellation(row.status)) {
+            ScheduledReadCancellation.CANCEL_BEFORE_START -> row.copy(status="cancelled", errorCode=ScheduledReadPolicy.STOP_REQUESTED,
+                updatedAt=now(), finishedAt=now()).also { dao.run(it); queueStore.discardEmptyCancelledAssistant(it.id) }
+            ScheduledReadCancellation.REQUEST_STOP -> row.copy(errorCode=ScheduledReadPolicy.STOP_REQUESTED, updatedAt=now())
+                .also { dao.run(it) }
+            ScheduledReadCancellation.CLOSED -> row
+        }
+    }
+
+    internal suspend fun interruptScheduledRead(id: String, ownerThread: String? = null): ChatRunRecord? = database.withTransaction {
+        require(ScheduledReadPolicy.isId(id))
+        val row = dao.run(id) ?: return@withTransaction null
+        if (row.status != "running" || (ownerThread != null && row.threadId != ownerThread)) return@withTransaction null
+        if (row.errorCode == ScheduledReadPolicy.STOP_REQUESTED) return@withTransaction row.takeIf { ownerThread != null }
+        val code = if (ownerThread == null) ScheduledReadPolicy.WORKER_STOPPED else ScheduledReadPolicy.STOP_REQUESTED
+        row.copy(errorCode=code, updatedAt=now()).also { dao.run(it) }
+    }
+
+    internal suspend fun verifyScheduledRead(id: String, threadId: String) = database.withTransaction {
+        val row = validRun(id)
+        check(ScheduledReadPolicy.isId(id) && row.threadId == threadId && row.status == "running")
+        if (row.errorCode in setOf(ScheduledReadPolicy.STOP_REQUESTED, ScheduledReadPolicy.WORKER_STOPPED))
+            throw kotlinx.coroutines.CancellationException("예약 실행이 중단되었습니다.")
+    }
+
+    private suspend fun scheduledScope(run: ChatRunRecord): Pair<ScheduledReadScope, Set<String>>? {
+        val thread = dao.thread(run.threadId)?.takeIf { it.deletedAt == null && !it.archived && it.activeBranchId == run.branchId }
+            ?: return null
+        val branch = dao.branch(run.branchId)?.takeIf { it.deletedAt == null && it.threadId == thread.id } ?: return null
+        val project = thread.projectId?.let { dao.project(it)?.takeUnless(ProjectRecord::archived) ?: return null }
+        return ScheduledReadScope(thread.id, branch.id, thread.projectId, thread.revision, project?.revision ?: 0) to
+            project?.settings?.disabledTools.orEmpty()
+    }
+
     /** Only the writer may resume an already captured text continuation; tool execution is never replayed here. */
     suspend fun resumeRun(runId:String):ChatRunRecord=database.withTransaction {
         val r=dao.run(runId)?:error("작업을 찾을 수 없습니다.")
@@ -586,10 +690,19 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun updateRun(runId:String,status:String,errorCode:String?=null,contextJson:String?=null):ChatRunRecord=database.withTransaction {
         require(status in RUN_STATUSES&&errorCode.orEmpty().length<=200);require(contextJson==null||contextJson.length<=2_000_000)
         val r=dao.run(runId)?:error("작업을 찾을 수 없습니다.")
-        if(r.status in TERMINAL)check(status==r.status){"종료된 작업을 다시 시작하지 않습니다."}
+        val scheduledStop=r.errorCode.takeIf {
+            ScheduledReadPolicy.isId(runId)&&it in setOf(ScheduledReadPolicy.STOP_REQUESTED,ScheduledReadPolicy.WORKER_STOPPED)
+        }
+        val finalStatus=when(scheduledStop){
+            ScheduledReadPolicy.STOP_REQUESTED->"cancelled"
+            ScheduledReadPolicy.WORKER_STOPPED->"interrupted"
+            else->status
+        }
+        if(r.status in TERMINAL)check(finalStatus==r.status){"종료된 작업을 다시 시작하지 않습니다."}
         if(contextJson!=null)checkBinding(r)
-        if(status !in TERMINAL)validRun(runId)
-        r.copy(status=status,errorCode=errorCode,contextJson=contextJson?:r.contextJson,updatedAt=now(),finishedAt=if(status in TERMINAL)now()else null).also {dao.run(it)}
+        if(finalStatus !in TERMINAL)validRun(runId)
+        val finalError=scheduledStop?:errorCode
+        r.copy(status=finalStatus,errorCode=finalError,contextJson=contextJson?:r.contextJson,updatedAt=now(),finishedAt=if(finalStatus in TERMINAL)now()else null).also {dao.run(it)}
     }
     suspend fun updateRunContext(runId:String,contextJson:String):ChatRunRecord=database.withTransaction {
         require(contextJson.length<=2_000_000);val r=validRun(runId);r.copy(contextJson=contextJson,updatedAt=now()).also {dao.run(it)}
@@ -678,7 +791,9 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun recoverInterruptedRuns():Int=database.withTransaction {
         val active=dao.interrupted();active.forEach {r->
             dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
-            dao.run(r.copy(status="interrupted",errorCode="process_restarted",updatedAt=now(),finishedAt=now()))
+            val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
+            dao.run(r.copy(status=if(stoppedByOwner)"cancelled" else "interrupted",
+                errorCode=if(stoppedByOwner)ScheduledReadPolicy.STOP_REQUESTED else "process_restarted",updatedAt=now(),finishedAt=now()))
         };active.size
     }
     suspend fun messagePage(threadId:String,branchId:String?=null,beforePosition:Long?=null,limit:Int=100):ChatMessagePage {

@@ -57,6 +57,7 @@ import com.user.localagent.core.AgentWorkMode
 import com.user.localagent.core.AgentWorkModePolicy
 import com.user.localagent.core.GoalDefinition
 import com.user.localagent.core.SkillToolCatalog
+import com.user.localagent.core.ScheduledReadPolicy
 import com.user.localagent.core.GoalToolCatalog
 import com.user.localagent.data.GrantRecord
 import com.user.localagent.benchmark.BenchmarkRunner
@@ -303,6 +304,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             stopThreadWork(selectedThreadId.value)
             return
         }
+        val request=activeRequest
+        if(request?.scheduledReadTool!=null){
+            scope.launch {
+                try {app.repository.chat.interruptScheduledRead(request.runId,request.threadId)}
+                finally {cancelOwnedExecution()}
+            }
+        }else cancelOwnedExecution()
+    }
+    private fun cancelOwnedExecution(){
         activeRequest?.let {queueOwner.goalStopEpochs.merge(it.threadId,1L,Long::plus)}
         executionEngine.cancel();requestResearch?.cancel();ownedRequestJob?.cancel()
         approval.value?.decision?.complete(false)
@@ -603,6 +613,38 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return true
     }
 
+    internal suspend fun deliverScheduledRead(id: String): Boolean = withContext(Dispatchers.Main.immediate) {
+        initialized.await()
+        val record = queueMutation.withLock {
+            val row = app.repository.chat.promoteScheduledRead(id)
+            if (row?.status == "queued" && queued.value.none { it.runId == id }) {
+                queued.value = queued.value + QueuedChatRequest.fromJson(row.contextJson)
+            }
+            row
+        }
+        if (record?.status == "queued") drain()
+        record?.status == ScheduledReadPolicy.SCHEDULED
+    }
+
+    internal suspend fun cancelScheduledRead(callerRunId: String, id: String) = withContext(Dispatchers.Main.immediate) {
+        initialized.await()
+        val row = queueMutation.withLock {
+            val result = app.repository.chat.cancelScheduledRead(callerRunId, id)
+            if (result.status == "cancelled") queued.value = queued.value.filterNot { it.runId == id }
+            result
+        }
+        if (row.status == "running" && row.errorCode == ScheduledReadPolicy.STOP_REQUESTED) stopScheduledRun(id,row.threadId)
+        row
+    }
+
+    internal suspend fun interruptScheduledRead(id: String) = withContext(Dispatchers.Main.immediate) {
+        app.repository.chat.interruptScheduledRead(id)?.let { stopScheduledRun(id,it.threadId) }
+    }
+
+    private fun stopScheduledRun(id: String, threadId: String) {
+        executionForRun(id)?.takeIf {it.activeRequest?.threadId==threadId}?.cancelOwnedExecution()
+    }
+
     internal fun drain(){
         if(workerBinding!=null){queueOwner.drain();return}
         if(draining?.isActive==true)return
@@ -634,8 +676,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             goalRunCallerJobs.remove(candidate.runId)
                             goalQueuedEpochs.remove(candidate.runId)
                             queued.value=queued.value.filterNot {it.runId==candidate.runId}
-                            runCatching {app.repository.chat.cancelQueuedRun(candidate.runId)}
-                            runCatching {app.repository.chat.updateRun(candidate.runId,"failed",error.javaClass.simpleName)}
+                            if(candidate.scheduledReadTool!=null){
+                                runCatching {app.repository.chat.pauseRejectedScheduledRead(candidate.runId)}
+                            }else{
+                                runCatching {app.repository.chat.cancelQueuedRun(candidate.runId)}
+                                runCatching {app.repository.chat.updateRun(candidate.runId,"failed",error.javaClass.simpleName)}
+                            }
                             status.value="대기 요청의 대상이 변경되어 실행하지 않았습니다. 원문은 대화에 보존됩니다."
                             if(candidate.goalSegment!=null)scope.launch {pauseRejectedGoalCandidate(candidate)}
                             null
@@ -888,6 +934,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.RUN_STARTED,
                     request.goal?.outcome,if(request.goal==null)com.user.localagent.data.WorkSummarySource.HOST else com.user.localagent.data.WorkSummarySource.USER_GOAL)
                 if(!prepareGoalAutopilotHold(request))return@launch
+                if(request.scheduledReadTool!=null)app.repository.chat.verifyScheduledRead(request.runId,request.threadId)
                 val privateLocal = request.modelId==com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION ||
                     (request.attachments.isNotEmpty() && request.attachments.all {it.mimeType.startsWith("image/")}) ||
                     !cloudPersonalDataAllowed(request) && (com.user.localagent.core.ConversationPrivacy.sensitiveText(request.text) ||
@@ -944,12 +991,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
                 requestFeedbackGeneration=try {app.planningFeedback.generation()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){null}
                 val storedUserMessage=request.userMessageId
-                if(workMode!=AgentWorkMode.RESEARCH&&request.goal==null)try {app.knowledgeIngestion.ingestDirectMessage(storedUserMessage)}
+                if(workMode!=AgentWorkMode.RESEARCH&&request.goal==null&&request.scheduledReadTool==null)try {app.knowledgeIngestion.ingestDirectMessage(storedUserMessage)}
                 catch(cancel:CancellationException){throw cancel}
                 catch(_:Exception){runCatching {recordAudit("knowledge_capture",false,"직접 대화의 기억 저장 검증 실패")}}
                 val disabledTools=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
                 val deviceExcluded=if(usesFreshPhoneText(request))emptySet()else com.user.localagent.core.LocalSubagentToolCatalog.names
-                val offeredTools=AgentWorkModePolicy.filterTools(workMode,ToolRegistry.definitions.keys-disabledTools-deviceExcluded)
+                val supportedTools=ToolRegistry.definitions.keys-disabledTools-deviceExcluded
+                val offeredTools=AgentWorkModePolicy.filterTools(workMode,
+                    request.scheduledReadTool?.let{supportedTools.intersect(setOf(it))}?:supportedTools)
                 requestTools?.bindAvailableTools(if(request.allowTools)offeredTools else emptySet())
                 val semanticOfferedTools=offeredTools-SkillToolCatalog.names
                 val semanticChoice=if(request.allowTools)chooseInference(request)?.withPcContext()else null
@@ -1322,6 +1371,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
                     }
                 }
+                request.scheduledReadTool?.let { tool ->
+                    if(app.repository.chat.run(request.runId)?.status=="running"&&
+                        observedOutcomes.none{it.call.name==tool&&it.result.success&&it.result.verification==VerificationState.VERIFIED}) {
+                        publishActionFinal(request,setOf(tool),"예약한 조회의 실제 결과를 확인하지 못했습니다.",true)
+                    }
+                }
                 val limitedFinalWritten=writeLimitedFinalNotice(request,reviewLimitedFinal&&!responsePaused)
                 val actualPaused=responsePaused||app.repository.chat.run(request.runId)?.status=="paused"
                 status.value=if(limitedFinalWritten)"확인된 결과 정리 완료 · 추가 검토 한도 표시됨"else finishedRunStatus(opaqueResponse,actualPaused,actionMode,workMode)
@@ -1331,7 +1386,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     workTraceSession?.closeProgress()
                     // Preserve actual host outcomes before the terminal-state write closes context updates.
                     runCatching {persistStepEvidence()}
-                    app.repository.chat.updateRun(request.runId,"cancelled")
+                    val stopCode=if(request.scheduledReadTool==null)null else app.repository.chat.run(request.runId)?.errorCode
+                    if(stopCode==ScheduledReadPolicy.WORKER_STOPPED)interruptedTerminalState="interrupted"
+                    app.repository.chat.updateRun(request.runId,checkNotNull(interruptedTerminalState),errorCode=stopCode)
                 }
                 app.chatAttachments.restoreToThread(request.threadId,attachmentSnapshot)
                 status.value="요청 중단 · 이미 확인된 실행 결과는 유지됩니다."
@@ -2780,6 +2837,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     /** Rechecked after approvals and directly before effects; history does not grant a new action. */
     private suspend fun enforceGoalToolFence(request:QueuedChatRequest,call:ToolCall) {
+        request.scheduledReadTool?.let { approved ->
+            check(call.name==approved&&approved in ScheduledReadPolicy.localReads){"이 예약에 승인된 조회만 실행할 수 있습니다."}
+            app.repository.chat.verifyScheduledRead(request.runId,request.threadId)
+        }
         if(request.goal==null)return
         ToolRegistry.validate(call)
         currentCoroutineContext().ensureActive()
