@@ -38,7 +38,7 @@ class ChatQueueValidation {
         val first=repo.chat.openFixedOfficeRooms()
         val second=repo.chat.openFixedOfficeRooms()
         assertEquals(first.id,second.id)
-        assertEquals(setOf("사무실","회장 이수빈","본부장 김호영","대리 김규민","대리 김서율"),
+        assertEquals(setOf("사무실","회장 이수빈","과장 김호영","대리 김규민","대리 김서율"),
             repo.chat.threads.first().map{it.title}.toSet())
     }}
     @Test fun archiveSweepPreservesRemoteResultsAndIgnoresAnOrdinaryRoomWithTheSameTitle()=runBlocking(Dispatchers.IO){fixture{repo,_,_->

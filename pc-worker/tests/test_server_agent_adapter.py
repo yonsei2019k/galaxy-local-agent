@@ -123,6 +123,29 @@ class ServerAgentAdapterTests(unittest.TestCase):
             ns["Handler"].dispatch(c)
             self.assertEqual([(400,{"error":"INVALID_CONVERSATION_CONTEXT"})],response)
             ns["AGENT_PROVIDER"].launch.assert_not_called();b.bootstrap_agent.assert_not_called()
+    def test_office_persona_is_forwarded_as_keyword_and_invalid_values_do_not_launch(self):
+        ns,b,c,response,_=self.make("/v1/agent/sessions/"+SESSION+"/launch",
+            body={"ownerRequest":"current","officePersona":"합성\n페르소나"})
+        c.headers.add_header("X-ZipHap-Phone-Capability",CAP)
+        ns["AGENT_PROVIDER"].launch.return_value={"state":"RUNNING","report":None,"errorCode":None}
+        ns["Handler"].dispatch(c)
+        ns["AGENT_PROVIDER"].launch.assert_called_once_with(OWNER,SESSION,CAP,"current",office_persona="합성\n페르소나")
+        self.assertEqual(200,response[0][0])
+        for bad in ("",None,5," x","x ","a\x00b","a\x1bb","a\x7fb","x"*6001,["x"]):
+            ns,b,c,response,_=self.make("/v1/agent/sessions/"+SESSION+"/launch",
+                body={"ownerRequest":"current","officePersona":bad})
+            c.headers.add_header("X-ZipHap-Phone-Capability",CAP)
+            ns["Handler"].dispatch(c)
+            self.assertEqual([(400,{"error":"INVALID_OFFICE_PERSONA"})],response)
+            ns["AGENT_PROVIDER"].launch.assert_not_called()
+    def test_persona_capabilities_authenticates_active_phone_and_context_capabilities_is_unchanged(self):
+        bridge,_,sid,phone,_,_=self.context_session()
+        ns,_,c,response,_=self.make("/v1/agent/sessions/"+sid+"/persona-capabilities")
+        c.command="GET";c.headers.add_header("X-ZipHap-Phone-Capability",phone);ns["AGENT_BRIDGE"]=bridge
+        ns["Handler"].dispatch(c)
+        self.assertEqual([(200,{"officePersonaVersions":[1],"maxOfficePersonaChars":6000})],response)
+        self.assertEqual([(200,{"conversationContextVersions":[1],"maxContextBytes":12000})],
+                         self.context_capabilities(bridge,sid,phone))
     def test_launch_envelope_unknown_or_missing_fields_do_not_launch(self):
         for body in ({"ownerRequest":"current","context":context_fixture()},
                      {"ownerRequest":"current","conversationContext":context_fixture(),"allowExternalAgent":True},

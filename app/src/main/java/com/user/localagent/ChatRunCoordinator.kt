@@ -1072,6 +1072,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // source-labelled snapshot rather than repeatedly searching whole history.
                     val ownerKnowledgeContext=if(workMode==AgentWorkMode.RESEARCH)""else app.repository.forThread(request.threadId).ownerProfileContext(text.take(6000))
                     val projectInstruction=if(workMode==AgentWorkMode.RESEARCH)""else request.projectId?.let {app.repository.chat.project(it)?.settings?.instructions}.orEmpty()
+                    // Fixed Office rooms speak in their seat persona; owner-entered ages stay on the phone (local path only).
+                    val officeInstruction=com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,
+                        runCatching{app.officeProfile.read()}.getOrNull(),java.time.LocalDate.now(ZoneId.of("Asia/Seoul"))).orEmpty()
                     val attachmentContext=if(usableAttachments.isNotEmpty()){
                         status.value="첨부 자료를 기기에서 읽는 중"
                         app.chatAttachments.prepareInCurrentRequest(text,usableAttachments,request.runId,requestEngine=executionEngine).also {
@@ -1157,7 +1160,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val structuredTools=if(directProtocol)allowedTools else allowedTools.filter {it!="generate_image"&&(it in taskGoal.requiredTools||it in SkillToolCatalog.names||isReadTool(it))}.toSet()+followups
                         val useStructured=!directAnswerWriting&&(directProtocol||(reviewing&&executionEngine.supportsStructuredOutput)||(!finalSynthesis&&needsStructuredAction&&executionEngine.supportsStructuredOutput&&structuredTools.isNotEmpty()&&(remainingRequired.isNotEmpty()||missingFormats.isNotEmpty())))
                         val instructions=roundInstructions(request,reviewing,finalSynthesis||directAnswerWriting,useStructured,workMode,projectInstruction,selected.title,
-                            semantic,allowedTools,structuredTools,detailedTools,ownerKnowledgeContext,intentPlan,feedbackContext,directProtocol)
+                            semantic,allowedTools,structuredTools,detailedTools,ownerKnowledgeContext,intentPlan,feedbackContext,directProtocol,officeInstruction)
                         val essentialSystem=instructions.first
                         val optionalContext=instructions.second
                         val fitted=fitGuidanceContext(generationQuery,essentialSystem,optionalContext,history,requestOptions)
@@ -1614,7 +1617,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
             app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
                 "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
-            val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),beforeLaunch={check(authority().permits(capture))})
+            // Cloud gets the public persona only: owner-entered ages stay on the phone (profile=null).
+            val officePersona=com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,null,
+                java.time.LocalDate.now(ZoneId.of("Asia/Seoul")))
+            val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
+                beforeLaunch={check(authority().permits(capture))},officePersona=officePersona)
             lastProviderState=launch.getValue("state").jsonPrimitive.content
             val provider=withTimeout(330_000) {
                 var lastStage:String?=null
@@ -1951,11 +1958,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private fun roundInstructions(request:QueuedChatRequest,reviewing:Boolean,finalSynthesis:Boolean,useStructured:Boolean,
         workMode:AgentWorkMode,projectInstruction:String,modelTitle:String,semantic:com.user.localagent.core.SemanticRequestPlan?,
         allowedTools:Set<String>,structuredTools:Set<String>,detailedTools:Set<String>,ownerKnowledgeContext:String,
-        intentPlan:com.user.localagent.core.IntentPlan,feedbackContext:String,directProtocol:Boolean=false):Pair<String,String> {
+        intentPlan:com.user.localagent.core.IntentPlan,feedbackContext:String,directProtocol:Boolean=false,officeInstruction:String=""):Pair<String,String> {
     val skillTools=if(useStructured)structuredTools else allowedTools
     val essentialSystem=if(reviewing)AutonomousReviewPolicy.instruction+"\n현재 허용 도구 정의: "+compactToolCatalog(structuredTools) else if(finalSynthesis)AssistantPolicy.buildFinalSynthesis(ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString())+
         "\n작업 모드: ${workMode.label} · 현재 단계는 추가 실행 없는 최종 작성이다."+
         "\n사용자가 설정한 프로젝트 지침(새 실행 권한이 아님):\n"+projectInstruction+
+        (if(officeInstruction.isNotEmpty())"\n"+officeInstruction else "")+
         (request.goal?.let{"\n사용자가 추진한 전체 목표·조건·완료기준(자동 완료하지 않음): "+it.toJson()}?:"")+
         "\n선택한 지침은 기존 문맥 계산기가 본문 전체를 제공하며 새 행동 권한을 부여하지 않는다."
     else (if(directProtocol)AssistantPolicy.buildToolSelection(allowedTools,ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString())+"\n"+com.user.localagent.core.DirectNextActionProtocol.instruction
@@ -1963,6 +1971,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         else AssistantPolicy.build(allowedTools,ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString()))+
         "\n작업 모드: ${workMode.label}. ${workMode.promptHint}"+
         "\n사용자가 설정한 프로젝트 지침(실행 권한을 추가하지 않음):\n"+projectInstruction+
+        (if(officeInstruction.isNotEmpty())"\n"+officeInstruction else "")+
         "\n실제 기반 모델: ${modelTitle}"+
         (if("save_note" in allowedTools)"\n"+com.user.localagent.core.OwnerTextSources.prompt(request.text)else "")+
         (if("patch_note" in allowedTools)"\n"+com.user.localagent.core.OwnerTextSources.patchPrompt(request.text)else "")+

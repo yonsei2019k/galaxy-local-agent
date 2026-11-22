@@ -1,3 +1,18 @@
+## 2026-11-22 — 사무실 직원 인격을 89257d1 위로 재적용, 클라우드 경로까지 연결 (claude/office-personas-2059)
+
+23cfec3(4d8faf3 기준)의 인격 작업을 설치본 2059와 같은 89257d1 위로 다시 적용했다. 충돌은 `roundInstructions` 서명 1곳이며, 기준의 skillTools 줄과 인격 인자를 모두 유지했다.
+- 클라우드 인격 전달:
+  - 휴대폰 `PcExternalAgentClient.launchProvider(officePersona=)`는 PC의 `GET persona-capabilities`가 버전 1을 알릴 때만 `officePersona`를 싣는다.
+  - 구버전 작업기(경로 없음, 404)나 미지원이면 인격을 빼고 정상 실행한다. 기존 context-capabilities 응답은 바꾸지 않았다(구 휴대폰이 정확한 키 집합을 요구함).
+  - 클라우드에는 공개 인격만 보내고 생년월일·학년은 보내지 않는다(profile=null).
+  - PC 쪽: `server.py`가 1~6000자, 제어 문자 없음, 앞뒤 공백 없음을 검증한다. 감독기는 `office_persona` 키워드를 명시한 제공자에게만 전달하고, 요청 다이제스트에는 넣지 않는다.
+  - Codex·Claude 제공자 지시에 "권한·승인·근거 요구는 바뀌지 않음" 문단과 인격을 덧붙인다. 인격이 없으면 지시문은 바이트 그대로다.
+- 검증:
+  - core 1,076, Android 1,134, lint, 미서명 assembleRelease PASS
+  - web-ui tsc와 vitest 42/42 PASS
+  - pc-worker 337건 중 기존 test_recovery 1건만 오류
+- 미검증: 서명·설치·실기, 운영 PC 작업기 배포.
+
 ## 2026-11-21 — 스마트폰 쿠팡 구매후기 준비
 
 - 대화 도구 `open_coupang_review_workspace`와 연결 관리에서 집합 앱 내 구매후기 화면을 연다. 별도 WebView 프로필과 프로세스에서 소유자가 직접 로그인하며 주문·리뷰·사진은 앱의 로컬 화면에서 처리한다.

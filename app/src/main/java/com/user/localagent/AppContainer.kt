@@ -56,6 +56,8 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
     val callFollowUp by lazy {com.user.localagent.callfollowup.CallFollowUpController(appContext){callFollowUpPipeline}}
     val skills = BuiltinSkills(context.applicationContext)
     val officeTools by lazy {com.user.localagent.office.NativeOfficeTools(appContext)}
+    /** Owner-entered Office staff details, encrypted on the phone. */
+    val officeProfile by lazy {com.user.localagent.office.OfficeProfileStore(appContext)}
     val emailTools by lazy {com.user.localagent.skills.EmailFileTools(appContext)}
     val phoneMedia by lazy {com.user.localagent.skills.PhoneMediaTools(appContext)}
     val videoTools by lazy {com.user.localagent.video.LocalVideoTools(appContext)}

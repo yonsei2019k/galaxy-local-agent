@@ -365,5 +365,42 @@ class ProviderSupervisorTests(unittest.TestCase):
         self.assertEqual("CANCELLED", call["state"])
 
 
+class OfficePersonaTests(ProviderSupervisorTests):
+    def test_persona_reaches_only_runners_declaring_the_keyword(self):
+        seen = []
+        def declaring(config, bootstrap, request, *, office_persona=None, **kwargs):
+            seen.append(("declaring", office_persona))
+            return AgentReport("partial", "x", "", 1, 0)
+        def legacy(config, bootstrap, request, **kwargs):
+            seen.append(("legacy", sorted(kwargs)))
+            return AgentReport("partial", "x", "", 1, 0)
+        bridge, manager = self.fixture(declaring)
+        manager.launch(OWNER, SID, "phone", "요청", office_persona="합성\n페르소나")
+        self.finished(manager)
+        self.assertEqual([("declaring", "합성\n페르소나")], seen)
+        bridge, manager = self.fixture(legacy)
+        seen.clear()
+        manager.launch(OWNER, SID, "phone", "요청", office_persona="합성 페르소나")
+        self.finished(manager)
+        self.assertEqual("legacy", seen[0][0]); self.assertNotIn("office_persona", seen[0][1])
+
+    def test_persona_does_not_change_request_identity(self):
+        bridge, manager = self.fixture()
+        manager.launch(OWNER, SID, "phone", "요청", office_persona="합성 페르소나")
+        self.finished(manager)
+        self.assertEqual(hashlib.sha256("요청".encode()).hexdigest(), manager.children[SID].digest)
+        manager.launch(OWNER, SID, "phone", "요청")  # same identity without persona still deduplicates
+
+    def test_invalid_persona_is_rejected_before_authority(self):
+        for bad in ("a\x00b", "a\x07b", "x" * 6001, "", " lead", "trail ", 5, b"x", ["x"]):
+            bridge, manager = self.fixture()
+            with self.assertRaises(BridgeError) as caught:
+                manager.launch(OWNER, SID, "phone", "요청", office_persona=bad)
+            self.assertEqual("INVALID_OFFICE_PERSONA", caught.exception.code)
+            bridge.bootstrap_agent.assert_not_called()
+        bridge, manager = self.fixture()
+        manager.launch(OWNER, SID, "phone", "요청", office_persona="x" * 6000)
+
+
 if __name__ == "__main__":
     unittest.main()

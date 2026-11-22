@@ -6,7 +6,21 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile")
+    private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
+    private fun requireOfficeEntries(element:JsonElement){
+        val entries=element.jsonObject
+        require(entries.keys.all{it in officeSeats})
+        for(value in entries.values){
+            val entry=value.jsonObject
+            require(entry.keys.all{it=="birthDate"||it=="schoolGrade"})
+            for((field,raw) in entry){
+                val p=raw.jsonPrimitive;require(p.isString)
+                require(p.content.none{it.isISOControl()})
+                require(p.content.length<=if(field=="birthDate")10 else 20)
+            }
+        }
+    }
     fun parse(raw:String):ReactUiCommand?=runCatching {
         require(raw.toByteArray(Charsets.UTF_8).size<=64*1024)
         val o=Json.parseToJsonElement(raw).jsonObject
@@ -28,10 +42,12 @@ internal object ReactBridgePolicy {
             "stop"->setOf("runId","actionEpoch")
             "steer"->setOf("runId","actionEpoch","text")
             "navigate"->setOf("panel")
+            "saveOfficeProfile"->setOf("entries")
             else->emptySet()
         }
         require(payload.keys==allowed)
-        for((key,value) in payload){
+        if(action=="saveOfficeProfile")requireOfficeEntries(payload.getValue("entries"))
+        else for((key,value) in payload){
             val p=value.jsonPrimitive
             if(key in setOf("actionEpoch","bindingEpoch"))require(!p.isString&&p.long in 0..9007199254740991L)
             else {require(p.isString);require(p.content.length<=if(key=="text")when(action){"steer"->4000;"collabSend"->8000;else->12000}else 128);require(!p.content.contains('\u0000'))}

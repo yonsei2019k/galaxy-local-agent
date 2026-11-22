@@ -4,11 +4,13 @@ import java.util.UUID
 
 enum class OfficeSeat(val displayName:String,val jobTitle:String) {
     CHAIR("이수빈","회장"),
-    DIRECTOR("김호영","본부장"),
+    DIRECTOR("김호영","과장"),
     ASSOCIATE_GYUMIN("김규민","대리"),
     ASSOCIATE_SEOYUL("김서율","대리");
 
     val label:String get()="$jobTitle $displayName"
+    /** Default room titles from earlier releases, refreshed to [label] when the owner never renamed them. */
+    val legacyLabels:Set<String> get()=if(this==DIRECTOR)setOf("본부장 $displayName") else emptySet()
 }
 
 /** Fixed product rooms. Work topics belong to tasks inside a room. */

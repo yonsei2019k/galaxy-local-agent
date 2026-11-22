@@ -56,6 +56,7 @@ export interface Snapshot {
   threads: Thread[]
   staffRooms?: Thread[]
   officeSelected?: boolean
+  officeProfile?: OfficeEntries
   tasks: Task[]
   models: Model[]
   activeModelLabel?: string
@@ -102,6 +103,17 @@ export interface CollaborationSnapshot {
   openRequest?: number
 }
 
+export type OfficeEntries = Record<string, { birthDate?: string; schoolGrade?: string }>
+
+const OFFICE_SEAT_KEYS = ['CHAIR', 'DIRECTOR', 'ASSOCIATE_GYUMIN', 'ASSOCIATE_SEOYUL']
+
+export function officeEntries(value: unknown): value is OfficeEntries {
+  return record(value) && Object.keys(value).length <= 4 && Object.entries(value).every(([seat, entry]) =>
+    OFFICE_SEAT_KEYS.includes(seat) && record(entry) && Object.keys(entry).every(key => key === 'birthDate' || key === 'schoolGrade') &&
+    (entry.birthDate === undefined || (typeof entry.birthDate === 'string' && entry.birthDate.length <= 10)) &&
+    (entry.schoolGrade === undefined || (typeof entry.schoolGrade === 'string' && entry.schoolGrade.length <= 20)))
+}
+
 export const MAX_COLLAB_TEXT = 8_000
 
 export type Panel = 'chat' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'collab'
@@ -117,6 +129,8 @@ type Intent =
   | { action: 'selectThread' | 'selectModel' | 'removeAttachment'; payload: { id: string } }
   | { action: 'renameThread'; payload: { title: string } }
   | { action: 'navigate'; payload: { panel: Panel } }
+  | { action: 'saveOfficeProfile'; payload: { entries: OfficeEntries } }
+  | { action: 'clearOfficeProfile' }
   | { action: 'openOffice' | 'attach' | 'manageThreads' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
 
 interface RunTarget {
@@ -217,6 +231,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
     value.resultPreviews.length > 2 ||
     value.resultPreviews.some(preview => !messages.some(message => message.id === preview.messageId && message.role === 'assistant')))) return null
   if (value.officeSelected !== undefined && typeof value.officeSelected !== 'boolean') return null
+  if (value.officeProfile !== undefined && (value.officeSelected !== true || !officeEntries(value.officeProfile))) return null
   if (value.staffRooms !== undefined && (!list(value.staffRooms, thread) || value.staffRooms.length > 4 ||
     value.staffRooms.some(room => !threads.some(item => item.id === room.id && item.selected === room.selected)))) return null
   if (value.activeModelLabel !== undefined && typeof value.activeModelLabel !== 'string') return null
@@ -253,6 +268,8 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if (intent.action !== 'ready' && !scope?.ready) return false
   if (intent.action === 'selectThread' && !scope?.threads.some(thread => thread.id === intent.payload.id)) return false
   if (intent.action === 'selectModel' && !scope?.models.some(model => model.id === intent.payload.id)) return false
+  if ((intent.action === 'saveOfficeProfile' || intent.action === 'clearOfficeProfile') && !scope?.officeSelected) return false
+  if (intent.action === 'saveOfficeProfile' && !officeEntries(intent.payload.entries)) return false
   if (intent.action === 'copy' && !scope?.messages.some(message => message.role === 'assistant' && message.id === intent.payload.messageId)) return false
   if (intent.action === 'stop' || intent.action === 'steer') {
     const target = runTarget(scope)

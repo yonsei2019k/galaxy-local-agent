@@ -28,6 +28,9 @@ class PcExternalAgentProviderTest {
         var forgedPhoneResult=false
         var expectedContext:JsonObject?=null
         var supportsContext=true
+        /** null: an older worker without the route (404); true/false: advertised support. */
+        var personaSupport:Boolean?=null
+        var expectedPersona:String?=null
         var busyLaunches=0
         var beforeSupportReply:suspend ()->Unit={}
         val calls=mutableListOf<Triple<String,JsonObject?,String?>>()
@@ -80,12 +83,17 @@ class PcExternalAgentProviderTest {
                     plan=JsonObject(plan.jsonObject+("state" to JsonPrimitive(if(body.getValue("accepted").jsonPrimitive.boolean)"ACCEPTED"else"REJECTED")))
                     snapshot()
                 }
+                path.endsWith("/persona-capabilities")->{
+                    check(method=="GET"&&body==null)
+                    val support=personaSupport?:throw IllegalStateException("SYNTHETIC_HTTP_404")
+                    buildJsonObject {put("officePersonaVersions",buildJsonArray{if(support)add(1)});put("maxOfficePersonaChars",6000)}.toString()
+                }
                 path.endsWith("/context-capabilities")->{beforeSupportReply();buildJsonObject {
                     put("conversationContextVersions",buildJsonArray{if(supportsContext)add(1)})
                     put("maxContextBytes",12000)
                 }.toString()}
                 path.endsWith("/launch")->{check(method=="POST"&&body==buildJsonObject{
-                    put("ownerRequest",request);expectedContext?.let{put("conversationContext",it)}
+                    expectedPersona?.let{put("officePersona",it)};put("ownerRequest",request);expectedContext?.let{put("conversationContext",it)}
                 });if(busyLaunches>0){busyLaunches--;throw PcAgentProviderBusy()};provider()}
                 path.endsWith("/provider-cancel")->{check(method=="POST"&&body==buildJsonObject{});provider()}
                 path.endsWith("/provider")->{check(method=="GET"&&body==null);provider()}
@@ -129,6 +137,34 @@ class PcExternalAgentProviderTest {
         assertFalse(report.containsKey("verification"));assertEquals(report,client.providerStatus());assertEquals(report,client.cancelProvider())
         wire.malformedReport=true
         assertTrue(runCatching{client.providerStatus()}.isFailure)
+    }
+    @Test fun officePersonaIsSentOnlyWhenThePcAdvertisesSupport()=runBlocking {
+        assertTrue(PcAgentBridgeTransport.acceptsPath("/v1/agent/sessions/$session/persona-capabilities"))
+        val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)
+        client.register(c)
+        val persona="[사무실 인격] 합성 인격 문구"
+        // Older worker: no route, so the launch omits the persona instead of failing.
+        client.launchProvider(request,officePersona=persona)
+        assertFalse(wire.calls.last().second!!.containsKey("officePersona"))
+        // Advertised but unsupported version: still omitted.
+        wire.personaSupport=false
+        client.launchProvider(request,officePersona=persona)
+        assertFalse(wire.calls.last().second!!.containsKey("officePersona"))
+        // Supported: sent exactly once in the launch body, owner request unchanged.
+        wire.personaSupport=true;wire.expectedPersona=persona
+        client.launchProvider(request,officePersona=persona)
+        assertEquals(persona,wire.calls.last().second!!.getValue("officePersona").jsonPrimitive.content)
+        assertEquals(request,wire.calls.last().second!!.getValue("ownerRequest").jsonPrimitive.content)
+        // No persona for an ordinary room: no capability round-trip at all.
+        val before=wire.calls.count{it.first.endsWith("/persona-capabilities")}
+        wire.expectedPersona=null
+        client.launchProvider(request)
+        assertEquals(before,wire.calls.count{it.first.endsWith("/persona-capabilities")})
+        // Malformed persona text is rejected on the phone before any upload.
+        val launches=wire.calls.count{it.first.endsWith("/launch")}
+        assertTrue(runCatching{client.launchProvider(request,officePersona="bad\u0000text")}.isFailure)
+        assertTrue(runCatching{client.launchProvider(request,officePersona="x".repeat(6001))}.isFailure)
+        assertEquals(launches,wire.calls.count{it.first.endsWith("/launch")})
     }
     @Test fun contextIsNegotiatedWithoutChangingTheCurrentOwnerRequest()=runBlocking {
         val c=capture();val wire=Wire(c);val client=PcExternalAgentClient(c,wire)

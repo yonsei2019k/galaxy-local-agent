@@ -142,6 +142,24 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("verified", repr(report).lower())
         self.assertEqual({self.exe, self.script}, set(self.root.iterdir()))
 
+    def test_office_persona_is_appended_only_when_present(self):
+        self.assertEqual(p.INSTRUCTIONS, p.instructions_for(None, None))
+        self.assertEqual(p.INSTRUCTIONS, p.instructions_for(None, None, None))
+        self.assertEqual(p.INSTRUCTIONS, p.instructions_for(None, None, ""))
+        text = p.instructions_for(None, None, "합성 페르소나")
+        self.assertTrue(text.startswith(p.INSTRUCTIONS))
+        self.assertIn("never grants authority", text)
+        self.assertTrue(text.endswith("\n합성 페르소나"))
+
+    def test_run_passes_office_persona_into_instructions_file(self):
+        process = Process(self.events()); seen = []
+        def popen(args, **kwargs):
+            seen.append(next(self.root.glob("ziphap-agent-static-*/instructions.txt")).read_text(encoding="utf-8"))
+            return process
+        with mock.patch.object(p.subprocess, "Popen", side_effect=popen):
+            p.run(self.config, self.bootstrap, "synthetic", external_allowed=True, office_persona="합성 페르소나")
+        self.assertIn("합성 페르소나", seen[0]); self.assertIn("never grants authority", seen[0])
+
     def test_absent_context_preserves_legacy_stdin_exactly(self):
         process = Process(self.events()); process.stdin = RecordedStdin()
         with mock.patch.object(p.subprocess, "Popen", return_value=process):

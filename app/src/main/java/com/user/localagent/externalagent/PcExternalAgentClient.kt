@@ -143,7 +143,20 @@ class PcExternalAgentClient(
     }
     var latestProviderProgress:ProviderProgress?=null
         private set
-    suspend fun launchProvider(ownerRequest:String,conversationContext:JsonObject?=null,provider:String="codex",beforeLaunch:suspend ()->Unit={}):JsonObject {
+    /**
+     * Public Office persona text (no owner-entered ages) for a fixed Office room, sent only when the PC
+     * advertises support. Older workers reject unknown launch keys, so an unsupported or unknown answer omits it.
+     */
+    private suspend fun supportedOfficePersona(persona:String?):String? {
+        if(persona.isNullOrBlank())return null
+        require(persona==persona.trim()&&persona.length<=6000&&persona.none{it.isISOControl()&&it!='\n'}){"INVALID_OFFICE_PERSONA"}
+        val support=try{call("GET","/persona-capabilities")}catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}catch(_:Exception){return null}
+        val versions=support["officePersonaVersions"]?.let{runCatching{it.jsonArray}.getOrNull()}?:return null
+        val max=support["maxOfficePersonaChars"]?.jsonPrimitive?.intOrNull?:return null
+        return persona.takeIf{versions.any{it.jsonPrimitive.intOrNull==1}&&persona.length<=max}
+    }
+    suspend fun launchProvider(ownerRequest:String,conversationContext:JsonObject?=null,provider:String="codex",beforeLaunch:suspend ()->Unit={},
+        officePersona:String?=null):JsonObject {
         require(captured.allowExternalAgent&&ownerRequest.isNotBlank()&&ownerRequest.toByteArray(Charsets.UTF_8).size<=65_536&&
             ExternalAgentContract.sha(ownerRequest)==captured.requestDigest){"BRIDGE_OWNER_REQUEST_CHANGED"}
         if(!captured.allowCloudPersonalData){
@@ -159,7 +172,9 @@ class PcExternalAgentClient(
                 "PC가 대화 맥락 전달을 지원하지 않습니다. PC 작업기를 업데이트한 뒤 다시 요청해주세요."
             }
         }
+        val persona=supportedOfficePersona(officePersona)
         val request=buildJsonObject{
+            persona?.let{put("officePersona",it)}
             put("ownerRequest",ownerRequest)
             require(provider in setOf("codex","claude"))
             if(provider=="claude")put("provider",provider)
