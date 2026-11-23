@@ -136,7 +136,7 @@ const MAX_REQUEST_LENGTH = 12_000
 const MAX_STEER_LENGTH = 4_000
 
 export function Composer({ snapshot, enabled, draft, pending, status, onDraft, onSubmit, onAttach, onStop, onRemoveAttachment,
-  onCancelPreparation, onOpenWaitingApproval }: {
+  onCancelPreparation, onOpenWaitingApproval, onVoice, onCancelVoice }: {
   snapshot: Snapshot | null
   enabled: boolean
   draft: string
@@ -145,6 +145,8 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   onDraft(text: string): void
   onSubmit(kind: 'send' | 'steer'): void
   onAttach(): void
+  onVoice(): void
+  onCancelVoice(): void
   onStop(): void
   onRemoveAttachment(id: string): void
   onCancelPreparation(): void
@@ -159,9 +161,14 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   const canSteer = enabled && controls.steer !== null && attachments.length === 0
   const tooLong = draft.length > MAX_REQUEST_LENGTH
   const tooLongForSteer = draft.length > MAX_STEER_LENGTH
-  const sendReady = enabled && !pending && !tooLong && (hasText || attachments.length > 0)
+  const voice = snapshot?.voicePrompt
+  const voiceBusy = voice !== undefined
+  const voiceLabel = voice === 'listening' ? '말하기 완료' : '음성으로 입력'
+  const sendReady = enabled && !pending && !voiceBusy && !tooLong && (hasText || attachments.length > 0)
   const sendLabel = busy ? '다음에 보내기' : '보내기'
-  const note = tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : status
+  const voiceStatus = voice === 'listening' ? '듣고 있어요. 다 말했으면 마이크를 다시 누르세요.'
+    : voice === 'finishing' ? '음성을 글로 바꾸고 있어요.' : voice === 'permission' ? '마이크 권한을 확인하고 있어요.' : ''
+  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : status)
 
   return (
     <footer className="composer-footer">
@@ -182,7 +189,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
           <div className="editor">
             <div className="editor-size" aria-hidden="true">{draft}{'\n'}</div>
             <textarea aria-label="메시지" aria-describedby={note ? statusId : undefined} aria-invalid={tooLong || undefined}
-              placeholder="메시지를 입력하세요" dir="auto" rows={1} disabled={!enabled} value={draft}
+              placeholder="메시지를 입력하세요" dir="auto" rows={1} disabled={!enabled || voiceBusy} value={draft}
               onChange={event => onDraft(event.currentTarget.value)} onKeyDown={event => {
                 if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing &&
                   event.nativeEvent.keyCode !== 229 && !event.repeat) {
@@ -192,7 +199,16 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
               }} />
           </div>
           <div className="composer-tools">
-            <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="파일 첨부" title="파일 첨부" onClick={onAttach}><Icon name="clip" /></button>
+            <div className="composer-actions">
+              {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="파일 첨부" title="파일 첨부" onClick={onAttach}><Icon name="clip" /></button>}
+              {snapshot?.voiceDraftEpoch !== undefined && <button type="button" className="icon-button voice-button"
+                disabled={!enabled || pending || tooLong || voice === 'permission' || voice === 'finishing'}
+                aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={onVoice}>
+                <Icon name="microphone" />
+              </button>}
+              {(voice === 'listening' || voice === 'finishing') && <button type="button" className="icon-button"
+                aria-label="음성 입력 취소" title="음성 입력 취소" onClick={onCancelVoice}><Icon name="close" /></button>}
+            </div>
             <div className="composer-actions">
               {enabled && snapshot?.canCancelPreparation === true && <button type="button" className="text-button" onClick={onCancelPreparation}>준비 취소</button>}
               {canStop && <button type="button" className="icon-button stop-button" aria-label="현재 작업 중단" title="현재 작업 중단" onClick={onStop}><Icon name="stop" /></button>}

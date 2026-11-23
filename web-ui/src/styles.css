@@ -420,7 +420,8 @@ svg { width: 20px; height: 20px; flex: none; }
 .composer:has(textarea[aria-invalid="true"]) { border-color: var(--fail); }
 .composer-tools { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 3px 9px 8px; }
 .composer-actions { display: flex; align-items: center; gap: 6px; }
-.attach-button { color: var(--secondary); }
+.attach-button, .voice-button { color: var(--secondary); }
+.voice-button[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
 .send-button, .steer-button {
   display: inline-flex;
   align-items: center;
@@ -494,6 +495,8 @@ svg { width: 20px; height: 20px; flex: none; }
   .model-group { flex-direction: column; align-items: end; gap: 2px; }
   .active-model { order: 2; max-width: 100%; }
   .model-control select { max-width: min(48vw, 220px); }
+  .composer-tools { flex-wrap: wrap; }
+  .composer-tools > .composer-actions:last-child { margin-inline-start: auto; }
   .composer-actions { gap: 4px; }
   .steer-button span, .send-button span { display: none; }
   .send-button, .steer-button { padding: 0 12px; }

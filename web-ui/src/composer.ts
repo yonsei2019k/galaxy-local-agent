@@ -57,7 +57,9 @@ export function updateChat(state: ChatState, update: Update): ChatState {
         (next.busy !== pending.snapshot.busy || next.status !== pending.snapshot.status ||
           next.messages.at(-1)?.id !== pending.snapshot.messages.at(-1)?.id)
       const editedAfterSend = pending !== null && state.draftRevision !== pending.draftRevision
-      const useHostDraft = next.draft === state.draft || (!state.draftDirty && !editedAfterSend) ||
+      const voiceResult = (next.voiceDraftEpoch ?? 0) > (state.snapshot?.voiceDraftEpoch ?? 0) &&
+        next.draft.startsWith(state.draft)
+      const useHostDraft = voiceResult || next.draft === state.draft || (!state.draftDirty && !editedAfterSend) ||
         (acknowledged && pending.kind === 'send' && !editedAfterSend && state.draft === pending.text && next.draft === '')
 
       return {

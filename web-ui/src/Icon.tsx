@@ -16,6 +16,7 @@ const paths = {
   refresh: 'M19 9a7.5 7.5 0 1 0 .1 6M19 4v5h-5',
   stop: 'M6 6h12v12H6z',
   steer: 'M7 19v-3a4 4 0 0 1 4-4h8m-5-5 5 5-5 5',
+  microphone: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM6 11v1a6 6 0 0 0 12 0v-1m-6 7v3m-3 0h6',
   clip: 'm9 13 5-5a2 2 0 0 1 3 3l-7 7a4 4 0 0 1-6-6l8-8',
   file: 'M7 3h6l4 4v14H7zm6 0v5h4m-7 4h4m-4 4h4',
   down: 'm6 9 6 6 6-6',

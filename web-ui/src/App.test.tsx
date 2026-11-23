@@ -77,6 +77,43 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('uses microphone actions scoped to this room and leaves recognized text unsent', () => {
+    mount()
+    snapshot({ ...base, voiceDraftEpoch: 0 })
+    edit('기존 초안')
+    click('음성으로 입력')
+    expect(requests().at(-1)).toMatchObject({
+      action: 'startVoicePrompt', threadId: 'thread-a', branchId: 'branch-a', payload: {},
+    })
+    snapshot({ ...base, voicePrompt: 'permission', voiceDraftEpoch: 0 })
+    expect(button('음성으로 입력').disabled).toBe(true)
+    snapshot({ ...base, voicePrompt: 'listening', voiceDraftEpoch: 0 })
+    expect(input().disabled).toBe(true)
+    expect(button('보내기').disabled).toBe(true)
+    click('말하기 완료')
+    expect(requests().at(-1)?.action).toBe('finishVoicePrompt')
+    snapshot({ ...base, voicePrompt: 'finishing', voiceDraftEpoch: 0 })
+    expect(button('음성으로 입력').disabled).toBe(true)
+    snapshot({ ...base, draft: '기존 초안 오늘 일정 알려줘', voiceDraftEpoch: 1 })
+    expect(input().value).toBe('기존 초안 오늘 일정 알려줘')
+    expect(input().disabled).toBe(false)
+    expect(requests().some(request => request.action === 'send')).toBe(false)
+
+    click('음성으로 입력')
+    snapshot({ ...base, draft: input().value, voicePrompt: 'listening', voiceDraftEpoch: 1 })
+    click('음성 입력 취소')
+    expect(requests().at(-1)?.action).toBe('cancelVoicePrompt')
+  })
+
+  it('does not overwrite a newer local edit with a dictation snapshot', () => {
+    mount()
+    snapshot({ ...base, draft: '이전 초안', voiceDraftEpoch: 0 })
+    edit('사용자가 새로 입력한 내용')
+    snapshot({ ...base, draft: '이전 초안 음성 입력', voiceDraftEpoch: 1 })
+    expect(input().value).toBe('사용자가 새로 입력한 내용')
+    expect(readSnapshot({ ...base, voicePrompt: 'invalid', voiceDraftEpoch: 1 })).toBeNull()
+  })
+
   it('renders the host author on office replies and keeps the default for ordinary replies', () => {
     mount()
     snapshot({ ...base, messages: [

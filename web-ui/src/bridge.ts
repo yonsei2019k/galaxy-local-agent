@@ -70,6 +70,8 @@ export interface Snapshot {
   canCancelPreparation?: boolean
   otherApprovalPending?: boolean
   composerEpoch?: number
+  voicePrompt?: 'permission' | 'listening' | 'finishing'
+  voiceDraftEpoch?: number
   theme?: 'light' | 'dark' | 'system'
   collab?: CollaborationSnapshot
 }
@@ -134,6 +136,7 @@ type Intent =
   | { action: 'navigate'; payload: { panel: Panel } }
   | { action: 'saveOfficeProfile'; payload: { entries: OfficeEntries } }
   | { action: 'clearOfficeProfile' }
+  | { action: 'startVoicePrompt' | 'finishVoicePrompt' | 'cancelVoicePrompt' }
   | { action: 'openOffice' | 'dismissOfficeGuide' | 'requestOfficeCalendar' | 'attach' | 'manageThreads' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
 
 interface RunTarget {
@@ -252,6 +255,8 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.otherApprovalPending !== undefined && typeof value.otherApprovalPending !== 'boolean') return null
   if (value.attachments !== undefined && !list(value.attachments, attachment)) return null
   if (value.composerEpoch !== undefined && !epoch(value.composerEpoch)) return null
+  if (value.voiceDraftEpoch !== undefined && !epoch(value.voiceDraftEpoch)) return null
+  if (value.voicePrompt !== undefined && value.voicePrompt !== 'permission' && value.voicePrompt !== 'listening' && value.voicePrompt !== 'finishing') return null
   if (value.theme !== undefined && value.theme !== 'light' && value.theme !== 'dark' && value.theme !== 'system') return null
   return { ...(value as unknown as Snapshot), collab: collaboration(value.collab) }
 }

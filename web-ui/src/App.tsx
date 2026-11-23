@@ -164,7 +164,9 @@ export default function App() {
             if (target) request({ action: 'stop', payload: target })
           }} onRemoveAttachment={id => request({ action: 'removeAttachment', payload: { id } })}
           onCancelPreparation={() => request({ action: 'cancelPreparation' })}
-          onOpenWaitingApproval={() => request({ action: 'openWaitingApproval' })} />
+          onOpenWaitingApproval={() => request({ action: 'openWaitingApproval' })}
+          onVoice={() => request({ action: snapshot?.voicePrompt === 'listening' ? 'finishVoicePrompt' : 'startVoicePrompt' })}
+          onCancelVoice={() => request({ action: 'cancelVoicePrompt' })} />
       </div>
       <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}
