@@ -71,6 +71,8 @@ export interface Snapshot {
   otherApprovalPending?: boolean
   composerEpoch?: number
   singleConversation?: boolean
+  inlineLogin?: boolean
+  browserLoginStatus?: string
   voicePrompt?: 'permission' | 'listening' | 'finishing'
   voiceDraftEpoch?: number
   theme?: 'light' | 'dark' | 'system'
@@ -256,6 +258,8 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.otherApprovalPending !== undefined && typeof value.otherApprovalPending !== 'boolean') return null
   if (value.attachments !== undefined && !list(value.attachments, attachment)) return null
   if (value.singleConversation !== undefined && typeof value.singleConversation !== 'boolean') return null
+  if (value.inlineLogin !== undefined && typeof value.inlineLogin !== 'boolean') return null
+  if (value.browserLoginStatus !== undefined && (typeof value.browserLoginStatus !== 'string' || value.browserLoginStatus.length > 240)) return null
   if (value.composerEpoch !== undefined && !epoch(value.composerEpoch)) return null
   if (value.voiceDraftEpoch !== undefined && !epoch(value.voiceDraftEpoch)) return null
   if (value.voicePrompt !== undefined && value.voicePrompt !== 'permission' && value.voicePrompt !== 'listening' && value.voicePrompt !== 'finishing') return null

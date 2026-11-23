@@ -2,6 +2,10 @@ package com.user.localagent.integrations
 
 import android.content.Context
 import android.view.ViewGroup
+import android.view.Window
+import android.view.WindowManager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,10 +40,7 @@ import kotlinx.coroutines.launch
 @Composable fun AppBrowserSurface(context:Context){
     val agent=remember(context){AppWebAgent.get(context)}
     val card by agent.ownerLoginCard.collectAsState()
-    card?.let { login ->
-        key(login.id) { SecureLoginCard(agent,login) }
-        return
-    }
+    if(card!=null)return
     val opened by agent.presentedAddress.collectAsState()
     val initialAddress=opened?:return
     val busy by agent.active.collectAsState()
@@ -97,7 +98,13 @@ import kotlinx.coroutines.launch
 
 
 @Composable
-private fun SecureLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard){
+internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard,window:Window,modifier:Modifier=Modifier){
+    DisposableEffect(window,login.id){
+        val flag=WindowManager.LayoutParams.FLAG_SECURE
+        val alreadySecure=(window.attributes.flags and flag)!=0
+        if(!alreadySecure)window.addFlags(flag)
+        onDispose {if(!alreadySecure)window.clearFlags(flag)}
+    }
     val scope=rememberCoroutineScope()
     val keyboard=LocalSoftwareKeyboardController.current
     var account by remember {mutableStateOf("")}
@@ -120,10 +127,9 @@ private fun SecureLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard){
             }
         }
     }
-    Dialog(onDismissRequest={if(!submitting)agent.cancelLoginCard(login.id)},
-        properties=DialogProperties(securePolicy=SecureFlagPolicy.SecureOn)){
-        Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
-            Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement=Arrangement.spacedBy(8.dp)){
                 Text("사이트 로그인",style=MaterialTheme.typography.titleLarge)
                 Text(login.host,style=MaterialTheme.typography.titleSmall)
                 Text("입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
@@ -144,6 +150,5 @@ private fun SecureLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard){
                     TextButton(onClick={agent.cancelLoginCard(login.id)},enabled=!submitting){Text("취소")}
                 }
             }
-        }
     }
 }

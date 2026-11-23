@@ -102,6 +102,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 function TaskCard({ task }: { task: Task }) {
   const phase = taskPhase(task)
   const heading = useId()
+  const recent = task.evidence?.slice(-3) ?? []
   return (
     <article className={`task-card task-card--${phase.tone}`} aria-labelledby={heading}>
       <div className="task-heading">
@@ -109,6 +110,10 @@ function TaskCard({ task }: { task: Task }) {
         <div><p className="task-state">{phase.title}</p><h2 id={heading}>{task.label || '작업'}</h2></div>
       </div>
       {task.detail && <p className="task-detail" dir="auto">{task.detail}</p>}
+      {task.phase === 'running' && <div className="task-progress" role="progressbar" aria-label="작업 진행 중"><span /></div>}
+      {recent.length > 0 && <ol className="task-step-line" aria-label="최근 확인된 작업 단계">
+        {recent.map(item => <li key={item.id}>{item.label}</li>)}
+      </ol>}
       {task.evidence && task.evidence.length > 0 && (
         <details className="task-evidence">
           <summary><Icon name="file" /> 작업 내역 <Icon name="down" className="details-chevron" /></summary>

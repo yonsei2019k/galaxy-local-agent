@@ -55,6 +55,8 @@ class AppWebAgent private constructor(private val context:Context) {
     data class LoginCard(val id:Long,val host:String)
     private val loginCard=MutableStateFlow<LoginCard?>(null)
     val ownerLoginCard:StateFlow<LoginCard?> get()=loginCard
+    private val loginStatus=MutableStateFlow<String?>(null)
+    val ownerLoginStatus:StateFlow<String?> get()=loginStatus
     private val loginDomKey="ziphapLogin"+token()
     private val loginScript by lazy {context.assets.open("app-web-login.js").bufferedReader().use{it.readText()}}
     private var cardOrigin:URI?=null
@@ -64,6 +66,7 @@ class AppWebAgent private constructor(private val context:Context) {
         if(loginCard.value?.id!=id)return
         loginCard.value=null
         cardOrigin=null
+        loginStatus.value="사이트에서 직접 로그인한 뒤 집합으로 돌아와 주세요."
         showBrowser(view().url.orEmpty())
     }
 
@@ -71,6 +74,7 @@ class AppWebAgent private constructor(private val context:Context) {
         if(loginCard.value?.id!=id)return
         loginCard.value=null
         cardOrigin=null
+        loginStatus.value="로그인을 취소했어요. 현재 작업은 멈춰 있습니다."
         loginCompletion?.complete(false)
     }
 
@@ -81,16 +85,38 @@ class AppWebAgent private constructor(private val context:Context) {
         if(!RuntimeGate.foreground.get()||loginCard.value?.id!=id||completion?.isCompleted==true||loginSubmitting||
             secureOrigin(view().url)!=origin||account.isBlank()||account.length>320||password.isEmpty()||password.length>1024)return false
         loginSubmitting=true
+        loginStatus.value="사이트에 로그인 정보를 제출하는 중이에요."
         try {
             val submitted=loginDom("submit",id,origin,account,password)
             if(submitted&&loginCard.value?.id==id){
+                loginStatus.value="로그인 정보를 제출했어요. 다음 페이지를 확인하고 있어요."
+                val waiter=loginCompletion
+                if(waiter==null){
+                    settle()
+                    loginStatus.value=loginReadbackStatus()
+                }
                 loginCard.value=null
                 cardOrigin=null
-                loginCompletion?.complete(true)
+                waiter?.complete(true)
                 return true
             }
+            loginStatus.value="현재 로그인 양식에 제출하지 못했어요. 사이트에서 직접 로그인할 수 있어요."
             return false
         }finally{loginSubmitting=false}
+    }
+
+    private suspend fun loginReadbackStatus():String {
+        if(navigation.value.error!=null||navigation.value.loading)
+            return "로그인 정보를 제출했지만 다음 페이지를 열지 못했어요. 작업은 일시정지됐어요."
+        val stillLogin=try{eval("Boolean(document.querySelector('input[type=password]'))",4_000)}
+        catch(_:TimeoutCancellationException){null}
+        catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){null}
+        return when(stillLogin){
+            JsonPrimitive(true)->"아직 사이트 로그인 화면이에요. 로그인 상태를 확인해 주세요."
+            JsonPrimitive(false)->"로그인 화면에서 이동했어요. 이어서 할 일을 보내 주세요."
+            else->"로그인 결과를 확인하지 못했어요. 작업은 일시정지됐어요."
+        }
     }
 
     private suspend fun loginDom(action:String,id:Long,origin:URI,account:String?=null,password:String?=null):Boolean {
@@ -154,11 +180,13 @@ class AppWebAgent private constructor(private val context:Context) {
             }
             override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
                 if(request.isForMainFrame&&request.url.toString()==loadingUrl)
-                    navigationFailed(when(error.errorCode){
+                    navigationFailed(when{
+                        "ERR_CLEARTEXT_NOT_PERMITTED" in error.description->"HTTPS_REQUIRED"
+                        else->when(error.errorCode){
                         WebViewClient.ERROR_FAILED_SSL_HANDSHAKE->"TLS_ERROR"
                         WebViewClient.ERROR_TIMEOUT->"PAGE_TIMEOUT"
                         else->"PAGE_UNREACHABLE"
-                    })
+                    }})
             }
             override fun onReceivedHttpError(view:WebView,request:WebResourceRequest,error:WebResourceResponse){
                 if(request.isForMainFrame&&request.url.toString()==loadingUrl)
@@ -318,21 +346,29 @@ class AppWebAgent private constructor(private val context:Context) {
                 cardOrigin=loginOrigin
                 presentation.value=null
                 loginCard.value=LoginCard(id,loginOrigin.host)
+                loginStatus.value="사이트에 로그인하면 작업을 이어갈 수 있어요."
             }
             if(loginCard.value?.id!=id&&!RuntimeGate.foreground.get())return initial
             val ownerFinished=withTimeoutOrNull(55_000){completion.await()}
             if(ownerFinished!=true){
                 keepCard=ownerFinished==null&&loginCard.value?.id==id
+                if(keepCard)loginStatus.value="작업이 인증 대기에서 일시정지됐어요. 여기서 로그인할 수 있어요."
                 return JsonObject(initial+("phoneBrowserVisible" to JsonPrimitive(isPresented())))
             }
             // Only after the owner is done do we observe the page again. Never replay the open.
             val currentOrigin=secureOrigin(view().url)?:return initial
-            if(currentOrigin!=requiredOrigin&&currentOrigin!=loginOrigin)return initial
+            if(currentOrigin!=requiredOrigin&&currentOrigin!=loginOrigin){
+                loginStatus.value="로그인 뒤 다른 사이트로 이동해 작업을 멈췄어요."
+                return initial
+            }
             settle()
             val finalOrigin=secureOrigin(view().url)?:return initial
             if((finalOrigin!=requiredOrigin&&finalOrigin!=loginOrigin)||navigation.value.error!=null||
-                navigation.value.loading)return initial
-            return readPage()
+                navigation.value.loading){loginStatus.value=loginReadbackStatus();return initial}
+            val page=readPage()
+            loginStatus.value=if(page["loginRequired"]==JsonPrimitive(true)||page["error"]!=null)
+                loginReadbackStatus() else "로그인 화면에서 이동했어요. 작업을 이어가고 있어요."
+            return page
         } finally {
             if(!keepCard){loginCard.value=null;cardOrigin=null}
             loginCompletion=null

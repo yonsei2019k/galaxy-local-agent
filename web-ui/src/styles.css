@@ -418,6 +418,16 @@ svg { width: 20px; height: 20px; flex: none; }
 .editor textarea { position: absolute; inset: 0; height: 100%; resize: none; margin: 0; border: 0; outline: 0; background: transparent; }
 .editor textarea::placeholder { color: var(--muted); opacity: 1; }
 .composer:has(textarea[aria-invalid="true"]) { border-color: var(--fail); }
+.task-progress { height: 4px; margin: 10px 0; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
+.task-progress span { display: block; height: 100%; width: 28%; background: var(--accent); border-radius: inherit; }
+@media (prefers-reduced-motion: no-preference) {
+  .task-progress span { animation: task-progress-slide 1.65s ease-in-out infinite alternate; }
+}
+@keyframes task-progress-slide { to { transform: translateX(255%); } }
+.task-step-line { padding: 0; margin: 10px 0; list-style: none; color: var(--muted); font-size: var(--fs-small); }
+.task-step-line li { padding: 2px 0 4px 12px; border-inline-start: 2px solid var(--line); }
+.task-step-line li:last-child { border-color: var(--accent); color: var(--ink); }
+.browser-login-status { padding: 8px var(--pad); color: var(--muted); font-size: var(--fs-small); }
 .composer-tools { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 3px 9px 8px; }
 .composer-actions { display: flex; align-items: center; gap: 6px; }
 .attach-button, .voice-button { color: var(--secondary); }

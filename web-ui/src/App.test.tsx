@@ -77,6 +77,21 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('shows login and observed progress inside the chat while preserving the draft', () => {
+    mount()
+    const active = running({ draft: '기존 초안', singleConversation: true, inlineLogin: true, browserLoginStatus: '로그인 결과를 확인 중이에요.',
+      tasks: [{ id: 'run-a', phase: 'running', label: '교육 이어듣기', detail: '', canCancel: true,
+        evidence: [{ id: 'observed', label: '로그인 화면 확인', detail: '' }] }] })
+    snapshot(active)
+    expect(host.querySelector('.main-column textarea')).toBeNull()
+    expect(host.querySelector('.browser-login-status')?.textContent).toBe(active.browserLoginStatus)
+    expect(host.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBeNull()
+    expect(host.querySelector('.task-step-line li')?.textContent).toBe('로그인 화면 확인')
+    snapshot({ ...active, inlineLogin: false, tasks: [{ ...active.tasks[0], phase: 'paused' }] })
+    expect(input().value).toBe('기존 초안')
+    expect(host.querySelector('[role="progressbar"]')).toBeNull()
+  })
+
   it('keeps only the main conversation with no room switcher or collaborator chat', () => {
     mount()
     snapshot({ ...base, singleConversation: true, staffRooms: base.threads })

@@ -140,7 +140,8 @@ export default function App() {
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
           onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}
           onOfficeCalendar={() => request({action:'requestOfficeCalendar'})} />
-        <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} status={status}
+        {snapshot?.browserLoginStatus && <div className="browser-login-status" role="status">{snapshot.browserLoginStatus}</div>}
+        {snapshot?.inlineLogin !== true && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} status={status}
           onDraft={text => {
             if (!snapshot?.ready) return
             dispatch({ type: 'edit', scope: snapshot, text })
@@ -166,7 +167,7 @@ export default function App() {
           onCancelPreparation={() => request({ action: 'cancelPreparation' })}
           onOpenWaitingApproval={() => request({ action: 'openWaitingApproval' })}
           onVoice={() => request({ action: snapshot?.voicePrompt === 'listening' ? 'finishVoicePrompt' : 'startVoicePrompt' })}
-          onCancelVoice={() => request({ action: 'cancelVoicePrompt' })} />
+          onCancelVoice={() => request({ action: 'cancelVoicePrompt' })} />}
       </div>
       {snapshot?.singleConversation !== true && <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}

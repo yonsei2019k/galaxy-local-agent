@@ -285,7 +285,11 @@ class MainActivity : ComponentActivity() {
         var chatScreenAttempt by remember {mutableIntStateOf(0)}
         var chatScreenUnavailable by remember {mutableStateOf(false)}
         var chatManagerOpen by rememberSaveable {mutableStateOf(false)}
-        val loginCard by com.user.localagent.integrations.AppWebAgent.get(this).ownerLoginCard.collectAsState()
+        val webAgent=remember {com.user.localagent.integrations.AppWebAgent.get(this)}
+        val loginCard by webAgent.ownerLoginCard.collectAsState()
+        val loginStatus by webAgent.ownerLoginStatus.collectAsState()
+        var connectionsOpen by rememberSaveable {mutableStateOf(false)}
+        var connectionStatus by remember {mutableStateOf<String?>(null)}
         LaunchedEffect(loginCard?.id){if(loginCard!=null){chatManagerOpen=false;openPanel(0)}}
         var composerEpoch by remember {mutableLongStateOf(0)}
         val submittedTokens=remember {linkedSetOf<String>()}
@@ -379,6 +383,8 @@ class MainActivity : ComponentActivity() {
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
+                    put("inlineLogin",loginCard!=null||connectionsOpen)
+                    (if(connectionsOpen)connectionStatus else loginStatus?:connectionStatus)?.let{put("browserLoginStatus",it)}
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
                     put("voiceDraftEpoch",voiceDraftEpoch)
                     voicePrompt?.takeIf{it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{put("voicePrompt",it.stage)}
@@ -434,8 +440,9 @@ class MainActivity : ComponentActivity() {
                     })
                 }.toString()
                 Box(Modifier.fillMaxSize().padding(padding).imePadding()){
+                Column(Modifier.fillMaxSize()){
                 key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={launchIntroPending=false;chatScreenUnavailable=true},
-                    onFirstReady={launchIntroPending=false},modifier=Modifier.fillMaxSize(),onCommand={command->
+                    onFirstReady={launchIntroPending=false},modifier=Modifier.weight(1f).fillMaxWidth(),onCommand={command->
                     val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
                     if(sameRoom){
                         val payload=command.payload
@@ -494,7 +501,7 @@ class MainActivity : ComponentActivity() {
                                 when(panel){
                                     "collab"->Unit
                                     "capabilities"->capabilityShelfOpen=true
-                                    "connections"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.CONNECTIONS}
+                                    "connections"->{openPanel(0);connectionsOpen=true}
                                     "privacy"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.PRIVACY}
                                     else->openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})
                                 }
@@ -519,6 +526,15 @@ class MainActivity : ComponentActivity() {
                         status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
                 })}
+                loginCard?.let { card -> key(card.id) {
+                    com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,card,window,
+                        Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
+                }} ?: if(connectionsOpen) {
+                    com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
+                        onClose={connectionsOpen=false},onStatus={connectionStatus=it},
+                        modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
+                } else Unit
+                }
                 if(launchIntroPending) LaunchIntro(Modifier.matchParentSize())
                 }
             }
@@ -602,7 +618,7 @@ class MainActivity : ComponentActivity() {
             onManageGoal={threadId->if(threadId==composerThreadId){queueOpen=false;goalEditorThreadId=threadId}},
         )
         if(capabilityShelfOpen)OfficeCapabilityShelf(app,onDismiss={capabilityShelfOpen=false},
-            onConnections={capabilityShelfOpen=false;openPanel(4);manualSettings=true;settingsPage=SettingsPage.CONNECTIONS},
+            onConnections={capabilityShelfOpen=false;openPanel(0);connectionsOpen=true},
             onImages={capabilityShelfOpen=false;openPanel(7)},
             calendarReadGranted=calendarGranted,onCalendarRead={
                 capabilityShelfOpen=false
