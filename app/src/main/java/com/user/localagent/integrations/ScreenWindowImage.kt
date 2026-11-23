@@ -15,10 +15,13 @@ import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.ziphap_android.nativeScreenPlayGlyph
 import java.security.MessageDigest
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /** Pixels stay in memory, on the phone. Only bounded labels and opaque refs leave this layer. */
 internal object ScreenWindowImage {
+    private val ocrActive = AtomicBoolean()
+
     @RequiresApi(34)
     suspend fun capture(service: AccessibilityService, windowId: Int): Bitmap? =
         withTimeoutOrNull(2500) {
@@ -26,14 +29,15 @@ internal object ScreenWindowImage {
                 service.takeScreenshotOfWindow(windowId, Dispatchers.Default.asExecutor(),
                     object : AccessibilityService.TakeScreenshotCallback {
                         override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                            val bitmap = result.hardwareBuffer.use { buffer ->
-                                if (buffer.width > 4096 || buffer.height > 4096) null
-                                else Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
-                                    ?.let { wrapped ->
+                            val bitmap = try {
+                                result.hardwareBuffer.use { buffer ->
+                                    if (!continuation.isActive || buffer.width > 4096 || buffer.height > 4096) null
+                                    else Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.let { wrapped ->
                                         try { wrapped.copy(Bitmap.Config.ARGB_8888, false) }
                                         finally { wrapped.recycle() }
                                     }
-                            }
+                                }
+                            } catch (_: RuntimeException) { null }
                             continuation.resume(bitmap) { _, dropped, _ -> dropped?.recycle() }
                         }
                         override fun onFailure(errorCode: Int) { continuation.resume(null) }
@@ -45,12 +49,26 @@ internal object ScreenWindowImage {
 
     /** ML Kit processes the crop on the device. It can return unavailable before its module is ready. */
     suspend fun lines(image: Bitmap, area: Rect): List<Line> {
-        val region = Bitmap.createBitmap(image, area.left, area.top, area.width(), area.height())
-        val crop = if (region === image) image.copy(Bitmap.Config.ARGB_8888, false) ?: return emptyList() else region
-        val reader = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-        val release = {
-            reader.close()
+        if (!ocrActive.compareAndSet(false, true)) return emptyList()
+        val crop = try {
+            val region = Bitmap.createBitmap(image, area.left, area.top, area.width(), area.height())
+            if (region === image) checkNotNull(image.copy(Bitmap.Config.ARGB_8888, false)) else region
+        } catch (error: RuntimeException) {
+            ocrActive.set(false)
+            throw error
+        }
+        val reader = try { TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build()) }
+        catch (error: RuntimeException) {
             crop.recycle()
+            ocrActive.set(false)
+            throw error
+        }
+        val release = {
+            try { reader.close() }
+            finally {
+                crop.recycle()
+                ocrActive.set(false)
+            }
         }
         val task = try { reader.process(InputImage.fromBitmap(crop, 0)) }
         catch (error: RuntimeException) {

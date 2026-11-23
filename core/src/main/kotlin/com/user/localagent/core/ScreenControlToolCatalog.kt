@@ -73,6 +73,9 @@ object ScreenControlToolCatalog {
     fun matchesTapArea(browserUi:Boolean,expectedArea:String?):Boolean =
         if(browserUi)expectedArea=="browser_ui" else expectedArea==null||expectedArea=="content"
 
+    fun isBrowserUi(packageName:String,withinWebContent:Boolean):Boolean =
+        packageName=="com.android.chrome"&&!withinWebContent
+
     /** Pure validation shared by the executor and approval review. */
     fun validate(call:ToolCall) {
         require(call.name==ACTION)
