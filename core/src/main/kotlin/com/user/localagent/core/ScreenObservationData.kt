@@ -16,7 +16,7 @@ object ScreenObservationData {
         val visibleElements = mutableListOf<JsonElement>()
         val visibleTexts = mutableListOf<JsonElement>()
         val base = screen.filterKeys { it in setOf(
-            "untrustedScreenData", "packageName", "app", "snapshotId", "lastAction", "screenChanged", "note",
+            "untrustedScreenData", "packageName", "app", "snapshotId", "lastAction", "screenChanged", "waitStatus", "note",
         ) }
         fun render(): String {
             val partial = screen["truncated"] == JsonPrimitive(true) ||

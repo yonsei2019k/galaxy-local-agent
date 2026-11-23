@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.UserManager
 import android.text.InputType
 import android.view.Display
@@ -15,6 +16,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.user.localagent.core.ObservedToolOutcome
 import com.user.localagent.core.ScreenControlToolCatalog
 import com.user.localagent.core.ScreenReadEvidence
+import com.user.localagent.core.ScreenObservationWait
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolReadPolicy
 import com.user.localagent.core.ToolResult
@@ -68,23 +70,46 @@ class ScreenControl(context:Context) {
 
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult=try {
         requireReady()
-        val observation=if(call.name==ScreenControlToolCatalog.READ) {
-            try{onMain{snapshot(service())}}catch(own:OwnAppForeground){null}
-        } else null
+        val read=if(call.name==ScreenControlToolCatalog.READ) observe(call) else null
         val result=when(call.name){
-            ScreenControlToolCatalog.READ->observation?.let(::render)?:ownAppView()
+            ScreenControlToolCatalog.READ->read?.let {(screen,status)->render(screen,waitStatus=status)}?:ownAppView()
             ScreenControlToolCatalog.ACTION->act(call,approvedSnapshot)
             else->error("지원하지 않는 화면 도구입니다.")
         }
         ToolResult(call.id,true,result,VerificationState.VERIFIED,
             if(call.name==ScreenControlToolCatalog.READ)"현재 화면 접근성 정보 조회" else "동작 후 화면을 다시 읽음 · 앱 안의 최종 결과는 화면 내용으로만 판단",
-            screenReadEvidence=observation?.evidence)
+            screenReadEvidence=read?.first?.evidence)
     }catch(error:Throwable){
         if(error is kotlinx.coroutines.CancellationException)throw error
         if(error is SnapshotChanged)error.failure(call.id)
         else if(error is SetupRequired)error.failure(call.id)
         else ToolResult(call.id,false,error.message?:"화면 제어 실패",VerificationState.FAILED,"화면 동작을 실행하지 않았거나 확인하지 못함",
             effectNotApplied=error is ScreenRefused)
+    }
+
+    private suspend fun observe(call:ToolCall):Pair<Snapshot,String?>? {
+        val request=ScreenObservationWait.from(call.arguments)
+        suspend fun read()=try { onMain { requireReady();snapshot(service()) } }
+            catch(own:OwnAppForeground) { null }
+        var current=read()?:run {
+            if(request!=null)throw ScreenRefused("기다릴 강의 화면을 먼저 열어야 합니다.")
+            return null
+        }
+        if(request==null)return current to null
+        val originalWindow=current.evidence.windowId
+        val deadline=SystemClock.elapsedRealtime()+request.seconds*1000L
+        while(true){
+            val status=request.status(current.packageName,current.evidence.windowId==originalWindow,
+                current.texts+current.elements.filterNot {it.sensitive}.map {it.label},
+                current.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive}.map {it.label})
+            if(status==ScreenObservationWait.Status.CONTEXT_CHANGED)
+                throw ScreenRefused("대기 중 원래 강의 화면을 확인할 수 없었습니다.")
+            val remaining=deadline-SystemClock.elapsedRealtime()
+            if(status==ScreenObservationWait.Status.READY||remaining<=0)
+                return current to status.name.lowercase(Locale.ROOT)
+            delay(minOf(2000L,remaining))
+            current=read()?:throw ScreenRefused("대기 중 집합 화면으로 돌아왔습니다. 원래 강의 화면을 다시 확인해야 합니다.")
+        }
     }
 
     /** Owner review text and whether this action needs it, from a fresh read of the same screen. */
@@ -298,7 +323,8 @@ class ScreenControl(context:Context) {
         return Snapshot(packageName,texts,elements,truncated,ScreenReadEvidence(id,packageDigest.hex(),window.id,targetKeys))
     }
 
-    private fun render(screen:Snapshot,action:String?=null,changed:Boolean=false):String=buildJsonObject {
+    private fun render(screen:Snapshot,action:String?=null,changed:Boolean=false,waitStatus:String?=null):String=buildJsonObject {
+        waitStatus?.let {put("waitStatus",it)}
         if(action!=null){put("lastAction",action);put("screenChanged",changed)}
         put("untrustedScreenData",true);put("packageName",screen.packageName);put("app",appLabel(screen.packageName))
         put("snapshotId",screen.id);put("truncated",screen.truncated)
