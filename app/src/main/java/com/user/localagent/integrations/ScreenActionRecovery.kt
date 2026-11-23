@@ -52,9 +52,8 @@ internal object ScreenActionRecovery {
 
         val data=runCatching {Json.parseToJsonElement(current.result.content) as? JsonObject}.getOrNull()?:return null
         val elements=data["elements"] as? JsonArray?:return null
-        val selected=elements.singleOrNull {(it as? JsonObject)?.get("ref")==JsonPrimitive(ref)}?:return null
-        return com.user.localagent.core.ScreenObservationData.forModel(
-            JsonObject(data+("elements" to JsonArray(listOf(selected)+elements.filterNot {it==selected}))).toString())
+        if(elements.count {(it as? JsonObject)?.get("ref")==JsonPrimitive(ref)}!=1)return null
+        return com.user.localagent.core.ScreenObservationData.forModel(current.result.content,ref)
     }
 
     private fun matches(outcomes:List<ObservedToolOutcome>,rejectedIndex:Int,nextIndex:Int,next:ToolCall):Boolean {
@@ -76,7 +75,7 @@ internal object ScreenActionRecovery {
         val snapshot=original.string("snapshotId")?:return null
         val ref=original.string("ref")?:return null
         return outcomes.subList(0,rejectedIndex).asReversed().firstNotNullOfOrNull {item->
-            read(item)?.takeIf {it.snapshotId==snapshot}
+            read(item)?.takeIf {it.snapshotId==snapshot&&ref in it.targets}
         }?.target(ref)
     }
 

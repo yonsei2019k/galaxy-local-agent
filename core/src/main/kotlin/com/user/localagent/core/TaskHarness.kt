@@ -182,6 +182,14 @@ object TaskHarness {
             }
         }
         if(unresolvedFailure)return HarnessDecision.Stop("아직 복구·검증되지 않은 실행이 있어 작업 완료를 확인할 수 없습니다.")
+        if(steps.withIndex().any {(index,step)->
+            step.tool==ScreenControlToolCatalog.READ&&step.evidence.summary==ScreenControlToolCatalog.PLAYBACK_WAIT_PENDING&&
+                steps.drop(index+1).none {later->
+                    later.tool==step.tool&&later.evidence.state==VerificationState.VERIFIED&&
+                        later.evidence.summary==ScreenControlToolCatalog.PLAYBACK_WAIT_READY&&
+                        later.arguments- "waitSeconds"==step.arguments- "waitSeconds"
+                }
+        })return HarnessDecision.Stop("동영상의 정상 종료와 다음 버튼이 아직 확인되지 않았습니다.")
         if(steps.any(PreparedHandoff::pendingEffect))return HarnessDecision.Stop("작성·확인 화면이 준비됐습니다. 외부 작업의 실제 완료는 아직 확인되지 않았습니다.",true)
         if(steps.withIndex().any {(index,step)->step.evidence.state==VerificationState.UNVERIFIED&&!AnalysisCompletionEvidence.resolved(steps,index)})return HarnessDecision.Stop("아직 확인하지 않은 실행 결과가 있습니다.")
         if(goal.requiredTools.isEmpty())return HarnessDecision.Stop("요청한 작업의 실행·검증 기준을 확정하지 못해 완료를 주장하지 않습니다.")

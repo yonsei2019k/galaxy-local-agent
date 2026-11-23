@@ -13,6 +13,8 @@ object ScreenControlToolCatalog {
     const val ACTION="screen_action"
     const val IMAGE="inspectImage"
     const val STALE_SNAPSHOT_RECEIPT="화면 변경 · 실행 전 중단"
+    const val PLAYBACK_WAIT_PENDING="동영상 종료 확인 대기"
+    const val PLAYBACK_WAIT_READY="동영상 종료 및 다음 버튼 확인"
     const val APPROVED_SNAPSHOT_CHANGED_RECEIPT="승인 후 화면 변경 · 실행 전 중단"
     const val APPROVED_SNAPSHOT_CHANGED_NOTICE="화면이 바뀌어 승인한 동작을 실행하지 않았습니다. 다시 진행하려면 새 요청을 보내주세요."
 

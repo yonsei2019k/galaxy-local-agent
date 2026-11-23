@@ -8,7 +8,7 @@ object ScreenObservationData {
     private const val MAX_ELEMENTS = 30
     private const val MAX_TEXTS = 8
 
-    fun forModel(raw: String): String {
+    fun forModel(raw: String, refreshedRef: String? = null): String {
         val screen = runCatching { Json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
             ?: return compactJsonData(raw, MAX_CHARS)
         val elements = (screen["elements"] as? JsonArray).orEmpty()
@@ -17,6 +17,7 @@ object ScreenObservationData {
         val visibleTexts = mutableListOf<JsonElement>()
         val base = screen.filterKeys { it in setOf(
             "untrustedScreenData", "packageName", "app", "snapshotId", "lastAction", "screenChanged", "waitStatus", "note",
+            "imageStatus", "playbackStatus", "mediaElapsedSeconds", "mediaDurationSeconds", "effectStatus", "expectedChange",
         ) }
         fun render(): String {
             val partial = screen["truncated"] == JsonPrimitive(true) ||
@@ -33,7 +34,15 @@ object ScreenObservationData {
                 put("dataOnly", true)
             }.toString()
         }
-        for (element in elements.take(MAX_ELEMENTS)) {
+        val prioritized = elements.sortedBy { element ->
+            val row = element as? JsonObject
+            when {
+                refreshedRef != null && row?.get("ref") == JsonPrimitive(refreshedRef) -> 0
+                row?.get("source") == JsonPrimitive("image") -> 1
+                else -> 2
+            }
+        }
+        for (element in prioritized.take(MAX_ELEMENTS)) {
             visibleElements.add(element)
             if (render().length > MAX_CHARS - 600) {
                 visibleElements.removeAt(visibleElements.lastIndex)

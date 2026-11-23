@@ -109,6 +109,24 @@ class ScreenActionRecoveryTest {
         assertEquals("e4",data.getValue("elements").jsonArray.first().jsonObject.getValue("ref").jsonPrimitive.content)
     }
 
+    @Test
+    fun canRebindExactImageControlAfterAnInterleavedAccessibilityOnlyRead() {
+        val original=action("visualOld",oldId,"v1")
+        val rejected=ObservedToolOutcome(original,stale.result.copy(id=original.id))
+        val visualRead=read("visual",oldId,mapOf("v1" to target))
+        val axOnly=read("axOnly",oldId,mapOf("e2" to "d".repeat(64)))
+        val refreshed=read("freshVisual",newId,mapOf("v2" to target))
+        val retry=action("visualNew",newId,"v2")
+        val observed=listOf(visualRead,axOnly,rejected,refreshed)
+        assertTrue(preflight(observed,retry) is HarnessDecision.Advance)
+        assertTrue(finish(observed+success(retry)) is HarnessDecision.Finish)
+
+        val changed=read("changedVisual",newId,mapOf("v2" to "e".repeat(64)))
+        assertTrue(preflight(listOf(visualRead,axOnly,rejected,changed),retry) is HarnessDecision.Stop)
+        val ambiguous=read("ambiguous",oldId,mapOf("v1" to target,"v3" to target))
+        assertTrue(preflight(listOf(visualRead,ambiguous,rejected,refreshed),retry) is HarnessDecision.Stop)
+    }
+
     private fun action(id:String,snapshot:String,ref:String,kind:String="tap")=ToolCall(id,actionName,buildJsonObject {
         put("action",kind);put("snapshotId",snapshot);put("ref",ref)
         if(kind=="type")put("text","changed")
