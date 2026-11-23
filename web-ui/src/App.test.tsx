@@ -289,6 +289,13 @@ describe('native conversation', () => {
     expect(postIntent(base, { action: 'requestOfficeCalendar' })).toBe(false)
   })
 
+  it('shows the one-time 집순이 introduction alongside existing conversation history', () => {
+    mount()
+    snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true })
+    expect(host.querySelector('.transcript .messages .message')).not.toBeNull()
+    expect(host.querySelector('.transcript .welcome--compact h1')?.textContent).toBe('안녕하세요, 집순이예요!')
+  })
+
   it('renders assistant output and evidence as text and copies the selected answer by native identity', () => {
     mount()
     const text = '<img src="https://invalid.example/image.png" onerror="alert(1)">\n<b>결과</b>'

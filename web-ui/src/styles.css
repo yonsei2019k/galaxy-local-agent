@@ -312,6 +312,8 @@ svg { width: 20px; height: 20px; flex: none; }
 .mascot-fallback svg { width: 63%; height: 63%; }
 .welcome h1 { margin: 0; font-size: clamp(26px, 6vw, 40px); line-height: 1.24; font-weight: 800; letter-spacing: -.05em; word-break: keep-all; text-wrap: balance; }
 .welcome p { max-width: 34em; margin: 12px 0 0; color: var(--muted); font-size: clamp(13px, 3.6vw, 15px); line-height: 1.6; word-break: keep-all; text-wrap: balance; }
+.welcome--compact { min-height: 0; padding-block: 24px; }
+.welcome--compact h1 { font-size: clamp(23px, 5vw, 30px); }
 .office-guide { width: min(100%, 33rem); margin-block-start: 12px; }
 .office-guide p { margin-inline: auto; }
 .office-guide-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-block-start: 12px; }

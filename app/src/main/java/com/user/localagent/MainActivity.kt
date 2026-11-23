@@ -405,7 +405,7 @@ class MainActivity : ComponentActivity() {
                         author?.let { put("authorLabel", it.label) }
                     })}})
                     put("officeSelected",officeOpen)
-                    put("showOfficeGuide",officeOpen&&!officeGuideDismissed&&messages.isEmpty())
+                    put("showOfficeGuide",officeOpen&&!officeGuideDismissed)
                     if(officeOpen)put("officeCalendarReadGranted",calendarGranted)
                     if(officeOpen)put("officeProfile",buildJsonObject{officeProfileEntries.forEach{(seat,entry)->put(seat,buildJsonObject{
                         entry.birthDate?.let{put("birthDate",it)};entry.schoolGrade?.let{put("schoolGrade",it)}

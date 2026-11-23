@@ -34,9 +34,10 @@ const exampleRequests = [
   { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.' },
 ]
 
-function Welcome({ staff, guide, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
+function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
   guide: boolean
+  compact?: boolean
   calendarGranted: boolean
   hasDraft: boolean
   onDraftExample(text: string): void
@@ -47,12 +48,12 @@ function Welcome({ staff, guide, calendarGranted, hasDraft, onDraftExample, onNa
   const [mascotAvailable, setMascotAvailable] = useState(true)
   const [step, setStep] = useState(0)
   return (
-    <div className="welcome">
-      <div className="mascot-field" aria-hidden="true">
+    <div className={compact ? "welcome welcome--compact" : "welcome"}>
+      {!compact && <div className="mascot-field" aria-hidden="true">
         {mascotAvailable
           ? <img className="mascot" src={`${import.meta.env.BASE_URL}ziphap-mascot.png`} alt="" onError={() => setMascotAvailable(false)} />
           : <BrandMark className="mascot-fallback" />}
-      </div>
+      </div>}
       <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
@@ -170,6 +171,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   const pausedTasks = tasks.filter(task => task.phase === 'paused')
   const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
   const empty = messages.length === 0 && tasks.length === 0
+  const guide = enabled && snapshot?.showOfficeGuide === true
   const loading = connected && !snapshot?.ready
   const staff = snapshot?.singleConversation ? undefined : snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
 
@@ -203,7 +205,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
         setScrolledUp(!pinned)
       }}>
         {loading ? <div className="loading" role="status"><Icon name="clock" /> 대화를 불러오는 중</div> : empty ?
-          <Welcome staff={staff} guide={enabled && snapshot?.showOfficeGuide === true}
+          <Welcome staff={staff} guide={guide}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
@@ -219,6 +221,9 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
             <div className="messages" role="log" aria-label="메시지">
               {messages.map(item => <Message key={item.id} message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />)}
             </div>
+            {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
+              calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
+              onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
             {liveTasks.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
               {liveTasks.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
