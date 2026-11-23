@@ -1928,7 +1928,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         "- <$url> · "+if(pageRead)"페이지 읽음" else "검색 결과 · 내용 미확인"
                     }
                 }else emptyList()
-                val notice="확인할 근거가 부족해 작업을 일시정지했습니다."
+                val lastScreenAction=actual.values.lastOrNull { observation ->
+                    observation.proposal.tool==com.user.localagent.core.ScreenControlToolCatalog.ACTION
+                }?.result
+                val screenChanged=lastScreenAction?.takeIf {it.success&&it.verification==VerificationState.VERIFIED}
+                    ?.let { observation->runCatching {
+                        Json.parseToJsonElement(observation.content).jsonObject["screenChanged"]?.jsonPrimitive?.booleanOrNull
+                    }.getOrNull() }
+                val notice=when(screenChanged){
+                    true->"마지막 조작 뒤 화면이 바뀐 것을 확인했습니다. 요청한 결과까지는 확인하지 못해 멈췄습니다."
+                    false->"마지막 조작 뒤 화면이 그대로였습니다. 요청한 결과까지는 확인하지 못해 멈췄습니다."
+                    null->"확인할 근거가 부족해 작업을 일시정지했습니다."
+                }
                 if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,notice,true)
                 else publishActionFinal(request,requestAuthorizedTools,
                     "$notice\n\n조회 중 찾은 공개 링크\n"+links.joinToString("\n"),
