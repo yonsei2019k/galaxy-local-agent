@@ -76,9 +76,9 @@ class ScreenControl(context:Context) {
             ScreenControlToolCatalog.ACTION->act(call,approvedSnapshot)
             else->error("지원하지 않는 화면 도구입니다.")
         }
-        ToolResult(call.id,true,result,VerificationState.VERIFIED,
-            if(call.name==ScreenControlToolCatalog.READ)"현재 화면 접근성 정보 조회" else "동작 후 화면을 다시 읽음 · 앱 안의 최종 결과는 화면 내용으로만 판단",
-            screenReadEvidence=read?.first?.evidence)
+        val summary=if(call.name==ScreenControlToolCatalog.READ)"현재 화면 접근성 정보 조회"
+            else "동작 후 화면을 다시 읽음 · 동작 유형 "+call.arguments.getValue("action").jsonPrimitive.content
+        ToolResult(call.id,true,result,VerificationState.VERIFIED,summary,screenReadEvidence=read?.first?.evidence)
     }catch(error:Throwable){
         if(error is kotlinx.coroutines.CancellationException)throw error
         if(error is SnapshotChanged)error.failure(call.id)
