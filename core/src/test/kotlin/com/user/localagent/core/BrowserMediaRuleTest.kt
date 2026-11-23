@@ -45,11 +45,12 @@ class BrowserMediaRuleTest {
         val call=ToolCall("test",AppBrowserToolCatalog.READ,buildJsonObject {
             put("playbackRule","playing && advancing");put("waitSeconds",9)
         })
-        for(tool in listOf(AppBrowserToolCatalog.READ,PcBrowserToolCatalog.READ)){
-            val observation=call.copy(name=tool)
+        for(browser in listOf(AppBrowserToolCatalog,PcBrowserToolCatalog)){
+            val observation=call.copy(name=browser.read)
             ToolRegistry.validate(observation)
+            browser.validate(observation)
             assertEquals(9,BrowserMediaRule.from(observation)?.waitSeconds)
-            assertThrows(IllegalArgumentException::class.java) {ToolRegistry.validate(observation.copy(
+            assertThrows(IllegalArgumentException::class.java) {browser.validate(observation.copy(
                 arguments=buildJsonObject {put("waitSeconds",9)}
             ))}
             assertThrows(IllegalArgumentException::class.java) {ToolRegistry.validate(observation.copy(
