@@ -505,7 +505,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         // Legacy slash commands predate durable submission IDs and may switch rooms. Keep them
         // on the existing native command surface instead of replaying them through a stale page.
         if(text.trimStart().startsWith("/")){status.value="빠른 명령은 상세 대화 화면에서 실행해주세요. 입력은 보존했습니다.";return false}
-        return submit(text,threadId,preferredModelId.value,app.chatAttachments.state.value.toList(),submissionId,branchId)
+        return submit(text,threadId,preferredModelId.value,app.chatAttachments.state.value.toList(),submissionId,branchId,singleAssistant=true)
     }
 
     /**
@@ -524,7 +524,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String,expectedBranchId:String?=null,
-        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null,publicResearchOnly:Boolean=false):Boolean {
+        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null,publicResearchOnly:Boolean=false,singleAssistant:Boolean=false):Boolean {
         val submission=com.user.localagent.core.ConversationSubmissionPolicy.parse(inputText)
         val routedInput=if(submission.explicitModeCommand!=null) {
             if(submission.commandOnly&&submission.explicitModeCommand!="/goal"&&snapshot.isEmpty()) {
@@ -537,7 +537,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }else handleChatCommand(inputText)?:return true
         val text=routedInput.ifBlank {if(snapshot.isNotEmpty())"첨부한 자료를 분석하고 핵심 내용을 정리해줘."else""}
         if(text.isBlank())return false
-        val office = threadId == officeRoomId && remoteAuthority == null
+        val office = !singleAssistant && threadId == officeRoomId && remoteAuthority == null
         if (office && (snapshot.isNotEmpty() || text.length > 6000)) {
             status.value = "사무실에 올릴 지시는 첨부 없이 6,000자 이내로 입력해 주세요. 초안을 유지했습니다."
             return false
@@ -1100,10 +1100,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // source-labelled snapshot rather than repeatedly searching whole history.
                     val ownerKnowledgeContext=if(workMode==AgentWorkMode.RESEARCH)""else app.repository.forThread(request.threadId).ownerProfileContext(text.take(6000))
                     val projectInstruction=if(workMode==AgentWorkMode.RESEARCH)""else request.projectId?.let {app.repository.chat.project(it)?.settings?.instructions}.orEmpty()
-                    // Fixed Office rooms speak in their seat persona; owner-entered ages stay on the phone (local path only).
-                    val officeInstruction=com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,
-                        runCatching{app.officeProfile.read()}.getOrNull(),java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
-                        colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW).orEmpty()
+                    // Historical Office workflows retain their seat voice. Ordinary chat uses the same voice on either provider.
+                    val officeInstruction=if(request.officeStage==null) JIPSOONI_VOICE else
+                        com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,
+                            runCatching{app.officeProfile.read()}.getOrNull(),java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
+                            colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW).orEmpty()
                     val attachmentContext=if(usableAttachments.isNotEmpty()){
                         status.value="첨부 자료를 기기에서 읽는 중"
                         app.chatAttachments.prepareInCurrentRequest(text,usableAttachments,request.runId,requestEngine=executionEngine).also {
@@ -1579,6 +1580,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
+    private val JIPSOONI_VOICE = "Your public name is 집순이, the assistant in ZipHap.Agent. " +
+        "Match the user's language. In Korean, use warm, concise everyday 존댓말 (해요체). " +
+        "Lead with what you can do next or what you verified. Only ask for setup needed for the current task; " +
+        "explain why in one short sentence. Do not speak as other assistants or claim a connection or completed action without evidence."
+
     internal fun officeTeamRun(id: String): Boolean = executionForRun(id)?.activeRequest?.officeStage != null
 
     private suspend fun runApprovedClockSchedule(request: QueuedChatRequest) {
@@ -1807,7 +1813,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
                 "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
             // Cloud gets the public persona only: owner-entered ages stay on the phone (profile=null).
-            val officePersona=com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,null,
+            val officePersona=if(request.officeStage==null) JIPSOONI_VOICE else com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,null,
                 java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
                 colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW)
             val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),

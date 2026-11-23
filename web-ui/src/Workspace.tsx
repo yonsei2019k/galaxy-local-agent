@@ -101,8 +101,8 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
     <header className="topbar">
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
-        <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || 'ZipHap.Agent'}</span>
-        {snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
+        <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
+        {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={onOfficeProfile}>직원 정보</button>}
         {snapshot?.singleConversation !== true && currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={() => setTitleDraft(currentThread.title)}>이름 변경</button>}

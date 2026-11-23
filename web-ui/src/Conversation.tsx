@@ -28,15 +28,24 @@ export function BrandMark({ className }: { className?: string }) {
   return <span className={`brand-mark ${className ?? ''}`}><Icon name="robot" /></span>
 }
 
-function Welcome({ staff, guide, calendarGranted, onNavigate, onDismiss, onCalendar }: {
+const exampleRequests = [
+  { label: '오늘 일정 확인', text: '오늘 남은 일정을 시간순으로 알려줘.', needsCalendar: true },
+  { label: '웹에서 정보 찾기', text: '이번 주말 서울 날씨를 찾아서 출처와 함께 알려줘.' },
+  { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.' },
+]
+
+function Welcome({ staff, guide, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
   guide: boolean
   calendarGranted: boolean
+  hasDraft: boolean
+  onDraftExample(text: string): void
   onNavigate(panel: Panel): void
   onDismiss(): void
   onCalendar(): void
 }) {
   const [mascotAvailable, setMascotAvailable] = useState(true)
+  const [step, setStep] = useState(0)
   return (
     <div className="welcome">
       <div className="mascot-field" aria-hidden="true">
@@ -44,17 +53,31 @@ function Welcome({ staff, guide, calendarGranted, onNavigate, onDismiss, onCalen
           ? <img className="mascot" src={`${import.meta.env.BASE_URL}ziphap-mascot.png`} alt="" onError={() => setMascotAvailable(false)} />
           : <BrandMark className="mascot-fallback" />}
       </div>
-      <h1>{staff ? `${staff}에게 말 걸기` : '무엇을 도와드릴까요?'}</h1>
+      <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
-      {guide && <section className="office-guide" aria-label="사무실 처음 안내">
-        <p>일정 확인, 자료 찾기, PC 작업을 여기서 말로 부탁해 보세요. 필요한 연결은 그때 확인합니다.</p>
-        <div className="office-guide-actions">
-          {!calendarGranted && <button type="button" onClick={onCalendar}>휴대폰 일정 읽기 허용</button>}
-          <button type="button" onClick={() => onNavigate('capabilities')}>할 수 있는 일 보기</button>
-          <button type="button" onClick={() => onNavigate('connections')}>앱과 컴퓨터 연결</button>
-          <button type="button" onClick={() => onNavigate('privacy')}>개인정보와 권한</button>
-          <button type="button" onClick={onDismiss}>바로 시작</button>
+      {guide && <section className="office-guide" aria-label="집순이 처음 안내">
+        <div aria-live="polite">
+          {step === 0 && <p>일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
+          {step === 1 && <p>일정을 보려면 휴대폰 일정 읽기를 허용해 주세요. Google이나 컴퓨터는 필요할 때 연결해도 돼요.</p>}
+          {step === 2 && <p>해볼 일을 고르면 입력창에 문장을 써드릴게요. 고쳐 쓰거나 바로 보내도 돼요. 휴대폰 일정이 연결되지 않았으면 먼저 읽기 권한을 물어볼게요.</p>}
         </div>
+        <div className="office-guide-actions">
+          {step === 0 && <button type="button" onClick={() => setStep(1)}>필요한 설정 보기</button>}
+          {step === 1 && <>
+            {calendarGranted ? <span role="status">휴대폰 일정 읽기 연결됨</span> :
+              <button type="button" onClick={onCalendar}>휴대폰 일정 읽기 허용</button>}
+            <button type="button" onClick={() => onNavigate('connections')}>앱과 컴퓨터 연결</button>
+            <button type="button" onClick={() => setStep(2)}>해볼 일 고르기</button>
+          </>}
+          {step === 2 && exampleRequests.map(example =>
+            <button type="button" key={example.label} disabled={hasDraft} onClick={() => {
+              onDraftExample(example.text)
+              if (example.needsCalendar && !calendarGranted) onCalendar()
+            }}>{example.label}</button>
+          )}
+          <button type="button" onClick={onDismiss}>바로 대화하기</button>
+        </div>
+        {step === 2 && hasDraft && <p>입력창에 작성한 내용을 먼저 확인해 주세요.</p>}
       </section>}
     </div>
   )
@@ -69,7 +92,7 @@ function Message({ message, previews, enabled, onCopy, onMessageMenu }: {
 }) {
   const user = message.role === 'user'
   const assistant = message.role === 'assistant'
-  const author = assistant ? message.authorLabel ?? 'ZipHap' : undefined
+  const author = assistant ? message.authorLabel ?? '집순이' : undefined
   return (
     <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> {author}</div>}
@@ -126,7 +149,7 @@ function TaskCard({ task }: { task: Task }) {
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMenu, onNavigate, onDismissOfficeGuide, onOfficeCalendar }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMenu, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -135,6 +158,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   onNavigate(panel: Panel): void
   onDismissOfficeGuide(): void
   onOfficeCalendar(): void
+  hasDraft: boolean
+  onDraftExample(text: string): void
 }) {
   const view = useRef<HTMLElement>(null)
   const pinnedToEnd = useRef(true)
@@ -179,7 +204,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
       }}>
         {loading ? <div className="loading" role="status"><Icon name="clock" /> 대화를 불러오는 중</div> : empty ?
           <Welcome staff={staff} guide={enabled && snapshot?.showOfficeGuide === true}
-            calendarGranted={snapshot?.officeCalendarReadGranted === true}
+            calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
             {previousTasks.length > 0 && <details className="task-evidence">

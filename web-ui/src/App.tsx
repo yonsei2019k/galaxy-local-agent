@@ -77,6 +77,12 @@ export default function App() {
     return delivered
   }
 
+  function editDraft(text: string) {
+    if (!snapshot?.ready) return
+    dispatch({ type: 'edit', scope: snapshot, text })
+    request({ action: 'draft', payload: { text } })
+  }
+
   function closeMobile() { setMobileOpen(false) }
 
   const enabled = connected && snapshot?.ready === true
@@ -139,14 +145,13 @@ export default function App() {
           onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })}
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
           onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}
-          onOfficeCalendar={() => request({action:'requestOfficeCalendar'})} />
+          onOfficeCalendar={() => request({action:'requestOfficeCalendar'})}
+          hasDraft={!!draft.trim() || snapshot?.inlineLogin === true} onDraftExample={text => {
+            if (!draft.trim() && !snapshot?.inlineLogin) editDraft(text)
+          }} />
         {snapshot?.browserLoginStatus && <div className="browser-login-status" role="status">{snapshot.browserLoginStatus}</div>}
         {snapshot?.inlineLogin !== true && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} status={status}
-          onDraft={text => {
-            if (!snapshot?.ready) return
-            dispatch({ type: 'edit', scope: snapshot, text })
-            request({ action: 'draft', payload: { text } })
-          }} onSubmit={action => {
+          onDraft={editDraft} onSubmit={action => {
             if (!snapshot?.ready || pending) return
             if (action === 'steer') {
               const target = runControls(snapshot).steer

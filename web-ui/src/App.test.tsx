@@ -146,7 +146,7 @@ describe('native conversation', () => {
     ] })
     const office = host.querySelector('[aria-label="대리 김규민 답변"]')
     expect(office?.querySelector('.message-label')?.textContent?.trim()).toBe('대리 김규민')
-    expect(host.querySelector('[aria-label="ZipHap 답변"] .message-label')?.textContent?.trim()).toBe('ZipHap')
+    expect(host.querySelector('[aria-label="집순이 답변"] .message-label')?.textContent?.trim()).toBe('집순이')
     expect(readSnapshot({ ...base, messages: [
       { id: 'input', role: 'user', text: '사용자 입력', authorLabel: '대리 김규민' },
     ] })).toBeNull()
@@ -260,19 +260,30 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'thread-a' } })
   })
 
-  it('keeps the office composer usable and uses native actions for optional setup', () => {
+  it('introduces 집순이, shows setup in order, and prepares an editable example without sending', () => {
     mount()
-    snapshot({ ...base, officeSelected: true, showOfficeGuide: true, officeCalendarReadGranted: false, messages: [], tasks: [] })
-    expect((host.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(false)
-    click('할 수 있는 일 보기')
-    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'capabilities' } })
-    click('휴대폰 일정 읽기 허용')
-    expect(requests().at(-1)).toMatchObject({ action: 'requestOfficeCalendar', payload: {} })
-    click('바로 시작')
+    const emptyChat = { ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true, messages: [], tasks: [] }
+    snapshot({ ...emptyChat, officeCalendarReadGranted: false })
+    const input = host.querySelector('textarea') as HTMLTextAreaElement
+    expect(input.disabled).toBe(false)
+    expect(host.querySelector('h1')?.textContent).toBe('안녕하세요, 집순이예요!')
+    expect(requests().map(item => item.action)).not.toContain('requestOfficeCalendar')
+    click('필요한 설정 보기')
+    click('앱과 컴퓨터 연결')
+    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'connections' } })
+    click('해볼 일 고르기')
+    click('오늘 일정 확인')
+    expect(input.value).toBe('오늘 남은 일정을 시간순으로 알려줘.')
+    expect(requests().slice(-2)).toMatchObject([
+      { action: 'draft', payload: { text: input.value } },
+      { action: 'requestOfficeCalendar', payload: {} },
+    ])
+    expect(requests().map(item => item.action)).not.toContain('send')
+    expect(Array.from(host.querySelectorAll<HTMLButtonElement>('.office-guide-actions button'))
+      .find(button => button.textContent === '웹에서 정보 찾기')?.disabled).toBe(true)
+    click('바로 대화하기')
     expect(requests().at(-1)).toMatchObject({ action: 'dismissOfficeGuide', payload: {} })
-    snapshot({ ...base, officeSelected: true, showOfficeGuide: true, officeCalendarReadGranted: true, messages: [], tasks: [] })
-    expect(host.textContent).not.toContain('휴대폰 일정 읽기 허용')
-    snapshot({ ...base, officeSelected: true, showOfficeGuide: false, messages: [], tasks: [] })
+    snapshot({ ...emptyChat, showOfficeGuide: false, officeCalendarReadGranted: true })
     expect(host.querySelector('.office-guide')).toBeNull()
     expect(readSnapshot({ ...base, officeSelected: false, showOfficeGuide: true })).toBeNull()
     expect(postIntent(base, { action: 'requestOfficeCalendar' })).toBe(false)

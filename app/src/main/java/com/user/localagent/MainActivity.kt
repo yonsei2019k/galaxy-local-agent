@@ -307,7 +307,7 @@ class MainActivity : ComponentActivity() {
         var officeProfileRevision by remember{mutableIntStateOf(0)}
         val officeOpen=composerThreadId==ZipHapRoom.OFFICE.threadId
         val calendarGranted by officeCalendarReadGranted.collectAsState()
-        val guideSettings=remember{getSharedPreferences("office-introduction",MODE_PRIVATE)}
+        val guideSettings=remember{getSharedPreferences("jipsooni-introduction",MODE_PRIVATE)}
         var officeGuideDismissed by remember{mutableStateOf(guideSettings.getBoolean("dismissed",false))}
         fun dismissOfficeGuide(){
             if(!officeGuideDismissed){
@@ -411,7 +411,7 @@ class MainActivity : ComponentActivity() {
                         entry.birthDate?.let{put("birthDate",it)};entry.schoolGrade?.let{put("schoolGrade",it)}
                     })}})
                     put("threads",buildJsonArray{if(composerThreadId.isNotBlank())add(buildJsonObject{
-                        put("id",composerThreadId);put("title","집합");put("selected",true)
+                        put("id",composerThreadId);put("title","집순이");put("selected",true)
                     })})
                     put("models",buildJsonArray{modelChoices.forEach{(id,label)->add(buildJsonObject{put("id",id);put("label",label)})}})
                     put("attachments",buildJsonArray{attachments.forEach{add(buildJsonObject{put("id",it.id);put("name",it.name)})}})
