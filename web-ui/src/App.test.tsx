@@ -291,7 +291,8 @@ describe('native conversation', () => {
 
   it('shows the one-time 집순이 introduction alongside existing conversation history', () => {
     mount()
-    snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true })
+    snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true,
+      messages: [{ id: 'prior-answer', role: 'assistant', text: 'Saved answer' }] })
     expect(host.querySelector('.transcript .messages .message')).not.toBeNull()
     expect(host.querySelector('.transcript .welcome--compact h1')?.textContent).toBe('안녕하세요, 집순이예요!')
   })
