@@ -7,7 +7,8 @@ import kotlinx.serialization.json.jsonPrimitive
  * host enforces [WebAgentPolicy] (public pages only, no typing into login/card/OTP fields, owner approval
  * before irreversible clicks and before typing outside search boxes).
  */
-open class BrowserToolCatalog(val open:String,val read:String,val action:String,where:String) {
+open class BrowserToolCatalog(val open:String,val read:String,val action:String,where:String,
+    private val navigationRule:Boolean=false) {
     val actions=setOf("click","type","select","press_enter","scroll","back")
     val definitions=listOf(
         ToolDefinition(open,Risk.LOW,mapOf("url" to Argument("string",true,2048,"Public http(s) page to open.")),
@@ -20,10 +21,12 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
             "snapshotId" to Argument("string",true,64,"snapshotId from the latest read of this browser; a changed page is refused."),
             "ref" to Argument("string",false,12,"Element ref from that snapshot (click/type/select/press_enter)."),
             "text" to Argument("string",false,500,"Text to type, or the option text to select. Never passwords, card numbers or verification codes."),
-            "direction" to Argument("string",false,10,"scroll direction: down or up.")),
+            "direction" to Argument("string",false,10,"scroll direction: down or up."))+
+            if(navigationRule)BrowserNavigationRule.arguments else emptyMap(),
             "Do one action on the $where page and return the re-read page. Pay/order/book/send/delete style clicks and typing outside "+
             "search boxes wait for owner approval. Login, payment card and verification fields are refused: the owner enters those. "+
-            "Authentication takes place on the owner's phone. The re-read page is observation, not proof the site completed the task.",90_000))
+            "Authentication takes place on the owner's phone. The re-read page is observation, not proof the site completed the task."+
+            if(navigationRule) " If the read exposes a recoverable-link and the page is changing, author a bounded navigation rule with the exact current ref, expectedLinkLabel and verifyPageText (new exact title or visible line expected at the destination). The phone may refresh the same link and verifies the new page. On an uncertain outcome only read again." else "",90_000))
     val names=definitions.map{it.name}.toSet()
 
     fun validate(call:ToolCall){
@@ -36,6 +39,7 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
         if(kind in setOf("type","select"))require(!text.isNullOrBlank()){"입력할 내용이 필요합니다."}
         require(text==null||!WebAgentPolicy.looksLikeSecretNumber(text)){"카드·계좌·주민번호처럼 보이는 숫자는 입력하지 않습니다."}
         if(kind=="scroll")require((call.arguments["direction"]?.jsonPrimitive?.content?:"down") in setOf("down","up"))
+        if(navigationRule)BrowserNavigationRule.from(call)
     }
 }
 
@@ -47,6 +51,6 @@ object PcBrowserToolCatalog:BrowserToolCatalog("open_pc_browser_page","read_pc_b
 
 /** Hidden browser inside the ZipHap app on this phone; the owner logs in to sites in the app's browser screen. */
 object AppBrowserToolCatalog:BrowserToolCatalog("open_app_browser_page","read_app_browser_page","app_browser_action",
-    "the ZipHap app's own offscreen browser on this phone (preferred for phone web tasks; the owner's in-app logins; works anywhere)") {
+    "the ZipHap app's own offscreen browser on this phone (preferred for phone web tasks; the owner's in-app logins; works anywhere)",navigationRule=true) {
     const val OPEN="open_app_browser_page";const val READ="read_app_browser_page";const val ACTION="app_browser_action"
 }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.view.View
 import android.webkit.*
+import com.user.localagent.core.BrowserNavigationRule
 import com.user.localagent.core.WebAgentPolicy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,6 +119,8 @@ class AppWebAgent private constructor(private val context:Context) {
                 put("label",if(e.editable&&!sensitive&&e.label.isBlank())(e.placeholder.ifBlank{e.name}).take(120) else e.label)
                 put("disabled",json["disabled"]?.jsonPrimitive?.booleanOrNull==true);put("editable",e.editable)
                 put("sensitive",sensitive);put("needsApproval",WebAgentPolicy.riskyControl(e))
+                json.s("ruleHref").takeIf {href->!sensitive&&!WebAgentPolicy.riskyControl(e)&&
+                    BrowserNavigationRule.sameSiteLink(url,href)}?.let {put("ruleHref",it)}
                 json["options"]?.let{put("options",it)}
             }
         }
@@ -147,6 +150,9 @@ class AppWebAgent private constructor(private val context:Context) {
         val target=if(action in setOf("click","type","select","press_enter"))current.second[ref]
             ?.takeIf{it["disabled"]?.jsonPrimitive?.booleanOrNull!=true}
             ?:return@guarded fail("ELEMENT_UNAVAILABLE") else null
+        if("ruleHref" in arguments&&(action!="click"||target?.s("ruleHref")!=arguments.s("ruleHref")||
+                arguments.s("ruleHref").isEmpty()||approvedSnapshot!=null))
+            return@guarded fail("ELEMENT_UNAVAILABLE")
         val text=arguments.s("text")
         when(action){
             "click","back"->Unit
@@ -179,6 +185,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 put("key",domKey);put("action",action);put("snapshotId",current.first)
                 put("ref",ref);put("text",text);put("direction",arguments.s("direction"))
                 put("needsApproval",needsApproval);put("approvedSnapshot",approvedSnapshot)
+                arguments["ruleHref"]?.let {put("ruleHref",it)}
             })
             val refusal=result?.s("error")
             if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"))

@@ -3,9 +3,13 @@ package com.user.localagent.compute
 import android.content.Context
 import com.user.localagent.core.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import java.net.URI
+import uniffi.ziphap_android.nativeBrowserNavigationTarget
 
 /** Owner switch per browser: on by default (each browser profile starts with no logins); turning it off persists. */
 class BrowserAgentSettings private constructor(context:Context,name:String) {
@@ -56,12 +60,16 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     }
     private data class Element(val label:String,val tag:String,val type:String,val needsApproval:Boolean)
     private var last:Triple<String,String,Map<String,Element>>?=null // snapshotId, url, elements
+    private var lastPage:JsonObject?=null
     private var initialOrigin:String?=null
     private var recoveredTarget:String?=null
+    private var ruleRecoveryBlocked=false
+    private var ruleEffectUncertain=false
 
     fun review(call:ToolCall):Pair<Boolean,String?> {
         if(call.name!=catalog.action)return false to null
         catalog.validate(call)
+        if(catalog==AppBrowserToolCatalog&&BrowserNavigationRule.from(call)!=null)return false to null
         if(recoveredTarget!=null)return false to null
         val action=call.arguments.getValue("action").jsonPrimitive.content
         val snapshot=last?.takeIf{it.first==call.arguments.getValue("snapshotId").jsonPrimitive.content}
@@ -83,10 +91,18 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         return needs to review
     }
 
-    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null):ToolResult {
+    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null,
+        verifyRuleAccess:suspend ()->Unit={}):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
+        if(call.name==catalog.action&&ruleEffectUncertain)return refused(call,"RULE_EFFECT_PENDING")
         if(call.name==catalog.action&&recoveredTarget!=null)return refused(call,"SNAPSHOT_STALE")
+        if(catalog==AppBrowserToolCatalog&&call.name==catalog.action) {
+            BrowserNavigationRule.from(call)?.let { rule->
+                if(approvedSnapshot!=null||ruleRecoveryBlocked)return refused(call,"RULE_EFFECT_PENDING")
+                return runNavigationRule(call,rule,verifyRuleAccess)
+            }
+        }
         val pcAction=catalog==PcBrowserToolCatalog&&call.name==catalog.action
         val observed=last
         val ref=call.arguments["ref"]?.jsonPrimitive?.contentOrNull
@@ -107,6 +123,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         }
         if(operation=="open"){
             last=null
+            lastPage=null
             recoveredTarget=null
             initialOrigin=origin(body.getValue("url").jsonPrimitive.content)
         }
@@ -137,15 +154,114 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         if(error!=null){
             if(catalog==AppBrowserToolCatalog&&error=="ACTION_OUTCOME_UNKNOWN"){
                 last=null
+                lastPage=null
+                ruleRecoveryBlocked=true
                 return ToolResult(call.id,false,buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),
                     VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
             }
-            if(error=="SNAPSHOT_STALE")last=null
+            if(error=="SNAPSHOT_STALE"){last=null;lastPage=null}
             return refused(call,error)
         }
         remember(result)
         return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,
             if(result["performed"]==null)"$where 페이지를 실제로 읽음" else "$where 동작 후 페이지를 다시 읽음 · 사이트의 최종 처리는 미보증")
+    }
+
+    private suspend fun runNavigationRule(call:ToolCall,rule:BrowserNavigationRule,verifyAccess:suspend ()->Unit):ToolResult {
+        val original=lastPage?:return refused(call,"RULE_SOURCE_CHANGED")
+        val source=original.string("url")
+        val originalRef=call.arguments.string("ref")
+        if(original.string("snapshotId")!=call.arguments.string("snapshotId")||!rulePage(original)||
+            original["truncated"]!=JsonPrimitive(false))return refused(call,"RULE_SOURCE_CHANGED")
+        val first=ruleElements(original).singleOrNull {it.string("ref")==originalRef}
+            ?:return refused(call,"RULE_LINK_UNPROVEN")
+        val destination=first.string("ruleHref")
+        if(!BrowserNavigationRule.sameSiteLink(source,destination)||!matchesRule(first,rule,destination)||
+            rule.sees(original.string("title"),original.string("text")))return refused(call,"RULE_LINK_UNPROVEN")
+
+        suspend fun checkAccess() {
+            currentCoroutineContext().ensureActive()
+            verifyAccess()
+            check(enabled()){"브라우저 사용이 중지됐습니다."}
+        }
+        suspend fun read():JsonObject {
+            checkAccess()
+            return backend("read",buildJsonObject {})
+        }
+
+        repeat(2) {
+            val fresh=withTimeoutOrNull(4_000){read()}?:return refused(call,"RULE_SOURCE_CHANGED")
+            if(fresh["loginRequired"]==JsonPrimitive(true))return authenticationRequired(call)
+            remember(fresh)
+            val matches=ruleElements(fresh)
+            val index=nativeBrowserNavigationTarget(
+                sameSource=rulePage(fresh)&&fresh.string("url")==source,
+                completeObservation=fresh["truncated"]==JsonPrimitive(false),
+                markerAlreadyVisible=rule.sees(fresh.string("title"),fresh.string("text")),
+                matchedControls=matches.map {matchesRule(it,rule,destination)},
+            )?.toInt()?:return refused(call,"RULE_LINK_UNPROVEN")
+            val ref=matches[index].string("ref")
+            if(!Regex("e[0-9]{1,4}").matches(ref))return refused(call,"RULE_LINK_UNPROVEN")
+            checkAccess()
+            val acted=try {
+                backend("act",buildJsonObject {
+                    put("action","click");put("snapshotId",fresh.string("snapshotId"));put("ref",ref);put("ruleHref",destination)
+                })
+            } catch (cancel:CancellationException) { throw cancel }
+            catch (_:Exception) { return uncertainRule(call) }
+            if(acted.string("error") in setOf("SNAPSHOT_STALE","ELEMENT_UNAVAILABLE"))return@repeat
+            if(acted["loginRequired"]==JsonPrimitive(true)){
+                ruleEffectUncertain=true
+                return authenticationRequired(call)
+            }
+            if(acted["performed"] !is JsonObject||acted["error"]!=null)return uncertainRule(call)
+
+            var page=acted
+            val verified=try {
+                withTimeoutOrNull(8_000) {
+                    repeat(4) {attempt->
+                        if(attempt>0){delay(650);page=read()}
+                        if(!rulePage(page)||page.string("url")!=destination) {
+                            // The renderer may still be showing the exact source while it loads the known link.
+                            if(!rulePage(page)||page.string("url")!=source)return@withTimeoutOrNull false
+                        } else if(rule.sees(page.string("title"),page.string("text"))) {
+                            checkAccess()
+                            return@withTimeoutOrNull true
+                        }
+                    }
+                    false
+                }
+            } catch (cancel:CancellationException) { throw cancel }
+            catch (_:Exception) { false }
+            if(page["loginRequired"]==JsonPrimitive(true)){
+                ruleEffectUncertain=true
+                return authenticationRequired(call)
+            }
+            if(verified!=true)return uncertainRule(call)
+            remember(page)
+            return ToolResult(call.id,true,compact(JsonObject(page+("navigationRuleStatus" to JsonPrimitive("verified")))),
+                VerificationState.VERIFIED,"같은 링크 이동 · 도착 페이지와 새 확인 문구 확인")
+        }
+        return refused(call,"RULE_SOURCE_CHANGED")
+    }
+
+    private fun JsonObject.string(key:String)=(this[key] as? JsonPrimitive)?.takeIf {it.isString}?.content.orEmpty()
+    private fun ruleElements(page:JsonObject)=(page["elements"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
+    private fun rulePage(page:JsonObject)=page["error"]==null&&page["blocked"]!=JsonPrimitive(true)&&
+        page["externalHandoffBlocked"]==null&&page["loginRequired"]!=JsonPrimitive(true)&&page.string("snapshotId").isNotBlank()
+    private fun matchesRule(item:JsonObject,rule:BrowserNavigationRule,destination:String)=
+        item.string("tag")=="a"&&item.string("label")==rule.label&&item.string("ruleHref")==destination&&
+            listOf("disabled","editable","sensitive","needsApproval").all {item[it]==JsonPrimitive(false)}
+    private fun uncertainRule(call:ToolCall):ToolResult {
+        ruleEffectUncertain=true
+        last=null
+        lastPage=null
+        val receipt=buildJsonObject {
+            put("navigationRuleStatus","unverified")
+            put("hint","같은 동작을 다시 시도하기 전에 현재 페이지를 읽어 결과를 확인하세요.")
+        }
+        return ToolResult(call.id,false,receipt.toString(),
+            VerificationState.UNVERIFIED,"페이지 이동 후 결과 미확인 · 같은 동작을 반복하지 않음")
     }
 
     private suspend fun recoverPublicPage(call:ToolCall,url:String,pcFallback:BrowserBackend?):ToolResult? {
@@ -164,6 +280,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     private fun authenticationRequired(call:ToolCall):ToolResult {
         last=null
+        lastPage=null
         recoveredTarget=null
         val noChange=call.name!=catalog.action
         return ToolResult(call.id,false,buildJsonObject {
@@ -212,11 +329,14 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
         "PC_RECOVERY_UNAVAILABLE"->"현재 요청에서 같은 페이지의 새 조회 결과를 확인하지 못했습니다."
         "ACTION_OUTCOME_UNKNOWN"->"동작이 실행됐는지 확인되지 않았습니다. 다시 실행하기 전에 페이지에서 결과를 확인하세요."
+        "RULE_SOURCE_CHANGED","RULE_LINK_UNPROVEN"->"같은 링크와 새 확인 문구를 증명하지 못해 이동하지 않았습니다. 현재 페이지를 다시 읽어 주세요."
+        "RULE_EFFECT_PENDING"->"앞선 동작의 결과를 먼저 읽어 확인해 주세요."
         else->"브라우저 요청이 거부됐습니다."
     }
 
     private fun remember(result:JsonObject){
-        val id=result["snapshotId"]?.jsonPrimitive?.contentOrNull?:run{last=null;return}
+        val id=result["snapshotId"]?.jsonPrimitive?.contentOrNull?:run{last=null;lastPage=null;return}
+        lastPage=result
         val elements=result["elements"]?.jsonArray.orEmpty().mapNotNull{item->runCatching{
             val e=item.jsonObject
             e.getValue("ref").jsonPrimitive.content to Element(e["label"]?.jsonPrimitive?.content.orEmpty(),e["tag"]?.jsonPrimitive?.content.orEmpty(),
@@ -227,7 +347,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","blocked","message")
+        listOf("snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","blocked","message","navigationRuleStatus")
             .forEach{key->result[key]?.let{put(key,it)}}
         put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))
@@ -237,6 +357,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 "needs-owner-approval".takeIf{e["needsApproval"]?.jsonPrimitive?.booleanOrNull==true},
                 "owner-only-field".takeIf{e["sensitive"]?.jsonPrimitive?.booleanOrNull==true},
                 "disabled".takeIf{e["disabled"]?.jsonPrimitive?.booleanOrNull==true},
+                "recoverable-link".takeIf{e.string("ruleHref").isNotBlank()},
                 e["options"]?.jsonArray?.joinToString("/"){o->o.jsonPrimitive.content}?.let{"options:"+it.take(300)})
             JsonPrimitive("${e.getValue("ref").jsonPrimitive.content}|${e["tag"]?.jsonPrimitive?.content}|${e["label"]?.jsonPrimitive?.content.orEmpty()}"+
                 if(flags.isEmpty())"" else "|"+flags.joinToString(","))

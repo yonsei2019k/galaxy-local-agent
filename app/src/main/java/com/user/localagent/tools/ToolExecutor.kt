@@ -190,7 +190,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             }
             browserFor(call.name)?.let{browser->
                 check(connectionRunId==null||connectionIsRunLive()){"브라우저 요청이 중단됐습니다."}
-                return@withContext browser.execute(call,approvedScreenSnapshot,pairedBrowserFallback)
+                return@withContext browser.execute(call,approvedScreenSnapshot,pairedBrowserFallback) {
+                    check(connectionRunId!=null&&connectionIsRunLive()&&call.name in capturedAvailableTools)
+                    connectionVerifyAccess()
+                    check(connectionIsRunLive())
+                }
             }
             if(call.name in KakaoScreenToolCatalog.names){
                 check(connectionRunId!=null&&connectionIsRunLive()){"카카오톡 조회의 원래 실행이 끝났습니다."}

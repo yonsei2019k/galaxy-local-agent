@@ -27,8 +27,13 @@ function (request) {
       autocomplete: node.autocomplete || '', disabled: !!node.disabled || node.matches(':disabled,[aria-disabled=true]'),
       editable: node.isContentEditable || ['input','textarea','select'].includes(tag),
     };
+    if (tag === 'a' && !item.disabled && !item.editable && !node.hasAttribute('download') &&
+        !node.hasAttribute('ping') && !node.hasAttribute('onclick') && !node.closest('form') &&
+        (!node.target || node.target === '_self') && (!item.role || item.role === 'link')) {
+      item.ruleHref = node.href;
+    }
     if (tag === 'select') item.options = options.map(o => o.text.trim().slice(0, 60));
-    // These action destinations and option values stay in the renderer and never enter the tool result.
+    // The host receives only eligible link destinations and keeps them out of the model view.
     const binding = JSON.stringify([item, node.href, node.target, node.type, node.formAction, node.formMethod,
       node.formTarget, form && [form.action, form.method, form.target],
       options.map(o => [o.value, o.matches(':disabled')])]);
@@ -94,6 +99,12 @@ function (request) {
         sameControl(control, describe(e, input.ref));
       switch (input.action) {
         case 'click':
+          if (input.ruleHref !== null && input.ruleHref !== undefined) {
+            if (!stillCurrent() || control.item.ruleHref !== input.ruleHref)
+              return fail('SNAPSHOT_STALE');
+            location.assign(input.ruleHref);
+            break;
+          }
           e.scrollIntoView({block:'center'});
           if (!stillCurrent()) return fail('SNAPSHOT_STALE');
           e.click();

@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../../public/app-web-agent.
 
 function fixture() {
   const effects = [];
-  const location = {href: 'https://fixture.example.test/details'};
+  const location = {href: 'https://fixture.example.test/details', assign(url) { effects.push(url); }};
   const makeDocument = () => ({
     nodes: [],
     title: 'Fixture',
@@ -34,6 +34,8 @@ function fixture() {
       this._value = '';
     }
     getAttribute(name) { return this.attrs[name] ?? null; }
+    hasAttribute(name) { return Object.hasOwn(this.attrs, name); }
+    closest(tag) { return tag === 'form' ? this.enclosingForm ?? null : null; }
     matches(query) { return query.includes(':disabled') ? !!this.disabled : !this.noLongerControl; }
     getRootNode() { return this.isConnected ? this.ownerDocument : this; }
     getBoundingClientRect() { return {width: 80, height: 25, top: 10, bottom: 35}; }
@@ -55,6 +57,23 @@ function fixture() {
   context.document.nodes = [button];
   return {context, effects, button, invoke, Input, makeDocument};
 }
+
+test('a navigation rule follows only the exact observed link and cannot replay it', () => {
+  const {context, effects, invoke, Input} = fixture();
+  const link = new Input('Product details','A');
+  link.href = 'https://fixture.example.test/product';
+  context.document.nodes = [link];
+  assert.equal(invoke({action:'observe'}).elements[0].ruleHref,link.href);
+  assert.equal(invoke({action:'click',ruleHref:link.href+'/other'}).error,'SNAPSHOT_STALE');
+  invoke({action:'observe'});
+  assert.equal(invoke({action:'click',ruleHref:link.href}).performed,true);
+  assert.equal(invoke({action:'click',ruleHref:link.href}).error,'SNAPSHOT_STALE');
+  assert.deepEqual(effects,[link.href]);
+  link.attrs.download = '';
+  assert.equal(invoke({action:'observe'}).elements[0].ruleHref,undefined);
+  assert.equal(invoke({action:'click',ruleHref:link.href}).error,'SNAPSHOT_STALE');
+  assert.deepEqual(effects,[link.href]);
+});
 
 test('a same-looking replacement after observation receives no click', () => {
   const {context, effects, button, invoke, Input} = fixture();

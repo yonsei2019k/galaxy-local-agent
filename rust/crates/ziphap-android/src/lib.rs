@@ -20,6 +20,7 @@ pub fn native_public_page_interstitial(title: String, text: String) -> bool {
 }
 
 mod screen_snapshot;
+mod browser_navigation;
 
 #[uniffi::export]
 pub fn native_record_evidence_matches(source: String, quote: String, label: String) -> bool {

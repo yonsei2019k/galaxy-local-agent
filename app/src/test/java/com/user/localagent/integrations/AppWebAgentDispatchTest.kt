@@ -222,6 +222,90 @@ class AppWebAgentDispatchTest {
         assertEquals(1,attempts)
     }
 
+    private val ruleSource="https://fixture.example.test/list"
+    private val ruleDestination="https://fixture.example.test/details"
+
+    private fun ruleClick()=ToolCall("rule",AppBrowserToolCatalog.ACTION,buildJsonObject {
+        put("action","click");put("snapshotId","snapshot");put("ref","e1")
+        put("expectedLinkLabel","Details");put("verifyPageText","Product details")
+    })
+
+    private fun rulePage(id:String,url:String=ruleSource,refs:List<String> = listOf("e1"),
+        marker:Boolean=false,performed:Boolean=false)=buildJsonObject {
+        put("snapshotId",id);put("url",url);put("truncated",false)
+        put("text",if(marker) "Product details" else "Products")
+        if(performed)put("performed",buildJsonObject {put("action","click")})
+        putJsonArray("elements"){
+            for(ref in refs)addJsonObject {
+                put("ref",ref);put("tag","a");put("label","Details");put("ruleHref",ruleDestination)
+                for(flag in listOf("disabled","editable","sensitive","needsApproval"))put(flag,false)
+            }
+        }
+    }
+
+    @Test fun writtenRuleRebindsAfterExplicitNoEffectAndVerifiesTheNewPage()=runBlocking {
+        var reads=0
+        val dispatched=mutableListOf<String>()
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,body->
+            when(op){
+                "open"->rulePage("snapshot")
+                "read"->{reads++;rulePage("fresh$reads",refs=listOf("e${reads+1}"))}
+                "act"->{
+                    assertEquals(ruleDestination,body.getValue("ruleHref").jsonPrimitive.content)
+                    assertFalse("expectedLinkLabel" in body)
+                    dispatched+=body.getValue("ref").jsonPrimitive.content
+                    if(dispatched.size==1)buildJsonObject {put("error","SNAPSHOT_STALE")}
+                    else rulePage("done",ruleDestination,emptyList(),marker=true,performed=true)
+                }
+                else->error(op)
+            }
+        }
+        val opened=tools.execute(open(ruleSource))
+        assertTrue(opened.content.contains("recoverable-link"))
+        assertFalse(opened.content.contains(ruleDestination))
+        val result=tools.execute(ruleClick())
+        assertTrue(result.success)
+        assertTrue(result.content.contains("\"navigationRuleStatus\":\"verified\""))
+        assertEquals(listOf("e2","e3"),dispatched)
+    }
+
+    @Test fun ruleRefusesAmbiguityScopeChangesAndAnAlreadyVisibleMarker()=runBlocking {
+        for(fresh in listOf(rulePage("fresh",refs=listOf("e2","e3")),
+                rulePage("fresh","https://fixture.example.test/other"),
+                rulePage("fresh",marker=true))){
+            var dispatched=0
+            val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+                when(op){
+                    "open"->rulePage("snapshot")
+                    "read"->fresh
+                    else->{dispatched++;error("unexpected action")}
+                }
+            }
+            tools.execute(open(ruleSource))
+            assertTrue(tools.execute(ruleClick()).effectNotApplied)
+            assertEquals(0,dispatched)
+        }
+    }
+
+    @Test fun uncertainNavigationAllowsObservationButCannotDispatchAgain()=runBlocking {
+        var dispatched=0
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+            when(op){
+                "open"->rulePage("snapshot")
+                "read"->rulePage("snapshot")
+                else->{dispatched++;buildJsonObject{put("error","ACTION_OUTCOME_UNKNOWN")}}
+            }
+        }
+        tools.execute(open(ruleSource))
+        val uncertain=tools.execute(ruleClick())
+        assertEquals(VerificationState.UNVERIFIED,uncertain.verification)
+        assertFalse(uncertain.effectNotApplied)
+        assertTrue(tools.execute(read()).success)
+        assertTrue(tools.execute(ruleClick()).effectNotApplied)
+        assertTrue(tools.execute(click(AppBrowserToolCatalog.ACTION)).effectNotApplied)
+        assertEquals(1,dispatched)
+    }
+
     private fun challenge()=buildJsonObject {put("status","approval_required");put("approvalId","a".repeat(32))}
 
     private fun snapshot(risky:Boolean,tag:String="button",label:String="Details")=buildJsonObject {

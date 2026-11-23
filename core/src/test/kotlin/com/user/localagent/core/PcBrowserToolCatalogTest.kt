@@ -27,4 +27,20 @@ class PcBrowserToolCatalogTest {
             assertThrows(IllegalArgumentException::class.java){c.validate(it)}
         }
     }
+
+    @Test fun phoneRulesAreLimitedToOneTypedClickWithAnExactReadback() {
+        val args=arrayOf("action" to "click","snapshotId" to "s","ref" to "e3",
+            BrowserNavigationRule.LABEL to "이용 안내",BrowserNavigationRule.VERIFY to "서비스 이용 안내")
+        val call=act(AppBrowserToolCatalog,*args)
+        ToolRegistry.validate(call)
+        AppBrowserToolCatalog.validate(call)
+        assertTrue(BrowserNavigationRule.from(call)!!.sees("", "다른 줄\n서비스 이용 안내"))
+        assertFalse(BrowserNavigationRule.from(call)!!.sees("", "이곳은 서비스 이용 안내 페이지"))
+        assertThrows(IllegalArgumentException::class.java){AppBrowserToolCatalog.validate(act(AppBrowserToolCatalog,*args.dropLast(1).toTypedArray()))}
+        assertThrows(IllegalArgumentException::class.java){ToolRegistry.validate(act(PcBrowserToolCatalog,*args))}
+        assertTrue(BrowserNavigationRule.sameSiteLink("https://example.org/a","https://example.org/b"))
+        assertFalse(BrowserNavigationRule.sameSiteLink("https://example.org/a","https://other.org/b"))
+        assertFalse(BrowserNavigationRule.sameSiteLink("https://example.org/a","https://example.org/%6cogin"))
+        assertFalse(BrowserNavigationRule.sameSiteLink("https://example.org/a","https://example.org/b?token=opaque"))
+    }
 }
