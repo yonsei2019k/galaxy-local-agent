@@ -3,6 +3,7 @@ name = "ziphap-pc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "ziphap-pc"
 
 [dependencies]
 serde.workspace = true
