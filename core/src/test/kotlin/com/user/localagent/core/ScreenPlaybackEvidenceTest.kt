@@ -4,6 +4,34 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ScreenPlaybackEvidenceTest {
+    @Test fun adaptiveObservationEstimatesAnEndAndWaitsForTerminalEvidence() {
+        val proof=ScreenPlaybackProgress()
+        fun observe(elapsed:Int,now:Long,enabled:Boolean=false)=
+            proof.observe(ScreenPlaybackEvidence(elapsed,600),now,enabled,!enabled,adaptive=true)
+        assertFalse(observe(570,0))
+        assertNull(proof.remainingSeconds())
+        assertFalse(observe(572,2_000))
+        assertEquals(28,proof.remainingSeconds())
+        assertFalse(observe(592,22_000,enabled=true))
+        assertEquals(8,proof.remainingSeconds())
+        assertFalse(observe(592,24_000,enabled=true))
+        assertNull(proof.remainingSeconds())
+        assertFalse(observe(598,30_000,enabled=true))
+        assertFalse(observe(600,32_000))
+        assertTrue(proof.observe(null,50_000,nextEnabled=true,nextDisabled=false,adaptive=true))
+    }
+
+    @Test fun findsOneRelevantControlWithoutGuessingOrLeavingThePlayer() {
+        val offscreen=ScreenLessonControl("다음", "e1")
+        val arrow=ScreenLessonControl("→","e2",true)
+        val play=ScreenLessonControl("▶","e3",true)
+        val next=ScreenLessonControl("다음 차시",null)
+        assertEquals(next,ScreenLessonControl.choose(listOf(offscreen,arrow,play,next)))
+        assertEquals(arrow,ScreenLessonControl.choose(listOf(offscreen,arrow,play)))
+        assertNull(ScreenLessonControl.choose(listOf(arrow,arrow.copy(ref="e4"))))
+        assertNull(ScreenLessonControl.choose(listOf(offscreen,play)))
+        assertEquals(offscreen,ScreenLessonControl.choose(listOf(offscreen,play),"다음"))
+    }
     @Test fun advancementRequiresAnIncreasingClockAtTheSameDuration() {
         val before = checkNotNull(ScreenPlaybackEvidence.from(listOf("0:02 / 10:05")))
         assertTrue(checkNotNull(ScreenPlaybackEvidence.from(listOf("0:04 / 10:05"))).advancedFrom(before, 2000))

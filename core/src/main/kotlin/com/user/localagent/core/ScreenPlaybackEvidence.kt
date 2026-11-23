@@ -2,8 +2,8 @@ package com.user.localagent.core
 
 /** Elapsed time and duration on a single independently identified media element. */
 data class ScreenPlaybackEvidence(val elapsed: Int, val duration: Int) {
-    fun advancedFrom(before: ScreenPlaybackEvidence, intervalMillis: Long): Boolean =
-        duration == before.duration && intervalMillis in 1..12_000 &&
+    fun advancedFrom(before: ScreenPlaybackEvidence, intervalMillis: Long, maxIntervalMillis:Long=12_000): Boolean =
+        duration == before.duration && intervalMillis in 1..maxIntervalMillis &&
             (elapsed - before.elapsed).toLong() in 1..(intervalMillis / 1_000 + 2)
 
     companion object {
@@ -44,20 +44,36 @@ class ScreenPlaybackProgress {
     private var last: Sample? = null
     private var lastAdvance: Sample? = null
     private var sawDisabled = false
+    private var advancing = false
+    private var reachedEnd = false
 
-    fun observe(clock: ScreenPlaybackEvidence?, nowMillis: Long, nextEnabled: Boolean, nextDisabled: Boolean): Boolean {
+    /** An estimate is only available after observing movement. A stopped or missing clock has no ETA. */
+    fun remainingSeconds(): Int? = last?.clock?.let {clock->
+        (clock.duration-clock.elapsed).takeIf {advancing&&it>0}
+    }
+
+    fun observe(clock: ScreenPlaybackEvidence?, nowMillis: Long, nextEnabled: Boolean, nextDisabled: Boolean,
+        adaptive:Boolean=false): Boolean {
+        advancing=false
         if (clock != null) {
             val previous = last
-            val advanced = previous != null && clock.advancedFrom(previous.clock, nowMillis - previous.atMillis)
+            val advanced = previous != null && clock.advancedFrom(previous.clock, nowMillis - previous.atMillis,
+                if(adaptive)30_000 else 12_000)
             if (previous != null && (clock.duration != previous.clock.duration ||
                     clock.elapsed < previous.clock.elapsed || (clock.elapsed > previous.clock.elapsed && !advanced))) {
                 lastAdvance = null
                 sawDisabled = false
+                reachedEnd = false
             }
-            if (advanced) lastAdvance = Sample(clock, nowMillis)
+            if (advanced) {
+                lastAdvance = Sample(clock, nowMillis)
+                reachedEnd=clock.elapsed==clock.duration
+            }
+            advancing=advanced
             last = Sample(clock, nowMillis)
         }
         if (nextDisabled && !nextEnabled) sawDisabled = true
+        if(adaptive)return nextEnabled&&reachedEnd
         val advanced = lastAdvance ?: return false
         if (!nextEnabled || nowMillis - advanced.atMillis !in 0..8_000) return false
         if (clock != null && clock.duration == advanced.clock.duration &&

@@ -5,6 +5,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ScreenObservationWaitTest {
+    @Test fun playbackCanBindTheCurrentChromeLessonWithoutUserLabels() {
+        val wait=checkNotNull(ScreenObservationWait.from(buildJsonObject {put("requirePlaybackEnd",true)}))
+        assertTrue(wait.automaticLesson)
+        assertEquals(90,wait.seconds)
+        assertEquals(ScreenObservationWait.Status.PENDING,wait.status("com.android.chrome",true,emptyList(),emptyList()))
+        assertEquals(ScreenObservationWait.Status.CONTEXT_CHANGED,wait.status("com.example.other",true,emptyList(),emptyList()))
+        assertEquals(ScreenObservationWait.Status.CONTEXT_CHANGED,wait.status("com.android.chrome",false,emptyList(),emptyList()))
+    }
+
+    @Test fun adaptivePlaybackCanRecheckThreeTimesWithoutUnboundedRepeats() {
+        val tool=ScreenControlToolCatalog.READ
+        val goal=TaskGoal("Wait for the current lesson",listOf("Observe end"),requiredTools=setOf(tool))
+        val args=buildJsonObject {put("requirePlaybackEnd",true)}
+        val step=HarnessStep(tool,args,StepEvidence(tool,VerificationState.VERIFIED,ScreenControlToolCatalog.PLAYBACK_WAIT_PENDING))
+        val call=ToolCall("wait",tool,args)
+        assertTrue(TaskHarness.beforeStep(goal,listOf(step,step),call) is HarnessDecision.Advance)
+        assertTrue(TaskHarness.beforeStep(goal,listOf(step,step,step),call) is HarnessDecision.Stop)
+    }
     private val app = "com.android.chrome"
     private val wait = ScreenObservationWait(app,"과정 1강","다음",60)
 

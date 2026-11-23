@@ -267,7 +267,10 @@ object TaskHarness {
             step.repeatFingerprint to if(step.tool==ScreenControlToolCatalog.READ)screenEpoch else 0
         }
         for(group in groups.values){
-            if(group.size>=3||group.count{!refreshedRejectedFile(it)}>=2&&!readOnly(group.first().tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
+            val first=group.first()
+            val limit=if(ScreenControlToolCatalog.isPlaybackRead(first.tool,first.arguments))
+                ScreenControlToolCatalog.PLAYBACK_WAIT_REPEAT_LIMIT else 2
+            if(group.size>limit||group.count{!refreshedRejectedFile(it)}>=2&&!readOnly(first.tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
         }
         return null
     }

@@ -18,6 +18,7 @@ object ScreenObservationData {
         val base = screen.filterKeys { it in setOf(
             "untrustedScreenData", "packageName", "app", "snapshotId", "lastAction", "screenChanged", "waitStatus", "note",
             "imageStatus", "playbackStatus", "mediaElapsedSeconds", "mediaDurationSeconds", "effectStatus", "expectedChange",
+            "nextLessonControl", "remainingPlaybackSeconds", "estimatedEndEpochMillis", "playbackProbeStatus",
         ) }
         fun render(): String {
             val partial = screen["truncated"] == JsonPrimitive(true) ||

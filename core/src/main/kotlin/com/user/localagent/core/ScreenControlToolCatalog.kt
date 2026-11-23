@@ -15,6 +15,9 @@ object ScreenControlToolCatalog {
     const val STALE_SNAPSHOT_RECEIPT="화면 변경 · 실행 전 중단"
     const val PLAYBACK_WAIT_PENDING="동영상 종료 확인 대기"
     const val PLAYBACK_WAIT_READY="동영상 종료 및 다음 버튼 확인"
+    const val PLAYBACK_WAIT_REPEAT_LIMIT=3
+    fun isPlaybackRead(tool:String,arguments:JsonObject):Boolean =
+        tool==READ&&arguments["requirePlaybackEnd"]==JsonPrimitive(true)
     const val APPROVED_SNAPSHOT_CHANGED_RECEIPT="승인 후 화면 변경 · 실행 전 중단"
     const val APPROVED_SNAPSHOT_CHANGED_NOTICE="화면이 바뀌어 승인한 동작을 실행하지 않았습니다. 다시 진행하려면 새 요청을 보내주세요."
 
@@ -27,8 +30,8 @@ object ScreenControlToolCatalog {
             "forApp" to Argument("string",false,120,"Exact package name observed on the phone."),
             "pageLabel" to Argument("string",false,120,"Exact visible title that stays on the current page."),
             "untilEnabledLabel" to Argument("string",false,120,"Exact label of a button that should become enabled."),
-            "waitSeconds" to Argument("integer",false,3,"Wait 1–90 seconds. Include forApp, pageLabel and untilEnabledLabel."),
-            "requirePlaybackEnd" to Argument("boolean",false,5,"For a video wait, require playback end evidence in addition to the enabled Next control."),
+            "waitSeconds" to Argument("integer",false,3,"Wait 1–90 seconds per check. Defaults to 90 for requirePlaybackEnd."),
+            "requirePlaybackEnd" to Argument("boolean",false,5,"Observe the current lesson until playback ends. With no page or button label, discover the next lesson control from the current Chrome page."),
         ),
             "Read the current phone screen to choose the next enabled control that advances the owner's goal. Use its fresh ref with screen_action, then observe the result. " +
             "Returns package, snapshotId, visible text and numbered elements (ref) for tap, type or scroll. " +
@@ -39,6 +42,7 @@ object ScreenControlToolCatalog {
             "If an expected visible control is missing, call read_screen with inspectImage=true. Pixel-derived controls appear as ordinary exact refs with source=image. " +
             "For video lessons, use the visible Play control once when needed on each new page and look for evidence of actual playback. " +
             "For video, wait with requirePlaybackEnd=true so an already enabled Next button cannot be used as proof of playback. A pending or context_changed wait is not completion. " +
+            "The phone estimates the next check from observed playback. If pending, repeat the bounded observation without clicking Play or Next. When ready use the returned nextLessonControl on the same snapshot. " +
             "Advance only from a fresh enabled result on that lesson, and verify the site's final lesson/course status. Do not seek past playback.",100_000),
         ToolDefinition(ACTION,Risk.LOW,mapOf(
             "action" to Argument("string",true,20,"One of tap, type, scroll, back, home, open_app."),

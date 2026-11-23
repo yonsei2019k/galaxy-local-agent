@@ -3274,7 +3274,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.ScreenControlToolCatalog.ACTION}
             else requestSteps
         val same=repeatScope.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
-        check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
+        val repeatLimit=when {
+            com.user.localagent.core.ScreenControlToolCatalog.isPlaybackRead(call.name,call.arguments)->
+                com.user.localagent.core.ScreenControlToolCatalog.PLAYBACK_WAIT_REPEAT_LIMIT
+            ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW->2
+            else->1
+        }
+        check(same<repeatLimit){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
         val traceAttempt=workTraceSession?.attempt(call)
         if(call.name in com.user.localagent.core.LocalSubagentToolCatalog.names)return performLocalSubagent(call,traceAttempt)
         val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}

@@ -21,6 +21,7 @@ import com.user.localagent.core.ScreenReadEvidence
 import com.user.localagent.core.ScreenObservationWait
 import com.user.localagent.core.ScreenPlaybackEvidence
 import com.user.localagent.core.ScreenPlaybackProgress
+import com.user.localagent.core.ScreenLessonControl
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolReadPolicy
 import com.user.localagent.core.ToolResult
@@ -41,6 +42,7 @@ import uniffi.ziphap_android.NativeScreenRole
 import uniffi.ziphap_android.NativeScreenTarget
 import uniffi.ziphap_android.nativeScreenDispatchDecision
 import uniffi.ziphap_android.nativeScreenSnapshotId
+import uniffi.ziphap_android.nativeLessonProbeDelayMs
 
 /**
  * Agent control of the foreground app through the owner-enabled accessibility service.
@@ -94,7 +96,7 @@ class ScreenControl(context:Context) {
         val truncated:Boolean,val evidence:ScreenReadEvidence,val windowBounds:Rect,
         val webBounds:Rect?,val videoBounds:List<Rect>,val protectedForm:Boolean,
         val playback:ScreenPlaybackEvidence?,val interactionRevision:UUID,
-        val browserPageDigest:String?,val disabledContentButtons:List<String>,
+        val browserPageDigest:String?,val disabledContentButtons:List<ScreenLessonControl>,val lessonHeadingDigest:String?,
     ) {
         val id get()=evidence.snapshotId
     }
@@ -104,8 +106,11 @@ class ScreenControl(context:Context) {
     )
     private data class ImageObservation(val screenId:String,val bounds:Rect,val expiresAt:Long,val targets:List<ImageTarget>)
     private data class PlaybackScope(val request:ScreenObservationWait,val window:Int,val video:List<Rect>,
-        val revision:UUID,val browserPageDigest:String?)
-    private data class PlaybackWait(val scope:PlaybackScope,val progress:ScreenPlaybackProgress=ScreenPlaybackProgress())
+        val revision:UUID,val browserPageDigest:String?,val headingDigest:String?)
+    private data class PlaybackWait(val scope:PlaybackScope,val progress:ScreenPlaybackProgress=ScreenPlaybackProgress(),
+        var approvedAdvance:Pair<String,String>?=null)
+    private data class LessonRead(val next:ScreenLessonControl?,val remaining:Int?,val endEpoch:Long?,val probeStatus:String)
+    private data class Observation(val screen:Snapshot,val status:String?=null,val lesson:LessonRead?=null)
 
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult=try {
         requireReady()
@@ -115,11 +120,11 @@ class ScreenControl(context:Context) {
         } else null
         val result=when(call.name){
             ScreenControlToolCatalog.READ->{
-                read?.let {(screen,status)->
+                read?.let {(screen,status,lesson)->
                     val imageRequested=call.arguments[ScreenControlToolCatalog.IMAGE]?.jsonPrimitive?.booleanOrNull==true
                     val image=if(imageRequested)inspectImage(screen) else null
                     lastImage=image
-                    render(screen,waitStatus=status,image=image,imageRequested=imageRequested)
+                    render(screen,waitStatus=status,image=image,imageRequested=imageRequested,lesson=lesson)
                 }?:ownAppView()
             }
             ScreenControlToolCatalog.ACTION->act(call,approvedSnapshot)
@@ -131,7 +136,7 @@ class ScreenControl(context:Context) {
                     ?:"not_target_window"
                 "화면 이미지 · $code · 후보 ${lastImage?.targets?.size?:0}개"
             } else if(call.arguments["requirePlaybackEnd"]?.jsonPrimitive?.booleanOrNull==true) {
-                when(read?.second) {
+                when(read?.status) {
                     "ready"->ScreenControlToolCatalog.PLAYBACK_WAIT_READY
                     "pending"->ScreenControlToolCatalog.PLAYBACK_WAIT_PENDING
                     else->"현재 화면 접근성 정보 조회"
@@ -144,7 +149,7 @@ class ScreenControl(context:Context) {
                 else->"이미지 버튼 클릭 · 결과 화면 확인"
             }
         } else "동작 후 화면을 다시 읽음 · 동작 유형 "+call.arguments.getValue("action").jsonPrimitive.content
-        val evidence=read?.first?.evidence?.let { observed->
+        val evidence=read?.screen?.evidence?.let { observed->
             val visualKeys=lastImage?.targets.orEmpty().mapNotNull {target->
                 target.recoveryKey?.let { target.ref to it }
             }
@@ -159,7 +164,7 @@ class ScreenControl(context:Context) {
             effectNotApplied=error is ScreenRefused)
     }
 
-    private suspend fun observe(call:ToolCall):Pair<Snapshot,String?>? {
+    private suspend fun observe(call:ToolCall):Observation? {
         val request=ScreenObservationWait.from(call.arguments)
         if(request!=null&&call.arguments[ScreenControlToolCatalog.IMAGE]?.jsonPrimitive?.booleanOrNull==true)
             throw ScreenRefused("화면 이미지 확인과 화면 변화 대기는 각각 요청해야 합니다.")
@@ -169,12 +174,15 @@ class ScreenControl(context:Context) {
             if(request!=null)throw ScreenRefused("기다릴 강의 화면을 먼저 열어야 합니다.")
             return null
         }
-        if(request==null)return current to null
+        if(request==null)return Observation(current)
+        if(request.automaticLesson&&(current.packageName!="com.android.chrome"||current.videoBounds.size!=1||
+                current.truncated||current.webBounds==null))
+            throw ScreenRefused("현재 크롬 페이지에서 하나의 영상 영역을 확인할 수 없습니다.")
         val originalWindow=current.evidence.windowId
         val deadline=SystemClock.elapsedRealtime()+request.seconds*1000L
         val proof=if(request.requirePlaybackEnd){
             fun scopeFor(screen:Snapshot)=PlaybackScope(request.copy(seconds=0),screen.evidence.windowId,
-                screen.videoBounds,screen.interactionRevision,screen.browserPageDigest)
+                screen.videoBounds,screen.interactionRevision,screen.browserPageDigest,screen.lessonHeadingDigest)
             val currentScope=scopeFor(current)
             PlaybackWait(currentScope).let {candidate->
                 (playbackWait?.takeIf {it.scope==candidate.scope}?:candidate).also {playbackWait=it}
@@ -183,31 +191,57 @@ class ScreenControl(context:Context) {
             playbackWait=null
             null
         }
+        var lastClockChangeAt=SystemClock.elapsedRealtime()
+        var lastClock:ScreenPlaybackEvidence?=null
         while(true){
-            val buttons=current.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive&&
-                (proof==null||!it.browserUi)}.map {it.label}
+            val enabled=current.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive&&
+                (proof==null||!it.browserUi)}
+            val buttons=enabled.map {it.label}
             var status=request.status(current.packageName,current.evidence.windowId==originalWindow,
                 current.texts+current.elements.filterNot {it.sensitive}.map {it.label},buttons)
             if(status==ScreenObservationWait.Status.CONTEXT_CHANGED){
                 playbackWait=null
                 throw ScreenRefused("대기 중 원래 강의 화면을 확인할 수 없었습니다.")
             }
+            var lesson:LessonRead?=null
             if(proof!=null){
-                if(current.protectedForm||current.videoBounds!=proof.scope.video||current.interactionRevision!=proof.scope.revision||
-                    current.browserPageDigest!=proof.scope.browserPageDigest){
+                if(!matchesPlaybackScope(proof.scope,current)||request.automaticLesson&&current.truncated){
                     playbackWait=null
                     throw ScreenRefused("대기 중 동영상이 표시된 영역이 바뀌었습니다.")
                 }
                 val clock=current.playback?:readVisiblePlaybackClock(current)
-                val nextDisabled=request.button !in buttons&&current.disabledContentButtons.count {it==request.button}==1
-                val ready=proof.progress.observe(clock,SystemClock.elapsedRealtime(),
-                    nextEnabled=status==ScreenObservationWait.Status.READY,nextDisabled=nextDisabled)
-                if(!ready)status=ScreenObservationWait.Status.PENDING
+                val now=SystemClock.elapsedRealtime()
+                if(clock!=null&&clock!=lastClock){lastClock=clock;lastClockChangeAt=now}
+                val candidate=if(request.automaticLesson)ScreenLessonControl.choose(
+                    enabled.filter {it.webContent&&!ScreenControlToolCatalog.isCommitLabel(it.label)}
+                        .map {lessonControl(current,it)}+current.disabledContentButtons,request.button)
+                    else null
+                val nextDisabled=if(request.automaticLesson)candidate!=null&&candidate.ref==null else
+                    request.button !in buttons&&current.disabledContentButtons.count {it.label==request.button}==1
+                val ready=proof.progress.observe(clock,now,
+                    nextEnabled=if(request.automaticLesson)candidate?.ref!=null else status==ScreenObservationWait.Status.READY,
+                    nextDisabled=nextDisabled,adaptive=request.automaticLesson)
+                status=if(ready)ScreenObservationWait.Status.READY else ScreenObservationWait.Status.PENDING
+                if(request.automaticLesson){
+                    proof.approvedAdvance=candidate?.ref?.takeIf {ready}?.let {current.id to it}
+                    val remaining=proof.progress.remainingSeconds()
+                    val probeStatus=when {
+                        ready->"finished"
+                        clock==null->"clock_unavailable"
+                        remaining!=null->"playing"
+                        else->"checking_playback"
+                    }
+                    lesson=LessonRead(candidate?.takeIf {ready},remaining,
+                        remaining?.let {System.currentTimeMillis()+it*1000L},probeStatus)
+                    if(!ready&&now-lastClockChangeAt>=20_000&&clock?.let {it.elapsed<it.duration}!=false)
+                        return Observation(current,"pending",lesson.copy(probeStatus=if(clock==null)"clock_unavailable" else "not_advancing"))
+                }
             }
             val remaining=deadline-SystemClock.elapsedRealtime()
             if(status==ScreenObservationWait.Status.READY||remaining<=0)
-                return current to status.name.lowercase(Locale.ROOT)
-            delay(minOf(2000L,remaining))
+                return Observation(current,status.name.lowercase(Locale.ROOT),lesson)
+            delay(if(request.automaticLesson)nativeLessonProbeDelayMs(lesson?.remaining?.toUInt(),remaining.toUInt()).toLong()
+                else minOf(2000L,remaining))
             current=try {read()} catch (refused:ScreenRefused) {
                 playbackWait=null
                 throw refused
@@ -216,6 +250,32 @@ class ScreenControl(context:Context) {
                 throw ScreenRefused("대기 중 집합 화면으로 돌아왔습니다. 원래 강의 화면을 다시 확인해야 합니다.")
             }
         }
+    }
+
+    private fun matchesPlaybackScope(scope:PlaybackScope,screen:Snapshot):Boolean =
+        !screen.protectedForm&&screen.evidence.windowId==scope.window&&screen.videoBounds==scope.video&&
+            screen.interactionRevision==scope.revision&&screen.browserPageDigest==scope.browserPageDigest&&
+            (!scope.request.automaticLesson||screen.lessonHeadingDigest==scope.headingDigest)
+
+    private fun besidePlayer(control:Rect,video:Rect?):Boolean = video!=null&&
+        (control.top>=video.bottom&&control.top-video.bottom<=video.height()/2&&
+            control.centerX() in video.centerX()..video.right||
+        control.left>=video.right&&control.left-video.right<=video.width()/4&&
+            control.centerY() in video.top..video.bottom)
+
+    private fun lessonControl(screen:Snapshot,element:Element):ScreenLessonControl =
+        ScreenLessonControl(element.label,element.ref,
+            besidePlayer(Rect().also(element.node::getBoundsInScreen),screen.videoBounds.singleOrNull()))
+
+    private fun checkLessonAdvance(screen:Snapshot,target:Element){
+        if(target.webContent)checkLessonAdvance(screen,lessonControl(screen,target))
+    }
+
+    private fun checkLessonAdvance(screen:Snapshot,target:ScreenLessonControl){
+        val watching=playbackWait?.takeIf {it.scope.request.automaticLesson&&matchesPlaybackScope(it.scope,screen)}?:return
+        if(ScreenLessonControl.isCandidate(target,watching.scope.request.button)&&
+            watching.approvedAdvance!=(screen.id to target.ref))
+            throw ScreenRefused("같은 강의의 재생 종료와 다음 버튼을 확인한 뒤 이동할 수 있습니다.")
     }
 
     /** Owner review text and whether this action needs it, from a fresh read of the same screen. */
@@ -229,9 +289,10 @@ class ScreenControl(context:Context) {
         val app=appLabel(screen.packageName)
         if(action=="tap"&&isImageRef(call.arguments)){
             val image=requireImageTarget(screen,call.arguments)
+            if(!image.play)checkLessonAdvance(screen,lessonImageControl(screen,image))
             return !image.play to describe(call,app,image.label)
         }
-        if(action=="tap")requireTapTarget(target,call.arguments)
+        if(action=="tap")checkLessonAdvance(screen,requireTapTarget(target,call.arguments))
         val needs=action=="type"||(action=="tap"&&target!=null&&ScreenControlToolCatalog.isCommitLabel(target.label))
         return needs to describe(call,app,target?.label)
     }
@@ -251,7 +312,6 @@ class ScreenControl(context:Context) {
 
     private suspend fun act(call:ToolCall,approvedSnapshot:String?):String {
         ScreenControlToolCatalog.validate(call)
-        playbackWait=null
         val a=call.arguments
         val action=a.getValue("action").jsonPrimitive.content
         val requested=a.getValue("snapshotId").jsonPrimitive.content
@@ -328,6 +388,11 @@ class ScreenControl(context:Context) {
             second.videoBounds==first.videoBounds&&second.browserPageDigest==first.browserPageDigest
 
     private fun isImageRef(args:JsonObject)=args["ref"]?.jsonPrimitive?.content?.startsWith("v")==true
+
+    private fun lessonImageControl(screen:Snapshot,target:ImageTarget):ScreenLessonControl =
+        ScreenLessonControl(target.label,target.ref,besidePlayer(
+            Rect(target.bounds).apply {offset(screen.windowBounds.left,screen.windowBounds.top)},
+            screen.videoBounds.singleOrNull()))
 
     private fun visualBlock(screen:Snapshot):String?=when {
         !isRunLive()||capturedVisualBinding==null||visualBinding()!=capturedVisualBinding->"image_access_not_enabled_for_run"
@@ -463,6 +528,7 @@ class ScreenControl(context:Context) {
             val current=snapshot(bridge)
             requireCurrentSnapshot(requested,current.id,approved)
             if(requireImageTarget(current,args)!==target)throw SnapshotChanged(afterApproval=approved!=null)
+            if(!target.play)checkLessonAdvance(current,lessonImageControl(current,target))
             val x=target.bounds.centerX()+current.windowBounds.left
             val y=target.bounds.centerY()+current.windowBounds.top
             val windows=bridge.windows.filter {it.displayId==Display.DEFAULT_DISPLAY}
@@ -505,7 +571,9 @@ class ScreenControl(context:Context) {
         when(action){
             "tap"->{
                 val checked=requireTapTarget(target,a)
+                checkLessonAdvance(screen,checked)
                 check(checked.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){"요소를 누르지 못했습니다."}
+                if(playbackWait?.approvedAdvance==(screen.id to checked.ref))playbackWait=null
             }
             "type"->{
                 checkNotNull(target){"입력칸 $ref 를 찾지 못했습니다."}
@@ -599,7 +667,8 @@ class ScreenControl(context:Context) {
         val texts=mutableListOf<String>();val elements=mutableListOf<Element>()
         val windowBounds=Rect().also(window::getBoundsInScreen)
         val webAreas=mutableListOf<Rect>();val videoAreas=mutableListOf<Rect>();val videoLabels=mutableListOf<String>()
-        val disabledContentButtons=mutableListOf<String>()
+        val disabledContentButtons=mutableListOf<Pair<String,Rect>>()
+        val headings=mutableListOf<String>()
         var browserPage:String?=null
         var protectedForm=false
         var visited=0;var truncated=false;var textBudget=6000
@@ -623,12 +692,13 @@ class ScreenControl(context:Context) {
             }
             val browserUi=ScreenControlToolCatalog.isBrowserUi(packageName,webContent)
             val label=labelOf(node)
+            if(webContent&&!sensitive&&node.isHeading&&label.isNotBlank()&&headings.size<12)headings+=label.take(120)
             if(browserUi&&node.viewIdResourceName=="com.android.chrome:id/url_bar")
                 browserPage=node.text?.toString()?.takeIf {it.isNotBlank()}
             if(webContent&&!sensitive&&!node.isEnabled&&
                 (node.isClickable||className=="android.widget.Button")&&disabledContentButtons.size<48) {
                 label.ifBlank {singleVisibleButtonLabel(node)}.take(120).takeIf {it.isNotBlank()}
-                    ?.let(disabledContentButtons::add)
+                    ?.let {disabledContentButtons+=it to Rect().also(node::getBoundsInScreen)}
             }
             if(!sensitive&&(video||videoAncestor)&&videoLabels.size<32){
                 val qualified=mediaRole?.takeIf {
@@ -697,16 +767,26 @@ class ScreenControl(context:Context) {
         return Snapshot(packageName,texts,elements,truncated,ScreenReadEvidence(id,packageDigest.hex(),window.id,targetKeys),
             windowBounds,webAreas.distinct().singleOrNull(),videoAreas.distinct(),protectedForm,
             if(videoAreas.distinct().size==1)ScreenPlaybackEvidence.from(videoLabels) else null,revision,
-            pageDigest,disabledContentButtons)
+            pageDigest,disabledContentButtons.map {(label,bounds)->
+                ScreenLessonControl(label,null,besidePlayer(bounds,videoAreas.distinct().singleOrNull()))
+            },headings.takeIf {it.isNotEmpty()}?.let {hash(it.joinToString("\n")).hex()})
     }
 
     private fun render(screen:Snapshot,action:String?=null,changed:Boolean=false,waitStatus:String?=null,
         image:ImageObservation?=null,imageRequested:Boolean=false,expectedChange:String?=null,
-        playbackStatus:String?=null):String=buildJsonObject {
+        playbackStatus:String?=null,lesson:LessonRead?=null):String=buildJsonObject {
         waitStatus?.let {put("waitStatus",it)}
         if(action!=null){put("lastAction",action);put("screenChanged",changed)}
         if(expectedChange!=null){put("expectedChange",expectedChange);put("effectStatus","check_current_screen")}
         playbackStatus?.let {put("playbackStatus",it)}
+        lesson?.let {result->
+            put("playbackProbeStatus",result.probeStatus)
+            result.remaining?.let {put("remainingPlaybackSeconds",it)}
+            result.endEpoch?.let {put("estimatedEndEpochMillis",it)}
+            result.next?.let { next->
+                put("nextLessonControl",buildJsonObject {put("ref",next.ref);put("label",next.label)})
+            }
+        }
         screen.playback?.let {put("mediaElapsedSeconds",it.elapsed);put("mediaDurationSeconds",it.duration)}
         if(imageRequested)put("imageStatus",when {
             image==null->visualBlock(screen)?:"capture_unavailable"

@@ -22,6 +22,25 @@ pub fn native_public_page_interstitial(title: String, text: String) -> bool {
 mod screen_snapshot;
 mod browser_navigation;
 
+/// Periodic foreground rechecks are still bounded by the confirmed playback observation window.
+#[uniffi::export]
+pub fn native_lesson_probe_delay_ms(remaining_seconds: Option<u32>, budget_ms: u32) -> u32 {
+    let suggested = remaining_seconds
+        .map(|seconds| seconds.saturating_sub(4).saturating_mul(1_000).clamp(1_500, 20_000))
+        .unwrap_or(2_000);
+    suggested.min(budget_ms)
+}
+
+#[cfg(test)]
+#[test]
+fn lesson_probe_checks_near_end_and_respects_the_remaining_budget() {
+    assert_eq!(native_lesson_probe_delay_ms(Some(600), 90_000), 20_000);
+    assert_eq!(native_lesson_probe_delay_ms(Some(13), 90_000), 9_000);
+    assert_eq!(native_lesson_probe_delay_ms(Some(1), 90_000), 1_500);
+    assert_eq!(native_lesson_probe_delay_ms(None, 503), 503);
+    assert_eq!(native_lesson_probe_delay_ms(None, 0), 0);
+}
+
 #[uniffi::export]
 pub fn native_record_evidence_matches(source: String, quote: String, label: String) -> bool {
     ziphap_core::record_evidence_matches(&source, &quote, &label)
