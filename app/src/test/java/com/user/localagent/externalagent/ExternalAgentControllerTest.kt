@@ -279,10 +279,24 @@ class ExternalAgentControllerTest {
     }
     @Test fun authorityChangeDuringAClaimedWaitCancelsItsCallbackWithoutInventingAnOutcome()=runBlocking {
         val c=capture();val b=Broker();var state=live(c);var executions=0
-        b.onPoll={if(b.claims==1)state=state.copy(projectBinding="revoked")}
-        val controller=ExternalAgentController(c,b,{state},{executions++;awaitCancellation()},{error("no outcome")},{1},heartbeatMs=1)
+        val callbackStarted=CompletableDeferred<Unit>()
+        var callbackCancelled=false
+        b.onPoll={
+            if(b.claims==1){
+                callbackStarted.await()
+                state=state.copy(projectBinding="revoked")
+            }
+        }
+        val controller=ExternalAgentController(c,b,{state},{
+            executions++
+            callbackStarted.complete(Unit)
+            try { awaitCancellation() } finally { callbackCancelled=true }
+        },{error("no outcome")},{1},heartbeatMs=1)
         controller.start();b.offer(proposal(c));withTimeout(1000){rejected{controller.pumpOnce()}}
-        assertEquals(1,executions);assertEquals(ExternalAgentController.Phase.UNKNOWN,controller.phase);assertTrue(b.reported.isEmpty())
+        assertEquals(1,executions)
+        assertTrue(callbackCancelled)
+        assertEquals(ExternalAgentController.Phase.UNKNOWN,controller.phase)
+        assertTrue(b.reported.isEmpty())
     }
     @Test fun pcCallsMayOccupyGlobalSequenceSlotsWithoutInventingOrReplayingPhoneEffects()=runBlocking {
         val c=capture();val b=Broker();val executed=mutableListOf<Int>()
