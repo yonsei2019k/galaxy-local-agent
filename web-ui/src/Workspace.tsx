@@ -13,6 +13,23 @@ const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
 
+const mainDestinations: { panel: Panel; label: string; icon: IconName }[] = [
+  { panel: 'chat', label: '기본 채팅', icon: 'chat' },
+  { panel: 'contacts', label: '연락처', icon: 'group' },
+  { panel: 'capabilities', label: '둘러보기', icon: 'compass' },
+  { panel: 'history', label: '보관함', icon: 'archive' },
+  { panel: 'settings', label: '나의 집순이', icon: 'person' },
+]
+
+export function BottomNavigation({ enabled, onNavigate }: { enabled: boolean; onNavigate(panel: Panel): void }) {
+  return <nav className="bottom-nav" aria-label="빠른 이동">
+    {mainDestinations.filter(item => item.panel !== 'contacts').map(({ panel, label, icon }) =>
+      <button key={panel} type="button" disabled={!enabled} aria-current={panel === 'chat' ? 'page' : undefined}
+        onClick={() => onNavigate(panel)}><Icon name={icon} /><span>{label}</span></button>
+    )}
+  </nav>
+}
+
 export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpenOffice, onNavigate, onClose }: {
   snapshot: Snapshot | null
   enabled: boolean
@@ -25,10 +42,13 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
   const staff = snapshot?.staffRooms
   const threads = staff ?? snapshot?.threads ?? []
   const single = snapshot?.singleConversation === true
+  const extraConversations = useId()
   return (
     <div className="sidebar-content">
       <div className="sidebar-brand">
-        <span className="wordmark"><BrandMark /> ZipHap<span>.Agent</span></span>
+        <span className="wordmark"><BrandMark /> {single ? '집순이' : <>ZipHap<span>.Agent</span></>}</span>
+        {single && <button type="button" className="icon-button sidebar-search" aria-label="대화 검색" disabled={!enabled}
+          onClick={() => onNavigate('history')}><Icon name="search" /></button>}
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
       </div>
       {!single && <><nav className="shared-rooms" aria-label="메인 채팅">
@@ -56,13 +76,18 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
         </button>
       </nav>
       </>}
-      <nav className="utility-nav" aria-label="앱 메뉴">
-        {shortcuts.map(({ panel, label, icon }) => (
-          <button key={panel} type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate(panel)}>
+      <nav className={single ? "destination-nav" : "utility-nav"} aria-label="앱 메뉴">
+        {(single ? mainDestinations : shortcuts).map(({ panel, label, icon }) => (
+          <button key={panel} type="button" className="sidebar-row" disabled={!enabled}
+            aria-current={single && panel === 'chat' ? 'page' : undefined} onClick={() => onNavigate(panel)}>
             <Icon name={icon} /><span>{label}</span>
           </button>
         ))}
       </nav>
+      {single && <section className="extra-conversations" aria-labelledby={extraConversations}>
+        <h2 id={extraConversations}>추가 대화</h2>
+        <p>별도로 표시할 대화가 없어요.</p>
+      </section>}
     </div>
   )
 }

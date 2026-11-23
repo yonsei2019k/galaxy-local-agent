@@ -172,6 +172,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
   const empty = messages.length === 0 && tasks.length === 0
   const guide = enabled && snapshot?.showOfficeGuide === true
+  const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
+  const activeTasksRef = useRef<HTMLElement>(null)
   const loading = connected && !snapshot?.ready
   const staff = snapshot?.singleConversation ? undefined : snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
 
@@ -197,6 +199,10 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
 
   return (
     <div className="conversation-wrap">
+      {snapshot?.singleConversation && activeTask && <button type="button" className="current-work"
+        onClick={() => activeTasksRef.current?.scrollIntoView({ block: 'nearest' })}>
+        <Icon name={taskPhase(activeTask).icon} /><span>{taskPhase(activeTask).title} · {activeTask.label}</span><Icon name="down" />
+      </button>}
       <main className="conversation" ref={view} aria-label="대화" tabIndex={0} onScroll={event => {
         const pane = event.currentTarget
         if (!pane.clientHeight) return
@@ -224,7 +230,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
               calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
-            {liveTasks.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
+            {liveTasks.length > 0 && <section ref={activeTasksRef} className="tasks" aria-label="현재 작업 상태">
               {liveTasks.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
           </div>

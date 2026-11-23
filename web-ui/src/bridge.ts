@@ -124,7 +124,7 @@ export function officeEntries(value: unknown): value is OfficeEntries {
 
 export const MAX_COLLAB_TEXT = 8_000
 
-export type Panel = 'chat' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'collab' | 'capabilities' | 'connections' | 'privacy'
+export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'collab' | 'capabilities' | 'connections' | 'privacy'
 
 type Intent =
   | { action: 'draft'; payload: { text: string } }

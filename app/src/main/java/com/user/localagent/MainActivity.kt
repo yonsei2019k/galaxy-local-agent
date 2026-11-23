@@ -502,6 +502,11 @@ class MainActivity : ComponentActivity() {
                                 val panel=payload.getValue("panel").jsonPrimitive.content
                                 when(panel){
                                     "collab"->Unit
+                                    "contacts"->try {
+                                        startActivity(Intent(Intent.ACTION_VIEW,android.provider.ContactsContract.Contacts.CONTENT_URI))
+                                    } catch (_:android.content.ActivityNotFoundException) {
+                                        status.value="이 휴대폰에서 연락처 앱을 열 수 없어요."
+                                    }
                                     "capabilities"->capabilityShelfOpen=true
                                     "connections"->{openPanel(0);connectionsOpen=true}
                                     "privacy"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.PRIVACY}
@@ -571,8 +576,9 @@ class MainActivity : ComponentActivity() {
                 androidx.activity.compose.BackHandler {returnToParent()}
                 Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
                     TextButton(onClick=::returnToParent){Text(if(returnsToSettings)"‹ 설정"else"‹ 대화")}
-                    val title=if(tab==4)settingsPage.title
-                        else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","대화 기록","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
+                    val title=if(tab==4&&settingsPage==SettingsPage.HOME&&!manualSettings)"나의 집순이"
+                        else if(tab==4)settingsPage.title
+                        else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","보관함","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
                     Text(title,style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
                     if(tab==4 && !manualSettings) TextButton(onClick={showManual(SettingsLink.MANUAL)}){Text("수동 설정")}
                 }
@@ -589,6 +595,15 @@ class MainActivity : ComponentActivity() {
                         true
                     }
                 },modifier=Modifier.weight(1f));5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
+                if(tab==6 || tab==4&&!manualSettings){
+                    HorizontalDivider()
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                        TextButton(onClick={openPanel(0)}){Text("기본 채팅")}
+                        TextButton(onClick={capabilityShelfOpen=true}){Text("둘러보기")}
+                        TextButton(enabled=tab!=6,onClick={openPanel(6)}){Text("보관함")}
+                        TextButton(enabled=tab!=4,onClick={openPanel(4)}){Text("나의 집순이")}
+                    }
+                }
             }
         }
         if(chatManagerOpen) AlertDialog(onDismissRequest={chatManagerOpen=false},title={Text("대화 도구")},text={
@@ -635,7 +650,7 @@ class MainActivity : ComponentActivity() {
             },
             onDraft={text->
                 if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||chat.draft.value.isNotBlank())false
-                else {chat.updateDraft(text,composerThreadId);capabilityShelfOpen=false;true}
+                else {chat.updateDraft(text,composerThreadId);capabilityShelfOpen=false;openPanel(0);true}
             })
         if(skillLibraryOpen)SkillLibraryDialog(chat.bundledSkills,toolStatuses=skillCapabilities,onDismiss={skillLibraryOpen=false})
         goalEditorThreadId?.takeIf{it==selectedThreadId&&it.isNotBlank()}?.let {goalThread->

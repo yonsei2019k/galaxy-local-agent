@@ -1,4 +1,8 @@
 const paths = {
+  compass: 'M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-5-3-2 4-4 2 2-4 4-2Z',
+  archive: 'M4 7h16v3H4zm1 3v9h14v-9m-9 3h4',
+  person: 'M12 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 9v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1Z',
+  search: 'M15.8 15.8 20 20M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0Z',
   menu: 'M4 6h16M4 12h16M4 18h12',
   plus: 'M12 5v14M5 12h14',
   close: 'm6 6 12 12M18 6 6 18',

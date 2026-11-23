@@ -47,7 +47,7 @@ internal object ReactBridgePolicy {
         }
         require(payload.keys==allowed)
         if(action=="navigate")require(payload.getValue("panel").jsonPrimitive.content in
-            setOf("chat","settings","images","tools","projects","history","collab","capabilities","connections","privacy"))
+            setOf("chat","settings","images","tools","projects","history","collab","capabilities","connections","privacy","contacts"))
         if(action=="saveOfficeProfile")requireOfficeEntries(payload.getValue("entries"))
         else for((key,value) in payload){
             val p=value.jsonPrimitive

@@ -101,6 +101,22 @@ describe('native conversation', () => {
     expect(requests().some(request => request.action === 'selectThread')).toBe(false)
   })
 
+  it('routes the single chat menu and mobile shortcuts to the existing capabilities', () => {
+    mount()
+    snapshot({ ...base, singleConversation: true })
+    expect(Array.from(host.querySelectorAll('.desktop-sidebar .destination-nav button'), button => button.textContent))
+      .toEqual(['기본 채팅', '연락처', '둘러보기', '보관함', '나의 집순이'])
+    click('연락처')
+    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'contacts' } })
+    const shortcut = host.querySelector('.bottom-nav button:last-child') as HTMLButtonElement
+    act(() => { shortcut.click() })
+    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'settings' } })
+    snapshot({ ...running(), singleConversation: true })
+    expect(host.querySelector('.current-work')?.textContent).toContain('테스트 작업')
+    snapshot({ ...base, singleConversation: true, inlineLogin: true })
+    expect(host.querySelector('.bottom-nav')).toBeNull()
+  })
+
   it('uses microphone actions scoped to this room and leaves recognized text unsent', () => {
     mount()
     snapshot({ ...base, voiceDraftEpoch: 0 })

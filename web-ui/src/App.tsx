@@ -3,7 +3,7 @@ import { SNAPSHOT_EVENT, hasNativeBridge, postIntent, readSnapshot } from './bri
 import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
 import { Collaboration } from './Collaboration'
-import { Composer, Header, MobileSidebar, Sidebar } from './Workspace'
+import { BottomNavigation, Composer, Header, MobileSidebar, Sidebar } from './Workspace'
 import { OfficeProfileForm } from './OfficeProfile'
 
 type Intent = Parameters<typeof postIntent>[1]
@@ -173,6 +173,8 @@ export default function App() {
           onOpenWaitingApproval={() => request({ action: 'openWaitingApproval' })}
           onVoice={() => request({ action: snapshot?.voicePrompt === 'listening' ? 'finishVoicePrompt' : 'startVoicePrompt' })}
           onCancelVoice={() => request({ action: 'cancelVoicePrompt' })} />}
+        {snapshot?.singleConversation && !snapshot.inlineLogin &&
+          <BottomNavigation enabled={enabled} onNavigate={panel => sidebarRequest({ action: 'navigate', payload: { panel } })} />}
       </div>
       {snapshot?.singleConversation !== true && <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}
