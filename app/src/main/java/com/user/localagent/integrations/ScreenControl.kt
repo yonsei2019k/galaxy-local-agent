@@ -89,7 +89,7 @@ class ScreenControl(context:Context) {
 
     private suspend fun observe(call:ToolCall):Pair<Snapshot,String?>? {
         val request=ScreenObservationWait.from(call.arguments)
-        suspend fun read()=try { onMain { requireReady();snapshot(service()) } }
+        suspend fun read()=try { snapshotWhenAvailable() }
             catch(own:OwnAppForeground) { null }
         var current=read()?:run {
             if(request!=null)throw ScreenRefused("기다릴 강의 화면을 먼저 열어야 합니다.")
@@ -118,7 +118,7 @@ class ScreenControl(context:Context) {
         val action=call.arguments.getValue("action").jsonPrimitive.content
         if(action in setOf("back","home","open_app"))return false to describe(call,null,null)
         val requested=call.arguments.getValue("snapshotId").jsonPrimitive.content
-        val screen=onMain{snapshot(service()).also { requireCurrentSnapshot(requested,it.id) }}
+        val screen=snapshotWhenAvailable().also { requireCurrentSnapshot(requested,it.id) }
         val target=call.arguments["ref"]?.jsonPrimitive?.content?.let{ref->screen.elements.firstOrNull{it.ref==ref}}
         val app=appLabel(screen.packageName)
         val needs=action=="type"||(action=="tap"&&target!=null&&ScreenControlToolCatalog.isCommitLabel(target.label))
@@ -161,19 +161,20 @@ class ScreenControl(context:Context) {
         }
         delay(900) // Let the app render the result before the observation read.
         val after=try {
-            var observed=onMain{snapshot(service())}
+            var observed=snapshotWhenAvailable()
             // A Chrome navigation can still be loading when the accessibility action returns.
             // Wait briefly for new evidence without replaying the action.
             repeat(2) {
                 if(observed.id==requested&&action!="type"){
                     delay(350)
-                    observed=onMain{snapshot(service())}
+                    observed=snapshotWhenAvailable()
                 }
             }
             observed
-        } catch (refused:ScreenRefused) {
-            // The effect was already requested. A protected successor screen cannot prove it failed.
-            throw IllegalStateException("동작을 요청했지만 동작 후 화면을 확인하지 못했습니다.",refused)
+        } catch (failure:IllegalStateException) {
+            if(failure is kotlinx.coroutines.CancellationException)throw failure
+            // A failed observation after dispatch cannot establish that no effect occurred.
+            throw IllegalStateException("동작을 요청했지만 동작 후 화면을 확인하지 못했습니다.",failure)
         }
         return render(after,action,requested!=after.id)
     }
@@ -252,13 +253,17 @@ class ScreenControl(context:Context) {
         fun failure(id:String)=ToolResult(id,false,setup.instruction,VerificationState.FAILED,setup.code,effectNotApplied=true)
     }
 
+    private suspend fun snapshotWhenAvailable():Snapshot =
+        retryScreenObservation(read={onMain{requireReady();snapshot(service())}})
+
     private fun snapshot(service:ScreenBridgeService):Snapshot {
-        check(context.getSystemService(UserManager::class.java).isUserUnlocked){"휴대폰 잠금을 먼저 풀어주세요."}
-        if(context.getSystemService(KeyguardManager::class.java).isKeyguardLocked)throw ScreenRefused("잠금 화면은 다루지 않습니다.")
+        if(!context.getSystemService(UserManager::class.java).isUserUnlocked||
+            context.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
+            throw ScreenRefused("잠금 화면은 다루지 않습니다.")
         val window=service.windows.filter{it.displayId==Display.DEFAULT_DISPLAY&&it.type==AccessibilityWindowInfo.TYPE_APPLICATION&&it.isFocused}
-            .singleOrNull()?:error("전경 앱 창을 찾지 못했습니다.")
-        val root=window.root?:error("전경 앱 화면을 읽지 못했습니다.")
-        val packageName=root.packageName?.toString()?:error("전경 앱을 확인하지 못했습니다.")
+            .singleOrNull()?:throw ScreenObservationUnavailable("전경 앱 창을 찾지 못했습니다.")
+        val root=window.root?:throw ScreenObservationUnavailable("전경 앱 화면을 읽지 못했습니다.")
+        val packageName=root.packageName?.toString()?:throw ScreenObservationUnavailable("전경 앱을 확인하지 못했습니다.")
         if(packageName==context.packageName)throw OwnAppForeground()
         if(refusedPackage(packageName))throw ScreenRefused("시스템·권한·설치·잠금 화면은 다루지 않습니다.")
         val texts=mutableListOf<String>();val elements=mutableListOf<Element>()
@@ -366,6 +371,7 @@ class ScreenControl(context:Context) {
 
     open class ScreenRefused(message:String):IllegalStateException(message)
     class OwnAppForeground:ScreenRefused("ZipHap.Agent 자신의 화면은 조작하지 않습니다.")
+    internal class ScreenObservationUnavailable(message:String):ScreenRefused(message)
     internal class SnapshotChanged(private val afterApproval:Boolean):ScreenRefused(
         if(afterApproval)ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE
         else "화면이 바뀌었습니다. read_screen으로 다시 읽은 뒤 새 snapshotId로 요청하세요."
@@ -377,6 +383,18 @@ class ScreenControl(context:Context) {
 
     companion object {
         private val snapshotNonce=ByteArray(32).also(SecureRandom()::nextBytes)
+
+        /** Only screen observations can be retried here. Dispatch stays outside this loop. */
+        internal suspend fun <T> retryScreenObservation(
+            wait:suspend ()->Unit={delay(350)},
+            read:suspend ()->T,
+        ):T {
+            repeat(3){
+                try{return read()}
+                catch(_:ScreenObservationUnavailable){wait()}
+            }
+            return read()
+        }
 
         internal fun requireCurrentSnapshot(requested:String,current:String,approvedSnapshot:String?=null) {
             when(nativeScreenDispatchDecision(requested,current,approvedSnapshot)){

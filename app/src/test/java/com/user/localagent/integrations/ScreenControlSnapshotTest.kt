@@ -1,6 +1,8 @@
 package com.user.localagent.integrations
 
 import java.security.MessageDigest
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import uniffi.ziphap_android.NativeScreenRole
@@ -24,6 +26,43 @@ class ScreenControlSnapshotTest {
         assertThrows(ScreenControl.SnapshotChanged::class.java) {
             ScreenControl.requireCurrentSnapshot(approved,capture("Total 32,000",window=6))
         }
+    }
+
+    @Test
+    fun transientEmptyWindowIsObservedAgainWithoutReplayingAnything()=runBlocking {
+        var reads=0
+        var waits=0
+        val state=ScreenControl.retryScreenObservation(wait={waits++}){
+            if(++reads<3)throw ScreenControl.ScreenObservationUnavailable("transition")
+            "next screen"
+        }
+        assertEquals("next screen",state)
+        assertEquals(3,reads)
+        assertEquals(2,waits)
+    }
+
+    @Test
+    fun protectedScreenDoesNotRetryAndMissingWindowIsBounded() {
+        var protectedReads=0
+        assertThrows(ScreenControl.ScreenRefused::class.java){
+            runBlocking {
+                ScreenControl.retryScreenObservation(wait={error("protected read must not wait")}){
+                    protectedReads++
+                    throw ScreenControl.ScreenRefused("locked")
+                }
+            }
+        }
+        assertEquals(1,protectedReads)
+        var emptyReads=0
+        assertThrows(ScreenControl.ScreenObservationUnavailable::class.java){
+            runBlocking {
+                ScreenControl.retryScreenObservation(wait={}){
+                    emptyReads++
+                    throw ScreenControl.ScreenObservationUnavailable("transition")
+                }
+            }
+        }
+        assertEquals(4,emptyReads)
     }
 
     private fun digest(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
