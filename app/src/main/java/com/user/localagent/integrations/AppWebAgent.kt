@@ -3,6 +3,7 @@ package com.user.localagent.integrations
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.http.SslError
 import android.view.View
 import android.webkit.*
 import com.user.localagent.core.BrowserNavigationRule
@@ -10,6 +11,7 @@ import com.user.localagent.core.WebAgentPolicy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import java.security.SecureRandom
 import kotlinx.coroutines.sync.withLock
@@ -37,6 +39,11 @@ class AppWebAgent private constructor(private val context:Context) {
     /** True while the agent is driving the page; the browser screen shows it and blocks owner input meanwhile. */
     val active:StateFlow<Boolean> get()=agentActive
     private val blockedNavigation=MutableStateFlow<String?>(null)
+    data class NavigationStatus(val loading:Boolean=false,val error:String?=null)
+    private val navigation=MutableStateFlow(NavigationStatus())
+    val navigationStatus:StateFlow<NavigationStatus> get()=navigation
+    private var navigationRevision=0L
+    private var loadingUrl:String?=null
 
     @SuppressLint("SetJavaScriptEnabled")
     fun view():WebView=webView?:WebView(context).also{web->
@@ -53,13 +60,76 @@ class AppWebAgent private constructor(private val context:Context) {
                 if(WebAgentPolicy.urlAllowed(url))return false
                 // Payment/app hand-offs (intent://, card apps) are the owner's step; never launched by the agent.
                 blockedNavigation.value=url.substringBefore(':').take(20)
+                if(request.isForMainFrame)navigationFailed("NAVIGATION_BLOCKED")
                 return true
             }
-            override fun onPageStarted(view:WebView,url:String?,favicon:Bitmap?){loading=true}
-            override fun onPageFinished(view:WebView,url:String?){loading=false}
+            override fun onPageStarted(view:WebView,url:String?,favicon:Bitmap?){
+                loadingUrl=url
+                loading=true
+                navigation.value=NavigationStatus(loading=true)
+            }
+            override fun onPageFinished(view:WebView,url:String?){
+                if(url!=loadingUrl)return
+                loading=false
+                if(navigation.value.loading)navigation.value=NavigationStatus()
+            }
+            override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
+                if(request.isForMainFrame&&request.url.toString()==loadingUrl)
+                    navigationFailed(when(error.errorCode){
+                        WebViewClient.ERROR_FAILED_SSL_HANDSHAKE->"TLS_ERROR"
+                        WebViewClient.ERROR_TIMEOUT->"PAGE_TIMEOUT"
+                        else->"PAGE_UNREACHABLE"
+                    })
+            }
+            override fun onReceivedHttpError(view:WebView,request:WebResourceRequest,error:WebResourceResponse){
+                if(request.isForMainFrame&&request.url.toString()==loadingUrl)
+                    navigationFailed("HTTP_ERROR")
+            }
+            override fun onReceivedSslError(view:WebView,handler:SslErrorHandler,error:SslError){
+                handler.cancel()
+                if(error.url==loadingUrl)navigationFailed("TLS_ERROR")
+            }
         }
         webView=web
         layoutOffscreen()
+    }
+
+    private fun navigationFailed(code:String){
+        loading=false
+        snapshot=null
+        navigation.value=NavigationStatus(error=code)
+    }
+
+    private fun beginNavigation(url:String):Long {
+        snapshot=null
+        blockedNavigation.value=null
+        loadingUrl=url
+        loading=true
+        navigation.value=NavigationStatus(loading=true)
+        val revision=++navigationRevision
+        view().loadUrl(url)
+        return revision
+    }
+
+    /** Sends a public URL entered by the owner to the same WebView the assistant observes. */
+    suspend fun openFromAddress(input:String) {
+        if(agentActive.value)return
+        val text=input.trim()
+        val url=if(text.contains("://"))text else "https://$text"
+        if(!WebAgentPolicy.urlAllowed(url)){
+            navigationFailed("URL_NOT_ALLOWED")
+            return
+        }
+        if(url.startsWith("http://",ignoreCase=true)){
+            navigationFailed("HTTPS_REQUIRED")
+            return
+        }
+        val revision=beginNavigation(url)
+        val completed=withTimeoutOrNull(20_000){navigation.first{!it.loading}}
+        if(completed==null&&navigationRevision==revision&&navigation.value.loading){
+            navigationFailed("PAGE_TIMEOUT")
+            view().stopLoading()
+        }
     }
 
     /** Off-screen layout so pages render and report element boxes even when the browser screen is closed. */
@@ -87,6 +157,7 @@ class AppWebAgent private constructor(private val context:Context) {
         delay(600)
         val deadline=System.currentTimeMillis()+15_000
         while(System.currentTimeMillis()<deadline){
+            if(navigation.value.error!=null)break
             val ready=runCatching{(eval("document.readyState",5_000) as? JsonPrimitive)?.contentOrNull}.getOrNull()
             if(!loading&&ready=="complete")break
             delay(400)
@@ -139,10 +210,17 @@ class AppWebAgent private constructor(private val context:Context) {
 
     suspend fun open(url:String):JsonObject = guarded{
         if(!WebAgentPolicy.urlAllowed(url))return@guarded fail("URL_NOT_ALLOWED")
-        snapshot=null;blockedNavigation.value=null
-        view().loadUrl(url);settle();readPage()
+        beginNavigation(url)
+        settle()
+        navigation.value.error?.let {return@guarded fail(it)}
+        if(navigation.value.loading)return@guarded fail("PAGE_TIMEOUT")
+        readPage()
     }
-    suspend fun read(observeMedia:Boolean=false):JsonObject = guarded{readPage(observeMedia)}
+    suspend fun read(observeMedia:Boolean=false):JsonObject = guarded{
+        navigation.value.error?.let {return@guarded fail(it)}
+        if(navigation.value.loading)return@guarded fail("PAGE_TIMEOUT")
+        readPage(observeMedia)
+    }
 
     suspend fun act(arguments:JsonObject,approvedSnapshot:String?):JsonObject = guarded{
         val action=arguments.s("action")

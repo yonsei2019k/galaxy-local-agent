@@ -160,7 +160,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 return recoverPublicPage(call,target,pcFallback)?:refused(call,"PC_RECOVERY_UNAVAILABLE")
             recoveredTarget=null
         }
-        if(catalog==AppBrowserToolCatalog&&operation=="open"&&phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE")){
+        if(catalog==AppBrowserToolCatalog&&operation=="open"&&phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE","PAGE_UNREACHABLE")){
             val url=body.getValue("url").jsonPrimitive.content
             if(fallbackUrlAllowed(url))recoverPublicPage(call,url,pcFallback)?.let{return it}
         }
@@ -433,6 +433,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "APPROVAL_MISMATCH"->"승인한 대상과 현재 페이지가 다릅니다. 다시 읽고 다시 요청하세요."
         "ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"->"그 요소를 사용할 수 없습니다. 다시 읽어 ref와 선택지를 확인하세요."
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
+        "PAGE_UNREACHABLE","HTTP_ERROR"->"사이트가 응답하지 않습니다. 주소나 연결을 확인하세요."
+        "TLS_ERROR"->"사이트의 보안 연결을 확인하지 못했습니다."
         "PC_RECOVERY_UNAVAILABLE"->"현재 요청에서 같은 페이지의 새 조회 결과를 확인하지 못했습니다."
         "ACTION_OUTCOME_UNKNOWN"->"동작이 실행됐는지 확인되지 않았습니다. 다시 실행하기 전에 페이지에서 결과를 확인하세요."
         "RULE_SOURCE_CHANGED","RULE_LINK_UNPROVEN"->"같은 링크와 새 확인 문구를 증명하지 못해 이동하지 않았습니다. 현재 페이지를 다시 읽어 주세요."

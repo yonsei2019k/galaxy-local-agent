@@ -3,16 +3,20 @@ package com.user.localagent.integrations
 import android.content.Context
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.user.localagent.compute.BrowserAgentSettings
-import com.user.localagent.core.WebAgentPolicy
+import kotlinx.coroutines.launch
 
 /** Settings for the in-app browser agent plus a full-screen view where the owner logs in or watches the agent. */
 @Composable fun AppBrowserPanel(context:Context){
@@ -31,13 +35,35 @@ import com.user.localagent.core.WebAgentPolicy
 @Composable private fun AppBrowserDialog(context:Context,onClose:()->Unit){
     val agent=remember(context){AppWebAgent.get(context)}
     val busy by agent.active.collectAsState()
-    var address by remember{mutableStateOf("https://")}
+    val navigation by agent.navigationStatus.collectAsState()
+    val keyboard=LocalSoftwareKeyboardController.current
+    val scope=rememberCoroutineScope()
+    var address by remember{mutableStateOf("")}
+    fun openAddress(){
+        if(busy||address.isBlank())return
+        keyboard?.hide()
+        scope.launch {agent.openFromAddress(address)}
+    }
     Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false)){
         Surface(Modifier.fillMaxSize()){
             Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    OutlinedTextField(address,{address=it},Modifier.weight(1f),singleLine=true,label={Text("주소")})
-                    Button(enabled=!busy&&WebAgentPolicy.urlAllowed(address),onClick={agent.view().loadUrl(address)}){Text("열기")}
+                    OutlinedTextField(address,{address=it},Modifier.weight(1f),singleLine=true,label={Text("주소")},
+                        keyboardOptions=KeyboardOptions(imeAction=ImeAction.Go),
+                        keyboardActions=KeyboardActions(onGo={openAddress()}))
+                    Button(enabled=!busy&&address.isNotBlank(),onClick={openAddress()}){Text("열기")}
+                }
+                if(navigation.loading)LinearProgressIndicator(Modifier.fillMaxWidth())
+                navigation.error?.let { code->
+                    Text(when(code){
+                        "URL_NOT_ALLOWED"->"웹사이트 주소를 확인해 주세요."
+                        "HTTPS_REQUIRED"->"이 브라우저는 보안 연결 주소(https://)를 사용해요."
+                        "TLS_ERROR"->"이 사이트의 보안 연결을 확인할 수 없어요."
+                        "PAGE_TIMEOUT"->"페이지 응답이 늦어요. 다시 열어 주세요."
+                        "NAVIGATION_BLOCKED"->"이 페이지에서 여는 외부 앱은 휴대폰에서 직접 열어 주세요."
+                        "HTTP_ERROR"->"사이트에서 페이지를 열어 주지 않았어요."
+                        else->"이 사이트에 연결할 수 없어요. 주소나 인터넷 연결을 확인해 주세요."
+                    },color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)
                 }
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}

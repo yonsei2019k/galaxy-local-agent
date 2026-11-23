@@ -90,15 +90,21 @@ class AppWebAgentDispatchTest {
     @Test
     fun failedPhoneReadUsesSamePublicPageOnPcWithoutTransferringControls()=runBlocking {
         val url="https://example.com/help"
-        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,_->buildJsonObject{put("error","PAGE_UNREADABLE")}}
-        val result=tools.execute(open(url),pcFallback={op,body->
-            assertEquals("open",op)
-            assertEquals(url,body.getValue("url").jsonPrimitive.content)
-            buildJsonObject{put("url",url);put("text","Public evidence");put("snapshotId","foreign-ref")}
-        })
-        assertEquals(VerificationState.VERIFIED,result.verification)
-        assertTrue(result.content.contains("PC"))
-        assertFalse(result.content.contains("foreign-ref"))
+        for(code in listOf("PAGE_UNREADABLE","PAGE_UNREACHABLE")){
+            val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,_->buildJsonObject{put("error",code)}}
+            val result=tools.execute(open(url),pcFallback={op,body->
+                assertEquals("open",op)
+                assertEquals(url,body.getValue("url").jsonPrimitive.content)
+                buildJsonObject{put("url",url);put("text","Public evidence");put("snapshotId","foreign-ref")}
+            })
+            assertEquals(VerificationState.VERIFIED,result.verification)
+            assertTrue(result.content.contains("PC"))
+            assertFalse(result.content.contains("foreign-ref"))
+        }
+        val tls=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,_->buildJsonObject{put("error","TLS_ERROR")}}
+        val result=tls.execute(open(url),pcFallback={_,_->error("TLS failure must stay on the phone")})
+        assertFalse(result.success)
+        assertTrue(result.content.contains("TLS_ERROR"))
     }
 
     @Test
