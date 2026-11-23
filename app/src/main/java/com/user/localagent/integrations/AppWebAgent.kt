@@ -568,11 +568,14 @@ class AppWebAgent private constructor(private val context:Context) {
                     put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",false)
                 }else block().also { page ->
                     websiteWork.value?.takeIf{it.host==secureOrigin(webView?.url)?.host&&it.host==requestedHost}?.let{work->
+                        val performed=page["performed"] as? JsonObject
+                        val target=performed?.s("control")?.trim()?.take(60).orEmpty()
+                        val title=page.s("title").trim().take(60)
                         val outcome=when{
                             page["loginRequired"]==JsonPrimitive(true)->"사이트 인증 필요"
                             page["error"]!=null->"페이지 또는 화면 동작을 확인하지 못함"
-                            page["performed"]!=null->"화면 동작 뒤 페이지 다시 확인"
-                            page["snapshotId"]!=null->"페이지 확인"
+                            performed!=null->if(target.isBlank())"화면 동작 뒤 페이지 확인" else "$target 항목 동작 뒤 페이지 확인"
+                            page["snapshotId"]!=null->if(title.isBlank())"페이지 확인" else "$title 페이지 확인"
                             else->"페이지에서 현재 상태를 다시 확인해야 함"
                         }
                         websiteWork.value=work.copy(status=outcome,steps=(work.steps+outcome).takeLast(4),working=false)
