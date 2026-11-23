@@ -287,6 +287,8 @@ class MainActivity : ComponentActivity() {
         var chatManagerOpen by rememberSaveable {mutableStateOf(false)}
         val webAgent=remember {com.user.localagent.integrations.AppWebAgent.get(this)}
         val loginCard by webAgent.ownerLoginCard.collectAsState()
+        val websiteLogin by webAgent.ownerWebsiteLogin.collectAsState()
+        val websiteWork by webAgent.ownerWebsiteWork.collectAsState()
         val loginStatus by webAgent.ownerLoginStatus.collectAsState()
         var connectionsOpen by rememberSaveable {mutableStateOf(false)}
         var connectionStatus by remember {mutableStateOf<String?>(null)}
@@ -526,14 +528,21 @@ class MainActivity : ComponentActivity() {
                         status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
                 })}
-                loginCard?.let { card -> key(card.id) {
+                val website=websiteLogin
+                if(website!=null)key(website.card.id){
+                    com.user.localagent.integrations.InlineWebsiteLogin(webAgent,website,window,
+                        Modifier.fillMaxWidth().fillMaxHeight(0.76f).padding(horizontal=12.dp))
+                } else loginCard?.let { card -> key(card.id) {
                     com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,card,window,
                         Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
                 }} ?: if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
                         onClose={connectionsOpen=false},onStatus={connectionStatus=it},
                         modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
-                } else Unit
+                } else websiteWork?.let{work->
+                    com.user.localagent.integrations.InlineWebsiteWorkCard(webAgent,work,
+                        Modifier.fillMaxWidth().padding(horizontal=12.dp))
+                }
                 }
                 if(launchIntroPending) LaunchIntro(Modifier.matchParentSize())
                 }

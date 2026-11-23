@@ -99,12 +99,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard,window:Window,modifier:Modifier=Modifier){
-    DisposableEffect(window,login.id){
-        val flag=WindowManager.LayoutParams.FLAG_SECURE
-        val alreadySecure=(window.attributes.flags and flag)!=0
-        if(!alreadySecure)window.addFlags(flag)
-        onDispose {if(!alreadySecure)window.clearFlags(flag)}
-    }
+    SecureBrowserWindow(window)
     val scope=rememberCoroutineScope()
     val keyboard=LocalSoftwareKeyboardController.current
     var account by remember {mutableStateOf("")}
@@ -150,5 +145,82 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                     TextButton(onClick={agent.cancelLoginCard(login.id)},enabled=!submitting){Text("취소")}
                 }
             }
+    }
+}
+
+
+@Composable
+internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLogin,window:Window,modifier:Modifier=Modifier){
+    SecureBrowserWindow(window)
+    val scope=rememberCoroutineScope()
+    val navigation by agent.navigationStatus.collectAsState()
+    var reload by remember {mutableIntStateOf(0)}
+    var visible by remember {mutableStateOf(false)}
+    var checking by remember {mutableStateOf(false)}
+    var returned by remember {mutableStateOf(false)}
+    LaunchedEffect(request.card.id,reload){
+        visible=false
+        visible=agent.loadWebsiteLogin(request.card.id)
+    }
+    fun goBack(){
+        if(returned)return
+        returned=true
+        scope.launch {agent.returnToLoginCard(request.card.id)}
+    }
+    androidx.activity.compose.BackHandler {goBack()}
+    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+        Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+            Text(request.card.host,style=MaterialTheme.typography.titleSmall)
+            if(navigation.loading||checking||returned)LinearProgressIndicator(Modifier.fillMaxWidth())
+            if(navigation.error!=null)Text(when(navigation.error){
+                "HTTPS_REQUIRED"->"사이트가 보안 연결을 제공하지 않는 페이지로 이동했어요."
+                "TLS_ERROR"->"사이트의 보안 연결을 확인할 수 없어요."
+                "PAGE_TIMEOUT"->"사이트 응답이 늦어요. 다시 열 수 있어요."
+                "NAVIGATION_BLOCKED"->"로그인 중 다른 사이트로의 이동을 멈췄어요."
+                else->"사이트에 연결할 수 없어요. 다시 열거나 로그인 입력창으로 돌아가세요."
+            },style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)
+            Box(Modifier.weight(1f).fillMaxWidth()){
+                AndroidView(factory={_->agent.view().also{(it.parent as? ViewGroup)?.removeView(it)}},
+                    modifier=Modifier.fillMaxSize(),onRelease={agent.detach()})
+            }
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                TextButton(onClick={goBack()},enabled=!returned){Text("입력창으로")}
+                TextButton(onClick={reload++},enabled=!navigation.loading&&!checking&&!returned){Text("다시 열기")}
+                TextButton(onClick={
+                    checking=true
+                    scope.launch {try{agent.finishWebsiteLogin(request.card.id)}finally{checking=false}}
+                },enabled=visible&&!navigation.loading&&!checking&&!returned){Text("로그인 확인")}
+            }
+        }
+    }
+}
+
+@Composable
+private fun SecureBrowserWindow(window:Window){
+    DisposableEffect(window){
+        val flag=WindowManager.LayoutParams.FLAG_SECURE
+        val alreadySecure=(window.attributes.flags and flag)!=0
+        if(!alreadySecure)window.addFlags(flag)
+        onDispose {if(!alreadySecure)window.clearFlags(flag)}
+    }
+}
+
+
+@Composable
+internal fun InlineWebsiteWorkCard(agent:AppWebAgent,work:AppWebAgent.WebsiteWork,modifier:Modifier=Modifier){
+    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+        Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),
+            verticalArrangement=Arrangement.spacedBy(4.dp)){
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,
+                verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                Text(work.host,style=MaterialTheme.typography.titleSmall,modifier=Modifier.weight(1f))
+                TextButton(onClick=agent::dismissWebsiteWork){Text("닫기")}
+            }
+            Text(work.status,style=MaterialTheme.typography.bodyMedium)
+            if(work.working)LinearProgressIndicator(Modifier.fillMaxWidth())
+            work.steps.takeLast(3).forEach {step->
+                Text("• "+step,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
