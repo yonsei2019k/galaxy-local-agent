@@ -256,6 +256,45 @@ class AppWebAgentDispatchTest {
         assertFalse(result.content.contains("playerId"))
     }
 
+    @Test fun unavailablePhoneMediaOffersPublicPcOpenAndUsesFreshPcEvidence()=runBlocking {
+        val url="https://fixture.example.test/video"
+        val phone=BrowserAgentTools(AppBrowserToolCatalog,"phone",{true}){operation,_->
+            buildJsonObject {
+                put("snapshotId","phone-snapshot");put("url",url)
+                if(operation=="read")putJsonObject("media"){put("status","frame_unavailable")}
+            }
+        }
+        fun observe(tool:String)=ToolCall("media",tool,buildJsonObject {
+            put("playbackRule","paused");put("waitSeconds",3)
+        })
+        val appRead=observe(AppBrowserToolCatalog.READ)
+        phone.execute(open(url))
+        assertFalse(phone.execute(appRead).content.contains("pcHandoffUrl"))
+        val handoff=phone.execute(appRead,pcFallback={_,_->error("handoff must not dispatch a PC action")})
+        val offered=Json.parseToJsonElement(handoff.content).jsonObject.getValue("pcHandoffUrl").jsonPrimitive.content
+        assertEquals(url,offered)
+        val pc=BrowserAgentTools(PcBrowserToolCatalog,"pc",{true}){operation,body->
+            buildJsonObject {
+                put("snapshotId","fresh-pc-snapshot");put("url",url)
+                if(operation=="open")assertEquals(url,body.getValue("url").jsonPrimitive.content)
+                else {
+                    assertEquals("read",operation)
+                    assertEquals(JsonPrimitive(true),body["observeMedia"])
+                    putJsonObject("media") {
+                        put("status","observed");put("playerId","${"b".repeat(32)}:1");put("epoch",0)
+                        put("positionMs",100);put("durationMs",4000);put("paused",true)
+                        put("ended",false);put("seeking",false);put("readyState",4);put("rate",1)
+                    }
+                }
+            }
+        }
+        assertTrue(pc.execute(ToolCall("pc-open",PcBrowserToolCatalog.OPEN,buildJsonObject {put("url",offered)})).success)
+        val read=pc.execute(observe(PcBrowserToolCatalog.READ))
+        assertTrue(read.content.contains("fresh-pc-snapshot"))
+        assertTrue(read.content.contains("\"mediaRuleResult\":\"matched\""))
+        assertFalse(read.content.contains("phone-snapshot"))
+    }
+
     private fun ruleClick()=ToolCall("rule",AppBrowserToolCatalog.ACTION,buildJsonObject {
         put("action","click");put("snapshotId","snapshot");put("ref","e1")
         put("expectedLinkLabel","Details");put("verifyPageText","Product details")

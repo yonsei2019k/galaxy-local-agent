@@ -180,6 +180,51 @@ SNAPSHOT_JS = r"""(() => {
           truncated: (document.body ? document.body.innerText.length : 0) > MAX_TEXT || out.length >= MAX_ELEMENTS};
 })()""" % (MAX_ELEMENTS, MAX_TEXT)
 
+# Fixed read-only observation. Code and frame locators never come from a request.
+MEDIA_JS = r"""(({key, seed}) => {
+  const docs = [{doc: document, depth: 0}];
+  let count = 0, missingFrame = false, player = null;
+  const visible = node => {
+    const view = node.ownerDocument.defaultView, rect = node.getBoundingClientRect();
+    const style = view.getComputedStyle(node);
+    return rect.width > 1 && rect.height > 1 && style.display !== 'none' && style.visibility !== 'hidden' &&
+      rect.bottom > 0 && rect.top < view.innerHeight * 3;
+  };
+  for (const {doc, depth} of docs) {
+    const media = doc.querySelectorAll('video,audio');
+    if (media.length > 32) return {status: 'media_scan_limit'};
+    for (const node of media) {
+      if (!(node instanceof doc.defaultView.HTMLMediaElement) || !node.isConnected ||
+          !node.currentSrc || (node.localName === 'video' && !visible(node))) continue;
+      if (player) return {status: 'multiple_players'};
+      player = node;
+    }
+    for (const frame of doc.querySelectorAll('iframe,frame')) {
+      if (++count > 12) return {status: 'media_scan_limit'};
+      if (!frame.isConnected || !visible(frame)) continue;
+      if (depth >= 3) return {status: 'media_scan_limit'};
+      const child = frame.contentDocument;
+      if (child?.defaultView) docs.push({doc: child, depth: depth + 1});
+      else missingFrame = true;
+    }
+  }
+  if (!player) return {status: missingFrame ? 'frame_unavailable' : 'player_unavailable'};
+  if (!Object.hasOwn(document, key)) Object.defineProperty(document, key, {value: {seen: new WeakMap(), next: 0, seed}});
+  const registry = document[key];
+  let identity = registry.seen.get(player);
+  if (!identity) {
+    identity = {id: registry.seed + ':' + ++registry.next, epoch: 0, source: player.currentSrc};
+    registry.seen.set(player, identity);
+    for (const event of ['seeking','emptied','loadstart']) player.addEventListener(event, () => identity.epoch++);
+  }
+  if (identity.source !== player.currentSrc) { identity.epoch++; identity.source = player.currentSrc; }
+  const millis = n => Number.isFinite(n) && n >= 0 && n <= 86400 ? Math.round(n * 1000) : null;
+  return {status: 'observed', playerId: identity.id, epoch: identity.epoch,
+    positionMs: millis(player.currentTime), durationMs: millis(player.duration), paused: player.paused,
+    ended: player.ended, seeking: player.seeking, readyState: player.readyState,
+    rate: Number.isFinite(player.playbackRate) ? player.playbackRate : null};
+})"""
+
 
 # ---------------------------------------------------------------- session
 
@@ -189,6 +234,7 @@ class BrowserAgent:
         self.profile = Path(self._isolated_profile.name if self._isolated_profile else profile)
         self.chrome = chrome; self.lock = threading.Lock()
         self.process = None; self.page = None; self.snapshot = None; self.pending = None
+        self.media_key = 'ziphap_' + secrets.token_hex(16)
 
     def _chrome(self):
         for candidate in ([self.chrome] if self.chrome else []) + CHROME_CANDIDATES:
@@ -295,9 +341,17 @@ class BrowserAgent:
             return self._read()
 
     def read(self, request):
-        if request: raise BrowserError('READ_SHAPE')
+        if request and (set(request) != {'observeMedia'} or request['observeMedia'] is not True):
+            raise BrowserError('READ_SHAPE')
         with self.lock:
-            self._ensure(); return self._read()
+            self._ensure()
+            result = self._read()
+            if request and result.get('snapshotId') and not result.get('loginRequired'):
+                args = json.dumps({'key': self.media_key, 'seed': secrets.token_hex(16)})
+                media = self.page.evaluate(MEDIA_JS + '(' + args + ')', timeout=3)
+                if isinstance(media, dict):
+                    result['media'] = media
+            return result
 
     def act(self, request):
         allowed = {'snapshotId', 'ref', 'action', 'text', 'direction', 'approvalId'}

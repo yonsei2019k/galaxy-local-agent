@@ -12,9 +12,11 @@ function (request) {
     e.placeholder || e.title || e.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const visible = e => {
     const r = e.getBoundingClientRect();
-    const s = getComputedStyle(e);
+    const view = e.ownerDocument.defaultView;
+    if (!view) return false;
+    const s = view.getComputedStyle(e);
     return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none' &&
-      r.bottom > 0 && r.top < innerHeight * 3;
+      r.bottom > 0 && r.top < view.innerHeight * 3;
   };
 
   const describe = (node, ref) => {
@@ -66,10 +68,30 @@ function (request) {
     const mediaPlayers = new WeakMap();
     let nextMediaId = 0;
     const mediaEvidence = () => {
-      const candidates = [...ownerDocument.querySelectorAll('video,audio')].filter(node =>
-        node instanceof HTMLMediaElement && node.isConnected &&
-        (node.tagName.toLowerCase() === 'audio' || visible(node)) && Boolean(node.currentSrc));
-      if (candidates.length !== 1) return {status: candidates.length ? 'multiple_players' : 'player_unavailable'};
+      const candidates = [];
+      const documents = [{doc: ownerDocument, depth: 0}];
+      let frames = 0;
+      let inaccessible = false;
+      for (const {doc, depth} of documents) {
+        const media = doc.querySelectorAll('video,audio');
+        if (media.length > 32) return {status: 'media_scan_limit'};
+        for (const node of media) {
+          if (node instanceof doc.defaultView.HTMLMediaElement && node.isConnected &&
+              (node.tagName.toLowerCase() === 'audio' || visible(node)) && node.currentSrc) {
+            candidates.push(node);
+            if (candidates.length > 1) return {status: 'multiple_players'};
+          }
+        }
+        for (const frame of doc.querySelectorAll('iframe,frame')) {
+          if (++frames > 12) return {status: 'media_scan_limit'};
+          if (!frame.isConnected || !visible(frame)) continue;
+          if (depth >= 3) return {status: 'media_scan_limit'};
+          const child = frame.contentDocument;
+          if (child?.defaultView) documents.push({doc: child, depth: depth + 1});
+          else inaccessible = true;
+        }
+      }
+      if (!candidates.length) return {status: inaccessible ? 'frame_unavailable' : 'player_unavailable'};
       const player = candidates[0];
       let identity = mediaPlayers.get(player);
       if (!identity) {

@@ -46,6 +46,23 @@ class Policy(unittest.TestCase):
 
 
 class Shapes(unittest.TestCase):
+    def test_pc_media_observation_is_opt_in_and_never_reads_login(self):
+        agent = b.BrowserAgent(profile='Z:/never-used')
+        agent._ensure = lambda: None
+        js = []
+        agent.page = type('Page', (), {'evaluate': lambda self, expression, **kwargs:
+            js.append(expression) or {'status': 'observed', 'positionMs': 4000}})()
+        agent._read = lambda: {'loginRequired': True}
+        self.assertEqual(agent.read({'observeMedia': True}), {'loginRequired': True})
+        self.assertEqual(js, [])
+        agent._read = lambda: {'snapshotId': 'pc-page'}
+        self.assertEqual(agent.read({}), {'snapshotId': 'pc-page'})
+        self.assertEqual(agent.read({'observeMedia': True})['media']['positionMs'], 4000)
+        self.assertEqual(len(js), 1)
+        for bad in ({'observeMedia': False}, {'observeMedia': True, 'script': 'x'}):
+            with self.assertRaises(b.BrowserError):
+                agent.read(bad)
+
     def test_public_read_uses_its_own_profile_and_returns_no_action_targets(self):
         owner_browser = b.BrowserAgent(profile='Z:/existing-profile')
         observed = {'url': 'https://example.com/', 'title': 'Public', 'text': 'Evidence',

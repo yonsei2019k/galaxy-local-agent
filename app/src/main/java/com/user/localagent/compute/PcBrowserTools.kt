@@ -102,10 +102,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         verifyRuleAccess:suspend ()->Unit={}):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
-        if(catalog==AppBrowserToolCatalog&&call.name==catalog.read) {
+        if(call.name==catalog.read) {
             BrowserMediaRule.from(call)?.let { rule->
                 if(recoveredTarget!=null)return refused(call,"RULE_SOURCE_CHANGED")
-                return observeMedia(call,rule,verifyRuleAccess)
+                return observeMedia(call,rule,verifyRuleAccess,pcFallback!=null)
             }
         }
         if(call.name==catalog.action&&ruleEffectUncertain)return refused(call,"RULE_EFFECT_PENDING")
@@ -278,7 +278,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             VerificationState.UNVERIFIED,"페이지 이동 후 결과 미확인 · 같은 동작을 반복하지 않음")
     }
 
-    private suspend fun observeMedia(call:ToolCall,rule:BrowserMediaRule,verifyAccess:suspend ()->Unit):ToolResult {
+    private suspend fun observeMedia(call:ToolCall,rule:BrowserMediaRule,verifyAccess:suspend ()->Unit,
+        mayOfferPc:Boolean):ToolResult {
         val undefined=NativeMediaFacts(null,null,null,null,null,null,null)
         if(nativeEvaluateMediaRule(rule.expression,undefined)==NativeMediaRuleResult.INVALID)
             return refused(call,"MEDIA_RULE_INVALID")
@@ -302,10 +303,14 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val media=page["media"] as? JsonObject
             val sample=media?.let(BrowserMediaSample::from)
             if(sample==null){
-                val status=media?.string("status")?.takeIf {it in setOf("multiple_players","player_unavailable")}
+                val status=media?.string("status")?.takeIf {
+                    it in setOf("multiple_players","player_unavailable","frame_unavailable","media_scan_limit")
+                }
                 mediaWatch=null
                 remember(page)
-                return mediaResult(call,page,status?:"player_unavailable")
+                val handoff=if(status in setOf(null,"player_unavailable","frame_unavailable","media_scan_limit")&&
+                    mayOfferPc&&catalog==AppBrowserToolCatalog)pcHandoff(page.string("url")) else emptyMap()
+                return mediaResult(call,JsonObject(page+handoff),status?:"player_unavailable")
             }
             val url=page.string("url")
             fun MediaWatch.matches()=this.url==url&&player==sample.playerId&&epoch==sample.epoch
@@ -365,8 +370,18 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         if(recovered==null||!readablePage(url,recovered))return null
         recoveredTarget=url
         // Reobserve the bound URL. The PC result never supplies a handset action target.
-        return ToolResult(call.id,true,compact(JsonObject(recovered-setOf("snapshotId","elements")),"PC 백그라운드 브라우저"),
+        val handoff=pcHandoff(url)
+        return ToolResult(call.id,true,compact(JsonObject(recovered-setOf("snapshotId","elements")+handoff),"PC 백그라운드 브라우저"),
             VerificationState.VERIFIED,"같은 공개 페이지를 PC 백그라운드 브라우저에서 읽음")
+    }
+
+    private fun pcHandoff(url:String):Map<String,JsonElement> {
+        if(ruleEffectUncertain||ruleRecoveryBlocked||!fallbackUrlAllowed(url)||
+            (initialOrigin!=null&&initialOrigin!=origin(url)))return emptyMap()
+        return mapOf(
+            "pcHandoffUrl" to JsonPrimitive(url),
+            "handoffNote" to JsonPrimitive("공개 페이지는 open_pc_browser_page로 새로 열고 PC에서 다시 확인할 수 있습니다. 휴대폰의 로그인이나 동작 상태는 전달되지 않습니다.")
+        )
     }
 
     private fun authenticationRequired(call:ToolCall):ToolResult {
@@ -439,7 +454,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("playbackEvidence","snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","blocked","message","navigationRuleStatus")
+        listOf("playbackEvidence","snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus")
             .forEach{key->result[key]?.let{put(key,it)}}
         put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))

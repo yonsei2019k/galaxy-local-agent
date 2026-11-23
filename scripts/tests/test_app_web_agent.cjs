@@ -9,11 +9,17 @@ const source = fs.readFileSync(path.join(__dirname, '../../public/app-web-agent.
 function fixture() {
   const effects = [];
   const location = {href: 'https://fixture.example.test/details', assign(url) { effects.push(url); }};
+  const view = {innerHeight: 600, getComputedStyle: node => ({display: node.hidden ? 'none' : 'block', visibility: 'visible'})};
   const makeDocument = () => ({
     nodes: [],
     title: 'Fixture',
+    defaultView: view,
     body: {innerText: 'Synthetic details'},
-    querySelectorAll(selector) { return selector === 'video,audio' ? this.nodes.filter(node => ['VIDEO','AUDIO'].includes(node.tagName)) : this.nodes; },
+    querySelectorAll(selector) {
+      if (selector === 'video,audio') return this.nodes.filter(node => ['VIDEO','AUDIO'].includes(node.tagName));
+      if (selector === 'iframe,frame') return this.nodes.filter(node => ['IFRAME','FRAME'].includes(node.tagName));
+      return this.nodes.filter(node => !['IFRAME','FRAME'].includes(node.tagName));
+    },
   });
   const context = vm.createContext({
     document: makeDocument(), location, innerHeight: 600,
@@ -50,6 +56,7 @@ function fixture() {
   }
   context.HTMLInputElement = context.HTMLTextAreaElement = Input;
   context.HTMLMediaElement = Input;
+  view.HTMLMediaElement = Input;
   function invoke(input) {
     return vm.runInContext('(' + source + ')(' + JSON.stringify({
       key: 'fixture-binding', snapshotId: 'snapshot-1', ref: 'e1', approvedSnapshot: null,
@@ -84,6 +91,37 @@ test('reads the timeline of a static muted player without collecting audio or me
   context.document.nodes.push(Object.assign(new Input('Other','AUDIO'),{currentSrc:media.currentSrc}));
   assert.equal(invoke(options).media.status,'multiple_players');
   assert.deepEqual(effects,[]);
+});
+
+test('observes a single same-origin frame player and invalidates replacement evidence', () => {
+  const {context, effects, invoke, Input, makeDocument} = fixture();
+  const frame = new Input('Lesson frame', 'IFRAME');
+  const frameDocument = makeDocument();
+  class FrameMedia extends Input {}
+  frameDocument.defaultView = {...frameDocument.defaultView, HTMLMediaElement: FrameMedia};
+  const makePlayer = () => Object.assign(new FrameMedia('', 'VIDEO'), {
+    ownerDocument: frameDocument, currentSrc: 'https://fixture.example.test/private-stream',
+    currentTime: 1, duration: 4, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
+  });
+  const player = makePlayer();
+  frame.contentDocument = frameDocument;
+  frameDocument.nodes = [player];
+  context.document.nodes = [frame];
+  const read = () => invoke({action: 'observe', observeMedia: true, snapshotId: 'a'.repeat(32)}).media;
+  const first = read();
+  assert.equal(first.status, 'observed');
+  player.currentTime = 4;
+  player.ended = true;
+  assert.equal(read().playerId, first.playerId);
+  assert.equal(read().ended, true);
+  assert.equal(JSON.stringify(read()).includes(player.currentSrc), false);
+  frameDocument.nodes.push(makePlayer());
+  assert.equal(read().status, 'multiple_players');
+  frameDocument.nodes = [makePlayer()];
+  assert.notEqual(read().playerId, first.playerId);
+  frame.contentDocument = null;
+  assert.equal(read().status, 'frame_unavailable');
+  assert.deepEqual(effects, []);
 });
 
 test('a navigation rule follows only the exact observed link and cannot replay it', () => {

@@ -8,7 +8,7 @@ data class BrowserMediaRule(val expression:String,val waitSeconds:Int) {
         const val EXPRESSION="playbackRule"
         const val REPEAT_LIMIT=3
         fun isRuleRead(tool:String,arguments:JsonObject):Boolean =
-            tool==AppBrowserToolCatalog.READ&&EXPRESSION in arguments
+            (tool==AppBrowserToolCatalog.READ||tool==PcBrowserToolCatalog.READ)&&EXPRESSION in arguments
         val arguments=mapOf(
             EXPRESSION to Argument("string",false,200,"Read-only expression over playing, advancing, ended, paused, seeking, buffering and duration_known. Supports !, &&, || and parentheses."),
             "waitSeconds" to Argument("integer",false,3,"Wait up to 1–90 seconds for the media rule. Defaults to 8."),

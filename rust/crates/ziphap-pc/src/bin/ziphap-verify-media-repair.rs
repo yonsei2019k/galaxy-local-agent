@@ -6,8 +6,9 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{ExitCode, Stdio};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::process::Command;
 
 const SOURCE: &str = include_str!("../../../ziphap-android/src/media_rule.rs");
 const FALLBACK: &str = "            _ => return Err(()),";
@@ -106,15 +107,10 @@ fn detached(program: &Path) -> Command {
             command.env(name, value);
         }
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
     command
 }
 
-fn verify(
+async fn verify(
     rustc: &Path,
     work: &Path,
     source: &str,
@@ -152,7 +148,8 @@ fn observed_condition() {{
     fs::write(work.join("trial.rs"), evaluator + &trial).map_err(|_| "ARTIFACT_WRITE")?;
     let binary = work.join(format!("trial{}", std::env::consts::EXE_SUFFIX));
     let build_log = fs::File::create(work.join("compiler.log")).map_err(|_| "ARTIFACT_WRITE")?;
-    let compiled = detached(rustc)
+    let mut command = detached(rustc);
+    command
         .current_dir(work)
         .stderr(build_log)
         .args([
@@ -163,18 +160,21 @@ fn observed_condition() {{
             "trial.rs",
             "-o",
         ])
-        .arg(&binary)
-        .status()
-        .map_err(|_| "COMPILER_START")?;
+        .arg(&binary);
+    let compiled = ziphap_pc::wait_owned_command(&mut command, Duration::from_secs(30))
+        .await
+        .map_err(|_| "COMPILER_PROCESS")?
+        .ok_or("COMPILER_TIMEOUT")?;
     if !compiled.success() {
         return Err("COMPILE_FAILED");
     }
     let test_log = fs::File::create(work.join("test.log")).map_err(|_| "ARTIFACT_WRITE")?;
-    let checked = detached(&binary)
-        .current_dir(work)
-        .stdout(test_log)
-        .status()
-        .map_err(|_| "TRIAL_START")?;
+    let mut command = detached(&binary);
+    command.current_dir(work).stdout(test_log);
+    let checked = ziphap_pc::wait_owned_command(&mut command, Duration::from_secs(10))
+        .await
+        .map_err(|_| "TRIAL_PROCESS")?
+        .ok_or("TRIAL_TIMEOUT")?;
     if !checked.success() {
         return Err(if baseline {
             "BASELINE_NOT_REPRODUCED"
@@ -185,11 +185,11 @@ fn observed_condition() {{
     Ok(())
 }
 
-fn run() -> Result<(), &'static str> {
+async fn run() -> Result<ExitCode, &'static str> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.as_slice() == ["--base"] {
         println!("{}", json!({"base_sha256": digest(SOURCE)}));
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
     let [compiler, root, expected_alias, expected_fact] = args.as_slice() else {
         return Err(
@@ -232,8 +232,22 @@ fn run() -> Result<(), &'static str> {
     for directory in [&workspace, &baseline, &repaired] {
         fs::create_dir(directory).map_err(|_| "ARTIFACT_DIRECTORY")?;
     }
-    verify(&rustc, &baseline, SOURCE, &proposal, true)?;
-    verify(&rustc, &repaired, &patched, &proposal, false)?;
+    let outcome = match verify(&rustc, &baseline, SOURCE, &proposal, true).await {
+        Err(error) => Err(("baseline", error)),
+        Ok(()) => verify(&rustc, &repaired, &patched, &proposal, false)
+            .await
+            .map_err(|error| ("candidate", error)),
+    };
+    if let Err((phase, error)) = outcome {
+        let failure = json!({
+            "status": "failed", "error": error, "phase": phase, "workspace_id": workspace_id,
+            "base_sha256": proposal.base_sha256, "candidate_sha256": digest(&patched)
+        });
+        fs::write(workspace.join("receipt.json"), failure.to_string())
+            .map_err(|_| "ARTIFACT_WRITE")?;
+        eprintln!("{failure}");
+        return Ok(ExitCode::FAILURE);
+    }
     let receipt = json!({
         "status": "verified_trial",
         "base_sha256": proposal.base_sha256,
@@ -249,12 +263,13 @@ fn run() -> Result<(), &'static str> {
         "{}",
         json!({"receipt": receipt, "workspace_id": workspace_id})
     );
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
-fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(code) => code,
         Err(error) => {
             eprintln!("{}", json!({"status": "failed", "error": error}));
             ExitCode::FAILURE

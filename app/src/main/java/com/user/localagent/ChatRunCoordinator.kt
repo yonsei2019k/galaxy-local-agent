@@ -3274,8 +3274,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val repeatScope=when {
             call.name==com.user.localagent.core.ScreenControlToolCatalog.READ->
                 requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.ScreenControlToolCatalog.ACTION}
-            mediaRule->requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.AppBrowserToolCatalog.ACTION&&
-                it.tool!=com.user.localagent.core.AppBrowserToolCatalog.OPEN}
+            mediaRule->{
+                val browser=if(call.name==com.user.localagent.core.PcBrowserToolCatalog.READ)
+                    com.user.localagent.core.PcBrowserToolCatalog else com.user.localagent.core.AppBrowserToolCatalog
+                requestSteps.takeLastWhile {it.tool!=browser.action&&it.tool!=browser.open}
+            }
             else->requestSteps
         }
         val same=repeatScope.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}

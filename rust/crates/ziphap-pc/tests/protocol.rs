@@ -528,6 +528,17 @@ async fn cancellation_kills_process_and_revokes_every_cached_thread_without_repl
 }
 
 #[tokio::test]
+async fn owned_repair_command_stops_at_its_deadline() {
+    let fixture = Fixture::new("unused");
+    let mut command = tokio::process::Command::new(&fixture.config.executable);
+    command.arg("--owned-descendant");
+    let budget = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+    assert!(wait_owned_command(&mut command, budget).await.unwrap().is_none());
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+}
+
+#[tokio::test]
 async fn owned_tree_cancellation_terminates_an_actual_offline_descendant() {
     let f = Fixture::new("descendant");
     let mut client = AppServerClient::spawn(f.config.clone()).await.unwrap();

@@ -13,6 +13,30 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 pub mod headless;
 mod process_tree;
 
+/// Runs a command chosen by the local host with the same process ownership as the provider.
+pub async fn wait_owned_command(
+    command: &mut Command,
+    budget: Duration,
+) -> Result<Option<std::process::ExitStatus>> {
+    command.kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn().map_err(|_| error("PROCESS_START"))?;
+    let mut tree = process_tree::ProcessTree::attach(&child)?;
+    let status = match tokio::time::timeout(budget, child.wait()).await {
+        Ok(status) => status.map(Some).map_err(|_| error("PROCESS_WAIT")),
+        Err(_) => Ok(None),
+    };
+    tree.terminate();
+    // Only the owned process tree is terminated. Don't leave timed-out children running.
+    if !matches!(&status, Ok(Some(_))) {
+        let _ = child.wait().await;
+    }
+    status
+}
+
 pub const MAX_LINE: usize = 256 * 1024;
 const MAX_STREAM: usize = 8 * 1024 * 1024;
 const MAX_CALLS: u32 = 18;

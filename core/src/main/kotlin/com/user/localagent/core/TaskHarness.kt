@@ -265,13 +265,16 @@ object TaskHarness {
         fun refreshedRejectedFile(step:HarnessStep):Boolean = rejectedBeforeEffect(step)&&step.tool=="write_project_file"&&
             steps.drop(steps.indexOf(step)+1).any{it.tool=="read_project_file"&&it.evidence.state==VerificationState.VERIFIED&&it.arguments["path"]==step.arguments["path"]}
         var screenEpoch=0
-        var browserEpoch=0
+        var appBrowserEpoch=0
+        var pcBrowserEpoch=0
         val groups=steps.groupBy { step ->
             if(step.tool==ScreenControlToolCatalog.ACTION)screenEpoch++
-            if(step.tool==AppBrowserToolCatalog.ACTION||step.tool==AppBrowserToolCatalog.OPEN)browserEpoch++
+            if(step.tool==AppBrowserToolCatalog.ACTION||step.tool==AppBrowserToolCatalog.OPEN)appBrowserEpoch++
+            if(step.tool==PcBrowserToolCatalog.ACTION||step.tool==PcBrowserToolCatalog.OPEN)pcBrowserEpoch++
             step.repeatFingerprint to when {
                 step.tool==ScreenControlToolCatalog.READ->screenEpoch
-                BrowserMediaRule.isRuleRead(step.tool,step.arguments)->browserEpoch
+                BrowserMediaRule.isRuleRead(step.tool,step.arguments)->
+                    if(step.tool==PcBrowserToolCatalog.READ)pcBrowserEpoch else appBrowserEpoch
                 else->0
             }
         }
