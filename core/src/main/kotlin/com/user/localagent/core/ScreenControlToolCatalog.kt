@@ -116,4 +116,5 @@ data class ScreenReadEvidence(
     val packageDigest:String,
     val windowId:Int,
     val targets:Map<String,String>,
+    val playbackScopeId:String?=null,
 )

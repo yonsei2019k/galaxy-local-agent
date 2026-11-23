@@ -108,8 +108,9 @@ class ScreenControl(context:Context) {
     private data class PlaybackScope(val request:ScreenObservationWait,val window:Int,val video:List<Rect>,
         val revision:UUID,val browserPageDigest:String?,val headingDigest:String?)
     private data class PlaybackWait(val scope:PlaybackScope,val progress:ScreenPlaybackProgress=ScreenPlaybackProgress(),
-        var approvedAdvance:Pair<String,String>?=null)
-    private data class LessonRead(val next:ScreenLessonControl?,val remaining:Int?,val endEpoch:Long?,val probeStatus:String)
+        var approvedAdvance:Pair<String,String>?=null,val scopeId:String=UUID.randomUUID().toString())
+    private data class LessonRead(val next:ScreenLessonControl?,val remaining:Int?,val endEpoch:Long?,val probeStatus:String,
+        val scopeId:String)
     private data class Observation(val screen:Snapshot,val status:String?=null,val lesson:LessonRead?=null)
 
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult=try {
@@ -153,7 +154,7 @@ class ScreenControl(context:Context) {
             val visualKeys=lastImage?.targets.orEmpty().mapNotNull {target->
                 target.recoveryKey?.let { target.ref to it }
             }
-            if(visualKeys.isEmpty()) observed else observed.copy(targets=observed.targets+visualKeys)
+            observed.copy(targets=observed.targets+visualKeys,playbackScopeId=read?.lesson?.scopeId)
         }
         ToolResult(call.id,true,result,VerificationState.VERIFIED,summary,screenReadEvidence=evidence)
     }catch(error:Throwable){
@@ -232,7 +233,7 @@ class ScreenControl(context:Context) {
                         else->"checking_playback"
                     }
                     lesson=LessonRead(candidate?.takeIf {ready},remaining,
-                        remaining?.let {System.currentTimeMillis()+it*1000L},probeStatus)
+                        remaining?.let {System.currentTimeMillis()+it*1000L},probeStatus,proof.scopeId)
                     if(!ready&&now-lastClockChangeAt>=20_000&&clock?.let {it.elapsed<it.duration}!=false)
                         return Observation(current,"pending",lesson.copy(probeStatus=if(clock==null)"clock_unavailable" else "not_advancing"))
                 }

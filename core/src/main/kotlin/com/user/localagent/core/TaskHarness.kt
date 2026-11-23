@@ -22,6 +22,7 @@ data class StepEvidence(val tool:String,val state:VerificationState,val summary:
         val idPattern="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
         require(continuationId==null||
             (tool in PrivateAnalysisToolCatalog.analysisNames&&continuationId.matches(Regex(idPattern)))||
+            (tool==ScreenControlToolCatalog.READ&&state==VerificationState.VERIFIED&&continuationId.matches(Regex("lesson:$idPattern")))||
             (tool in setOf(GoalToolCatalog.START,GoalToolCatalog.RESUME)&&state==VerificationState.VERIFIED&&continuationId.matches(Regex("goal-run:$idPattern"))))
     }
     val verification:VerificationState get()=state
@@ -187,6 +188,7 @@ object TaskHarness {
                 steps.drop(index+1).none {later->
                     later.tool==step.tool&&later.evidence.state==VerificationState.VERIFIED&&
                         later.evidence.summary==ScreenControlToolCatalog.PLAYBACK_WAIT_READY&&
+                        later.evidence.continuationId==step.evidence.continuationId&&
                         later.arguments- "waitSeconds"==step.arguments- "waitSeconds"
                 }
         })return HarnessDecision.Stop("동영상의 정상 종료와 다음 버튼이 아직 확인되지 않았습니다.")

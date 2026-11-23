@@ -23,6 +23,25 @@ class ScreenObservationWaitTest {
         assertTrue(TaskHarness.beforeStep(goal,listOf(step,step),call) is HarnessDecision.Advance)
         assertTrue(TaskHarness.beforeStep(goal,listOf(step,step,step),call) is HarnessDecision.Stop)
     }
+
+    @Test fun aDifferentAutomaticLessonDoesNotSettleAnOlderWaitWithIdenticalArguments() {
+        val tool=ScreenControlToolCatalog.READ
+        val goal=TaskGoal("Wait for this lesson",listOf("Observe end"),requiredTools=setOf(tool))
+        val args=buildJsonObject {put("requirePlaybackEnd",true)}
+        fun entry(summary:String,scope:String):HarnessStep {
+            val call=ToolCall(scope,tool,args)
+            val result=ToolResult(scope,true,"{}",VerificationState.VERIFIED,summary,
+                screenReadEvidence=ScreenReadEvidence("id","browser",1,emptyMap(),scope))
+            return HarnessStep(call,AnalysisCompletionEvidence.fromResult(call,result))
+        }
+        val first="a1234567-1234-1234-1234-123456789abc"
+        val second="b1234567-1234-1234-1234-123456789abc"
+        val pending=entry(ScreenControlToolCatalog.PLAYBACK_WAIT_PENDING,first)
+        val wrong=entry(ScreenControlToolCatalog.PLAYBACK_WAIT_READY,second)
+        val right=entry(ScreenControlToolCatalog.PLAYBACK_WAIT_READY,first)
+        assertTrue(TaskHarness.decide(goal,listOf(pending,wrong),requestedFinish=true) is HarnessDecision.Stop)
+        assertTrue(TaskHarness.decide(goal,listOf(pending,right),requestedFinish=true) is HarnessDecision.Finish)
+    }
     private val app = "com.android.chrome"
     private val wait = ScreenObservationWait(app,"과정 1강","다음",60)
 
