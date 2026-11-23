@@ -136,12 +136,21 @@ class ScreenControl(context:Context) {
         }
         delay(900) // Let the app render the result before the observation read.
         val after=try {
-            onMain{snapshot(service())}
+            var observed=onMain{snapshot(service())}
+            // A Chrome navigation can still be loading when the accessibility action returns.
+            // Wait briefly for new evidence without replaying the action.
+            repeat(2) {
+                if(observed.id==requested&&action!="type"){
+                    delay(350)
+                    observed=onMain{snapshot(service())}
+                }
+            }
+            observed
         } catch (refused:ScreenRefused) {
             // The effect was already requested. A protected successor screen cannot prove it failed.
             throw IllegalStateException("동작을 요청했지만 동작 후 화면을 확인하지 못했습니다.",refused)
         }
-        return "동작: $action 실행\n\n동작 후 화면:\n"+render(after)
+        return render(after,action,requested!=after.id)
     }
 
     private fun perform(screen:Snapshot,action:String,a:JsonObject) {
@@ -289,7 +298,8 @@ class ScreenControl(context:Context) {
         return Snapshot(packageName,texts,elements,truncated,ScreenReadEvidence(id,packageDigest.hex(),window.id,targetKeys))
     }
 
-    private fun render(screen:Snapshot):String=buildJsonObject {
+    private fun render(screen:Snapshot,action:String?=null,changed:Boolean=false):String=buildJsonObject {
+        if(action!=null){put("lastAction",action);put("screenChanged",changed)}
         put("untrustedScreenData",true);put("packageName",screen.packageName);put("app",appLabel(screen.packageName))
         put("snapshotId",screen.id);put("truncated",screen.truncated)
         put("texts",JsonArray(screen.texts.map(::JsonPrimitive)))

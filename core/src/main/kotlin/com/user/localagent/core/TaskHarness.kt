@@ -249,11 +249,16 @@ object TaskHarness {
         if(steps.zipWithNext().any {(a,b)->
             val timedOutRead = a.evidence.state==VerificationState.FAILED && a.evidence.effectNotApplied &&
                 a.evidence.summary=="read_timeout_no_mutation" && ToolInterruptionPolicy.hasNoMutation(a.tool)
-            a.repeatFingerprint==b.repeatFingerprint && !timedOutRead
+            a.repeatFingerprint==b.repeatFingerprint && !timedOutRead && a.tool!=ScreenControlToolCatalog.READ
         })return "같은 도구와 인자의 연속 실행을 중단했습니다."
         fun refreshedRejectedFile(step:HarnessStep):Boolean = rejectedBeforeEffect(step)&&step.tool=="write_project_file"&&
             steps.drop(steps.indexOf(step)+1).any{it.tool=="read_project_file"&&it.evidence.state==VerificationState.VERIFIED&&it.arguments["path"]==step.arguments["path"]}
-        for(group in steps.groupBy {it.repeatFingerprint}.values){
+        var screenEpoch=0
+        val groups=steps.groupBy { step ->
+            if(step.tool==ScreenControlToolCatalog.ACTION)screenEpoch++
+            step.repeatFingerprint to if(step.tool==ScreenControlToolCatalog.READ)screenEpoch else 0
+        }
+        for(group in groups.values){
             if(group.size>=3||group.count{!refreshedRejectedFile(it)}>=2&&!readOnly(group.first().tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
         }
         return null

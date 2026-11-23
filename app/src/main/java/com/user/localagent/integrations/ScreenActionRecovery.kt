@@ -6,7 +6,6 @@ import com.user.localagent.core.ScreenControlToolCatalog
 import com.user.localagent.core.ScreenReadEvidence
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.VerificationState
-import com.user.localagent.core.compactJsonData
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -54,7 +53,8 @@ internal object ScreenActionRecovery {
         val data=runCatching {Json.parseToJsonElement(current.result.content) as? JsonObject}.getOrNull()?:return null
         val elements=data["elements"] as? JsonArray?:return null
         val selected=elements.singleOrNull {(it as? JsonObject)?.get("ref")==JsonPrimitive(ref)}?:return null
-        return compactJsonData(JsonObject(data+("elements" to JsonArray(listOf(selected)+elements.filterNot {it==selected}))).toString(),1100)
+        return com.user.localagent.core.ScreenObservationData.forModel(
+            JsonObject(data+("elements" to JsonArray(listOf(selected)+elements.filterNot {it==selected}))).toString())
     }
 
     private fun matches(outcomes:List<ObservedToolOutcome>,rejectedIndex:Int,nextIndex:Int,next:ToolCall):Boolean {

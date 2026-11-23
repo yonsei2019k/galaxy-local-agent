@@ -87,8 +87,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private fun reviewKey(call:ToolCall)=call.name+":"+JsonObject(call.arguments.toSortedMap())
     /** The approval names a real scoped record, and its revision must still match at the mutation. */
     /** Typing and commit-like taps need the owner even though navigation taps do not. */
-    suspend fun screenActionNeedsOwner(call:ToolCall):Boolean=(call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION&&
-        com.user.localagent.integrations.ScreenControl(context).review(call).first)||browserFor(call.name)?.review(call)?.first==true
+    suspend fun reviewPhoneScreenAction(call:ToolCall):Pair<Boolean,String>? =
+        if(call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION)
+            com.user.localagent.integrations.ScreenControl(context).review(call)
+        else null
+    suspend fun browserActionNeedsOwner(call:ToolCall):Boolean=browserFor(call.name)?.review(call)?.first==true
     private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context)}
     private val appBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.app(context)}
     private fun browserFor(name:String)=when(name){
@@ -99,7 +102,6 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     suspend fun reviewForAction(call:ToolCall):String? {
         ToolRegistry.validate(call)
         if(call.name=="patch_note")return checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.review(resolveOwnerText(call))
-        if(call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION)return com.user.localagent.integrations.ScreenControl(context).review(call).second
         if(call.name==com.user.localagent.core.PcBrowserToolCatalog.ACTION||call.name==com.user.localagent.core.AppBrowserToolCatalog.ACTION)
             return checkNotNull(browserFor(call.name)).review(call).second
         if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)return requestConnections.reviewForAction(call)

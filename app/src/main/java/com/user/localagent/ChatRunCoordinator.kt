@@ -2505,9 +2505,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             .write(model,options,if(resume==null)user+com.user.localagent.core.ToolUsePolicy.turnReminder(structuredSchema==null)+com.user.localagent.core.RoundBudget.hint(budgetRound,com.user.localagent.core.WorkSegments.TOTAL_ROUNDS)else user,system,history,structuredSchema=structuredSchema,display=display,resume=resume,recoverTruncatedTool=recoverTruncatedTool,exactManagedReview=exactManagedReview)
 
     private fun modelEvidenceResult(call:ToolCall,result:ToolResult):String=when {
-        call.name==com.user.localagent.core.ScreenControlToolCatalog.READ->
+        call.name in com.user.localagent.core.ScreenControlToolCatalog.names&&result.success->
             com.user.localagent.integrations.ScreenActionRecovery.modelRead(observedOutcomes,call)
-                ?:com.user.localagent.core.compactJsonData(result.content,1100)
+                ?:com.user.localagent.core.ScreenObservationData.forModel(result.content)
         call.name=="read_note"&&result.success&&result.verification==VerificationState.VERIFIED->com.user.localagent.notes.NoteReadModelDelivery.modelResult(result.content)
         call.name=="read_project_file"->com.user.localagent.workspace.ProjectReadDelivery.modelResult(result.content)
         call.name in com.user.localagent.core.ProjectStorageToolCatalog.names&&result.success&&result.verification==VerificationState.VERIFIED->
@@ -3257,15 +3257,39 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val screenTool=call.name in com.user.localagent.core.ScreenControlToolCatalog.names
         if(screenTool)
             com.user.localagent.integrations.ScreenControl(context).requireReady()
-        val same=requestSteps.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
+        val repeatScope=if(call.name==com.user.localagent.core.ScreenControlToolCatalog.READ)
+            requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.ScreenControlToolCatalog.ACTION}
+            else requestSteps
+        val same=repeatScope.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         check(same<(if(ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW)2 else 1)){"같은 작업이 반복되어 중단했습니다. 기존 실행 결과를 확인해야 합니다."}
         val traceAttempt=workTraceSession?.attempt(call)
         if(call.name in com.user.localagent.core.LocalSubagentToolCatalog.names)return performLocalSubagent(call,traceAttempt)
         val grants=app.repository.listGrants().map {CapabilityGrant(it.extensionId,it.codeHash,it.toolName,it.scope)}
         val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
         val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
-        val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)||tools.screenActionNeedsOwner(call)
-        val targetReview=tools.reviewForAction(call)
+        var auditOk=false
+        suspend fun commitObserved(observed:ToolResult) {
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
+            requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
+            val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
+            auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
+            persistStepEvidence()
+        }
+        val phoneReview=try {
+            tools.reviewPhoneScreenAction(call)
+        } catch(changed:com.user.localagent.integrations.ScreenControl.SnapshotChanged) {
+            val failure=changed.failure(call.id)
+            commitObserved(failure)
+            return failure
+        } catch(refused:com.user.localagent.integrations.ScreenControl.ScreenRefused) {
+            val failure=ToolResult(call.id,false,refused.message.orEmpty(),VerificationState.FAILED,
+                "화면 접근 거부 · 실행 전 중단",effectNotApplied=true)
+            commitObserved(failure)
+            return failure
+        }
+        val confirmation=CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants)||
+            (phoneReview?.first?:tools.browserActionNeedsOwner(call))
+        val targetReview=phoneReview?.second?:tools.reviewForAction(call)
         var noteOwnerAccepted=false
         var approvedScreenSnapshot:String?=null
         if((confirmation&&!targetConfirmed||call.name=="patch_note")&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
@@ -3310,14 +3334,6 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val recorded=traceAttempt?.let{workTraceSession?.outcome(it,prepared)}==true
             recordOutcomeSafely(call.name,true,"PREPARED · Android 요청 전달 · 실제 화면·저장·발송 미확인",auditAlreadyStored=recorded)
             return prepared
-        }
-        var auditOk=false
-        suspend fun commitObserved(observed:ToolResult) {
-            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
-            requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
-            val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
-            auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
-            persistStepEvidence()
         }
         val result=if(call.name=="patch_note"){
             var interrupted:CancellationException?=null
