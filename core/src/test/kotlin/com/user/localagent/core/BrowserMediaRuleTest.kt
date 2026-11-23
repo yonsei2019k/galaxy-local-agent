@@ -45,12 +45,17 @@ class BrowserMediaRuleTest {
         val call=ToolCall("test",AppBrowserToolCatalog.READ,buildJsonObject {
             put("playbackRule","playing && advancing");put("waitSeconds",9)
         })
-        ToolRegistry.validate(call)
-        assertEquals(9,BrowserMediaRule.from(call)?.waitSeconds)
-        assertThrows(IllegalArgumentException::class.java) {ToolRegistry.validate(call.copy(name=PcBrowserToolCatalog.READ))}
-        assertThrows(IllegalArgumentException::class.java) {AppBrowserToolCatalog.validate(call.copy(
-            arguments=buildJsonObject {put("waitSeconds",9)}
-        ))}
+        for(tool in listOf(AppBrowserToolCatalog.READ,PcBrowserToolCatalog.READ)){
+            val observation=call.copy(name=tool)
+            ToolRegistry.validate(observation)
+            assertEquals(9,BrowserMediaRule.from(observation)?.waitSeconds)
+            assertThrows(IllegalArgumentException::class.java) {ToolRegistry.validate(observation.copy(
+                arguments=buildJsonObject {put("waitSeconds",9)}
+            ))}
+            assertThrows(IllegalArgumentException::class.java) {ToolRegistry.validate(observation.copy(
+                arguments=JsonObject(observation.arguments+("script" to JsonPrimitive("bad")))
+            ))}
+        }
     }
 
     @Test fun theSameObservationCanWaitAcrossBoundedReads() {
