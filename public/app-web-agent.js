@@ -112,6 +112,11 @@ function (request) {
     };
     const dispatch = input => {
       if (input.action === 'observe') {
+        // Detect an owner's password form before collecting any page text or field values.
+        if ([...ownerDocument.querySelectorAll('input[type=password]')].some(visible)) {
+          observed = null;
+          return {url: location.href, loginRequired: true};
+        }
         observed = {id: input.snapshotId, ...collect()};
         return {...observed.page, elements: observed.controls.map(e => e.item),
           truncated: observed.page.truncated || observed.controls.length === maxElements,

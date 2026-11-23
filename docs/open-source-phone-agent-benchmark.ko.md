@@ -17,3 +17,10 @@
 3. **정확한 완료 보고** — 한국어 실제 휴대폰 시나리오에는 짧은 질문과 추가 답변, 결제 전 중단, 정확한 결과 검증을 포함한다. AndroidWorld 점수, 합성 결과, 집합의 실제 휴대폰 결과는 각각 별도 기록한다. 평가용 접근성과 개발 권한을 개인 휴대폰 운영에 추가하지 않는다.
 
 현재 단계는 소스 비교다. 외부 에이전트를 실행하거나 해당 코드를 집합에 반영하지 않았다.
+
+## 2026-11-23 — 로그인 인계와 화면이 달라졌을 때의 복구 비교
+
+- **OpenPhoneUse (MIT, `54a3ef0`)**는 Android 접근성 트리와 이미지를 이용해 다음 행동을 결정하고, 클릭 뒤 실제 화면을 다시 읽는다. `ChatUserGate`는 현재 요청의 ID로만 응답을 받고 요청이 끝나거나 취소되면 확인창을 정리한다. `ScreenWatch`는 모델이 판단하는 중 화면이 달라졌을 때 기존 판단을 중단하고 최신 상태를 넘긴다. 재생 시간처럼 숫자만 달라진 변화는 별도로 처리한다. [ChatUserGate](https://github.com/joungminsung/OpenPhoneUse/blob/54a3ef025dabc8524028506b2cf7204096a8de24/app/src/main/java/com/phoneuse/app/ChatUserGate.kt) · [ScreenWatch](https://github.com/joungminsung/OpenPhoneUse/blob/54a3ef025dabc8524028506b2cf7204096a8de24/app/src/main/java/com/phoneuse/agent/ScreenWatch.kt)
+- **OpenDroid**는 별도의 PC를 전제로 하지 않는 Android 앱이며 화면 읽기와 터치, 재사용 가능한 스킬을 제공한다. **Mobilerun**은 여러 실행 환경에서 Android 관찰·조작을 통합하는 개발용 구성이다. **Open-AutoGLM**의 수동 인계 콜백은 로그인·인증의 전환을 비교하기 좋다. 두 개발용 경로의 ADB나 외부 접근성 서버는 집합 운영 구성을 변경하지 않는다. [OpenDroid](https://github.com/Silung/OpenDroid) · [Mobilerun](https://github.com/droidrun/mobilerun) · [Open-AutoGLM](https://github.com/zai-org/Open-AutoGLM)
+- 실제 참조 앱의 교육 대화는 HTTP 브라우저 인계, HTTPS 로그인 카드, 페이지 전환과 학습시간의 별도 확인을 보여 줬다. 채팅의 보고만으로 이수 여부나 자격 증명의 실제 저장 방식을 확인하지 않았다. 실제 시험에서는 페이지 증거와 사이트의 진도·이수 상태를 별개로 확인한다.
+- 집합의 앱 브라우저는 같은 창에서 사용자가 직접 입력하고, 현재 인계 ID의 ‘로그인했어요’만 받는 짧은 대기를 추가한다. 대기 중 모델 화면 조회를 멈추고, 확인한 뒤 이전 탐색을 반복하지 않은 채 HTTPS의 동일 작업 출처에서 화면을 새로 읽는다. 원본 비밀번호를 저장하는 기능은 이 변경에 포함되지 않는다.

@@ -18,6 +18,7 @@ function fixture() {
     querySelectorAll(selector) {
       if (selector === 'video,audio') return this.nodes.filter(node => ['VIDEO','AUDIO'].includes(node.tagName));
       if (selector === 'iframe,frame') return this.nodes.filter(node => ['IFRAME','FRAME'].includes(node.tagName));
+      if (selector === 'input[type=password]') return this.nodes.filter(node => node.tagName==='INPUT' && node.type==='password');
       return this.nodes.filter(node => !['IFRAME','FRAME'].includes(node.tagName));
     },
   });
@@ -90,6 +91,24 @@ test('reads the timeline of a static muted player without collecting audio or me
   assert.equal(invoke(options).media.status,'observed');
   context.document.nodes.push(Object.assign(new Input('Other','AUDIO'),{currentSrc:media.currentSrc}));
   assert.equal(invoke(options).media.status,'multiple_players');
+  assert.deepEqual(effects,[]);
+});
+
+test('a visible password form returns only authentication metadata', () => {
+  const {context, effects, invoke, Input} = fixture();
+  const user = new Input('', 'INPUT');
+  user.value = 'fixture-account-never-in-snapshot';
+  const secret = new Input('', 'INPUT');
+  secret.type = 'password';
+  secret.value = 'fixture-password-never-in-snapshot';
+  context.document.nodes = [user, secret];
+  const page = invoke({action:'observe',observeMedia:true});
+  assert.equal(page.loginRequired,true);
+  assert.equal(page.elements,undefined);
+  assert.equal(page.text,undefined);
+  assert.equal(JSON.stringify(page).includes(user.value),false);
+  assert.equal(JSON.stringify(page).includes(secret.value),false);
+  assert.equal(invoke({action:'click'}).error,'SNAPSHOT_STALE');
   assert.deepEqual(effects,[]);
 });
 

@@ -9,6 +9,7 @@ import android.webkit.*
 import com.user.localagent.benchmark.RuntimeGate
 import com.user.localagent.core.BrowserNavigationRule
 import com.user.localagent.core.WebAgentPolicy
+import java.net.URI
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,8 +46,17 @@ class AppWebAgent private constructor(private val context:Context) {
     val navigationStatus:StateFlow<NavigationStatus> get()=navigation
     private val presentation=MutableStateFlow<String?>(null)
     val presentedAddress:StateFlow<String?> get()=presentation
+    private val loginWait=MutableStateFlow<Long?>(null)
+    val waitingForOwnerLogin:StateFlow<Long?> get()=loginWait
+    private val credentialScreen=MutableStateFlow(false)
+    val showingCredentialPage:StateFlow<Boolean> get()=credentialScreen
+    private var loginCompletion:CompletableDeferred<Boolean>?=null
+    private var nextLoginId=0L
     fun showBrowser(address:String=""){presentation.value=address}
-    fun closeBrowser(){presentation.value=null}
+    fun closeBrowser(){presentation.value=null;loginCompletion?.complete(false)}
+    fun ownerFinishedBrowserLogin(id:Long){
+        if(loginWait.value==id)loginCompletion?.complete(true)
+    }
     private suspend fun isPresented():Boolean {
         val browser=view()
         fun onScreen()=RuntimeGate.foreground.get()&&browser.isAttachedToWindow&&browser.isShown&&
@@ -194,13 +204,13 @@ class AppWebAgent private constructor(private val context:Context) {
             ?:return fail("PAGE_UNREADABLE")
         val url=value.s("url")
         if(!WebAgentPolicy.urlAllowed(url)){snapshot=null;return buildJsonObject{put("url","");put("blocked",true);put("message","이 페이지는 브라우저 에이전트가 읽지 않습니다.")}}
+        if(value["loginRequired"]==JsonPrimitive(true))return loginHandoff(url)
         val raw=value["elements"]?.jsonArray.orEmpty().map{it.jsonObject}
         val parsed=raw.map{element(it)}
         if(parsed.any{it.editable&&WebAgentPolicy.sensitiveField(it)}){
-            showBrowser(url)
-            val shown=isPresented()
-            return buildJsonObject{put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",shown)}
+            return loginHandoff(url)
         }
+        credentialScreen.value=false
         val elements=raw.zip(parsed).map{(json,e)->
             val sensitive=e.editable&&WebAgentPolicy.sensitiveField(e)
             buildJsonObject{
@@ -225,17 +235,56 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private fun fail(code:String)=buildJsonObject{put("error",code)}
 
+    private suspend fun loginHandoff(url:String):JsonObject {
+        credentialScreen.value=true
+        showBrowser(url)
+        val shown=isPresented()
+        return buildJsonObject{put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",shown)}
+    }
+
+    private fun secureOrigin(url:String?):URI? {
+        if(url==null||!WebAgentPolicy.urlAllowed(url))return null
+        val uri=URI(url)
+        if(!uri.scheme.equals("https",true)||uri.port !in setOf(-1,443))return null
+        return URI("https",null,uri.host.lowercase(),-1,null,null,null)
+    }
+
+    /** Keeps the original open tool alive while the owner uses the site's own login form. */
+    private suspend fun afterOwnerLogin(requestedUrl:String,initial:JsonObject):JsonObject {
+        val requiredOrigin=secureOrigin(requestedUrl)?:return initial
+        val loginOrigin=secureOrigin(view().url)?:return initial
+        val completion=CompletableDeferred<Boolean>()
+        loginCompletion=completion
+        loginWait.value=++nextLoginId
+        try {
+            if(withTimeoutOrNull(45_000){completion.await()}!=true)return initial
+            // Only after the owner is done do we observe the page again. Never replay the open.
+            val currentOrigin=secureOrigin(view().url)?:return initial
+            if(currentOrigin!=requiredOrigin&&currentOrigin!=loginOrigin)return initial
+            settle()
+            val finalOrigin=secureOrigin(view().url)?:return initial
+            if((finalOrigin!=requiredOrigin&&finalOrigin!=loginOrigin)||navigation.value.error!=null||
+                navigation.value.loading)return initial
+            return readPage()
+        } finally {
+            loginCompletion=null
+            loginWait.value=null
+        }
+    }
+
     suspend fun open(url:String,showOnPhone:Boolean=false):JsonObject = guarded{
         if(!WebAgentPolicy.urlAllowed(url))return@guarded fail("URL_NOT_ALLOWED")
         if(showOnPhone)showBrowser(url)
         beginNavigation(url)
         settle()
         val error=navigation.value.error
-        val page=when {
+        var page=when {
             error!=null->fail(error)
             navigation.value.loading->fail("PAGE_TIMEOUT")
             else->readPage()
         }
+        if(showOnPhone&&page["loginRequired"]==JsonPrimitive(true)&&page["phoneBrowserVisible"]==JsonPrimitive(true))
+            page=afterOwnerLogin(url,page)
         if(showOnPhone&&"phoneBrowserVisible" !in page)
             JsonObject(page+("phoneBrowserVisible" to JsonPrimitive(isPresented()))) else page
     }

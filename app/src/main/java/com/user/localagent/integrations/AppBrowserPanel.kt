@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.user.localagent.compute.BrowserAgentSettings
 import kotlinx.coroutines.launch
 
@@ -36,6 +37,8 @@ import kotlinx.coroutines.launch
     val initialAddress=opened?:return
     val busy by agent.active.collectAsState()
     val navigation by agent.navigationStatus.collectAsState()
+    val ownerLogin by agent.waitingForOwnerLogin.collectAsState()
+    val credentialPage by agent.showingCredentialPage.collectAsState()
     val keyboard=LocalSoftwareKeyboardController.current
     val scope=rememberCoroutineScope()
     var address by remember(initialAddress){mutableStateOf(initialAddress)}
@@ -44,7 +47,9 @@ import kotlinx.coroutines.launch
         keyboard?.hide()
         scope.launch {agent.openFromAddress(address)}
     }
-    Dialog(onDismissRequest=agent::closeBrowser,properties=DialogProperties(usePlatformDefaultWidth=false)){
+    Dialog(onDismissRequest=agent::closeBrowser,properties=DialogProperties(
+        usePlatformDefaultWidth=false,
+        securePolicy=if(credentialPage)SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit)){
         Surface(Modifier.fillMaxSize()){
             Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
@@ -68,8 +73,12 @@ import kotlinx.coroutines.launch
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
-                    if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
+                    val loginId=ownerLogin
+                    if(loginId!=null)Button(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
+                    else if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
                 }
+                if(ownerLogin!=null)Text("사이트에서 직접 로그인한 다음 ‘로그인했어요’를 눌러 주세요.",
+                    style=MaterialTheme.typography.bodyMedium)
                 Box(Modifier.weight(1f).fillMaxWidth()){
                     AndroidView(factory={_->agent.view().also{(it.parent as? ViewGroup)?.removeView(it)}},Modifier.fillMaxSize(),
                         onRelease={agent.detach()})
