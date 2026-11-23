@@ -38,11 +38,16 @@ object ScreenControlToolCatalog {
             "action" to Argument("string",true,20,"One of tap, type, scroll, back, home, open_app."),
             "snapshotId" to Argument("string",true,80,"snapshotId from the latest read_screen; a changed screen is refused. home/open_app accept the snapshotId of any read."),
             "ref" to Argument("string",false,12,"Element ref from that read_screen, for tap/type/scroll."),
+            "expectedLabel" to Argument("string",false,120,"Tap requires the exact visible label of the chosen enabled element. Copy it from the same observation."),
+            "targetArea" to Argument("string",false,12,"Tap defaults to content. Use browser_ui only when the owner asked to operate Chrome's own controls, such as tabs."),
             "text" to Argument("string",false,2000,"Text to type. Never passwords, card numbers or verification codes."),
             "direction" to Argument("string",false,10,"scroll direction: forward or backward."),
             "packageName" to Argument("string",false,120,"Package name or app name (e.g. 계산기) to open for open_app.")),
             "Operate the foreground app screen once: tap an element, type text, scroll, go back, go home or open an app. "+
             "Returns the newest screen with current refs. Use it to decide the next action; never reuse a ref from a previous snapshot. " +
+            "Tap requires the exact visible label in expectedLabel. Skip unreadable elements; do not try unrelated buttons to guess. " +
+            "After a tap, check what actually opened and whether it advances the goal before proposing another action. " +
+            "For a task inside the current website, choose content controls and leave Chrome's browser_ui controls alone. " +
             "If screenChanged is false, inspect the screen again before deciding whether any further action is needed. " +
             "A click or changed screen by itself does not prove the requested task finished. "+
             "Typing and send/pay/delete/confirm taps wait for owner approval. Protected screens are refused."))
@@ -55,6 +60,13 @@ object ScreenControlToolCatalog {
         val text=label.lowercase(java.util.Locale.ROOT)
         return commitWords.any{it in text}
     }
+
+    /** A ref proves position; its label must also match the button deliberately chosen by the model. */
+    fun matchesTapLabel(observed:String,expected:String?):Boolean =
+        observed.isNotBlank()&&expected==observed
+
+    fun matchesTapArea(browserUi:Boolean,expectedArea:String?):Boolean =
+        if(browserUi)expectedArea=="browser_ui" else expectedArea==null||expectedArea=="content"
 
     /** Pure validation shared by the executor and approval review. */
     fun validate(call:ToolCall) {

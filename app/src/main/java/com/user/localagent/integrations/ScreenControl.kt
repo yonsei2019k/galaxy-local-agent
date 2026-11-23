@@ -62,7 +62,10 @@ class ScreenControl(context:Context) {
     internal fun requireReady(){setupNeeded()?.let{throw SetupRequired(it)}}
 
     /** Element of a read: ref is its index in a deterministic traversal of the same screen. */
-    private data class Element(val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,val sensitive:Boolean)
+    private data class Element(
+        val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,
+        val sensitive:Boolean,val browserUi:Boolean,
+    )
     private data class Snapshot(val packageName:String,val texts:List<String>,val elements:List<Element>,
         val truncated:Boolean,val evidence:ScreenReadEvidence) {
         val id get()=evidence.snapshotId
@@ -121,6 +124,7 @@ class ScreenControl(context:Context) {
         val screen=snapshotWhenAvailable().also { requireCurrentSnapshot(requested,it.id) }
         val target=call.arguments["ref"]?.jsonPrimitive?.content?.let{ref->screen.elements.firstOrNull{it.ref==ref}}
         val app=appLabel(screen.packageName)
+        if(action=="tap")requireTapTarget(target,call.arguments)
         val needs=action=="type"||(action=="tap"&&target!=null&&ScreenControlToolCatalog.isCommitLabel(target.label))
         return needs to describe(call,app,target?.label)
     }
@@ -184,9 +188,8 @@ class ScreenControl(context:Context) {
         val target=ref?.let{r->screen.elements.firstOrNull{it.ref==r}}
         when(action){
             "tap"->{
-                checkNotNull(target){"요소 $ref 를 찾지 못했습니다."}
-                if(target.sensitive)throw ScreenRefused("보호된 요소는 누르지 않습니다.")
-                check(target.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){"요소를 누르지 못했습니다."}
+                val checked=requireTapTarget(target,a)
+                check(checked.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){"요소를 누르지 못했습니다."}
             }
             "type"->{
                 checkNotNull(target){"입력칸 $ref 를 찾지 못했습니다."}
@@ -200,6 +203,17 @@ class ScreenControl(context:Context) {
                 check(node.performAction(id)){"더 스크롤할 수 없습니다."}
             }
         }
+    }
+
+    private fun requireTapTarget(target:Element?,arguments:JsonObject):Element {
+        val expected=(arguments["expectedLabel"] as? JsonPrimitive)?.takeIf {it.isString}?.content
+        val area=(arguments["targetArea"] as? JsonPrimitive)?.takeIf {it.isString}?.content
+        if(target==null||target.role!=NativeScreenRole.TAP||target.sensitive||
+            !ScreenControlToolCatalog.matchesTapLabel(target.label,expected))
+            throw ScreenRefused("누를 버튼의 실제 이름과 번호가 일치하지 않아 실행하지 않았습니다. 화면을 다시 읽어 같은 요소를 확인하세요.")
+        if(!ScreenControlToolCatalog.matchesTapArea(target.browserUi,area))
+            throw ScreenRefused("웹페이지 안의 버튼과 크롬 자체 조작 버튼을 혼동해 누르지 않았습니다. 현재 페이지를 다시 확인하세요.")
+        return target
     }
 
     /** Accepts a package name or the app's launcher label ("계산기"); only launcher apps, never refused ones. */
@@ -268,11 +282,14 @@ class ScreenControl(context:Context) {
         if(refusedPackage(packageName))throw ScreenRefused("시스템·권한·설치·잠금 화면은 다루지 않습니다.")
         val texts=mutableListOf<String>();val elements=mutableListOf<Element>()
         var visited=0;var truncated=false;var textBudget=6000
-        fun visit(node:AccessibilityNodeInfo,depth:Int,sensitiveAncestor:Boolean) {
+        fun visit(node:AccessibilityNodeInfo,depth:Int,sensitiveAncestor:Boolean,webAncestor:Boolean) {
             if(visited>=600||depth>30){truncated=true;return}
             visited++
             if(!node.isVisibleToUser)return
             val sensitive=sensitiveAncestor||sensitive(node)
+            val webContent=webAncestor||node.className?.toString()=="android.webkit.WebView"
+            val browserUi=packageName=="com.android.chrome"&&!webContent&&
+                node.viewIdResourceName?.startsWith("$packageName:id/")==true
             val label=labelOf(node)
             val actions=node.actionList.map{it.id}.toSet()
             val role=when {
@@ -282,15 +299,17 @@ class ScreenControl(context:Context) {
                 else->null
             }
             if(role!=null&&elements.size<150){
-                val shown=if(node.isPassword)"[보호된 입력칸]" else (label.ifBlank{descendantLabel(node)}).take(120)
-                elements+=Element("e${elements.size+1}",role,shown,node,sensitive||node.isPassword)
+                val shown=if(node.isPassword)"[보호된 입력칸]" else label.ifBlank {
+                    if(role==NativeScreenRole.TAP)singleVisibleButtonLabel(node) else descendantLabel(node)
+                }.take(120)
+                elements+=Element("e${elements.size+1}",role,shown,node,sensitive||node.isPassword,browserUi)
             } else if(label.isNotBlank()&&!node.isPassword&&textBudget>0){
                 val piece=label.take(200);texts+=piece;textBudget-=piece.length
             }
-            for(index in 0 until node.childCount.coerceAtMost(80))node.getChild(index)?.let{visit(it,depth+1,sensitive)}
+            for(index in 0 until node.childCount.coerceAtMost(80))node.getChild(index)?.let{visit(it,depth+1,sensitive,webContent)}
             if(node.childCount>80)truncated=true
         }
-        visit(root,0,false)
+        visit(root,0,false,false)
         if(elements.size>=150||textBudget<=0)truncated=true
         val digest=MessageDigest.getInstance("SHA-256")
         fun hash(value:String)=digest.digest(value.toByteArray(Charsets.UTF_8))
@@ -309,7 +328,7 @@ class ScreenControl(context:Context) {
             val uniqueId=if(Build.VERSION.SDK_INT>=33) node.uniqueId else null
             val resourceId=node.viewIdResourceName
             // Use fixed-width field digests so adjacent identity components cannot alias.
-            for (part in listOf(node.packageName,node.className,resourceId,uniqueId)) {
+            for (part in listOf(node.packageName,node.className,resourceId,uniqueId,element.browserUi)) {
                 identity.update(hash(part?.toString().orEmpty()))
             }
             val target=NativeScreenTarget(element.role,hash(element.label),identity.digest(),bounds.left,bounds.top,
@@ -335,13 +354,31 @@ class ScreenControl(context:Context) {
         put("snapshotId",screen.id);put("truncated",screen.truncated)
         put("texts",JsonArray(screen.texts.map(::JsonPrimitive)))
         put("elements",buildJsonArray{screen.elements.forEach{e->add(buildJsonObject{
-            put("ref",e.ref);put("role",e.role.name.lowercase(Locale.ROOT));put("label",e.label);if(e.sensitive)put("blocked",true)
+            put("ref",e.ref);put("role",e.role.name.lowercase(Locale.ROOT));put("label",e.label)
+            if(e.browserUi)put("targetArea","browser_ui")
+            if(e.sensitive||(e.role==NativeScreenRole.TAP&&e.label.isBlank()))put("blocked",true)
         })}})
     }.toString()
 
     private fun labelOf(node:AccessibilityNodeInfo):String=
         listOfNotNull(node.text?.toString(),node.contentDescription?.toString(),node.hintText?.toString())
             .firstOrNull{it.isNotBlank()}?.replace(Regex("\\s+")," ")?.trim().orEmpty()
+    private fun singleVisibleButtonLabel(node:AccessibilityNodeInfo):String {
+        val labels=linkedSetOf<String>()
+        fun collect(parent:AccessibilityNodeInfo,depth:Int){
+            if(depth==4||labels.size>1)return
+            for(i in 0 until parent.childCount.coerceAtMost(12)){
+                val child=parent.getChild(i)?:continue
+                if(!child.isVisibleToUser||child.isClickable||child.isEditable||sensitive(child))continue
+                val label=labelOf(child)
+                if(label.isNotBlank())labels+=label else collect(child,depth+1)
+                if(labels.size>1)return
+            }
+        }
+        collect(node,0)
+        return labels.singleOrNull().orEmpty()
+    }
+
     private fun descendantLabel(node:AccessibilityNodeInfo,depth:Int=0):String {
         if(depth>4)return ""
         for(i in 0 until node.childCount.coerceAtMost(12)){

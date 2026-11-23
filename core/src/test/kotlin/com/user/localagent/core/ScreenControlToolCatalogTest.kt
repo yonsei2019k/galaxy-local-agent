@@ -28,6 +28,22 @@ class ScreenControlToolCatalogTest {
         assertThrows(IllegalArgumentException::class.java){ScreenControlToolCatalog.validate(call("action" to "type","snapshotId" to "s","ref" to "e2","text" to "4111 1111 1111 1111"))}
         ScreenControlToolCatalog.validate(call("action" to "type","snapshotId" to "s","ref" to "e2","text" to "010-1234-5678 내일 3시 회의"))
     }
+    @Test fun tapMustMatchTheExactButtonLabelInTheSameObservation(){
+        assertTrue(ScreenControlToolCatalog.matchesTapLabel("학습진행하기","학습진행하기"))
+        assertFalse(ScreenControlToolCatalog.matchesTapLabel("공지사항","학습진행하기"))
+        assertFalse(ScreenControlToolCatalog.matchesTapLabel("학습진행하기",null))
+        assertFalse(ScreenControlToolCatalog.matchesTapLabel("",""))
+    }
+
+    @Test fun pageTapCannotSelectChromeControlsByDefault(){
+        assertTrue(ScreenControlToolCatalog.matchesTapArea(false,null))
+        assertTrue(ScreenControlToolCatalog.matchesTapArea(false,"content"))
+        assertFalse(ScreenControlToolCatalog.matchesTapArea(true,null))
+        assertFalse(ScreenControlToolCatalog.matchesTapArea(true,"content"))
+        assertTrue(ScreenControlToolCatalog.matchesTapArea(true,"browser_ui"))
+        assertFalse(ScreenControlToolCatalog.matchesTapArea(false,"browser_ui"))
+    }
+
     @Test fun commitLikeLabelsNeedOwnerReview(){
         listOf("보내기","결제하기","주문하기","삭제","Send","Confirm").forEach{assertTrue(it,ScreenControlToolCatalog.isCommitLabel(it))}
         listOf("검색","메뉴","7","더보기","뒤로").forEach{assertFalse(it,ScreenControlToolCatalog.isCommitLabel(it))}
