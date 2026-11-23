@@ -259,19 +259,29 @@ object TaskHarness {
         if(steps.zipWithNext().any {(a,b)->
             val timedOutRead = a.evidence.state==VerificationState.FAILED && a.evidence.effectNotApplied &&
                 a.evidence.summary=="read_timeout_no_mutation" && ToolInterruptionPolicy.hasNoMutation(a.tool)
-            a.repeatFingerprint==b.repeatFingerprint && !timedOutRead && a.tool!=ScreenControlToolCatalog.READ
+            a.repeatFingerprint==b.repeatFingerprint && !timedOutRead && a.tool!=ScreenControlToolCatalog.READ&&
+                !BrowserMediaRule.isRuleRead(a.tool,a.arguments)
         })return "같은 도구와 인자의 연속 실행을 중단했습니다."
         fun refreshedRejectedFile(step:HarnessStep):Boolean = rejectedBeforeEffect(step)&&step.tool=="write_project_file"&&
             steps.drop(steps.indexOf(step)+1).any{it.tool=="read_project_file"&&it.evidence.state==VerificationState.VERIFIED&&it.arguments["path"]==step.arguments["path"]}
         var screenEpoch=0
+        var browserEpoch=0
         val groups=steps.groupBy { step ->
             if(step.tool==ScreenControlToolCatalog.ACTION)screenEpoch++
-            step.repeatFingerprint to if(step.tool==ScreenControlToolCatalog.READ)screenEpoch else 0
+            if(step.tool==AppBrowserToolCatalog.ACTION||step.tool==AppBrowserToolCatalog.OPEN)browserEpoch++
+            step.repeatFingerprint to when {
+                step.tool==ScreenControlToolCatalog.READ->screenEpoch
+                BrowserMediaRule.isRuleRead(step.tool,step.arguments)->browserEpoch
+                else->0
+            }
         }
         for(group in groups.values){
             val first=group.first()
-            val limit=if(ScreenControlToolCatalog.isPlaybackRead(first.tool,first.arguments))
-                ScreenControlToolCatalog.PLAYBACK_WAIT_REPEAT_LIMIT else 2
+            val limit=when {
+                ScreenControlToolCatalog.isPlaybackRead(first.tool,first.arguments)->ScreenControlToolCatalog.PLAYBACK_WAIT_REPEAT_LIMIT
+                BrowserMediaRule.isRuleRead(first.tool,first.arguments)->BrowserMediaRule.REPEAT_LIMIT
+                else->2
+            }
             if(group.size>limit||group.count{!refreshedRejectedFile(it)}>=2&&!readOnly(first.tool))return "같은 요청의 반복 또는 중복 변경을 중단했습니다."
         }
         return null

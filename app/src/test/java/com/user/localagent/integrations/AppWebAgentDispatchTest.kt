@@ -7,6 +7,8 @@ import com.user.localagent.core.ToolCall
 import com.user.localagent.core.VerificationState
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.putJsonArray
@@ -224,6 +226,35 @@ class AppWebAgentDispatchTest {
 
     private val ruleSource="https://fixture.example.test/list"
     private val ruleDestination="https://fixture.example.test/details"
+
+    @Test fun aRejectedMediaProgramCanBeRewrittenAndRunAsReadOnly()=runBlocking {
+        var reads=0
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,body->
+            assertEquals("read",op)
+            assertEquals(JsonPrimitive(true),body["observeMedia"])
+            reads++
+            buildJsonObject {
+                put("snapshotId","s$reads");put("url","https://fixture.example.test/media")
+                put("text","Static slide")
+                put("media",buildJsonObject {
+                    put("status","observed");put("playerId","${"a".repeat(32)}:1");put("epoch",0)
+                    put("positionMs",reads*1000);put("durationMs",12000);put("paused",false)
+                    put("seeking",false);put("ended",false);put("readyState",4);put("rate",1)
+                })
+            }
+        }
+        fun observe(expression:String)=ToolCall("media",AppBrowserToolCatalog.READ,buildJsonObject {
+            put("playbackRule",expression);put("waitSeconds",5)
+        })
+        assertTrue(tools.execute(observe("playing || window.play()")).effectNotApplied)
+        assertEquals(0,reads)
+        val result=tools.execute(observe("playing && advancing && !buffering"))
+        val evidence=Json.parseToJsonElement(result.content).jsonObject.getValue("playbackEvidence").jsonObject
+        assertEquals(JsonPrimitive("playing"),evidence["playbackStatus"])
+        assertEquals(JsonPrimitive("matched"),evidence["mediaRuleResult"])
+        assertTrue(reads>=2)
+        assertFalse(result.content.contains("playerId"))
+    }
 
     private fun ruleClick()=ToolCall("rule",AppBrowserToolCatalog.ACTION,buildJsonObject {
         put("action","click");put("snapshotId","snapshot");put("ref","e1")

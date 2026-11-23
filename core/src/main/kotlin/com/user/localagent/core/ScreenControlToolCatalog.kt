@@ -41,6 +41,7 @@ object ScreenControlToolCatalog {
             "Ask only if the target genuinely cannot be determined, the next step needs the owner, or an attempted effect is still uncertain. " +
             "If an expected visible control is missing, call read_screen with inspectImage=true. Pixel-derived controls appear as ordinary exact refs with source=image. " +
             "For video lessons, use the visible Play control once when needed on each new page and look for evidence of actual playback. " +
+            "A static frame and silence tell you nothing about playback. Use advancing clock evidence; if the clock cannot be read and the same player is already in the ZipHap browser, use its playbackRule media observer. Do not restart uncertain playback. " +
             "For video, wait with requirePlaybackEnd=true so an already enabled Next button cannot be used as proof of playback. A pending or context_changed wait is not completion. " +
             "The phone estimates the next check from observed playback. If pending, repeat the bounded observation without clicking Play or Next. When ready use the returned nextLessonControl on the same snapshot. " +
             "Advance only from a fresh enabled result on that lesson, and verify the site's final lesson/course status. Do not seek past playback.",100_000),

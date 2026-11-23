@@ -63,11 +63,37 @@ function (request) {
   if (!Object.prototype.hasOwnProperty.call(ownerDocument, request.key)) {
     if (request.action !== 'observe') return fail('SNAPSHOT_STALE');
     let observed;
+    const mediaPlayers = new WeakMap();
+    let nextMediaId = 0;
+    const mediaEvidence = () => {
+      const candidates = [...ownerDocument.querySelectorAll('video,audio')].filter(node =>
+        node instanceof HTMLMediaElement && node.isConnected &&
+        (node.tagName.toLowerCase() === 'audio' || visible(node)) && Boolean(node.currentSrc));
+      if (candidates.length !== 1) return {status: candidates.length ? 'multiple_players' : 'player_unavailable'};
+      const player = candidates[0];
+      let identity = mediaPlayers.get(player);
+      if (!identity) {
+        identity = {id: request.snapshotId + ':' + ++nextMediaId, epoch: 0, source: player.currentSrc};
+        for (const event of ['seeking', 'emptied', 'loadstart'])
+          player.addEventListener(event, () => { identity.epoch++; });
+        mediaPlayers.set(player, identity);
+      }
+      if (identity.source !== player.currentSrc) {
+        identity.epoch++;
+        identity.source = player.currentSrc;
+      }
+      const millis = value => Number.isFinite(value) && value >= 0 && value <= 86400 ? Math.round(value * 1000) : null;
+      return {status: 'observed', playerId: identity.id, epoch: identity.epoch,
+        positionMs: millis(player.currentTime), durationMs: millis(player.duration),
+        paused: player.paused, ended: player.ended, seeking: player.seeking, readyState: player.readyState,
+        rate: Number.isFinite(player.playbackRate) ? player.playbackRate : null};
+    };
     const dispatch = input => {
       if (input.action === 'observe') {
         observed = {id: input.snapshotId, ...collect()};
         return {...observed.page, elements: observed.controls.map(e => e.item),
-          truncated: observed.page.truncated || observed.controls.length === maxElements};
+          truncated: observed.page.truncated || observed.controls.length === maxElements,
+          ...(input.observeMedia ? {media: mediaEvidence()} : {})};
       }
       const expected = observed;
       if (!expected || expected.id !== input.snapshotId) return fail('SNAPSHOT_STALE');

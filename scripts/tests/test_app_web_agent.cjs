@@ -13,7 +13,7 @@ function fixture() {
     nodes: [],
     title: 'Fixture',
     body: {innerText: 'Synthetic details'},
-    querySelectorAll() { return this.nodes; },
+    querySelectorAll(selector) { return selector === 'video,audio' ? this.nodes.filter(node => ['VIDEO','AUDIO'].includes(node.tagName)) : this.nodes; },
   });
   const context = vm.createContext({
     document: makeDocument(), location, innerHeight: 600,
@@ -31,6 +31,7 @@ function fixture() {
       this.isConnected = true;
       this.ownerDocument = context.document;
       this.attrs = {};
+      this.listeners = {};
       this._value = '';
     }
     getAttribute(name) { return this.attrs[name] ?? null; }
@@ -43,10 +44,12 @@ function fixture() {
     focus() { this.onFocus?.(); }
     click() { effects.push(this); }
     dispatchEvent(event) { effects.push(event.type); this.onEvent?.(event); }
+    addEventListener(name, listener) { this.listeners[name] = listener; }
     get value() { return this._value; }
     set value(value) { this._value = value; }
   }
   context.HTMLInputElement = context.HTMLTextAreaElement = Input;
+  context.HTMLMediaElement = Input;
   function invoke(input) {
     return vm.runInContext('(' + source + ')(' + JSON.stringify({
       key: 'fixture-binding', snapshotId: 'snapshot-1', ref: 'e1', approvedSnapshot: null,
@@ -57,6 +60,31 @@ function fixture() {
   context.document.nodes = [button];
   return {context, effects, button, invoke, Input, makeDocument};
 }
+
+test('reads the timeline of a static muted player without collecting audio or media URLs', () => {
+  const {context, effects, invoke, Input} = fixture();
+  const media = new Input('Static lesson','VIDEO');
+  Object.assign(media,{currentSrc:'https://private.example.test/secret-stream',currentTime:1,
+    duration:60,paused:false,ended:false,seeking:false,readyState:4,playbackRate:1,muted:true,volume:0});
+  context.document.nodes=[media];
+  const options = {action:'observe', observeMedia:true, snapshotId:'a'.repeat(32)};
+  const first = invoke(options).media;
+  media.currentTime=3;
+  const second = invoke(options).media;
+  assert.equal(first.playerId,second.playerId);
+  assert.equal(second.positionMs-first.positionMs,2000);
+  assert.equal(second.paused,false);
+  assert.equal(JSON.stringify(second).includes(media.currentSrc),false);
+  assert.equal('muted' in second,false);
+  media.listeners.seeking();
+  assert.equal(invoke(options).media.epoch,second.epoch+1);
+  media.tagName='AUDIO';
+  media.hidden=true;
+  assert.equal(invoke(options).media.status,'observed');
+  context.document.nodes.push(Object.assign(new Input('Other','AUDIO'),{currentSrc:media.currentSrc}));
+  assert.equal(invoke(options).media.status,'multiple_players');
+  assert.deepEqual(effects,[]);
+});
 
 test('a navigation rule follows only the exact observed link and cannot replay it', () => {
   const {context, effects, invoke, Input} = fixture();

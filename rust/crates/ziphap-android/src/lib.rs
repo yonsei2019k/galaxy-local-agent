@@ -21,6 +21,7 @@ pub fn native_public_page_interstitial(title: String, text: String) -> bool {
 
 mod screen_snapshot;
 mod browser_navigation;
+mod media_rule;
 
 /// Periodic foreground rechecks are still bounded by the confirmed playback observation window.
 #[uniffi::export]

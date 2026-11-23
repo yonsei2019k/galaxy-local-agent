@@ -3270,11 +3270,17 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val screenTool=call.name in com.user.localagent.core.ScreenControlToolCatalog.names
         if(screenTool)
             com.user.localagent.integrations.ScreenControl(context).requireReady()
-        val repeatScope=if(call.name==com.user.localagent.core.ScreenControlToolCatalog.READ)
-            requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.ScreenControlToolCatalog.ACTION}
-            else requestSteps
+        val mediaRule=com.user.localagent.core.BrowserMediaRule.isRuleRead(call.name,call.arguments)
+        val repeatScope=when {
+            call.name==com.user.localagent.core.ScreenControlToolCatalog.READ->
+                requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.ScreenControlToolCatalog.ACTION}
+            mediaRule->requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.AppBrowserToolCatalog.ACTION&&
+                it.tool!=com.user.localagent.core.AppBrowserToolCatalog.OPEN}
+            else->requestSteps
+        }
         val same=repeatScope.count {it.tool==call.name&&it.arguments==call.arguments&&!(it.evidence.state==VerificationState.FAILED&&it.evidence.effectNotApplied&&it.tool in setOf("update_note","update_reminder","write_project_file"))}
         val repeatLimit=when {
+            mediaRule->com.user.localagent.core.BrowserMediaRule.REPEAT_LIMIT
             com.user.localagent.core.ScreenControlToolCatalog.isPlaybackRead(call.name,call.arguments)->
                 com.user.localagent.core.ScreenControlToolCatalog.PLAYBACK_WAIT_REPEAT_LIMIT
             ToolRegistry.definitions.getValue(call.name).risk==com.user.localagent.core.Risk.LOW->2

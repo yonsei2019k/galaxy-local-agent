@@ -9,7 +9,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import java.net.URI
+import java.util.Locale
 import uniffi.ziphap_android.nativeBrowserNavigationTarget
+import uniffi.ziphap_android.nativeEvaluateMediaRule
+import uniffi.ziphap_android.nativeLessonProbeDelayMs
+import uniffi.ziphap_android.NativeMediaFacts
+import uniffi.ziphap_android.NativeMediaRuleResult
 
 /** Owner switch per browser: on by default (each browser profile starts with no logins); turning it off persists. */
 class BrowserAgentSettings private constructor(context:Context,name:String) {
@@ -53,7 +58,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val web=com.user.localagent.integrations.AppWebAgent.get(context)
             when(operation){
                 "open"->web.open(body.getValue("url").jsonPrimitive.content)
-                "read"->web.read()
+                "read"->web.read(body["observeMedia"]==JsonPrimitive(true))
                 else->web.act(body,body[APP_APPROVED_SNAPSHOT]?.jsonPrimitive?.contentOrNull)
             }
         }
@@ -65,6 +70,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private var recoveredTarget:String?=null
     private var ruleRecoveryBlocked=false
     private var ruleEffectUncertain=false
+    private data class MediaWatch(val url:String,val player:String,val epoch:Int,val progress:BrowserMediaProgress)
+    private var mediaWatch:MediaWatch?=null
 
     fun review(call:ToolCall):Pair<Boolean,String?> {
         if(call.name!=catalog.action)return false to null
@@ -95,6 +102,12 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         verifyRuleAccess:suspend ()->Unit={}):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
+        if(catalog==AppBrowserToolCatalog&&call.name==catalog.read) {
+            BrowserMediaRule.from(call)?.let { rule->
+                if(recoveredTarget!=null)return refused(call,"RULE_SOURCE_CHANGED")
+                return observeMedia(call,rule,verifyRuleAccess)
+            }
+        }
         if(call.name==catalog.action&&ruleEffectUncertain)return refused(call,"RULE_EFFECT_PENDING")
         if(call.name==catalog.action&&recoveredTarget!=null)return refused(call,"SNAPSHOT_STALE")
         if(catalog==AppBrowserToolCatalog&&call.name==catalog.action) {
@@ -124,6 +137,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         if(operation=="open"){
             last=null
             lastPage=null
+            mediaWatch=null
             recoveredTarget=null
             initialOrigin=origin(body.getValue("url").jsonPrimitive.content)
         }
@@ -264,6 +278,83 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             VerificationState.UNVERIFIED,"페이지 이동 후 결과 미확인 · 같은 동작을 반복하지 않음")
     }
 
+    private suspend fun observeMedia(call:ToolCall,rule:BrowserMediaRule,verifyAccess:suspend ()->Unit):ToolResult {
+        val undefined=NativeMediaFacts(null,null,null,null,null,null,null)
+        if(nativeEvaluateMediaRule(rule.expression,undefined)==NativeMediaRuleResult.INVALID)
+            return refused(call,"MEDIA_RULE_INVALID")
+        fun nowMs()=System.nanoTime()/1_000_000
+        val deadline=nowMs()+rule.waitSeconds*1_000L
+        var bound:MediaWatch?=null
+        var lastResult:ToolResult?=null
+        while(true) {
+            currentCoroutineContext().ensureActive()
+            verifyAccess()
+            check(enabled()){"브라우저 사용이 중지됐습니다."}
+            val left=deadline-nowMs()
+            if(left<=0)return lastResult?:mediaResult(call,null,"observation_timeout")
+            val page=withTimeoutOrNull(minOf(4_000L,left)) {
+                backend("read",buildJsonObject {put("observeMedia",true)})
+            }?:return mediaResult(call,null,"observation_timeout")
+            verifyAccess()
+            if(!enabled())return refused(call,"RULE_SOURCE_CHANGED")
+            if(page["loginRequired"]==JsonPrimitive(true))return authenticationRequired(call)
+            if(!rulePage(page))return mediaResult(call,null,"page_unavailable")
+            val media=page["media"] as? JsonObject
+            val sample=media?.let(BrowserMediaSample::from)
+            if(sample==null){
+                val status=media?.string("status")?.takeIf {it in setOf("multiple_players","player_unavailable")}
+                mediaWatch=null
+                remember(page)
+                return mediaResult(call,page,status?:"player_unavailable")
+            }
+            val url=page.string("url")
+            fun MediaWatch.matches()=this.url==url&&player==sample.playerId&&epoch==sample.epoch
+            if(bound!=null&&!bound.matches()) {
+                mediaWatch=null
+                return mediaResult(call,null,"player_changed")
+            }
+            val watch=bound?:mediaWatch?.takeIf {it.matches()}?:MediaWatch(url,sample.playerId,sample.epoch,BrowserMediaProgress())
+            bound=watch
+            mediaWatch=watch
+            val reading=watch.progress.observe(sample,nowMs())
+            val status=reading.status
+            val facts=NativeMediaFacts(
+                if(status==BrowserMediaStatus.CHECKING)null else status==BrowserMediaStatus.PLAYING,
+                if(sample.ended&&status!=BrowserMediaStatus.ENDED)null else status==BrowserMediaStatus.ENDED,
+                sample.paused,sample.readyState<3&&!sample.paused&&!sample.ended&&!sample.seeking&&reading.advancing!=true,
+                sample.seeking,reading.advancing,sample.durationMs!=null,
+            )
+            val result=nativeEvaluateMediaRule(rule.expression,facts)
+            val remainingBudget=deadline-nowMs()
+            remember(page)
+            lastResult=mediaResult(call,page,status.name.lowercase(Locale.ROOT),reading,result)
+            if(result==NativeMediaRuleResult.MATCHED||status in setOf(BrowserMediaStatus.ENDED,
+                    BrowserMediaStatus.PAUSED,BrowserMediaStatus.SEEKING)||remainingBudget<=0||
+                sample.ended&&status==BrowserMediaStatus.CHECKING){
+                return lastResult
+            }
+            delay(nativeLessonProbeDelayMs(reading.remainingSeconds?.toUInt(),remainingBudget.toUInt()).toLong())
+        }
+    }
+
+    private fun mediaResult(call:ToolCall,page:JsonObject?,status:String,reading:BrowserMediaReading?=null,
+        ruleResult:NativeMediaRuleResult=NativeMediaRuleResult.UNKNOWN):ToolResult {
+        val evidence=buildJsonObject {
+            put("playbackStatus",status)
+            put("mediaRuleResult",ruleResult.name.lowercase(Locale.ROOT))
+            reading?.let {
+                put("positionMs",it.sample.positionMs)
+                it.sample.durationMs?.let {duration->put("durationMs",duration)}
+                it.remainingSeconds?.let {seconds->
+                    put("remainingPlaybackSeconds",seconds)
+                    put("estimatedEndEpochMillis",System.currentTimeMillis()+seconds*1000L)
+                }
+            }
+        }
+        val result=JsonObject(page.orEmpty()+("playbackEvidence" to evidence))
+        return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,"브라우저 재생 상태 관찰 · $status")
+    }
+
     private suspend fun recoverPublicPage(call:ToolCall,url:String,pcFallback:BrowserBackend?):ToolResult? {
         if(pcFallback==null)return null
         val recovered=try {
@@ -331,6 +422,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "ACTION_OUTCOME_UNKNOWN"->"동작이 실행됐는지 확인되지 않았습니다. 다시 실행하기 전에 페이지에서 결과를 확인하세요."
         "RULE_SOURCE_CHANGED","RULE_LINK_UNPROVEN"->"같은 링크와 새 확인 문구를 증명하지 못해 이동하지 않았습니다. 현재 페이지를 다시 읽어 주세요."
         "RULE_EFFECT_PENDING"->"앞선 동작의 결과를 먼저 읽어 확인해 주세요."
+        "MEDIA_RULE_INVALID"->"허용된 재생 상태와 논리 연산자만 사용해 읽기 조건을 다시 작성하세요."
         else->"브라우저 요청이 거부됐습니다."
     }
 
@@ -347,7 +439,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","blocked","message","navigationRuleStatus")
+        listOf("playbackEvidence","snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","blocked","message","navigationRuleStatus")
             .forEach{key->result[key]?.let{put(key,it)}}
         put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))
