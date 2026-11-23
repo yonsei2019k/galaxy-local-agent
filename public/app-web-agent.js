@@ -19,6 +19,20 @@ function (request) {
       r.bottom > 0 && r.top < view.innerHeight * 3;
   };
 
+  // Check that a human pointer would reach this control in the current viewport.
+  const receivesClick = node => {
+    if (node.closest('[inert],[aria-disabled=true]')) return false;
+    const rect = node.getBoundingClientRect();
+    const view = ownerDocument.defaultView;
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    const right = Math.min(view.innerWidth, rect.right);
+    const bottom = Math.min(view.innerHeight, rect.bottom);
+    if (right - left <= 1 || bottom - top <= 1) return false;
+    const hit = ownerDocument.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+    return hit !== null && node.contains(hit);
+  };
+
   const describe = (node, ref) => {
     const tag = node.tagName.toLowerCase();
     const form = node.form || null;
@@ -152,14 +166,15 @@ function (request) {
         sameControl(control, describe(e, input.ref));
       switch (input.action) {
         case 'click':
+          e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+          if (!stillCurrent()) return fail('SNAPSHOT_STALE');
+          if (!receivesClick(e)) return fail('ELEMENT_OBSCURED');
           if (input.ruleHref !== null && input.ruleHref !== undefined) {
-            if (!stillCurrent() || control.item.ruleHref !== input.ruleHref)
+            if (control.item.ruleHref !== input.ruleHref)
               return fail('SNAPSHOT_STALE');
             location.assign(input.ruleHref);
             break;
           }
-          e.scrollIntoView({block:'center'});
-          if (!stillCurrent()) return fail('SNAPSHOT_STALE');
           e.click();
           break;
         case 'type': {

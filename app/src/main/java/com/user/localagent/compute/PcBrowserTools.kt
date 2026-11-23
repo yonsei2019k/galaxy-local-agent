@@ -177,7 +177,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 return ToolResult(call.id,false,buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),
                     VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
             }
-            if(error=="SNAPSHOT_STALE"){last=null;lastPage=null}
+            if(error in setOf("SNAPSHOT_STALE","ELEMENT_OBSCURED")){last=null;lastPage=null}
             return refused(call,error,(result["phoneBrowserVisible"] as? JsonPrimitive)?.booleanOrNull)
         }
         remember(result)
@@ -437,6 +437,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "FIELD_NOT_ALLOWED","TEXT_NOT_ALLOWED"->"로그인·결제·인증은 휴대폰에서 소유자가 직접 진행해야 합니다."
         "URL_NOT_ALLOWED"->"공개 http(s) 웹페이지만 열 수 있습니다."
         "APPROVAL_MISMATCH"->"승인한 대상과 현재 페이지가 다릅니다. 다시 읽고 다시 요청하세요."
+        "ELEMENT_OBSCURED"->"다른 화면 요소가 버튼을 가리고 있거나 버튼을 누를 수 없는 상태입니다. 페이지를 다시 읽고 팝업이나 가림 상태를 확인하세요."
         "ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"->"그 요소를 사용할 수 없습니다. 다시 읽어 ref와 선택지를 확인하세요."
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
         "PAGE_UNREACHABLE","HTTP_ERROR"->"사이트가 응답하지 않습니다. 주소나 연결을 확인하세요."

@@ -81,6 +81,12 @@ jobs:
           python scripts/build-react-ui.py --self-test
           node --test scripts/tests/test_app_web_agent.cjs
           python scripts/build-react-ui.py --ci-tests
+      - name: Test browser actions in headless Chromium
+        working-directory: scripts/browser-validation
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install chromium --only-shell --with-deps
+          npm test
       - name: Install pinned Android SDK
         shell: bash
         run: |

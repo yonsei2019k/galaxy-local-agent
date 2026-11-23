@@ -9,9 +9,10 @@ const source = fs.readFileSync(path.join(__dirname, '../../public/app-web-agent.
 function fixture() {
   const effects = [];
   const location = {href: 'https://fixture.example.test/details', assign(url) { effects.push(url); }};
-  const view = {innerHeight: 600, getComputedStyle: node => ({display: node.hidden ? 'none' : 'block', visibility: 'visible'})};
+  const view = {innerWidth: 800, innerHeight: 600, getComputedStyle: node => ({display: node.hidden ? 'none' : 'block', visibility: 'visible'})};
   const makeDocument = () => ({
     nodes: [],
+    elementFromPoint() { return this.nodes[0]; },
     title: 'Fixture',
     defaultView: view,
     body: {innerText: 'Synthetic details'},
@@ -46,7 +47,8 @@ function fixture() {
     closest(tag) { return tag === 'form' ? this.enclosingForm ?? null : null; }
     matches(query) { return query.includes(':disabled') ? !!this.disabled : !this.noLongerControl; }
     getRootNode() { return this.isConnected ? this.ownerDocument : this; }
-    getBoundingClientRect() { return {width: 80, height: 25, top: 10, bottom: 35}; }
+    getBoundingClientRect() { return {width: 80, height: 25, left: 10, right: 90, top: 10, bottom: 35}; }
+    contains(node) { return node === this; }
     scrollIntoView() { this.onScroll?.(); }
     focus() { this.onFocus?.(); }
     click() { effects.push(this); }

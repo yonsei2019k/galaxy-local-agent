@@ -178,6 +178,11 @@ class AppWebAgentDispatchTest {
         }
         val call=click(AppBrowserToolCatalog.ACTION)
         assertTrue(tools.execute(call).effectNotApplied)
+        code="ELEMENT_OBSCURED"
+        val obscured=tools.execute(call)
+        assertTrue(obscured.effectNotApplied)
+        assertFalse(obscured.success)
+        assertTrue(obscured.content.contains("페이지를 다시 읽고"))
         code="ACTION_OUTCOME_UNKNOWN"
         val unknown=tools.execute(call)
         assertFalse(unknown.effectNotApplied)

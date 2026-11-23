@@ -340,7 +340,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 arguments["ruleHref"]?.let {put("ruleHref",it)}
             })
             val refusal=result?.s("error")
-            if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"))
+            if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","ELEMENT_OBSCURED","OPTION_UNKNOWN"))
                 return@guarded fail(checkNotNull(refusal))
             if(result?.get("performed")!=JsonPrimitive(true))return@guarded fail("ACTION_OUTCOME_UNKNOWN")
             settle()

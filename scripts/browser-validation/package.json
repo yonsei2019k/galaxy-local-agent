@@ -1,0 +1,11 @@
+{
+  "name": "ziphap-browser-validation",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test phone-browser.test.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}
