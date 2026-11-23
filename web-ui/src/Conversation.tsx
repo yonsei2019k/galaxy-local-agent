@@ -141,7 +141,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
   const empty = messages.length === 0 && tasks.length === 0
   const loading = connected && !snapshot?.ready
-  const staff = snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
+  const staff = snapshot?.singleConversation ? undefined : snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
 
   const scrollToEnd = useCallback(() => {
     if (view.current) view.current.scrollTop = view.current.scrollHeight

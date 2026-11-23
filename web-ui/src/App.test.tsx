@@ -77,6 +77,15 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('keeps only the main conversation with no room switcher or collaborator chat', () => {
+    mount()
+    snapshot({ ...base, singleConversation: true, staffRooms: base.threads })
+    expect(host.querySelectorAll('[aria-label="직원 채팅방"],[aria-label="메인 채팅"],[aria-label="외부 협업"]')).toHaveLength(0)
+    expect(host.textContent).not.toContain('협력사 핫라인')
+    expect(host.textContent).not.toContain('대화 B')
+    expect(requests().some(request => request.action === 'selectThread')).toBe(false)
+  })
+
   it('uses microphone actions scoped to this room and leaves recognized text unsent', () => {
     mount()
     snapshot({ ...base, voiceDraftEpoch: 0 })

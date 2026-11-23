@@ -81,7 +81,7 @@ export default function App() {
 
   const enabled = connected && snapshot?.ready === true
   const conversationKey = JSON.stringify([snapshot?.threadId, snapshot?.branchId])
-  const collaborationOpen = collaborationScope === conversationKey
+  const collaborationOpen = snapshot?.singleConversation !== true && collaborationScope === conversationKey
   const attachmentKey = JSON.stringify(snapshot?.attachments?.map(attachment => attachment.id) ?? [])
   useEffect(() => {
     const attempt = sendAttempt.current
@@ -95,12 +95,12 @@ export default function App() {
 
   const openRequest = snapshot?.collab?.openRequest
   useEffect(() => {
-    if (enabled && openRequest !== undefined && openRequest > observedOpenRequest.current) {
+    if (snapshot?.singleConversation !== true && enabled && openRequest !== undefined && openRequest > observedOpenRequest.current) {
       observedOpenRequest.current = openRequest
       setCollaborationScope(conversationKey)
       setMobileOpen(false)
     }
-  }, [conversationKey, enabled, openRequest])
+  }, [conversationKey, enabled, openRequest, snapshot?.singleConversation])
 
   function sidebarRequest(intent: Intent) {
     if (request(intent)) {
@@ -168,10 +168,10 @@ export default function App() {
           onVoice={() => request({ action: snapshot?.voicePrompt === 'listening' ? 'finishVoicePrompt' : 'startVoicePrompt' })}
           onCancelVoice={() => request({ action: 'cancelVoicePrompt' })} />
       </div>
-      <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
+      {snapshot?.singleConversation !== true && <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}
         onRefresh={bindingEpoch => request({ action: 'collabRefresh', payload: { bindingEpoch } })}
-        onSend={payload => request({ action: 'collabSend', payload })} />
+        onSend={payload => request({ action: 'collabSend', payload })} />}
     </div>
   )
 }

@@ -24,13 +24,14 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
 }) {
   const staff = snapshot?.staffRooms
   const threads = staff ?? snapshot?.threads ?? []
+  const single = snapshot?.singleConversation === true
   return (
     <div className="sidebar-content">
       <div className="sidebar-brand">
         <span className="wordmark"><BrandMark /> ZipHap<span>.Agent</span></span>
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
       </div>
-      <nav className="shared-rooms" aria-label="메인 채팅">
+      {!single && <><nav className="shared-rooms" aria-label="메인 채팅">
         <button type="button" className="sidebar-row" disabled={!enabled}
           aria-current={snapshot?.officeSelected && !collaborationOpen ? 'page' : undefined} onClick={onOpenOffice}>
           <Icon name="group" /><span>사무실</span>
@@ -54,6 +55,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
           <Icon name="group" /><span>협력사 핫라인</span>
         </button>
       </nav>
+      </>}
       <nav className="utility-nav" aria-label="앱 메뉴">
         {shortcuts.map(({ panel, label, icon }) => (
           <button key={panel} type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate(panel)}>
@@ -102,7 +104,7 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
         <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || 'ZipHap.Agent'}</span>
         {snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={onOfficeProfile}>직원 정보</button>}
-        {currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
+        {snapshot?.singleConversation !== true && currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={() => setTitleDraft(currentThread.title)}>이름 변경</button>}
         {titleDraft !== null && <form className="rename-thread-form" onSubmit={event => {
           event.preventDefault()

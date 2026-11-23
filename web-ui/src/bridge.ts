@@ -70,6 +70,7 @@ export interface Snapshot {
   canCancelPreparation?: boolean
   otherApprovalPending?: boolean
   composerEpoch?: number
+  singleConversation?: boolean
   voicePrompt?: 'permission' | 'listening' | 'finishing'
   voiceDraftEpoch?: number
   theme?: 'light' | 'dark' | 'system'
@@ -254,6 +255,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.canCancelPreparation !== undefined && typeof value.canCancelPreparation !== 'boolean') return null
   if (value.otherApprovalPending !== undefined && typeof value.otherApprovalPending !== 'boolean') return null
   if (value.attachments !== undefined && !list(value.attachments, attachment)) return null
+  if (value.singleConversation !== undefined && typeof value.singleConversation !== 'boolean') return null
   if (value.composerEpoch !== undefined && !epoch(value.composerEpoch)) return null
   if (value.voiceDraftEpoch !== undefined && !epoch(value.voiceDraftEpoch)) return null
   if (value.voicePrompt !== undefined && value.voicePrompt !== 'permission' && value.voicePrompt !== 'listening' && value.voicePrompt !== 'finishing') return null
