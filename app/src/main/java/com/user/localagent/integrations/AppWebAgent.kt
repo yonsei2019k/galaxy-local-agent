@@ -52,12 +52,60 @@ class AppWebAgent private constructor(private val context:Context) {
     val showingCredentialPage:StateFlow<Boolean> get()=credentialScreen
     private var loginCompletion:CompletableDeferred<Boolean>?=null
     private var nextLoginId=0L
+    data class LoginCard(val id:Long,val host:String)
+    private val loginCard=MutableStateFlow<LoginCard?>(null)
+    val ownerLoginCard:StateFlow<LoginCard?> get()=loginCard
+    private val loginDomKey="ziphapLogin"+token()
+    private val loginScript by lazy {context.assets.open("app-web-login.js").bufferedReader().use{it.readText()}}
+    private var cardOrigin:URI?=null
+    private var loginSubmitting=false
+
+    fun switchToWebsiteLogin(id:Long){
+        if(loginCard.value?.id!=id)return
+        loginCard.value=null
+        showBrowser(view().url.orEmpty())
+    }
+
+    fun cancelLoginCard(id:Long){
+        if(loginCard.value?.id==id)loginCompletion?.complete(false)
+    }
+
+    /** Only the native, owner-operated secure card can call this method. */
+    suspend fun submitLoginCard(id:Long,account:String,password:String):Boolean {
+        val origin=cardOrigin?:return false
+        val completion=loginCompletion?:return false
+        if(!RuntimeGate.foreground.get()||loginCard.value?.id!=id||completion.isCompleted||loginSubmitting||
+            secureOrigin(view().url)!=origin||account.isBlank()||account.length>320||password.isEmpty()||password.length>1024)return false
+        loginSubmitting=true
+        try {
+            val submitted=loginDom("submit",id,origin,account,password)
+            if(submitted&&loginCard.value?.id==id&&loginCompletion===completion){
+                completion.complete(true)
+                return true
+            }
+            return false
+        }finally{loginSubmitting=false}
+    }
+
+    private suspend fun loginDom(action:String,id:Long,origin:URI,account:String?=null,password:String?=null):Boolean {
+        val request=buildJsonObject{
+            put("action",action);put("id",id);put("key",loginDomKey);put("origin",origin.toString())
+            if(account!=null)put("account",account)
+            if(password!=null)put("password",password)
+        }
+        return try{eval("($loginScript)($request)",5_000)==JsonPrimitive(true)}
+        catch(_:TimeoutCancellationException){false}
+        catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){false}
+    }
+
     fun showBrowser(address:String=""){presentation.value=address}
     fun closeBrowser(){presentation.value=null;loginCompletion?.complete(false)}
     fun ownerFinishedBrowserLogin(id:Long){
         if(loginWait.value==id)loginCompletion?.complete(true)
     }
     private suspend fun isPresented():Boolean {
+        if(presentation.value==null)return false
         val browser=view()
         fun onScreen()=RuntimeGate.foreground.get()&&browser.isAttachedToWindow&&browser.isShown&&
             browser.windowVisibility==View.VISIBLE&&browser.width>0&&browser.height>0
@@ -250,14 +298,28 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     /** Keeps the original open tool alive while the owner uses the site's own login form. */
-    private suspend fun afterOwnerLogin(requestedUrl:String,initial:JsonObject):JsonObject {
+    private suspend fun afterOwnerLogin(requestedUrl:String?,initial:JsonObject):JsonObject {
+        if(initial["loginRequired"]!=JsonPrimitive(true)||!RuntimeGate.foreground.get())return initial
         val requiredOrigin=secureOrigin(requestedUrl)?:return initial
         val loginOrigin=secureOrigin(view().url)?:return initial
         val completion=CompletableDeferred<Boolean>()
         loginCompletion=completion
-        loginWait.value=++nextLoginId
+        val id=++nextLoginId
+        loginWait.value=id
         try {
-            if(withTimeoutOrNull(45_000){completion.await()}!=true)return initial
+            if(requiredOrigin==loginOrigin&&RuntimeGate.foreground.get()&&loginDom("capture",id,loginOrigin)){
+                cardOrigin=loginOrigin
+                presentation.value=null
+                loginCard.value=LoginCard(id,loginOrigin.host)
+            }
+            val ownerFinished=withTimeoutOrNull(55_000){completion.await()}
+            if(ownerFinished!=true){
+                if(ownerFinished==null&&loginCard.value?.id==id){
+                    loginCard.value=null
+                    showBrowser(view().url.orEmpty())
+                }
+                return JsonObject(initial+("phoneBrowserVisible" to JsonPrimitive(isPresented())))
+            }
             // Only after the owner is done do we observe the page again. Never replay the open.
             val currentOrigin=secureOrigin(view().url)?:return initial
             if(currentOrigin!=requiredOrigin&&currentOrigin!=loginOrigin)return initial
@@ -267,6 +329,8 @@ class AppWebAgent private constructor(private val context:Context) {
                 navigation.value.loading)return initial
             return readPage()
         } finally {
+            loginCard.value=null
+            cardOrigin=null
             loginCompletion=null
             loginWait.value=null
         }
@@ -283,15 +347,17 @@ class AppWebAgent private constructor(private val context:Context) {
             navigation.value.loading->fail("PAGE_TIMEOUT")
             else->readPage()
         }
-        if(showOnPhone&&page["loginRequired"]==JsonPrimitive(true)&&page["phoneBrowserVisible"]==JsonPrimitive(true))
-            page=afterOwnerLogin(url,page)
+        page=afterOwnerLogin(url,page)
+        if(showOnPhone&&page["error"]==null&&page["loginRequired"]!=JsonPrimitive(true)&&presentation.value==null)
+            showBrowser(view().url.orEmpty())
         if(showOnPhone&&"phoneBrowserVisible" !in page)
             JsonObject(page+("phoneBrowserVisible" to JsonPrimitive(isPresented()))) else page
     }
     suspend fun read(observeMedia:Boolean=false):JsonObject = guarded{
         navigation.value.error?.let {return@guarded fail(it)}
         if(navigation.value.loading)return@guarded fail("PAGE_TIMEOUT")
-        readPage(observeMedia)
+        val url=view().url
+        afterOwnerLogin(url,readPage(observeMedia))
     }
 
     suspend fun act(arguments:JsonObject,approvedSnapshot:String?):JsonObject = guarded{
@@ -330,6 +396,7 @@ class AppWebAgent private constructor(private val context:Context) {
             return@guarded fail("APPROVAL_MISMATCH")
 
         // Only the current renderer evaluation can attest a refusal before dispatch.
+        val sourceUrl=view().url
         snapshot=null
         blockedNavigation.value=null
         try {
@@ -344,7 +411,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 return@guarded fail(checkNotNull(refusal))
             if(result?.get("performed")!=JsonPrimitive(true))return@guarded fail("ACTION_OUTCOME_UNKNOWN")
             settle()
-            val page=readPage()
+            val page=afterOwnerLogin(sourceUrl,readPage())
             if(page["error"]!=null)return@guarded fail("ACTION_OUTCOME_UNKNOWN")
             JsonObject(page+mapOf("performed" to buildJsonObject{put("action",action);put("ref",ref);put("control",target?.s("label"))},
                 "evidence" to JsonPrimitive("동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.")))

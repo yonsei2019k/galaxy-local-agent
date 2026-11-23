@@ -11,6 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -33,6 +35,11 @@ import kotlinx.coroutines.launch
 
 @Composable fun AppBrowserSurface(context:Context){
     val agent=remember(context){AppWebAgent.get(context)}
+    val card by agent.ownerLoginCard.collectAsState()
+    card?.let { login ->
+        key(login.id) { SecureLoginCard(agent,login) }
+        return
+    }
     val opened by agent.presentedAddress.collectAsState()
     val initialAddress=opened?:return
     val busy by agent.active.collectAsState()
@@ -82,6 +89,59 @@ import kotlinx.coroutines.launch
                 Box(Modifier.weight(1f).fillMaxWidth()){
                     AndroidView(factory={_->agent.view().also{(it.parent as? ViewGroup)?.removeView(it)}},Modifier.fillMaxSize(),
                         onRelease={agent.detach()})
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun SecureLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard){
+    val scope=rememberCoroutineScope()
+    val keyboard=LocalSoftwareKeyboardController.current
+    var account by remember {mutableStateOf("")}
+    var password by remember {mutableStateOf("")}
+    var submitting by remember {mutableStateOf(false)}
+    var declined by remember {mutableStateOf(false)}
+    val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting&&!declined
+    fun submit(){
+        if(!ready)return
+        val enteredAccount=account
+        val enteredPassword=password
+        account=""
+        password=""
+        submitting=true
+        keyboard?.hide()
+        scope.launch {
+            if(!agent.submitLoginCard(login.id,enteredAccount,enteredPassword)){
+                submitting=false
+                declined=true
+            }
+        }
+    }
+    Dialog(onDismissRequest={if(!submitting)agent.cancelLoginCard(login.id)},
+        properties=DialogProperties(securePolicy=SecureFlagPolicy.SecureOn)){
+        Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+            Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+                Text("사이트 로그인",style=MaterialTheme.typography.titleLarge)
+                Text(login.host,style=MaterialTheme.typography.titleSmall)
+                Text("입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
+                if(declined)Text("로그인 양식이 바뀌었어요. 사이트에서 직접 로그인해 주세요.",
+                    color=MaterialTheme.colorScheme.error)
+                OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
+                    enabled=!submitting&&!declined,label={Text("아이디")},
+                    keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
+                OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth(),singleLine=true,
+                    enabled=!submitting&&!declined,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
+                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
+                    keyboardActions=KeyboardActions(onGo={submit()}))
+                Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=ready){
+                    Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
+                }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                    TextButton(onClick={agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
+                    TextButton(onClick={agent.cancelLoginCard(login.id)},enabled=!submitting){Text("취소")}
                 }
             }
         }
