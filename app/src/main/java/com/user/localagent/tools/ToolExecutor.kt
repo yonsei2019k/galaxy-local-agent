@@ -84,12 +84,17 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         }
     }
     private val reviewedTargets=mutableMapOf<String,Pair<String,Long>>()
+    private val phoneScreen by lazy { com.user.localagent.integrations.ScreenControl(context) }
+    internal fun bindScreenVisualAccess(binding:String?) {
+        phoneScreen.capturedVisualBinding=binding
+        phoneScreen.isRunLive={connectionRunId!=null&&connectionIsRunLive()}
+    }
     private fun reviewKey(call:ToolCall)=call.name+":"+JsonObject(call.arguments.toSortedMap())
     /** The approval names a real scoped record, and its revision must still match at the mutation. */
     /** Typing and commit-like taps need the owner even though navigation taps do not. */
     suspend fun reviewPhoneScreenAction(call:ToolCall):Pair<Boolean,String>? =
         if(call.name==com.user.localagent.core.ScreenControlToolCatalog.ACTION)
-            com.user.localagent.integrations.ScreenControl(context).review(call)
+            phoneScreen.review(call)
         else null
     suspend fun browserActionNeedsOwner(call:ToolCall):Boolean=browserFor(call.name)?.review(call)?.first==true
     private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context)}
@@ -181,7 +186,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             }
             if(call.name in com.user.localagent.core.ScreenControlToolCatalog.names){
                 check(connectionRunId==null||connectionIsRunLive()){"화면 제어 요청이 중단됐습니다."}
-                return@withContext com.user.localagent.integrations.ScreenControl(context).execute(call,approvedScreenSnapshot)
+                return@withContext phoneScreen.execute(call,approvedScreenSnapshot)
             }
             browserFor(call.name)?.let{browser->
                 check(connectionRunId==null||connectionIsRunLive()){"브라우저 요청이 중단됐습니다."}

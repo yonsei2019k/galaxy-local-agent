@@ -24,6 +24,7 @@ class ScreenObservationWaitTest {
 
     @Test fun waitNeedsABoundedDurationAndAllBindingFields() {
         assertNull(ScreenObservationWait.from(buildJsonObject {}))
+        assertNull(ScreenObservationWait.from(buildJsonObject {put(ScreenControlToolCatalog.IMAGE,true)}))
         val good=buildJsonObject {
             put("forApp",app);put("pageLabel","과정 1강");put("untilEnabledLabel","다음");put("waitSeconds",90)
         }

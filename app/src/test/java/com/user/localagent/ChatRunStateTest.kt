@@ -8,6 +8,14 @@ import com.user.localagent.inference.InferenceOptions
 import com.user.localagent.inference.InferenceTurn
 
 class ChatRunStateTest {
+    @Test fun visualAccessIsCapturedAtSubmissionAndLegacyRequestsHaveNoGrant() {
+        val request=QueuedChatRequest("r","t","b",null,"합성 요청","model",false,emptyList(),"u")
+        assertNull(QueuedChatRequest.fromJson(request.toJson()).screenVisualBinding)
+        val revision=java.util.UUID.randomUUID().toString()
+        assertEquals(revision,QueuedChatRequest.fromJson(request.copy(screenVisualBinding=revision).toJson()).screenVisualBinding)
+        assertThrows(IllegalArgumentException::class.java) {request.copy(screenVisualBinding="enabled")}
+    }
+
     @Test fun cloudPhoneAuthorityIsExplicitAndSurvivesOnlyAnExactNewSnapshot(){
         val base=QueuedChatRequest("r","t","b",null,"합성 요청","paired-pc-cloud-agent-v1",false,emptyList(),"u")
         val old=Json.parseToJsonElement(base.toJson()).jsonObject

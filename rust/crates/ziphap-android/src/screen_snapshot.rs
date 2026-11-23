@@ -5,6 +5,43 @@ const DIGEST_BYTES: usize = 32;
 const MAX_VISIBLE_TEXTS: usize = 600;
 const MAX_TARGETS: usize = 150;
 
+/// A bounded, center-aligned play glyph recognizer. It deliberately rejects
+/// arbitrary drawings and is only used inside an independently identified video.
+#[uniffi::export]
+pub fn native_screen_play_glyph(sample: Vec<u8>, side: u32, radius: u32) -> bool {
+    if !(17..=65).contains(&side)
+        || side % 2 == 0
+        || !(5..=20).contains(&radius)
+        || radius * 2 + 3 > side
+        || sample.len() != (side * side) as usize
+    {
+        return false;
+    }
+    let center = (side / 2) as i32;
+    let radius = radius as i32;
+    let mut inside = Vec::new();
+    let mut outside = Vec::new();
+    for y in -radius..=radius {
+        for x in -radius..=radius {
+            let boundary = (radius - x) * 4 - 7 * y.abs();
+            let value = sample[((center + y) * side as i32 + center + x) as usize];
+            if x > -radius + 2 && boundary > 8 {
+                inside.push(value);
+            } else if (x < -radius + 2 || boundary < -9)
+                && x * x + y * y <= radius * radius
+            {
+                outside.push(value);
+            }
+        }
+    }
+    let counts = |high: bool| {
+        let good_inside = inside.iter().filter(|&&v| if high { v >= 205 } else { v <= 50 }).count();
+        let good_outside = outside.iter().filter(|&&v| if high { v <= 145 } else { v >= 110 }).count();
+        good_inside * 100 >= inside.len() * 92 && good_outside * 100 >= outside.len() * 85
+    };
+    !inside.is_empty() && !outside.is_empty() && (counts(true) || counts(false))
+}
+
 #[derive(Clone, Copy, uniffi::Enum)]
 pub enum NativeScreenRole {
     Tap,
@@ -148,6 +185,28 @@ pub fn native_screen_snapshot_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visual_play_glyph_requires_a_right_facing_contrast_shape() {
+        let side = 49usize;
+        let radius = 13;
+        let mut play = vec![21; side * side];
+        let mut back = play.clone();
+        let mut pause = play.clone();
+        for y in -radius..=radius {
+            for x in -radius..=radius {
+                let index = ((24 + y) * side as i32 + 24 + x) as usize;
+                if x >= -radius + 2 && (radius - x) * 4 >= 7 * y.abs() {play[index] = 248;}
+                if x <= radius - 2 && (radius + x) * 4 >= 7 * y.abs() {back[index] = 248;}
+                if (3..=7).contains(&x.abs()) && y.abs() <= 10 {pause[index] = 248;}
+            }
+        }
+        assert!(native_screen_play_glyph(play.clone(), 49, 13));
+        assert!(native_screen_play_glyph(play.into_iter().map(|v|255-v).collect(), 49, 13));
+        assert!(!native_screen_play_glyph(back, 49, 13));
+        assert!(!native_screen_play_glyph(pause, 49, 13));
+        assert!(!native_screen_play_glyph(vec![0; 3], 49, 13));
+    }
 
     #[test]
     fn accepted_approval_is_bound_to_the_requested_and_current_snapshot() {

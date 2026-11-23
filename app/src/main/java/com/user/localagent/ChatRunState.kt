@@ -29,6 +29,7 @@ data class QueuedChatRequest(
     val officeStage: OfficeStage? = null,
     val officeParentId: String? = null,
     val scheduledClockReceiptOnly: Boolean = false,
+    val screenVisualBinding: String? = null,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -36,6 +37,7 @@ data class QueuedChatRequest(
         parentGoalStartRunId?.let {require(goal!=null&&mode in setOf("act","debug")&&it.isNotBlank()&&it.length<=100&&it!=runId&&it.none {c->c.code<32}){"목표 시작 요청의 원래 실행 연결이 올바르지 않습니다."}}
         pcDataBinding?.let {require(it.matches(Regex("[a-f0-9]{64}"))){"PC 자료 선택의 고정 버전이 올바르지 않습니다."}}
         kakaoReadBinding?.let {require(runCatching{java.util.UUID.fromString(it).toString()==it}.getOrDefault(false))}
+        screenVisualBinding?.let {require(java.util.UUID.fromString(it).toString()==it)}
         require(capturedPcRevision==null||capturedPcRevision>=0)
         require(capturedPcTextDefault==null || capturedPcRevision!=null &&
             capturedPcTextDefault==com.user.localagent.models.PairedPcTextProfileDescriptor.GEMMA_E4B_V1.selectionId)
@@ -87,6 +89,7 @@ data class QueuedChatRequest(
         officeStage?.let { put("officeStage", it.name) }
         officeParentId?.let { put("officeParentId", it) }
         if (scheduledClockReceiptOnly) put("scheduledClockReceiptOnly", true)
+        screenVisualBinding?.let {put("screenVisualBinding",it)}
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -124,7 +127,8 @@ data class QueuedChatRequest(
                 o["scheduledReadTool"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["officeStage"]?.jsonPrimitive?.content?.let(OfficeStage::valueOf),
                 o["officeParentId"]?.jsonPrimitive?.content,
-                o["scheduledClockReceiptOnly"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean} ?: false)
+                o["scheduledClockReceiptOnly"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean} ?: false,
+                o["screenVisualBinding"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
         }
     }
 }

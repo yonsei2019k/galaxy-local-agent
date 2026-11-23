@@ -1,3 +1,4 @@
 <resources>
     <string name="screen_work_in_progress">집합 · 화면 조작 중</string>
+    <string name="screen_work_stop">집합 · 화면 조작 중 · 중지</string>
 </resources>

@@ -577,7 +577,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
                     allowExternalAgent=ExternalAgentSettings.isCloud(resolvedModel)&&externalAuthority.enabled,externalAgentRevision=if(ExternalAgentSettings.isCloud(resolvedModel))externalAuthority.revision else null,
                     cloudReadOnlyModes=ExternalAgentSettings.isCloud(resolvedModel) && externalAuthority.enabled,
-                    officeStage = OfficeStage.WORKFLOW.takeIf { office }).also {submitted=it}.toJson()
+                    officeStage = OfficeStage.WORKFLOW.takeIf { office },
+                    screenVisualBinding=com.user.localagent.integrations.ScreenControl(context).visualBinding()
+                        .takeIf {mode in setOf("act","debug")&&!office}).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -2402,7 +2404,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             onGoalChanged={value->
                 goalState.value=value
                 if(queueOwner.selectedThreadId.value==request.threadId&&queueOwner.selectedProjectId.value==request.projectId.orEmpty())queueOwner.goalState.value=value
-            })
+            }).also { it.bindScreenVisualAccess(request.screenVisualBinding.takeIf {request.allowTools&&request.continuation==null}) }
         requestRepository=app.repository.forThread(request.threadId)
         requestImports=com.user.localagent.imports.ConversationImport(context,requestRepository!!)
         requestResearch=com.user.localagent.web.WebResearchController(context,requestRepository!!)
@@ -3332,7 +3334,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         currentCoroutineContext().ensureActive()
         enforceGoalToolFence(checkNotNull(activeRequest),call)
         if(screenTool)withContext(Dispatchers.Main.immediate){
-            com.user.localagent.integrations.ScreenBridgeService.current()?.markScreenWork(bound.id)
+            com.user.localagent.integrations.ScreenBridgeService.current()?.markScreenWork(bound.id) {
+                queueOwner.stopRun(bound.id, bound.threadId)
+            }
         }
         externalEffectGuard?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
         val intent=tools.prepareIntent(call)

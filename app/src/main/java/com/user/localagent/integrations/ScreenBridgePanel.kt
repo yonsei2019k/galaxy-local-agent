@@ -83,6 +83,17 @@ fun ScreenBridgePanel(context: Context, open: (Intent) -> Unit, report: (String)
                 status(if (on) "에이전트 화면 제어를 켰습니다. Android 접근성 서비스도 켜져 있어야 합니다." else "에이전트 화면 제어를 껐습니다.")
             })
         }
+        if (android.os.Build.VERSION.SDK_INT >= 34 && controlOn) {
+            var visualOn by remember(control) { mutableStateOf(control.visualBinding()!=null) }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("크롬 버튼 이미지 인식\n글자가 없는 버튼을 휴대폰에서 확인합니다. 켠 뒤 새 요청부터 적용됩니다.",
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Switch(checked = visualOn, onCheckedChange = { on ->
+                    control.setVisualEnabled(on)
+                    visualOn = on
+                })
+            }
+        }
         HorizontalDivider()
         Text("앱별 허용", style = MaterialTheme.typography.titleMedium)
         Text("스위치는 앱 내부 동의입니다. Android 서비스 권한을 대신 켜지 않습니다. 설치한 앱과 실제 화면이 지원되는지는 검사창에서 확인하세요.",

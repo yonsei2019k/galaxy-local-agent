@@ -11,6 +11,7 @@ import kotlinx.serialization.json.*
 object ScreenControlToolCatalog {
     const val READ="read_screen"
     const val ACTION="screen_action"
+    const val IMAGE="inspectImage"
     const val STALE_SNAPSHOT_RECEIPT="화면 변경 · 실행 전 중단"
     const val APPROVED_SNAPSHOT_CHANGED_RECEIPT="승인 후 화면 변경 · 실행 전 중단"
     const val APPROVED_SNAPSHOT_CHANGED_NOTICE="화면이 바뀌어 승인한 동작을 실행하지 않았습니다. 다시 진행하려면 새 요청을 보내주세요."
@@ -20,10 +21,12 @@ object ScreenControlToolCatalog {
     val actions=setOf("tap","type","scroll","back","home","open_app")
     val definitions=listOf(
         ToolDefinition(READ,Risk.LOW,mapOf(
+            IMAGE to Argument("boolean",false,5,"Inspect pixels on the current phone window if the accessibility list omitted a visible button."),
             "forApp" to Argument("string",false,120,"Exact package name observed on the phone."),
             "pageLabel" to Argument("string",false,120,"Exact visible title that stays on the current page."),
             "untilEnabledLabel" to Argument("string",false,120,"Exact label of a button that should become enabled."),
             "waitSeconds" to Argument("integer",false,3,"Wait 1–90 seconds. Include forApp, pageLabel and untilEnabledLabel."),
+            "requirePlaybackEnd" to Argument("boolean",false,5,"For a video wait, require playback end evidence in addition to the enabled Next control."),
         ),
             "Read the current phone screen to choose the next enabled control that advances the owner's goal. Use its fresh ref with screen_action, then observe the result. " +
             "Returns package, snapshotId, visible text and numbered elements (ref) for tap, type or scroll. " +
@@ -31,8 +34,9 @@ object ScreenControlToolCatalog {
             "Translate the owner's goal into the next enabled control on the current screen. Use the control's purpose and context, even if the owner did not name its label. " +
             "For a clear in-scope navigation step, act yourself using the exact fresh ref; then inspect the result and continue. " +
             "Ask only if the target genuinely cannot be determined, the next step needs the owner, or an attempted effect is still uncertain. " +
+            "If an expected visible control is missing, call read_screen with inspectImage=true. Pixel-derived controls appear as ordinary exact refs with source=image. " +
             "For video lessons, use the visible Play control once when needed on each new page and look for evidence of actual playback. " +
-            "Use a bounded observation wait for the site to unlock Next. A pending or context_changed wait is not completion. " +
+            "For video, wait with requirePlaybackEnd=true so an already enabled Next button cannot be used as proof of playback. A pending or context_changed wait is not completion. " +
             "Advance only from a fresh enabled result on that lesson, and verify the site's final lesson/course status. Do not seek past playback.",100_000),
         ToolDefinition(ACTION,Risk.LOW,mapOf(
             "action" to Argument("string",true,20,"One of tap, type, scroll, back, home, open_app."),
@@ -40,16 +44,17 @@ object ScreenControlToolCatalog {
             "ref" to Argument("string",false,12,"Element ref from that read_screen, for tap/type/scroll."),
             "expectedLabel" to Argument("string",false,120,"Tap requires the exact visible label of the chosen enabled element. Copy it from the same observation."),
             "targetArea" to Argument("string",false,12,"Tap defaults to content. Use browser_ui only when the owner asked to operate Chrome's own controls, such as tabs."),
+            "expectedChange" to Argument("string",false,120,"For source=image, state the visible result to verify after the tap. This is a prediction, not proof."),
             "text" to Argument("string",false,2000,"Text to type. Never passwords, card numbers or verification codes."),
             "direction" to Argument("string",false,10,"scroll direction: forward or backward."),
             "packageName" to Argument("string",false,120,"Package name or app name (e.g. 계산기) to open for open_app.")),
             "Operate the foreground app screen once: tap an element, type text, scroll, go back, go home or open an app. "+
             "Returns the newest screen with current refs. Use it to decide the next action; never reuse a ref from a previous snapshot. " +
-            "Tap requires the exact visible label in expectedLabel. Skip unreadable elements; do not try unrelated buttons to guess. " +
+            "Tap requires the exact observed label in expectedLabel. For image refs include expectedChange; do not try unrelated buttons to guess. " +
             "After a tap, check what actually opened and whether it advances the goal before proposing another action. " +
             "For a task inside the current website, choose content controls and leave Chrome's browser_ui controls alone. " +
             "If screenChanged is false, inspect the screen again before deciding whether any further action is needed. " +
-            "A click or changed screen by itself does not prove the requested task finished. "+
+            "A click or changed screen by itself does not prove the requested task finished. If playbackStatus is unverified, look for progress without tapping Play again. "+
             "Typing and send/pay/delete/confirm taps wait for owner approval. Protected screens are refused."))
     val names=definitions.map{it.name}.toSet()
 

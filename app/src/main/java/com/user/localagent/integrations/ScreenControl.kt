@@ -5,6 +5,8 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
+import android.graphics.Path
+import android.accessibilityservice.GestureDescription
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -17,6 +19,7 @@ import com.user.localagent.core.ObservedToolOutcome
 import com.user.localagent.core.ScreenControlToolCatalog
 import com.user.localagent.core.ScreenReadEvidence
 import com.user.localagent.core.ScreenObservationWait
+import com.user.localagent.core.ScreenPlaybackEvidence
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolReadPolicy
 import com.user.localagent.core.ToolResult
@@ -24,10 +27,14 @@ import com.user.localagent.core.VerificationState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Locale
+import java.util.UUID
+import kotlin.coroutines.resume
 import uniffi.ziphap_android.NativeScreenDispatchDecision
 import uniffi.ziphap_android.NativeScreenRole
 import uniffi.ziphap_android.NativeScreenTarget
@@ -44,7 +51,23 @@ class ScreenControl(context:Context) {
     private val prefs=this.context.getSharedPreferences("screen_control_v1",Context.MODE_PRIVATE)
 
     fun enabled():Boolean=prefs.getBoolean("enabled",false)
-    fun setEnabled(value:Boolean){prefs.edit().putBoolean("enabled",value).apply()}
+    fun setEnabled(value:Boolean){
+        val edit=prefs.edit().putBoolean("enabled",value)
+        if(!value)edit.remove("window_image_revision")
+        edit.apply()
+    }
+    fun visualBinding():String?=prefs.getString("window_image_revision",null)
+        ?.takeIf {Build.VERSION.SDK_INT>=34&&enabled()}
+    fun setVisualEnabled(value:Boolean){
+        val edit=prefs.edit()
+        if(value)edit.putString("window_image_revision",UUID.randomUUID().toString())
+        else edit.remove("window_image_revision")
+        edit.apply()
+    }
+    internal var capturedVisualBinding:String?=null
+    internal var isRunLive:()->Boolean={false}
+    private var lastImage:ImageObservation?=null
+    private var playbackWait:PlaybackWait?=null
     fun ready():Boolean=setupNeeded()==null
 
     private fun setupNeeded():SetupNeeded? {
@@ -64,23 +87,55 @@ class ScreenControl(context:Context) {
     /** Element of a read: ref is its index in a deterministic traversal of the same screen. */
     private data class Element(
         val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,
-        val sensitive:Boolean,val browserUi:Boolean,
+        val sensitive:Boolean,val browserUi:Boolean,val webContent:Boolean,
     )
     private data class Snapshot(val packageName:String,val texts:List<String>,val elements:List<Element>,
-        val truncated:Boolean,val evidence:ScreenReadEvidence) {
+        val truncated:Boolean,val evidence:ScreenReadEvidence,val windowBounds:Rect,
+        val webBounds:Rect?,val videoBounds:List<Rect>,val protectedForm:Boolean,
+        val playback:ScreenPlaybackEvidence?,val interactionRevision:UUID,
+    ) {
         val id get()=evidence.snapshotId
     }
+    private data class ImageTarget(
+        val ref:String,val label:String,val bounds:Rect,val fingerprint:ByteArray,val nativeRef:String?,
+        val play:Boolean,
+    )
+    private data class ImageObservation(val screenId:String,val bounds:Rect,val expiresAt:Long,val targets:List<ImageTarget>)
+    private data class PlaybackWait(
+        val app:String,val page:String,val button:String,val window:Int,val video:List<Rect>,val revision:UUID,
+        var previousClock:ScreenPlaybackEvidence?=null,
+        var sawPlayback:Boolean=false,var sawNextDisabled:Boolean=false,
+    )
 
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null):ToolResult=try {
         requireReady()
         val read=if(call.name==ScreenControlToolCatalog.READ) observe(call) else null
         val result=when(call.name){
-            ScreenControlToolCatalog.READ->read?.let {(screen,status)->render(screen,waitStatus=status)}?:ownAppView()
+            ScreenControlToolCatalog.READ->{
+                lastImage=null
+                read?.let {(screen,status)->
+                    val imageRequested=call.arguments[ScreenControlToolCatalog.IMAGE]?.jsonPrimitive?.booleanOrNull==true
+                    val image=if(imageRequested)inspectImage(screen) else null
+                    lastImage=image
+                    render(screen,waitStatus=status,image=image,imageRequested=imageRequested)
+                }?:ownAppView()
+            }
             ScreenControlToolCatalog.ACTION->act(call,approvedSnapshot)
             else->error("지원하지 않는 화면 도구입니다.")
         }
-        val summary=if(call.name==ScreenControlToolCatalog.READ)"현재 화면 접근성 정보 조회"
-            else "동작 후 화면을 다시 읽음 · 동작 유형 "+call.arguments.getValue("action").jsonPrimitive.content
+        val summary=if(call.name==ScreenControlToolCatalog.READ) {
+            if(call.arguments[ScreenControlToolCatalog.IMAGE]?.jsonPrimitive?.booleanOrNull==true){
+                val code=Json.parseToJsonElement(result).jsonObject["imageStatus"]?.jsonPrimitive?.content
+                    ?:"not_target_window"
+                "화면 이미지 · $code · 후보 ${lastImage?.targets?.size?:0}개"
+            } else "현재 화면 접근성 정보 조회"
+        } else if(isImageRef(call.arguments)) {
+            when(Json.parseToJsonElement(result).jsonObject["playbackStatus"]?.jsonPrimitive?.content) {
+                "advancing"->"이미지 버튼 클릭 · 재생 시간 증가 확인"
+                "unverified"->"이미지 버튼 클릭 · 재생 확인 대기"
+                else->"이미지 버튼 클릭 · 결과 화면 확인"
+            }
+        } else "동작 후 화면을 다시 읽음 · 동작 유형 "+call.arguments.getValue("action").jsonPrimitive.content
         ToolResult(call.id,true,result,VerificationState.VERIFIED,summary,screenReadEvidence=read?.first?.evidence)
     }catch(error:Throwable){
         if(error is kotlinx.coroutines.CancellationException)throw error
@@ -92,6 +147,8 @@ class ScreenControl(context:Context) {
 
     private suspend fun observe(call:ToolCall):Pair<Snapshot,String?>? {
         val request=ScreenObservationWait.from(call.arguments)
+        if(request!=null&&call.arguments[ScreenControlToolCatalog.IMAGE]?.jsonPrimitive?.booleanOrNull==true)
+            throw ScreenRefused("화면 이미지 확인과 화면 변화 대기는 각각 요청해야 합니다.")
         suspend fun read()=try { snapshotWhenAvailable() }
             catch(own:OwnAppForeground) { null }
         var current=read()?:run {
@@ -101,12 +158,32 @@ class ScreenControl(context:Context) {
         if(request==null)return current to null
         val originalWindow=current.evidence.windowId
         val deadline=SystemClock.elapsedRealtime()+request.seconds*1000L
+        val proof=if(request.requirePlaybackEnd){
+            val currentScope=PlaybackWait(request.app,request.page,request.button,originalWindow,current.videoBounds,current.interactionRevision)
+            (playbackWait?.takeIf {it.copy(previousClock=null,sawPlayback=false,sawNextDisabled=false)==currentScope}
+                ?:currentScope).also {playbackWait=it}
+        }else null
         while(true){
-            val status=request.status(current.packageName,current.evidence.windowId==originalWindow,
-                current.texts+current.elements.filterNot {it.sensitive}.map {it.label},
-                current.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive}.map {it.label})
-            if(status==ScreenObservationWait.Status.CONTEXT_CHANGED)
+            val buttons=current.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive}.map {it.label}
+            var status=request.status(current.packageName,current.evidence.windowId==originalWindow,
+                current.texts+current.elements.filterNot {it.sensitive}.map {it.label},buttons)
+            if(status==ScreenObservationWait.Status.CONTEXT_CHANGED){
+                playbackWait=null
                 throw ScreenRefused("대기 중 원래 강의 화면을 확인할 수 없었습니다.")
+            }
+            if(proof!=null){
+                if(current.protectedForm||current.videoBounds!=proof.video||current.interactionRevision!=proof.revision){
+                    playbackWait=null
+                    throw ScreenRefused("대기 중 동영상이 표시된 영역이 바뀌었습니다.")
+                }
+                val clock=current.playback?:readVisiblePlaybackClock(current)
+                if(proof.previousClock?.let {clock?.advancedFrom(it)}==true)proof.sawPlayback=true
+                if(clock!=null)proof.previousClock=clock
+                if(request.button !in buttons)proof.sawNextDisabled=true
+                if(status==ScreenObservationWait.Status.READY&&
+                    !(proof.sawPlayback&&(proof.sawNextDisabled||clock?.let{it.elapsed==it.duration}==true)))
+                    status=ScreenObservationWait.Status.PENDING
+            }
             val remaining=deadline-SystemClock.elapsedRealtime()
             if(status==ScreenObservationWait.Status.READY||remaining<=0)
                 return current to status.name.lowercase(Locale.ROOT)
@@ -124,6 +201,10 @@ class ScreenControl(context:Context) {
         val screen=snapshotWhenAvailable().also { requireCurrentSnapshot(requested,it.id) }
         val target=call.arguments["ref"]?.jsonPrimitive?.content?.let{ref->screen.elements.firstOrNull{it.ref==ref}}
         val app=appLabel(screen.packageName)
+        if(action=="tap"&&isImageRef(call.arguments)){
+            val image=requireImageTarget(screen,call.arguments)
+            return !image.play to describe(call,app,image.label)
+        }
         if(action=="tap")requireTapTarget(target,call.arguments)
         val needs=action=="type"||(action=="tap"&&target!=null&&ScreenControlToolCatalog.isCommitLabel(target.label))
         return needs to describe(call,app,target?.label)
@@ -144,24 +225,30 @@ class ScreenControl(context:Context) {
 
     private suspend fun act(call:ToolCall,approvedSnapshot:String?):String {
         ScreenControlToolCatalog.validate(call)
+        playbackWait=null
         val a=call.arguments
         val action=a.getValue("action").jsonPrimitive.content
         val requested=a.getValue("snapshotId").jsonPrimitive.content
-        onMain {
-            val service=service()
-            when(action){
-                "home"->check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)){"홈으로 이동하지 못했습니다."}
-                "open_app"->openApp(a.getValue("packageName").jsonPrimitive.content)
-                else->{
-                    val screen=try{snapshot(service)}catch(refused:ScreenRefused){
-                        if(approvedSnapshot!=null)throw SnapshotChanged(afterApproval=true)
-                        throw refused
+        val imageTap=action=="tap"&&isImageRef(a)
+        val imagePlay=if(imageTap)tapImage(a,requested,approvedSnapshot) else {
+            onMain {
+                lastImage=null
+                val service=service()
+                when(action){
+                    "home"->check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)){"홈으로 이동하지 못했습니다."}
+                    "open_app"->openApp(a.getValue("packageName").jsonPrimitive.content)
+                    else->{
+                        val screen=try{snapshot(service)}catch(refused:ScreenRefused){
+                            if(approvedSnapshot!=null)throw SnapshotChanged(afterApproval=true)
+                            throw refused
+                        }
+                        requireCurrentSnapshot(requested,screen.id,approvedSnapshot)
+                        if(action=="back")check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)){"뒤로 가지 못했습니다."}
+                        else perform(screen,action,a)
                     }
-                    requireCurrentSnapshot(requested,screen.id,approvedSnapshot)
-                    if(action=="back")check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)){"뒤로 가지 못했습니다."}
-                    else perform(screen,action,a)
                 }
             }
+            false
         }
         delay(900) // Let the app render the result before the observation read.
         val after=try {
@@ -180,7 +267,171 @@ class ScreenControl(context:Context) {
             // A failed observation after dispatch cannot establish that no effect occurred.
             throw IllegalStateException("동작을 요청했지만 동작 후 화면을 확인하지 못했습니다.",failure)
         }
-        return render(after,action,requested!=after.id)
+        val playback=if(imagePlay)verifyPlayback(after) else null
+        val latest=playback?.first?:after
+        return render(latest,action,requested!=latest.id,
+            expectedChange=if(imageTap)a["expectedChange"]?.jsonPrimitive?.content else null,
+            playbackStatus=playback?.second)
+    }
+
+    private suspend fun verifyPlayback(first:Snapshot):Pair<Snapshot,String> {
+        val before=first.playback?:readVisiblePlaybackClock(first)?:return first to "unverified"
+        if(first.protectedForm||!isRunLive())return first to "unverified"
+        delay(1600)
+        val second=try {snapshotWhenAvailable()} catch (_:ScreenRefused) {return first to "unverified"}
+        if(!isRunLive()||second.protectedForm||second.interactionRevision!=first.interactionRevision||
+            second.evidence.windowId!=first.evidence.windowId||
+            second.packageName!=first.packageName||second.videoBounds!=first.videoBounds)
+            return second to "unverified"
+        val clock=second.playback?:readVisiblePlaybackClock(second)
+        return second to if(clock?.advancedFrom(before)==true)"advancing" else "unverified"
+    }
+
+    private fun isImageRef(args:JsonObject)=args["ref"]?.jsonPrimitive?.content?.startsWith("v")==true
+
+    private fun visualBlock(screen:Snapshot):String?=when {
+        !isRunLive()||capturedVisualBinding==null||visualBinding()!=capturedVisualBinding->"image_access_not_enabled_for_run"
+        screen.protectedForm->"protected_form"
+        screen.truncated->"incomplete_accessibility_view"
+        screen.packageName!="com.android.chrome"||screen.webBounds==null->"not_chrome_page"
+        else->null
+    }
+
+    private suspend fun capture(screen:Snapshot):android.graphics.Bitmap? {
+        if(Build.VERSION.SDK_INT<34||visualBlock(screen)!=null)return null
+        val bitmap=ScreenWindowImage.capture(onMain{service()},screen.evidence.windowId)?:return null
+        if(bitmap.width!=screen.windowBounds.width()||bitmap.height!=screen.windowBounds.height()){
+            bitmap.recycle()
+            return null
+        }
+        return bitmap
+    }
+
+    private suspend fun readVisiblePlaybackClock(screen:Snapshot):ScreenPlaybackEvidence? {
+        val region=screen.videoBounds.singleOrNull()?:return null
+        if(screen.webBounds?.contains(region)!=true)return null
+        val image=capture(screen)?:return null
+        try {
+            val area=Rect(region).apply {offset(-screen.windowBounds.left,-screen.windowBounds.top)}
+            return ScreenPlaybackEvidence.from(ScreenWindowImage.lines(image,area).map {it.text})
+        } catch (error:RuntimeException) {
+            if(error is kotlinx.coroutines.CancellationException)throw error
+            return null
+        } finally {image.recycle()}
+    }
+
+    private suspend fun inspectImage(screen:Snapshot):ImageObservation? {
+        val image=capture(screen)?:return null
+        try {
+            val web=checkNotNull(screen.webBounds)
+            fun relative(bounds:Rect)=Rect(bounds).apply {offset(-screen.windowBounds.left,-screen.windowBounds.top)}
+            val crop=relative(web)
+            val candidates=mutableListOf<ImageTarget>()
+            fun add(label:String,bounds:Rect,nativeRef:String?,play:Boolean) {
+                candidates+=ImageTarget("v"+UUID.randomUUID().toString().replace("-","").take(11),label,bounds,
+                    ScreenWindowImage.fingerprint(image,bounds),nativeRef,play)
+            }
+            val unlabeled=onMain {
+                screen.elements.filter {it.webContent&&!it.sensitive&&it.role==NativeScreenRole.TAP&&it.label.isBlank()}
+                    .mapNotNull { element ->
+                        val bounds=relative(Rect().also(element.node::getBoundsInScreen))
+                        (element.ref to bounds).takeIf {crop.contains(bounds)&&bounds.width()>=24&&bounds.height()>=24}
+                    }
+            }
+            val nativeTaps=onMain {
+                screen.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive&&it.label.isNotBlank()}
+                    .map {relative(Rect().also(it.node::getBoundsInScreen))}
+            }
+            withContext(Dispatchers.Default) {
+                val visibleVideo=screen.videoBounds.map(::relative).filter {crop.contains(it)}
+                val play=visibleVideo.mapNotNull {video->
+                    ScreenWindowImage.playPoint(image,video)
+                        ?.takeUnless {candidate->nativeTaps.any {it.contains(candidate.centerX(),candidate.centerY())}}
+                }.singleOrNull()
+                if(play!=null){
+                    val boundButtons=unlabeled.filter {it.second.contains(play.centerX(),play.centerY())}
+                    if(boundButtons.size<=1)add("▶ 동영상 재생",play,boundButtons.singleOrNull()?.first,true)
+                }
+                if(unlabeled.isNotEmpty()){
+                    val lines=try {ScreenWindowImage.lines(image,crop)}
+                    catch (error:RuntimeException) {
+                        if(error is kotlinx.coroutines.CancellationException)throw error
+                        emptyList()
+                    }
+                    for ((ref,bounds) in unlabeled.take(16)) {
+                        if(play!=null&&Rect.intersects(play,bounds))continue
+                        val line=lines.singleOrNull {it.text.isNotBlank()&&bounds.contains(it.bounds)}?:continue
+                        // Each OCR line must identify exactly one unnamed accessibility target.
+                        if(unlabeled.count {it.second.contains(line.bounds)}==1)add(line.text,bounds,ref,false)
+                    }
+                }
+            }
+            if(snapshotWhenAvailable().id!=screen.id)throw SnapshotChanged(afterApproval=false)
+            return ImageObservation(screen.id,screen.windowBounds,SystemClock.elapsedRealtime()+90_000,candidates)
+        } finally { image.recycle() }
+    }
+
+    private fun requireImageTarget(screen:Snapshot,args:JsonObject):ImageTarget {
+        val observation=lastImage
+        if(visualBlock(screen)!=null||observation==null||observation.screenId!=screen.id||
+            observation.bounds!=screen.windowBounds||observation.expiresAt<=SystemClock.elapsedRealtime())
+            throw ScreenRefused("화면 이미지가 만료되었거나 권한이 없습니다. 화면을 다시 확인하세요.")
+        val target=observation.targets.singleOrNull {it.ref==args["ref"]?.jsonPrimitive?.content}
+        if(target==null||!ScreenControlToolCatalog.matchesTapLabel(target.label,args["expectedLabel"]?.jsonPrimitive?.content)||
+            !ScreenControlToolCatalog.matchesTapArea(false,args["targetArea"]?.jsonPrimitive?.content)||
+            args["expectedChange"]?.jsonPrimitive?.content.isNullOrBlank())
+            throw ScreenRefused("이미지에서 본 버튼과 클릭 뒤 확인할 결과를 지정해야 합니다.")
+        return target
+    }
+
+    private suspend fun tapImage(args:JsonObject,requested:String,approved:String?):Boolean {
+        val screen=try {snapshotWhenAvailable()} catch(refused:ScreenRefused) {
+            if(approved!=null)throw SnapshotChanged(afterApproval=true)
+            throw refused
+        }
+        requireCurrentSnapshot(requested,screen.id,approved)
+        val target=requireImageTarget(screen,args)
+        if(!target.play&&approved!=requested)throw ScreenRefused("이미지에서 읽은 버튼은 클릭 전에 확인이 필요합니다.")
+        val frame=capture(screen)?:throw ScreenRefused("현재 창의 이미지를 다시 확인할 수 없습니다.")
+        val same=try {withContext(Dispatchers.Default){
+            ScreenWindowImage.fingerprint(frame,target.bounds).contentEquals(target.fingerprint)
+        }} finally {frame.recycle()}
+        if(!same)throw SnapshotChanged(afterApproval=approved!=null)
+        withContext(Dispatchers.Main) {
+            val bridge=service()
+            val current=snapshot(bridge)
+            requireCurrentSnapshot(requested,current.id,approved)
+            if(requireImageTarget(current,args)!==target)throw SnapshotChanged(afterApproval=approved!=null)
+            lastImage=null
+            if(target.nativeRef!=null){
+                val element=current.elements.single {it.ref==target.nativeRef}
+                check(element.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)){"화면의 버튼을 누르지 못했습니다."}
+            } else {
+                val x=(target.bounds.centerX()+current.windowBounds.left).toFloat()
+                val y=(target.bounds.centerY()+current.windowBounds.top).toFloat()
+                val obscured=bridge.windows.any { window->
+                    window.displayId==Display.DEFAULT_DISPLAY&&window.id!=current.evidence.windowId&&
+                        Rect().also(window::getBoundsInScreen).contains(x.toInt(),y.toInt())&&
+                        (window.type!=AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY||
+                            window.root?.packageName?.toString()!=context.packageName)
+                }
+                if(obscured||bridge.screenIndicatorCovers(x.toInt(),y.toInt()))
+                    throw ScreenRefused("다른 창이 버튼을 가리고 있어 누르지 않았습니다.")
+                val path=Path().apply {moveTo(x,y)}
+                val gesture=GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path,0,50)).build()
+                val settled=withTimeoutOrNull(1800) {
+                    suspendCancellableCoroutine { continuation ->
+                        val accepted=bridge.dispatchGesture(gesture,object:AccessibilityService.GestureResultCallback(){
+                            override fun onCompleted(description:GestureDescription){if(continuation.isActive)continuation.resume(true)}
+                            override fun onCancelled(description:GestureDescription){if(continuation.isActive)continuation.resume(false)}
+                        },null)
+                        if(!accepted)continuation.resume(false)
+                    }
+                }
+                check(settled==true){"터치 결과를 확인하지 못했습니다."}
+            }
+        }
+        return target.play
     }
 
     private fun perform(screen:Snapshot,action:String,a:JsonObject) {
@@ -281,16 +532,32 @@ class ScreenControl(context:Context) {
         if(packageName==context.packageName)throw OwnAppForeground()
         if(refusedPackage(packageName))throw ScreenRefused("시스템·권한·설치·잠금 화면은 다루지 않습니다.")
         val texts=mutableListOf<String>();val elements=mutableListOf<Element>()
+        val windowBounds=Rect().also(window::getBoundsInScreen)
+        val webAreas=mutableListOf<Rect>();val videoAreas=mutableListOf<Rect>();val videoLabels=mutableListOf<String>()
+        var protectedForm=false
         var visited=0;var truncated=false;var textBudget=6000
-        fun visit(node:AccessibilityNodeInfo,depth:Int,sensitiveAncestor:Boolean,webAncestor:Boolean) {
+        fun visit(node:AccessibilityNodeInfo,depth:Int,sensitiveAncestor:Boolean,webAncestor:Boolean,videoAncestor:Boolean) {
             if(visited>=600||depth>30){truncated=true;return}
             visited++
             if(!node.isVisibleToUser)return
             val sensitive=sensitiveAncestor||sensitive(node)
-            val webContent=webAncestor||node.className?.toString()=="android.webkit.WebView"
+            val className=node.className?.toString()
+            val webContent=webAncestor||className=="android.webkit.WebView"
+            if(sensitive)protectedForm=true
+            if(className=="android.webkit.WebView") {
+                Rect().also(node::getBoundsInScreen).takeIf {it.intersect(windowBounds)}?.let(webAreas::add)
+            }
+            val mediaRole=node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")?.toString()
+            val video=webContent&&!sensitive&&(className in setOf("android.widget.VideoView","android.webkit.HTMLVideoElement")||
+                mediaRole in setOf("video","비디오","동영상"))
+            if(video){
+                val area=Rect().also(node::getBoundsInScreen)
+                if(windowBounds.contains(area)&&area.width()>=80&&area.height()>=80)videoAreas+=area
+            }
             val browserUi=packageName=="com.android.chrome"&&!webContent&&
                 node.viewIdResourceName?.startsWith("$packageName:id/")==true
             val label=labelOf(node)
+            if(!sensitive&&(video||videoAncestor)&&label.isNotBlank()&&videoLabels.size<32)videoLabels+=label.take(120)
             val actions=node.actionList.map{it.id}.toSet()
             val role=when {
                 node.isEditable&&AccessibilityNodeInfo.ACTION_SET_TEXT in actions->NativeScreenRole.EDIT
@@ -302,14 +569,14 @@ class ScreenControl(context:Context) {
                 val shown=if(node.isPassword)"[보호된 입력칸]" else label.ifBlank {
                     if(role==NativeScreenRole.TAP)singleVisibleButtonLabel(node) else descendantLabel(node)
                 }.take(120)
-                elements+=Element("e${elements.size+1}",role,shown,node,sensitive||node.isPassword,browserUi)
+                elements+=Element("e${elements.size+1}",role,shown,node,sensitive||node.isPassword,browserUi,webContent)
             } else if(label.isNotBlank()&&!node.isPassword&&textBudget>0){
                 val piece=label.take(200);texts+=piece;textBudget-=piece.length
             }
-            for(index in 0 until node.childCount.coerceAtMost(80))node.getChild(index)?.let{visit(it,depth+1,sensitive,webContent)}
+            for(index in 0 until node.childCount.coerceAtMost(80))node.getChild(index)?.let{visit(it,depth+1,sensitive,webContent,video||videoAncestor)}
             if(node.childCount>80)truncated=true
         }
-        visit(root,0,false,false)
+        visit(root,0,false,false,false)
         if(elements.size>=150||textBudget<=0)truncated=true
         val digest=MessageDigest.getInstance("SHA-256")
         fun hash(value:String)=digest.digest(value.toByteArray(Charsets.UTF_8))
@@ -328,7 +595,7 @@ class ScreenControl(context:Context) {
             val uniqueId=if(Build.VERSION.SDK_INT>=33) node.uniqueId else null
             val resourceId=node.viewIdResourceName
             // Use fixed-width field digests so adjacent identity components cannot alias.
-            for (part in listOf(node.packageName,node.className,resourceId,uniqueId,element.browserUi)) {
+            for (part in listOf(node.packageName,node.className,resourceId,uniqueId,element.browserUi,element.webContent)) {
                 identity.update(hash(part?.toString().orEmpty()))
             }
             val target=NativeScreenTarget(element.role,hash(element.label),identity.digest(),bounds.left,bounds.top,
@@ -342,14 +609,28 @@ class ScreenControl(context:Context) {
             target
         }
         val packageDigest=hash(packageName)
+        val revision=service.screenInteractionRevision
+        val layout=hash(listOf(windowBounds,webAreas.distinct(),videoAreas.distinct(),protectedForm,revision).toString())
         val id=checkNotNull(nativeScreenSnapshotId(snapshotNonce,packageDigest,window.id,truncated,
-            texts.map(::hash),targets)){"화면 관측을 확인하지 못했습니다."}
-        return Snapshot(packageName,texts,elements,truncated,ScreenReadEvidence(id,packageDigest.hex(),window.id,targetKeys))
+            texts.take(599).map(::hash)+listOf(layout),targets)){"화면 관측을 확인하지 못했습니다."}
+        return Snapshot(packageName,texts,elements,truncated,ScreenReadEvidence(id,packageDigest.hex(),window.id,targetKeys),
+            windowBounds,webAreas.distinct().singleOrNull(),videoAreas.distinct(),protectedForm,
+            if(videoAreas.distinct().size==1)ScreenPlaybackEvidence.from(videoLabels) else null,revision)
     }
 
-    private fun render(screen:Snapshot,action:String?=null,changed:Boolean=false,waitStatus:String?=null):String=buildJsonObject {
+    private fun render(screen:Snapshot,action:String?=null,changed:Boolean=false,waitStatus:String?=null,
+        image:ImageObservation?=null,imageRequested:Boolean=false,expectedChange:String?=null,
+        playbackStatus:String?=null):String=buildJsonObject {
         waitStatus?.let {put("waitStatus",it)}
         if(action!=null){put("lastAction",action);put("screenChanged",changed)}
+        if(expectedChange!=null){put("expectedChange",expectedChange);put("effectStatus","check_current_screen")}
+        playbackStatus?.let {put("playbackStatus",it)}
+        screen.playback?.let {put("mediaElapsedSeconds",it.elapsed);put("mediaDurationSeconds",it.duration)}
+        if(imageRequested)put("imageStatus",when {
+            image==null->visualBlock(screen)?:"capture_unavailable"
+            image.targets.isEmpty()->"no_reliable_candidate"
+            else->"candidates_found"
+        })
         put("untrustedScreenData",true);put("packageName",screen.packageName);put("app",appLabel(screen.packageName))
         put("snapshotId",screen.id);put("truncated",screen.truncated)
         put("texts",JsonArray(screen.texts.map(::JsonPrimitive)))
@@ -357,7 +638,12 @@ class ScreenControl(context:Context) {
             put("ref",e.ref);put("role",e.role.name.lowercase(Locale.ROOT));put("label",e.label)
             if(e.browserUi)put("targetArea","browser_ui")
             if(e.sensitive||(e.role==NativeScreenRole.TAP&&e.label.isBlank()))put("blocked",true)
-        })}})
+        })}
+            image?.targets?.forEach { target->add(buildJsonObject {
+                put("ref",target.ref);put("role","tap");put("label",target.label);put("source","image")
+                put("targetArea","content");put("requiresOwner",!target.play)
+            })}
+        })
     }.toString()
 
     private fun labelOf(node:AccessibilityNodeInfo):String=

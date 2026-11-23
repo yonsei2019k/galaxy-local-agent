@@ -135,11 +135,17 @@ class ScreenBridgeService : AccessibilityService() {
     private var inspector: LinearLayout? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val screenRuns = mutableMapOf<String, Runnable>()
+    private val screenStops = linkedMapOf<String, () -> Unit>()
+    internal var screenInteractionRevision = UUID.randomUUID()
+        private set
     private var screenIndicator: TextView? = null
     private var observingScreenOff = false
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_SCREEN_OFF) clearScreenWork()
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                screenInteractionRevision = UUID.randomUUID()
+                clearScreenWork()
+            }
         }
     }
     override fun onServiceConnected() {
@@ -166,7 +172,10 @@ class ScreenBridgeService : AccessibilityService() {
         // Ignore only our own inspector's metadata events; never read text or content descriptions.
         if (event?.packageName?.toString() != packageName) invalidate()
     }
-    override fun onInterrupt() { clearScreenWork(); closeInspector(); invalidate() }
+    override fun onInterrupt() {
+        screenInteractionRevision = UUID.randomUUID()
+        clearScreenWork(); closeInspector(); invalidate()
+    }
     override fun onDestroy() {
         if (observingScreenOff) unregisterReceiver(screenOff)
         clearScreenWork()
@@ -177,13 +186,12 @@ class ScreenBridgeService : AccessibilityService() {
         super.onDestroy()
     }
 
-    internal fun markScreenWork(runId: String) {
+    internal fun markScreenWork(runId: String, stop: (() -> Unit)? = null) {
         requireMainThread()
         if (!getSystemService(PowerManager::class.java).isInteractive ||
             getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
         if (screenIndicator == null) {
             val indicator = TextView(this).apply {
-                text = getString(R.string.screen_work_in_progress)
                 setTextColor(Color.WHITE)
                 textSize = 14f
                 setPadding(dp(12), dp(6), dp(12), dp(6))
@@ -211,6 +219,11 @@ class ScreenBridgeService : AccessibilityService() {
                 return
             }
         }
+        if (stop != null) {
+            screenStops.remove(runId)
+            screenStops[runId] = stop
+        }
+        updateScreenIndicator()
         screenRuns.remove(runId)?.let(mainHandler::removeCallbacks)
         val expiry = Runnable { endScreenWork(runId) }
         screenRuns[runId] = expiry
@@ -220,12 +233,45 @@ class ScreenBridgeService : AccessibilityService() {
     internal fun endScreenWork(runId: String) {
         requireMainThread()
         screenRuns.remove(runId)?.let(mainHandler::removeCallbacks)
+        screenStops.remove(runId)
         if (screenRuns.isEmpty()) clearScreenWork()
+        else updateScreenIndicator()
+    }
+
+    private fun updateScreenIndicator() {
+        val indicator = screenIndicator ?: return
+        val params = indicator.layoutParams as WindowManager.LayoutParams
+        val canStop = screenStops.isNotEmpty()
+        indicator.text = getString(if (canStop) R.string.screen_work_stop else R.string.screen_work_in_progress)
+        indicator.setOnClickListener(if (canStop) android.view.View.OnClickListener {
+            screenStops.entries.lastOrNull()?.let { (runId, stop) ->
+                endScreenWork(runId)
+                stop()
+            }
+        } else null)
+        indicator.isClickable = canStop
+        val oldFlags = params.flags
+        params.flags = if (canStop) oldFlags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            else oldFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        if (oldFlags != params.flags) {
+            try { getSystemService(WindowManager::class.java).updateViewLayout(indicator, params) }
+            catch (error: RuntimeException) {
+                com.user.localagent.FailureLog.record(this, "screen_work_indicator", error, "WINDOW_UPDATE_FAILED")
+                clearScreenWork()
+            }
+        }
+    }
+
+    internal fun screenIndicatorCovers(x: Int, y: Int): Boolean {
+        val view = screenIndicator?.takeIf { screenStops.isNotEmpty() } ?: return false
+        val location = IntArray(2).also(view::getLocationOnScreen)
+        return x in location[0] until location[0] + view.width && y in location[1] until location[1] + view.height
     }
 
     private fun clearScreenWork() {
         screenRuns.values.forEach(mainHandler::removeCallbacks)
         screenRuns.clear()
+        screenStops.clear()
         screenIndicator?.let { runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(it) } }
         screenIndicator = null
     }
