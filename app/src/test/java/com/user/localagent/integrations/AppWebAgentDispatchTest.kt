@@ -26,6 +26,20 @@ class AppWebAgentDispatchTest {
     private fun open(url:String)=ToolCall("open",AppBrowserToolCatalog.OPEN,buildJsonObject{put("url",url)})
     private fun read()=ToolCall("read",AppBrowserToolCatalog.READ,buildJsonObject{})
 
+    @Test fun phonePresentationStaysOnPhoneAndRequiresAnActualReceipt()=runBlocking {
+        val url="https://example.com/help"
+        val call=open(url).copy(arguments=buildJsonObject {put("url",url);put("showOnPhone",true)})
+        val browser=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){_,body->
+            assertEquals(JsonPrimitive(true),body["showOnPhone"])
+            buildJsonObject {put("error","PAGE_UNREACHABLE");put("phoneBrowserVisible",true)}
+        }
+        val result=browser.execute(call,pcFallback={_,_->error("Do not replace a visible phone request with PC reading")})
+        val receipt=Json.parseToJsonElement(result.content).jsonObject
+        assertFalse(result.success)
+        assertEquals(JsonPrimitive(true),receipt["phoneBrowserVisible"])
+        assertEquals(JsonPrimitive("PAGE_UNREACHABLE"),receipt["error"])
+    }
+
     @Test
     fun plannedReadReobservesTheSamePageAndNeverUsesStalePhoneControls()=runBlocking {
         val url="https://example.com/help"

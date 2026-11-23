@@ -57,7 +57,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         fun app(context:Context)=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
             val web=com.user.localagent.integrations.AppWebAgent.get(context)
             when(operation){
-                "open"->web.open(body.getValue("url").jsonPrimitive.content)
+                "open"->web.open(body.getValue("url").jsonPrimitive.content,body["showOnPhone"]==JsonPrimitive(true))
                 "read"->web.read(body["observeMedia"]==JsonPrimitive(true))
                 else->web.act(body,body[APP_APPROVED_SNAPSHOT]?.jsonPrimitive?.contentOrNull)
             }
@@ -124,7 +124,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         if(pcAction&&(review(call).first||approvedSnapshot!=null)&&!approvedPcTarget)
             return refused(call,"APPROVAL_MISMATCH")
         val (operation,body)=when(call.name){
-            catalog.open->"open" to buildJsonObject{put("url",call.arguments.getValue("url"))}
+            catalog.open->"open" to buildJsonObject{
+                put("url",call.arguments.getValue("url"))
+                if(catalog==AppBrowserToolCatalog&&call.arguments["showOnPhone"]==JsonPrimitive(true))put("showOnPhone",true)
+            }
             catalog.read->"read" to buildJsonObject{}
             else->{
                 val arguments=if(catalog==AppBrowserToolCatalog){
@@ -153,14 +156,15 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         }
         val target=recoveredTarget
         if(result["loginRequired"]==JsonPrimitive(true)&&!(operation=="read"&&target!=null))
-            return authenticationRequired(call)
+            return authenticationRequired(call,result["phoneBrowserVisible"]==JsonPrimitive(true))
         val phoneError=result["error"]?.jsonPrimitive?.contentOrNull
         if(operation=="read"&&target!=null){
             if(!readablePage(target,result))
                 return recoverPublicPage(call,target,pcFallback)?:refused(call,"PC_RECOVERY_UNAVAILABLE")
             recoveredTarget=null
         }
-        if(catalog==AppBrowserToolCatalog&&operation=="open"&&phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE","PAGE_UNREACHABLE")){
+        if(catalog==AppBrowserToolCatalog&&operation=="open"&&body["showOnPhone"]!=JsonPrimitive(true)&&
+            phoneError in setOf("PAGE_TIMEOUT","PAGE_UNREADABLE","PAGE_UNREACHABLE")){
             val url=body.getValue("url").jsonPrimitive.content
             if(fallbackUrlAllowed(url))recoverPublicPage(call,url,pcFallback)?.let{return it}
         }
@@ -174,7 +178,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                     VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
             }
             if(error=="SNAPSHOT_STALE"){last=null;lastPage=null}
-            return refused(call,error)
+            return refused(call,error,(result["phoneBrowserVisible"] as? JsonPrimitive)?.booleanOrNull)
         }
         remember(result)
         return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,
@@ -384,13 +388,14 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         )
     }
 
-    private fun authenticationRequired(call:ToolCall):ToolResult {
+    private fun authenticationRequired(call:ToolCall,shown:Boolean=false):ToolResult {
         last=null
         lastPage=null
         recoveredTarget=null
         val noChange=call.name!=catalog.action
         return ToolResult(call.id,false,buildJsonObject {
             put("error",PHONE_AUTH_REQUIRED)
+            put("phoneBrowserVisible",shown)
             initialOrigin?.let{put("phoneBrowserOrigin",it)}
             put("hint","인증은 휴대폰의 집합 앱 브라우저에서 직접 진행해 주세요. 로그인이나 인증값을 채팅에 입력할 필요가 없습니다.")
         }.toString(),if(noChange)VerificationState.FAILED else VerificationState.UNVERIFIED,
@@ -423,8 +428,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         result["loginRequired"]!=JsonPrimitive(true)&&samePage(url,result)&&
             result["text"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true
 
-    private fun refused(call:ToolCall,error:String)=ToolResult(call.id,false,
-        buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
+    private fun refused(call:ToolCall,error:String,shown:Boolean?=null)=ToolResult(call.id,false,
+        buildJsonObject{put("error",error);put("hint",hint(error));shown?.let{put("phoneBrowserVisible",it)}}.toString(),
+        VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
 
     private fun hint(code:String)=when(code){
         "SNAPSHOT_STALE"->"페이지가 바뀌었습니다. ${catalog.read}로 다시 읽은 뒤 새 snapshotId와 ref를 사용하세요."
@@ -456,7 +462,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("playbackEvidence","snapshotId","url","title","loginRequired","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus")
+        listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus")
             .forEach{key->result[key]?.let{put(key,it)}}
         put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))

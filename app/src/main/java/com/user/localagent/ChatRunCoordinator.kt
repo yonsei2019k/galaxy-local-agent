@@ -3024,12 +3024,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             it.call.name in com.user.localagent.core.PcBrowserToolCatalog.names}?:return false
         if(outcome.result.success||outcome.result.verificationSummary!=com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED)
             return false
-        val site=runCatching{Json.parseToJsonElement(outcome.result.content).jsonObject["phoneBrowserOrigin"]?.jsonPrimitive?.contentOrNull}.getOrNull()
+        val auth=runCatching{Json.parseToJsonElement(outcome.result.content).jsonObject}.getOrNull()
+        val site=auth?.get("phoneBrowserOrigin")?.jsonPrimitive?.contentOrNull
+        val shown=auth?.get("phoneBrowserVisible")==JsonPrimitive(true)
         val requiresReadback=observedOutcomes.any{!it.result.effectNotApplied&&!com.user.localagent.core.ToolReadPolicy.isReadOnly(it.call.name)}
         val where=site?.let{" ($it)"}.orEmpty()
         val next=if(requiresReadback)"인증 뒤 이전 동작의 결과를 먼저 확인해 주세요."
             else "인증한 뒤 이 대화에서 이어서 요청해 주세요."
-        answer("이 사이트는 인증이 필요해요$where. 휴대폰의 집합 설정에서 ‘앱 브라우저 열기 · 로그인’을 열어 직접 인증해 주세요. $next")
+        val login=if(shown)"휴대폰에 열린 집합 브라우저에서 직접 인증해 주세요."
+            else "휴대폰의 집합 앱 브라우저에서 직접 인증해 주세요."
+        answer("이 사이트는 인증이 필요해요$where. $login $next")
         persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode="browser_auth_on_phone")
         status.value="휴대폰 인증 대기"

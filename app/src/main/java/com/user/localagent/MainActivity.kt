@@ -146,7 +146,12 @@ class MainActivity : ComponentActivity() {
         app.runs.refreshVisibleHistory()
         openCallReport(intent)
         lifecycleScope.launch {repeatOnLifecycle(Lifecycle.State.STARTED){while(isActive){if(!app.runs.hasActiveRuns.value && !RuntimeGate.benchmark.get()&&!app.smsAnalysis.state.value.running&&!app.webResearch.state.value.running&&!app.imageStudio.state.value.running)app.updates.checkAndApply();delay(60_000)}}}
-        setContent { ZipHapTheme { AppScreen() } }
+        setContent {
+            ZipHapTheme {
+                AppScreen()
+                com.user.localagent.integrations.AppBrowserSurface(this@MainActivity)
+            }
+        }
     }
     override fun onStart(){
         super.onStart()

@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.http.SslError
 import android.view.View
 import android.webkit.*
+import com.user.localagent.benchmark.RuntimeGate
 import com.user.localagent.core.BrowserNavigationRule
 import com.user.localagent.core.WebAgentPolicy
 import kotlinx.coroutines.*
@@ -42,6 +43,20 @@ class AppWebAgent private constructor(private val context:Context) {
     data class NavigationStatus(val loading:Boolean=false,val error:String?=null)
     private val navigation=MutableStateFlow(NavigationStatus())
     val navigationStatus:StateFlow<NavigationStatus> get()=navigation
+    private val presentation=MutableStateFlow<String?>(null)
+    val presentedAddress:StateFlow<String?> get()=presentation
+    fun showBrowser(address:String=""){presentation.value=address}
+    fun closeBrowser(){presentation.value=null}
+    private suspend fun isPresented():Boolean {
+        val browser=view()
+        fun onScreen()=RuntimeGate.foreground.get()&&browser.isAttachedToWindow&&browser.isShown&&
+            browser.windowVisibility==View.VISIBLE&&browser.width>0&&browser.height>0
+        if(onScreen())return true
+        return withTimeoutOrNull(600){
+            while(!onScreen())delay(40)
+            true
+        }?:false
+    }
     private var navigationRevision=0L
     private var loadingUrl:String?=null
 
@@ -182,7 +197,9 @@ class AppWebAgent private constructor(private val context:Context) {
         val raw=value["elements"]?.jsonArray.orEmpty().map{it.jsonObject}
         val parsed=raw.map{element(it)}
         if(parsed.any{it.editable&&WebAgentPolicy.sensitiveField(it)}){
-            return buildJsonObject{put("loginRequired",true);put("dataOnly",true)}
+            showBrowser(url)
+            val shown=isPresented()
+            return buildJsonObject{put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",shown)}
         }
         val elements=raw.zip(parsed).map{(json,e)->
             val sensitive=e.editable&&WebAgentPolicy.sensitiveField(e)
@@ -208,13 +225,19 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private fun fail(code:String)=buildJsonObject{put("error",code)}
 
-    suspend fun open(url:String):JsonObject = guarded{
+    suspend fun open(url:String,showOnPhone:Boolean=false):JsonObject = guarded{
         if(!WebAgentPolicy.urlAllowed(url))return@guarded fail("URL_NOT_ALLOWED")
+        if(showOnPhone)showBrowser(url)
         beginNavigation(url)
         settle()
-        navigation.value.error?.let {return@guarded fail(it)}
-        if(navigation.value.loading)return@guarded fail("PAGE_TIMEOUT")
-        readPage()
+        val error=navigation.value.error
+        val page=when {
+            error!=null->fail(error)
+            navigation.value.loading->fail("PAGE_TIMEOUT")
+            else->readPage()
+        }
+        if(showOnPhone&&"phoneBrowserVisible" !in page)
+            JsonObject(page+("phoneBrowserVisible" to JsonPrimitive(isPresented()))) else page
     }
     suspend fun read(observeMedia:Boolean=false):JsonObject = guarded{
         navigation.value.error?.let {return@guarded fail(it)}
