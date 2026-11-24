@@ -281,7 +281,53 @@
 - [ ] **Step 4:** 웹 UI 시험·빌드·하네스를 통과시킨다.
 - [ ] **Step 5:** 커밋한다. 메시지: `헤더 작업 줄과 입력창 시트로 상태·모델 선택 정리`
 
-### Task 7: 측정 비교·전체 빌드·인계 기록
+### Task 7: 모션 그래픽 (화면 전환과 캐릭터 상태 반응)
+
+소유자 지시(2026-11-24): "모션 그래픽을 넣고, 캐릭터는 움직이는 캐릭터로." 방식은 SVG와 CSS 애니메이션이다. 영상은 첫 실행 인트로에만 쓴다(기존). Rive·Lottie는 쓰지 않는다(소유자에게 비교 설명함).
+
+**Files:**
+- Create: `web-ui/src/motion.css` (공통 키프레임·시간 토큰)
+- Modify: `web-ui/src/character/character.css`, `Character.tsx` (Task 3 결과물에 움직임 추가)
+- Modify: `web-ui/src/work/work.css`, `WorkSheet.tsx`, `ComposerSheet.tsx`, `CharacterPicker.tsx` (시트 열림·닫힘)
+- Test: `web-ui/src/motion.test.tsx`
+
+**규칙**
+- **시간 토큰** (`tokens.json`과 `tokens.css`에 추가)
+  - `--motion-fast` 120ms, `--motion-base` 220ms, `--motion-slow` 360ms
+  - 이징 `--ease-out` = `cubic-bezier(.2,.8,.2,1)`, `--ease-spring` = `cubic-bezier(.34,1.56,.64,1)`
+- **캐릭터 움직임**
+  - CSS `@keyframes`로 SVG 그룹의 `transform`·`opacity`만 바꾼다. `transform-box: fill-box`를 쓴다.
+  - 평소 동작
+    - 숨쉬기: 몸·얼굴 scale 1→1.02, 3.2초 반복
+    - 눈 깜빡임: 표정 그룹 scaleY 1→0.1→1, 0.18초, 4.6초 주기
+    - 캐릭터를 누르면 귀가 흔들린다: ±6°, 0.5초 1회
+  - 상태별 동작
+    - 작업 중: 두 손이 번갈아 위아래로 2px, 0.4초
+    - 대기: 담요가 위아래로 2px, 3.2초. Zz가 위로 떠오르며 사라짐, 2.4초. 말풍선이 위아래로 1px
+    - 완료: 김이 위로 올라가며 사라짐, 2초. 상태가 바뀔 때 한 번 6px 뛰어오름
+    - 확인 필요: 손이 ±10° 흔들림, 0.6초 2회 후 멈춤. "!"가 scale 1→1.12로 2회
+  - 32px 이하 크기(헤더·라벨)에서는 숨쉬기와 깜빡임만 한다.
+- **화면 움직임**
+  - 하단 시트: 아래에서 올라온다(translateY 100%→0, `--motion-base`, `--ease-out`). 배경은 흐려짐(opacity 0→0.4).
+  - 작업 카드: 처음 나타날 때 아래에서 8px 올라오며 나타난다. 상태가 바뀌면 색이 `--motion-base`로 바뀐다.
+  - 진행 막대: 왼쪽에서 오른쪽으로 흐르는 반짝임(기존 막대 대체)
+  - 완료로 바뀌는 순간: 카드 아이콘이 `--ease-spring`으로 1→1.15→1, 1회
+  - 새 메시지: 아래에서 6px 올라오며 나타남(`--motion-fast`)
+- **접근성:** `@media (prefers-reduced-motion: reduce)`에서는 위의 모든 반복 움직임과 이동을 끈다. 색 변화만 즉시 바뀐다. 접근성 확대·축소 상태에서도 레이아웃이 흔들리지 않아야 한다.
+- **성능:** `transform`·`opacity` 외 속성은 애니메이션하지 않는다. 화면 밖 캐릭터는 `animation-play-state: paused`(IntersectionObserver)로 멈춘다.
+
+- [ ] **Step 1:** 시험을 쓴다. `motion.test.tsx`
+  - `characterAnimatesByStateClasses`: 상태마다 루트에 `character--state-work` 등의 클래스와 `data-animated="true"`가 붙는다.
+  - `smallCharacterOnlyBreathesAndBlinks`: size 32는 상태 동작 클래스가 없다.
+  - `reducedMotionDisablesAnimation`: `matchMedia('(prefers-reduced-motion: reduce)')`가 true면 `data-animated="false"`
+  - `offscreenCharacterPauses`: IntersectionObserver 가짜에서 화면 밖이면 `data-paused="true"`
+  - `sheetsUseSharedMotionClass`: 세 시트 모두 `sheet--motion` 클래스가 있다.
+- [ ] **Step 2:** 실패를 확인한다.
+- [ ] **Step 3:** 구현한다.
+- [ ] **Step 4:** 웹 UI 시험·빌드·하네스를 통과시킨다. 하네스는 `prefers-reduced-motion: reduce` 에뮬레이션으로 한 번 더 돌려 넘침과 대비를 확인한다.
+- [ ] **Step 5:** 커밋한다. 메시지: `캐릭터 움직임과 화면 전환 모션 추가`
+
+### Task 8: 측정 비교·전체 빌드·인계 기록
 
 **Files:**
 - Modify: `docs/agent-change-log.md` (맨 위 항목)
