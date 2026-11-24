@@ -53,14 +53,20 @@ test('phone browser asset checks actionability and refreshes stale references in
     assert.deepEqual(await click('fourth', ref), { error: 'ELEMENT_OBSCURED' });
     assert.equal(await page.evaluate(() => window.steps), 1);
 
-    await page.locator('#next').evaluate(element => element.removeAttribute('inert'));
-    await observe('trusted');
-    const { trustedTap } = await run({ action:'prepareTrustedTap', snapshotId:'trusted', ref });
+    const touchPage = await browser.newPage(devices['Pixel 7']);
+    await touchPage.setContent(`<meta name="viewport" content="width=device-width, initial-scale=1">
+      <button onclick="window.trusted = event.isTrusted">Enter classroom</button>`);
+    const touch = options => touchPage.evaluate(`(${source})(${JSON.stringify({
+      key:'ziphap-touch-fixture', approvedSnapshot:null, ...options,
+    })})`);
+    const current = await touch({ action:'observe', snapshotId:'trusted' });
+    const touchRef = current.elements.find(element => element.label === 'Enter classroom').ref;
+    const { trustedTap } = await touch({ action:'prepareTrustedTap', snapshotId:'trusted', ref:touchRef });
     assert.ok(trustedTap.x > 0 && trustedTap.x < trustedTap.viewportWidth);
-    assert.equal(await page.evaluate(() => window.steps), 1);
-    await page.touchscreen.tap(trustedTap.x, trustedTap.y);
-    assert.equal(await page.evaluate(() => window.steps), 2);
-    assert.deepEqual(await run({ action:'prepareTrustedTap', snapshotId:'trusted', ref }), { error:'SNAPSHOT_STALE' });
+    assert.equal(await touchPage.evaluate(() => window.trusted), undefined);
+    await touchPage.touchscreen.tap(trustedTap.x, trustedTap.y);
+    assert.equal(await touchPage.evaluate(() => window.trusted), true);
+    assert.deepEqual(await touch({ action:'prepareTrustedTap', snapshotId:'trusted', ref:touchRef }), { error:'SNAPSHOT_STALE' });
   } finally {
     await browser.close();
   }
