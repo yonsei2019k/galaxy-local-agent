@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node --test phone-browser.test.cjs browser-login.test.cjs"
+    "test": "node --test phone-browser.test.cjs browser-login.test.cjs chat-visual.test.cjs"
   },
   "devDependencies": {
     "playwright": "1.65.1"
