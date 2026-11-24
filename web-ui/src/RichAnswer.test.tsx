@@ -84,3 +84,39 @@ test('does not expose raw card text while streaming or for unknown templates', (
   expect(render('요약\n```service-result\n' + unknown)).toContain('<p>요약</p>')
   expect(render('요약\n```service-result\n' + unknown)).not.toContain('private fixture')
 })
+const comparisonQuote = {
+  ...quote, address: '테스트시 바다로 1', rateTerms: '객실만 · 침대 2개 · 인원 4명',
+  url: 'https://low.example.org/stay', checkoutHost: 'checkout.example.org',
+  online: 126000, onsite: 30000, total: 156000,
+}
+const alternativeQuote = {
+  ...comparisonQuote, url: 'https://high.example.net/stay', checkoutHost: 'checkout.example.net',
+  online: 180000, onsite: 0, total: 180000,
+}
+
+test('groups the same room and calculates savings from the next verified independent checkout', () => {
+  const html = render(stayBlock([alternativeQuote, comparisonQuote,
+    { ...comparisonQuote, url: 'https://mobile.example.org/stay', online: 135000, total: 165000 },
+    { ...alternativeQuote, url: 'https://unavailable.example.com/stay', checkoutHost: 'example.com',
+      online: 158000, total: 158000, available: false },
+  ]))
+  expect(html).toContain('같은 객실의 판매처')
+  expect(html).toContain('예상 24,000원 절약')
+  expect(html).toContain('비교 기준 high.example.net 180,000원')
+  expect(html.indexOf('low.example.org')).toBeLessThan(html.indexOf('high.example.net'))
+})
+
+test.each([
+  ['a different street address', { address: '테스트시 바다로 2' }],
+  ['a different room', { room: '다른 객실' }],
+  ['different included meals', { rateTerms: '조식 포함' }],
+  ['different cancellation', { cancellation: '환불 불가' }],
+  ['missing checkout', { checkoutHost: null }],
+  ['affiliate links leading to the same checkout', { checkoutHost: 'm.example.org' }],
+  ['an unavailable offer', { available: false }],
+  ['an incomplete fee', { onsite: null }],
+  ['checks outside the same price window', { checkedAt: '2026-11-24T21:11:00+09:00' }],
+  ['a price tie', { online: 156000, total: 156000 }],
+])('does not show savings for %s', (_label, changes) => {
+  expect(render(stayBlock([comparisonQuote, { ...alternativeQuote, ...changes }]))).not.toContain('절약')
+})

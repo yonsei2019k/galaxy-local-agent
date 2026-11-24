@@ -28,3 +28,10 @@
 .stay-photo img { display: block; width: 100%; max-height: 220px; object-fit: contain; border-radius: var(--radius-control); background: var(--color-bg); }
 .stay-photo figcaption { color: var(--color-muted); font-size: var(--fs-caption); margin-top: 4px; }
 .stay-actions button:disabled { opacity: .65; cursor: default; }
+
+.rich-answer .stay-offer-group h4 { margin: 0; font-size: var(--fs-body); overflow-wrap: anywhere; }
+.rich-answer .stay-offer-group .stay-list { margin-top: var(--space-2); }
+.rich-answer .stay-offer-group .stay-list li { padding-inline: 0; }
+.stay-savings { display: grid; gap: 3px; padding: var(--space-2); background: var(--color-cobalt-soft); border-radius: var(--radius-control); overflow-wrap: anywhere; }
+.stay-savings strong { color: var(--color-cobalt-text); }
+.stay-savings span { font-size: var(--fs-small); color: var(--color-muted); }
