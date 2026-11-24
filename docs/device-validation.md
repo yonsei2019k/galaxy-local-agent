@@ -1,5 +1,13 @@
 # Device validation
 
+## 2076 스마트폰 인프라 검증
+
+기존 서명으로 2075 위에 2076을 설치했다. 기기 base APK를 다시 가져와 SHA-256 `6a8eced2e01a6625cc5ec29e51646d29f75177f45f7a7973eac1b007666045a8`을 확인했다.
+
+기존 연결을 사용해 Gmail 검색과 Google Calendar 단일 시간 범위 조회를 확인했다. 계정 정보·메일·일정 내용은 기록에 남기지 않았다. Android 캘린더 가상 제공자 9건과 암호화 연결 계정 변경 1건도 통과했다. 기존 권한으로 읽기를 확인했으며 신규 휴대폰 동의부터 작업 자동 재개까지의 전체 흐름은 별도 시험이 필요하다.
+
+접근성 화면 시험은 두 번 모두 실행 전 중단됐다. 두 번째 시도 직전 소유자가 설정에서 다시 켠 뒤 Android가 서비스를 연결한 것을 확인했으나 이 폰에서 계측을 시작한 뒤 연결이 다시 해제됐다. 실제 2076 앱의 평상시 채팅 실행 경로로 재시험한다. 실패한 두 시도는 보존한다.
+
 ## 2047 on-phone Coupang review workspace candidate
 
 Installed signed 2047 over the verified signed 2046 with matching package and signer. The installed base APK SHA-256 was `394bf5576d509c25e89de410f1208ee58d6fe9c33f20d1169a19e049855d99ec`. Core JVM 1,019 and mandatory release lint passed. Four synthetic DOM cases exercised the capture script. The installed app and its conversation menu opened. The app moved out of the foreground during settings navigation, before opening the Coupang workspace. No actual login, purchase-history collection, photo upload, or posting was exercised.
