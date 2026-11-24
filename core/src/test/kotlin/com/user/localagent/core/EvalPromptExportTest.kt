@@ -15,6 +15,26 @@ import org.junit.Test
 class EvalPromptExportTest {
     private val out=File("build/eval").apply{mkdirs()}
 
+    @Test fun exportsClosedGoalToolSchemasForPairedWorker() {
+        val names = GoalProgressToolCatalog.names + GoalWaitToolCatalog.WAIT
+        val catalog = Json.parseToJsonElement(ToolRegistry.schemaJson(names)).jsonArray
+        fun verify(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    if (node["type"] == JsonPrimitive("object")) {
+                        assertEquals(JsonPrimitive(false), node["additionalProperties"])
+                        assertTrue(node["properties"] is JsonObject)
+                    }
+                    node.values.forEach(::verify)
+                }
+                is JsonArray -> node.forEach(::verify)
+                else -> Unit
+            }
+        }
+        verify(catalog)
+        File(out, "goal-execution-schemas.json").writeText(catalog.toString())
+    }
+
     @Test fun exportsCurrentPolicyForLocalVerificationTools(){
         val tools=ToolUsePolicy.verificationTools
         val data=buildJsonObject {

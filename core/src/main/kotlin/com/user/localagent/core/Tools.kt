@@ -206,7 +206,7 @@ object ToolRegistry {
                 if(d.description.isNotBlank())put("description",d.description)
                 put("parameters",buildJsonObject {
                     put("type","object");put("additionalProperties",false)
-                    put("properties",buildJsonObject {d.arguments.forEach {(key,spec)->put(key,NoteReadPatchToolCatalog.argumentSchema(name,key)?:GoalToolCatalog.argumentSchema(name,key)?:PrivateAnalysisToolCatalog.argumentSchema(name,key)?:OfficeToolCatalog.argumentSchema(name,key)?:buildJsonObject {
+                    put("properties",buildJsonObject {d.arguments.forEach {(key,spec)->put(key,GoalExecutionSchemas.argument(name,key)?:NoteReadPatchToolCatalog.argumentSchema(name,key)?:GoalToolCatalog.argumentSchema(name,key)?:PrivateAnalysisToolCatalog.argumentSchema(name,key)?:OfficeToolCatalog.argumentSchema(name,key)?:buildJsonObject {
                         put("type",spec.type)
                         if(spec.description.isNotBlank())put("description",spec.description)
                         if(spec.type=="string")put("maxLength",spec.maxLength)
@@ -216,7 +216,7 @@ object ToolRegistry {
                         if(key=="recordingId"&&name in RecordingToolCatalog.names)put("pattern","^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
                         if(key=="limit"){put("minimum",1);put("maximum",limitMax(name))}
                         if(spec.type=="array")put("items",buildJsonObject{
-                            put("type",if(name==GoalProgressToolCatalog.UPDATE && key=="ops")"object" else "integer")
+                            put("type","integer")
                         })
                     })}})
                     put("required",buildJsonArray {d.arguments.filterValues {it.required}.keys.forEach {add(it)}})
