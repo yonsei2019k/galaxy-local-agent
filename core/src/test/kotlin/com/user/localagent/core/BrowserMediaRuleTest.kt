@@ -59,6 +59,19 @@ class BrowserMediaRuleTest {
         }
     }
 
+    @Test fun ordinaryReadsInThreeDifferentPagesDoNotCountAsRepeatedWork() {
+        for (browser in listOf(AppBrowserToolCatalog, PcBrowserToolCatalog)) {
+            val goal=TaskGoal("Find a document",listOf("Read its details"),requiredTools=browser.names)
+            val read=ToolCall("observe",browser.read,buildJsonObject {})
+            val snapshot=HarnessStep(read,StepEvidence(browser.read,VerificationState.VERIFIED,"observed"))
+            fun page(path:String)=HarnessStep(browser.open,buildJsonObject {put("url","https://example.org/$path")},
+                StepEvidence(browser.open,VerificationState.VERIFIED,"opened"))
+            val steps=listOf(page("home"),snapshot,page("archive"),snapshot,page("details"))
+            assertTrue(TaskHarness.beforeStep(goal,steps,read) is HarnessDecision.Advance)
+            assertTrue(TaskHarness.beforeStep(goal,steps+snapshot,read) is HarnessDecision.Stop)
+        }
+    }
+
     @Test fun theSameObservationCanWaitAcrossBoundedReads() {
         val tool=AppBrowserToolCatalog.READ
         val args=buildJsonObject {put("playbackRule","ended")}

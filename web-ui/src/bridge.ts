@@ -8,6 +8,7 @@ export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   text: string
+  fileFormats?: string[]
   authorLabel?: string
 }
 
@@ -129,7 +130,7 @@ export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'pro
 
 type Intent =
   | { action: 'draft'; payload: { text: string } }
-  | { action: 'copy' | 'messageMenu'; payload: { messageId: string } }
+  | { action: 'copy' | 'messageFiles' | 'messageMenu'; payload: { messageId: string } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }
   | { action: 'steer'; payload: RunTarget & { text: string } }
@@ -178,6 +179,9 @@ function resultPreview(value: unknown): value is ResultPreview {
 function message(value: unknown): value is ConversationMessage {
   return record(value) && strings(value, 'id', 'text') &&
     (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool') &&
+    (value.fileFormats === undefined || (value.role === 'assistant' && Array.isArray(value.fileFormats) &&
+      value.fileFormats.length <= 16 && value.fileFormats.every(format =>
+        typeof format === 'string' && ['pdf', 'docx', 'xlsx', 'txt', 'csv'].includes(format)))) &&
     (value.authorLabel === undefined || (value.role === 'assistant' && typeof value.authorLabel === 'string' &&
       value.authorLabel.trim().length > 0 && value.authorLabel.length <= 80 &&
       !/[\u0000-\u001f\u007f]/.test(value.authorLabel)))

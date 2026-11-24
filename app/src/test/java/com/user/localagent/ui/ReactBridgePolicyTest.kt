@@ -26,6 +26,8 @@ class ReactBridgePolicyTest {
             assertNull(ReactBridgePolicy.parse(wire(action,"""{"text":"injected"}""")))
         }
         assertNull(ReactBridgePolicy.parse(wire("chatMenu","{}")))
+        assertNotNull(ReactBridgePolicy.parse(wire("messageFiles","""{"messageId":"m"}""")))
+        assertNull(ReactBridgePolicy.parse(wire("messageFiles","""{"messageId":"m","path":"other.pdf"}""")))
         assertNotNull(ReactBridgePolicy.parse(wire("messageMenu","""{"messageId":"m"}""")))
         assertNotNull(ReactBridgePolicy.parse(wire("removeAttachment","""{"id":"one-file"}""")))
         assertNull(ReactBridgePolicy.parse(wire("removeAttachment","""{"id":"one-file","approved":true}""")))

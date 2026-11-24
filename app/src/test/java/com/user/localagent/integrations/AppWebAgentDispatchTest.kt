@@ -383,6 +383,46 @@ class AppWebAgentDispatchTest {
         }
     }
 
+    @Test fun lostClickReplyIsSettledByObservedDestinationAndMarkerWithoutReplaying()=runBlocking {
+        for (transportFailed in listOf(false,true)) {
+            var reads=0
+            var clicks=0
+            val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+                when(op){
+                    "open"->rulePage("snapshot")
+                    "read"->if(++reads==1)rulePage("before")
+                        else rulePage("after",ruleDestination,emptyList(),marker=true)
+                    else->{
+                        clicks++
+                        if(transportFailed)error("renderer disconnected")
+                        buildJsonObject{put("error","ACTION_OUTCOME_UNKNOWN")}
+                    }
+                }
+            }
+            tools.execute(open(ruleSource))
+            val result=tools.execute(ruleClick())
+            assertEquals(VerificationState.VERIFIED,result.verification)
+            assertEquals(1,clicks)
+            assertEquals(2,reads)
+        }
+    }
+
+    @Test fun markerOnUnexpectedPageNeverSettlesLostClickReply()=runBlocking {
+        var clicks=0
+        val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->
+            when(op){
+                "open"->rulePage("snapshot")
+                "read"->if(clicks==0)rulePage("before")
+                    else rulePage("after","https://fixture.example.test/other",emptyList(),marker=true)
+                else->{clicks++;buildJsonObject{put("error","ACTION_OUTCOME_UNKNOWN")}}
+            }
+        }
+        tools.execute(open(ruleSource))
+        assertEquals(VerificationState.UNVERIFIED,tools.execute(ruleClick()).verification)
+        assertTrue(tools.execute(ruleClick()).effectNotApplied)
+        assertEquals(1,clicks)
+    }
+
     @Test fun uncertainNavigationAllowsObservationButCannotDispatchAgain()=runBlocking {
         var dispatched=0
         val tools=BrowserAgentTools(AppBrowserToolCatalog,"fixture",{true}){op,_->

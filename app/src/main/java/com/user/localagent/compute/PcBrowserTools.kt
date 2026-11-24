@@ -226,19 +226,23 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                     put("action","click");put("snapshotId",fresh.string("snapshotId"));put("ref",ref);put("ruleHref",destination)
                 })
             } catch (cancel:CancellationException) { throw cancel }
-            catch (_:Exception) { return uncertainRule(call) }
-            if(acted.string("error") in setOf("SNAPSHOT_STALE","ELEMENT_UNAVAILABLE"))return@repeat
-            if(acted["loginRequired"]==JsonPrimitive(true)){
+            catch (_:Exception) { null }
+            if(acted?.string("error") in setOf("SNAPSHOT_STALE","ELEMENT_UNAVAILABLE"))return@repeat
+            if(acted?.get("loginRequired")==JsonPrimitive(true)){
                 ruleEffectUncertain=true
                 return authenticationRequired(call)
             }
-            if(acted["performed"] !is JsonObject||acted["error"]!=null)return uncertainRule(call)
+            val lostReply=acted==null||acted.string("error")=="ACTION_OUTCOME_UNKNOWN"
+            if(acted!=null && !lostReply && (acted["performed"] !is JsonObject || acted["error"]!=null))return uncertainRule(call)
 
-            var page=acted
+            // A dispatched click may replace the renderer before its callback arrives.
+            // Only a fresh observation of the bound destination AND its marker settles it.
+            var page=acted?:JsonObject(emptyMap())
             val verified=try {
                 withTimeoutOrNull(8_000) {
                     repeat(4) {attempt->
-                        if(attempt>0){delay(650);page=read()}
+                        if(attempt>0)delay(650)
+                        if(attempt>0||lostReply)page=read()
                         if(!rulePage(page)||page.string("url")!=destination) {
                             // The renderer may still be showing the exact source while it loads the known link.
                             if(!rulePage(page)||page.string("url")!=source)return@withTimeoutOrNull false
@@ -450,6 +454,14 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         else->"브라우저 요청이 거부됐습니다."
     }
 
+    internal fun requirePdfRef(snapshotId:String,ref:String) {
+        val page=lastPage
+        check(enabled() && catalog==AppBrowserToolCatalog && page!=null && page.string("snapshotId")==snapshotId &&
+            page["elements"]?.jsonArray?.any{it.jsonObject.string("ref")==ref && it.jsonObject["sessionPdf"]==JsonPrimitive(true)}==true) {
+            "현재 요청에서 확인한 PDF 링크가 아니에요."
+        }
+    }
+
     private fun remember(result:JsonObject){
         val id=result["snapshotId"]?.jsonPrimitive?.contentOrNull?:run{last=null;lastPage=null;return}
         lastPage=result
@@ -470,6 +482,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         put("elements",JsonArray(result["elements"]?.jsonArray.orEmpty().take(120).mapNotNull{item->runCatching{
             val e=item.jsonObject
             val flags=listOfNotNull(e["type"]?.jsonPrimitive?.content?.takeIf{it.isNotBlank()},
+                "same-session-pdf".takeIf{e["sessionPdf"]==JsonPrimitive(true)},
                 "needs-owner-approval".takeIf{e["needsApproval"]?.jsonPrimitive?.booleanOrNull==true},
                 "owner-only-field".takeIf{e["sensitive"]?.jsonPrimitive?.booleanOrNull==true},
                 "disabled".takeIf{e["disabled"]?.jsonPrimitive?.booleanOrNull==true},

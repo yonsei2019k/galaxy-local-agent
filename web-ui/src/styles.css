@@ -457,6 +457,7 @@ svg { width: 20px; height: 20px; flex: none; }
 .stop-button svg { width: 16px; height: 16px; }
 .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-height: 92px; overflow: auto; padding: 10px 12px 0; }
 .attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 6px 10px; border-radius: var(--radius-pill); background: var(--surface-soft); border: 1px solid var(--line); color: var(--secondary); font-size: 12px; }
+.answer-files { margin-top: 8px; min-height: 44px; cursor: pointer; }
 .attachment span { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .attachment svg { width: 15px; height: 15px; }
 

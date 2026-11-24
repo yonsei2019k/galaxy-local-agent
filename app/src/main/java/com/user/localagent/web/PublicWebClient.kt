@@ -377,7 +377,10 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
 }
 
 /** Validated DNS addresses are used directly for the TLS connection, preventing DNS rebinding. */
-class PinnedPublicHttpsTransport(private val resolve:(String)->List<InetAddress> = {InetAddress.getAllByName(it).toList()}):PublicWebTransport {
+class PinnedPublicHttpsTransport(private val pdf:Boolean=false,private val resolve:(String)->List<InetAddress> = {InetAddress.getAllByName(it).toList()}):PublicWebTransport {
+    private var pdfSession: BoundPdfGet? = null
+    internal constructor(session: BoundPdfGet): this(pdf=true) { pdfSession=session }
+
     override suspend fun get(url:String,maxBytes:Int):PublicWebResponse=withContext(Dispatchers.IO) {
         require(maxBytes in 1..PublicWebClient.MAX_BYTES)
         var target=PublicWebSafety.requireHttps(url)
@@ -397,7 +400,9 @@ class PinnedPublicHttpsTransport(private val resolve:(String)->List<InetAddress>
                     socket.startHandshake()
                     val path=target.rawPath.ifEmpty {"/"}+(target.rawQuery?.let {"?$it"}?:"")
                     val authority=if(host.contains(':'))"[$host]"else host
-                    socket.outputStream.write(("GET $path HTTP/1.1\r\nHost: $authority\r\nUser-Agent: ZipHap.Agent/1.0 PublicWebReader\r\nAccept: text/html,application/rss+xml,application/xhtml+xml,application/json,text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
+                    val accept=if(pdf)"application/pdf,application/octet-stream;q=0.8" else "text/html,application/rss+xml,application/xhtml+xml,application/json,text/plain"
+                    val cookie = pdfSession?.headerFor(target.toString()).orEmpty()
+                    socket.outputStream.write(("GET $path HTTP/1.1\r\nHost: $authority\r\nUser-Agent: ZipHap.Agent/1.0 PublicWebReader\r\nAccept: $accept\r\nAccept-Encoding: identity\r\n${cookie}Connection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
                     socket.outputStream.flush()
                     val input=socket.inputStream.buffered()
                     val status=line(input,8192).split(' ').getOrNull(1)?.toIntOrNull()?:error("잘못된 HTTP 상태")
@@ -412,6 +417,7 @@ class PinnedPublicHttpsTransport(private val resolve:(String)->List<InetAddress>
                         headers[key]=value
                     }
                     if(status in setOf(301,302,303,307,308)){
+                        check(pdfSession==null) { "로그인된 문서 다운로드의 주소가 변경됐어요." }
                         check(redirect<3){"웹 이동 횟수 상한 초과"}
                         target=PublicWebSafety.requireHttps(target.resolve(headers["location"]?:error("이동 주소 없음")).toString())
                     }else {

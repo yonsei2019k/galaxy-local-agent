@@ -35,6 +35,16 @@ class AppWebAgent private constructor(private val context:Context) {
     private var webView:WebView?=null
     private var loading=false
     private var snapshot:Pair<String,Map<String,JsonObject>>?=null
+    private class PdfDocument(val view:WebView,val url:String,val snapshotId:String,val sessionDigests:Map<String,ByteArray>)
+    private var pdfDocument:PdfDocument?=null
+
+    private fun sessionCookie(view:WebView,target:String):String? {
+        if(!androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE))return null
+        return androidx.webkit.WebViewCompat.getProfile(view).cookieManager.getCookie(target)?.takeIf{
+            it.length in 1..8192 && it.all{c->c.code in 0x20..0x7e}
+        }
+    }
+    private fun cookieDigest(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.US_ASCII))
     private val domKey="ziphapBrowser"+token()
     private val domScript by lazy {context.assets.open("app-web-agent.js").bufferedReader().use{it.readText()}}
     private val agentActive=MutableStateFlow(false)
@@ -258,6 +268,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 return true
             }
             override fun onPageStarted(view:WebView,url:String?,favicon:Bitmap?){
+                pdfDocument=null
                 loadingUrl=url
                 loading=true
                 navigation.value=NavigationStatus(loading=true)
@@ -382,6 +393,8 @@ class AppWebAgent private constructor(private val context:Context) {
             return loginHandoff(url)
         }
         credentialScreen.value=false
+        val digests=mutableMapOf<String,ByteArray>()
+        val sourceView=view()
         val elements=raw.zip(parsed).map{(json,e)->
             val sensitive=e.editable&&WebAgentPolicy.sensitiveField(e)
             buildJsonObject{
@@ -392,10 +405,20 @@ class AppWebAgent private constructor(private val context:Context) {
                 put("disabled",json["disabled"]?.jsonPrimitive?.booleanOrNull==true);put("editable",e.editable)
                 put("sensitive",sensitive);put("needsApproval",WebAgentPolicy.riskyControl(e))
                 json.s("ruleHref").takeIf {href->!sensitive&&!WebAgentPolicy.riskyControl(e)&&
-                    BrowserNavigationRule.sameSiteLink(url,href)}?.let {put("ruleHref",it)}
+                    BrowserNavigationRule.sameSiteLink(url,href)}?.let {href->
+                        put("ruleHref",href)
+                        if(digests.size<8 && !loading && sourceView.url==url &&
+                            com.user.localagent.web.BoundPdfGet.eligible(url,href)) {
+                            sessionCookie(sourceView,href)?.let{cookie->
+                                digests[href]=cookieDigest(cookie)
+                                put("sessionPdf",true)
+                            }
+                        }
+                    }
                 json["options"]?.let{put("options",it)}
             }
         }
+        pdfDocument=if(digests.isEmpty())null else PdfDocument(sourceView,url,id,digests)
         snapshot=id to elements.associateBy{it.s("ref")}
         return buildJsonObject{
             put("snapshotId",id);put("url",url);put("title",value.s("title"));put("text",value.s("text"))
@@ -414,6 +437,48 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private fun fail(code:String)=buildJsonObject{put("error",code)}
+
+    internal suspend fun saveObservedPdf(id:String,ref:String,verifyRun:suspend ()->Unit):String=mutex.withLock {
+        val document=withContext(Dispatchers.Main.immediate) {
+            checkNotNull(pdfDocument?.takeIf{it.snapshotId==id}){"PDF가 있던 페이지를 다시 확인해 주세요."}
+        }
+        val target=withContext(Dispatchers.Main.immediate) {
+            snapshot?.takeIf{it.first==id}?.second?.get(ref)?.takeIf{it["sessionPdf"]==JsonPrimitive(true)}
+                ?.s("ruleHref")?.takeIf{it in document.sessionDigests}?:error("현재 페이지에서 확인한 PDF 링크가 아니에요.")
+        }
+        suspend fun freshCookie():String {
+            verifyRun()
+            return withContext(Dispatchers.Main.immediate) {
+                fun current()=pdfDocument===document && webView===document.view && document.view.url==document.url &&
+                    snapshot?.first==id && !loading && loginCard.value==null && !loginSubmitting && websiteLogin.value==null
+                check(current()){"PDF를 선택한 페이지가 바뀌었어요."}
+                val checked=dom(buildJsonObject{
+                    put("key",domKey); put("snapshotId",id); put("ref",ref); put("action","checkPdfLink")
+                    put("href",target); put("needsApproval",false); put("approvedSnapshot",JsonNull)
+                })
+                verifyRun()
+                check(current() && checked?.get("current")==JsonPrimitive(true)){"선택한 PDF 링크가 바뀌었어요."}
+                val cookie=checkNotNull(sessionCookie(document.view,target))
+                check(java.security.MessageDigest.isEqual(cookieDigest(cookie),document.sessionDigests.getValue(target))){"문서의 로그인 상태가 바뀌었어요."}
+                cookie
+            }
+        }
+        try {
+            val session=com.user.localagent.web.BoundPdfGet(target,::freshCookie)
+            withContext(Dispatchers.IO) {
+                com.user.localagent.tools.PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),target,
+                    com.user.localagent.web.PinnedPublicHttpsTransport(session),publish={commit->
+                        withContext(Dispatchers.Main.immediate) {
+                            freshCookie()
+                            currentCoroutineContext().ensureActive()
+                            commit()
+                        }
+                    })
+            }
+        } finally {
+            withContext(NonCancellable+Dispatchers.Main.immediate){if(pdfDocument===document)pdfDocument=null}
+        }
+    }
 
     private suspend fun loginHandoff(url:String):JsonObject {
         credentialScreen.value=true

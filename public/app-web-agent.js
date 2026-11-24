@@ -165,7 +165,7 @@ function (request) {
       }
       const expected = observed;
       if (!expected || expected.id !== input.snapshotId) return fail('SNAPSHOT_STALE');
-      observed = null;
+      if (input.action !== 'checkPdfLink') observed = null;
       if ((input.needsApproval || input.approvedSnapshot !== null) && input.approvedSnapshot !== expected.id)
         return fail('APPROVAL_MISMATCH');
       const current = collect();
@@ -192,6 +192,9 @@ function (request) {
         e.matches(selector) && visible(e) && JSON.stringify(page()) === pageBinding &&
         sameControl(control, describe(e, input.ref));
       switch (input.action) {
+        case 'checkPdfLink':
+          return stillCurrent() && e.tagName.toLowerCase() === 'a' && control.item.ruleHref === input.href
+            ? {current: true} : fail('SNAPSHOT_STALE');
         case 'click':
           e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
           if (!stillCurrent()) return fail('SNAPSHOT_STALE');

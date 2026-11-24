@@ -68,6 +68,38 @@ internal object ChatResultPreviews {
             else JsonArray(listOfNotNull(image, chart))
         }
 
+    /** A marker is display text. Only a file produced by this message's own run can be exported. */
+    suspend fun files(context: Context, app: AppContainer, thread: String, branch: String,
+                      referenced: Map<String, List<String>>): Map<String, List<String>> = try {
+        withContext(Dispatchers.IO) { loadBoundFiles(context,app,thread,branch,referenced) }
+    } catch(cancel: CancellationException) { throw cancel }
+      catch(_: Exception) { emptyMap() }
+
+    private suspend fun loadBoundFiles(context:Context,app:AppContainer,thread:String,branch:String,
+                                       referenced:Map<String,List<String>>):Map<String,List<String>> {
+        if (referenced.isEmpty() || thread.isBlank() || branch.isBlank()) return emptyMap()
+        val room = app.repository.chat.thread(thread) ?: return emptyMap()
+        val directory = File(context.filesDir, "exports").canonicalFile
+        val bound = mutableMapOf<String, List<String>>()
+        for ((id, names) in referenced) {
+            val message = app.repository.getMessage(id) ?: continue
+            if (message.role != "assistant" || message.threadId != thread || message.branchId != branch) continue
+            val run = message.runId?.let { app.repository.chat.run(it) } ?: continue
+            if (run.threadId != thread || run.branchId != branch || run.projectId != room.projectId ||
+                app.repository.chat.assistantForRun(run.id)?.id != id) continue
+            val manifest = runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["verifiedChatFiles"] as? JsonArray }.getOrNull()
+                ?: continue
+            val allowed = verifiedChatFileNames(message.text, names, manifest).filter { name ->
+                val file = File(directory,name).canonicalFile
+                file.parentFile == directory && file.name == name && file.isFile && file.length() > 0
+            }
+            if (allowed.isNotEmpty()) bound[id] = allowed
+        }
+        val current = app.repository.chat.thread(thread)
+        return if (current == null || current.activeBranchId != branch || current.deletedAt != null ||
+            current.projectId != room.projectId || app.runs.selectedThreadId.value != thread) emptyMap() else bound
+    }
+
     private fun thumbnail(context: Context, directory: String, filename: String, expectedHash: String?): String? {
         val root = File(context.filesDir, directory).canonicalFile
         val file = File(root, filename).canonicalFile

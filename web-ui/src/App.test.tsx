@@ -77,6 +77,18 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('opens the native file actions for the originating assistant answer without accepting a file path', () => {
+    mount()
+    snapshot({ ...base, messages: [
+      { id: 'file-msg', role: 'assistant', text: '문서를 준비했어요.', fileFormats: ['pdf'] },
+      { id: 'user-msg', role: 'user', text: '[[file:artifact-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf]]' },
+    ] })
+    click('PDF 열기·저장')
+    expect(requests().at(-1)).toMatchObject({ action: 'messageFiles', threadId: base.threadId, branchId: base.branchId,
+      payload: { messageId: 'file-msg' } })
+    expect(host.querySelectorAll('.answer-files')).toHaveLength(1)
+  })
+
   it('shows login and observed progress inside the chat while preserving the draft', () => {
     mount()
     const active = running({ draft: '기존 초안', singleConversation: true, inlineLogin: true, browserLoginStatus: '로그인 결과를 확인 중이에요.',

@@ -15,6 +15,15 @@ class ChatArtifactNamesTest {
         assertTrue(chatFileNames("[[file:../artifact-$a.pdf]] [[file:artifact-$a.exe]] [[file:artifact-------------------------------------.pdf]]").isEmpty())
         assertTrue(chatImageNames("[[image:../image-$a.png]] [[image:image-$a.svg]]").isEmpty())
     }
+    @Test fun quotedMarkerCannotBorrowAnArtifactFromAnotherRun(){
+        val own="artifact-$a.pdf"
+        val other="artifact-$b.pdf"
+        val text="[[file:$other]] [[file:$own]]"
+        val proof=kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive(own)))
+        assertEquals(listOf(own),verifiedChatFileNames(text,listOf(other,own),proof))
+        assertTrue(verifiedChatFileNames(text,listOf(other),proof).isEmpty())
+        assertTrue(verifiedChatFileNames("[[file:$other]]",listOf(own),proof).isEmpty())
+    }
     @Test fun outputCardCountIsBounded(){
         val text=(1..100).joinToString {"[[file:artifact-00000000-0000-0000-0000-${it.toString().padStart(12,'0')}.pdf]]"}
         assertEquals(16,chatFileNames(text).size)

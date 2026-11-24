@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -34,7 +34,7 @@ internal object ReactBridgePolicy {
         val allowed=when(action){
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
-            "copy","messageMenu"->setOf("messageId")
+            "copy","messageFiles","messageMenu"->setOf("messageId")
             "renameThread"->setOf("title")
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
             "collabRefresh"->setOf("bindingEpoch")

@@ -1080,7 +1080,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // The local meaning plan selects research; lexical routes never override its action.
                 } else if(request.goal==null&&requestReadbackObligations==null&&request.previousSteps.none {s->s.evidence.state==VerificationState.VERIFIED&&com.user.localagent.core.RequiredReadbackObligations.Pair.entries.any {it.mutation==s.tool}}&&semantic?.action==com.user.localagent.core.SemanticAction.TOOL_TASK&&direct!=null&&semantic?.requiredTools==setOf(direct.name)&&usableAttachments.isEmpty()&&!projectFileRequest) {
                     val result=runTool(direct)
-                    answer(if(com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(taskGoal.requiredTools,observedOutcomes)else toolAnswer(direct,result.content))
+                    answer(if(com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(taskGoal.requiredTools,observedOutcomes)else if(result.success&&result.verification==VerificationState.VERIFIED)toolAnswer(direct,result.content) else result.content)
                     if(!result.success||result.verification!=VerificationState.VERIFIED){
                         persistStepEvidence()
                         app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")
@@ -2105,7 +2105,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
 
     private suspend fun answer(text:String) {
         val request=activeRequest
-        val record=if(request!=null)app.repository.chat.writeRunAnswer(request.runId,text)else {
+        val manifest = request?.let { app.repository.chat.run(it.runId)?.contextJson }?.let {
+            Json.parseToJsonElement(it).jsonObject["verifiedChatFiles"] as? JsonArray
+        }
+        val fileLinks = manifest.orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            .map { "[[file:$it]]" }.filterNot { it in text }
+        val visible = (listOf(text) + fileLinks).joinToString("\n")
+        val record=if(request!=null)app.repository.chat.writeRunAnswer(request.runId,visible)else {
             val thread=app.repository.chat.thread(selectedThreadId.value)?:error("대화방을 찾을 수 없습니다.")
             app.repository.chat.addMessage(thread.id,thread.activeBranchId,"assistant",text)
         }
@@ -2116,7 +2122,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(name in setOf("read_skill","knowledge_capture","analyze_sms","inspect_messenger_sources"))
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"$name · $summary")
     }
-    private suspend fun persistStepEvidence(closedSubagentId: String? = null){
+    private suspend fun persistStepEvidence(closedSubagentId: String? = null, verifiedFile:String?=null){
         val request=activeRequest?:return
         val run=app.repository.chat.run(request.runId)?:return
         if(run.status in com.user.localagent.data.ChatStore.TERMINAL||run.contextJson.isBlank())return
@@ -2131,7 +2137,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }}.toMap()
         requestReadbackObligations=com.user.localagent.core.RequiredReadbackObligations.capture(selected,context,requestSteps,evidence.mutations,evidence.reads,evidence.aligned,signatures)
         val updated=stored.copy(previousSteps=requestSteps.toList(),readbackObligations=requestReadbackObligations)
-        val merged=JsonObject(original+Json.parseToJsonElement(updated.toJson()).jsonObject)
+        val base=original+Json.parseToJsonElement(updated.toJson()).jsonObject
+        val merged=if(verifiedFile==null)JsonObject(base) else {
+            val prior=(original["verifiedChatFiles"] as? JsonArray).orEmpty()
+            JsonObject(base+("verifiedChatFiles" to JsonArray((prior+JsonPrimitive(verifiedFile)).distinct().take(16))))
+        }
         val next = when {
             closedSubagentId == null -> merged
             (merged[LOCAL_SUBAGENT_IN_FLIGHT] as? JsonPrimitive)?.contentOrNull == closedSubagentId ->
@@ -2740,6 +2750,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             require(Regex("artifact-[a-f0-9-]{36}\\.(?:docx|xlsx|pdf|txt|csv)").matches(name))
             return "${call.arguments.getValue("title").jsonPrimitive.content} · ${data.getValue("format").jsonPrimitive.content.uppercase()} 파일을 만들고 다시 읽어 확인했습니다.\n[[file:$name]]"
         }
+        if(call.name in setOf("save_public_pdf","save_browser_pdf"))return "원본 PDF를 저장했어요."
         if(call.name!="generate_image")return result
         val info=Json.parseToJsonElement(result).jsonObject
         val name=info.getValue("fileName").jsonPrimitive.content
@@ -3295,7 +3306,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val repeatScope=when {
             call.name==com.user.localagent.core.ScreenControlToolCatalog.READ->
                 requestSteps.takeLastWhile {it.tool!=com.user.localagent.core.ScreenControlToolCatalog.ACTION}
-            mediaRule->{
+            call.name in setOf(com.user.localagent.core.PcBrowserToolCatalog.READ,com.user.localagent.core.AppBrowserToolCatalog.READ)->{
                 val browser=if(call.name==com.user.localagent.core.PcBrowserToolCatalog.READ)
                     com.user.localagent.core.PcBrowserToolCatalog else com.user.localagent.core.AppBrowserToolCatalog
                 requestSteps.takeLastWhile {it.tool!=browser.action&&it.tool!=browser.open}
@@ -3322,7 +3333,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
             val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
-            persistStepEvidence()
+            val file = if (!observed.success || observed.effectNotApplied || observed.verification!=VerificationState.VERIFIED) null else when (call.name) {
+                "save_public_pdf","save_browser_pdf","create_document" -> runCatching {
+                    val name=Json.parseToJsonElement(observed.content).jsonObject.getValue("fileName").jsonPrimitive.content
+                    com.user.localagent.ui.chatFileNames("[[file:$name]]").singleOrNull()?.takeIf { it==name }
+                }.getOrNull()
+                in com.user.localagent.core.PrivateAnalysisToolCatalog.analysisNames -> withContext(Dispatchers.IO) {
+                    com.user.localagent.analysis.PrivateAnalysisHost.verifiedArtifactToken(observed,java.io.File(context.filesDir,"exports"))
+                        ?.let { com.user.localagent.ui.chatFileNames(it).singleOrNull() }
+                }
+                else -> null
+            }
+            persistStepEvidence(verifiedFile=file)
         }
         val phoneReview=try {
             tools.reviewPhoneScreenAction(call)
@@ -3374,7 +3396,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 queueOwner.stopRun(bound.id, bound.threadId)
             }
         }
-        externalEffectGuard?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
+        val boundGrant=externalEffectGuard
+        boundGrant?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
         val intent=tools.prepareIntent(call)
         if(intent != null) {
             withContext(Dispatchers.Main) { externalIntentLauncher?.invoke(intent)?:context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -3409,7 +3432,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         } else {
             val observed=try {
                 withTimeoutOrNull(ToolRegistry.definitions.getValue(call.name).timeoutMillis) {
-                    com.user.localagent.core.ToolInterruptionPolicy.observed(call,tools.execute(call,approvedScreenSnapshot))
+                    com.user.localagent.core.ToolInterruptionPolicy.observed(call,tools.execute(call,approvedScreenSnapshot,verifyGrant={boundGrant?.invoke(); Unit}))
                 }
                     ?: com.user.localagent.core.ToolInterruptionPolicy.timedOut(call)
             }

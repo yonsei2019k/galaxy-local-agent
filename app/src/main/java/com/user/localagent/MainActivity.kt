@@ -14,6 +14,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -385,6 +386,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         var messageMenuId by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
+        var fileMessageId by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
         var messageEdit by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
         val answerStates by chat.answerStates.collectAsState()
         val pending by approval.collectAsState()
@@ -395,6 +397,17 @@ class MainActivity : ComponentActivity() {
             val result by produceState(kotlinx.serialization.json.JsonArray(emptyList()), previewMessageIds, activeExecutions.filter { it.threadId == composerThreadId }.map { it.runId }) {
                 value = com.user.localagent.ui.ChatResultPreviews.load(
                     this@MainActivity, app, composerThreadId, currentBranchId, previewMessageIds)
+            }
+            result
+        }
+        val fileReferences = remember(messages) {
+            messages.takeLast(160).filter { it.role=="assistant" && "[[file:" in it.text }.mapNotNull {
+                message->chatFileNames(message.text).takeIf { it.isNotEmpty() }?.let { message.id to it }
+            }.toMap()
+        }
+        val verifiedFiles = key(composerThreadId,currentBranchId,fileReferences) {
+            val result by produceState<Map<String,List<String>>>(emptyMap(),activeExecutions.map { it.runId }) {
+                value=ChatResultPreviews.files(this@MainActivity,app,composerThreadId,currentBranchId,fileReferences)
             }
             result
         }
@@ -437,7 +450,11 @@ class MainActivity : ComponentActivity() {
                         put("id",message.id);put("role",if (author == null) message.role else "assistant")
                         val text = if (message.role == "assistant" || author != null)
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
-                        put("text",text.take(32000))
+                        val files = verifiedFiles[message.id].orEmpty()
+                        if (files.isEmpty()) put("text",text.take(32000)) else {
+                            put("fileFormats",buildJsonArray { files.forEach { add(it.substringAfterLast('.')) } })
+                            put("text",files.fold(text){body,name->body.replace("[[file:$name]]","")}.trimEnd().take(32000))
+                        }
                         author?.let { put("authorLabel", it.label) }
                     })}})
                     put("officeSelected",officeOpen)
@@ -557,6 +574,15 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&(it.role=="assistant"||officeAuthor(it.role)!=null)})chat.copyMessage(id)}
+                            "messageFiles"->{
+                                val id=payload.getValue("messageId").jsonPrimitive.content
+                                val names=verifiedFiles[id]
+                                if(names!=null)this@MainActivity.lifecycleScope.launch {
+                                    val checked=ChatResultPreviews.files(this@MainActivity,app,composerThreadId,currentBranchId,mapOf(id to names))
+                                    if(checked[id]==names)fileMessageId=id
+                                    else status.value="이 대화에서 저장한 파일을 찾지 못했어요."
+                                }
+                            }
                             "messageMenu"->{
                                 val id=payload.getValue("messageId").jsonPrimitive.content
                                 if(messages.any{it.id==id&&(it.role in setOf("user","assistant")||officeAuthor(it.role)!=null)})messageMenuId=id
@@ -707,6 +733,11 @@ class MainActivity : ComponentActivity() {
                 TextButton(onClick={chatManagerOpen=false;skillLibraryOpen=true}){Text("도움 기능")}
             }
         },confirmButton={TextButton(onClick={chatManagerOpen=false}){Text("닫기")}})
+        verifiedFiles[fileMessageId]?.let {files->
+            AlertDialog(onDismissRequest={fileMessageId=null},title={Text("답변에 담긴 파일")},text={
+                Column(Modifier.verticalScroll(rememberScrollState())) { FileArtifactChatPreview(files.joinToString("\n") { "[[file:$it]]" }) }
+            },confirmButton={TextButton(onClick={fileMessageId=null}){Text("닫기")}})
+        }
         messages.firstOrNull{it.id==messageMenuId}?.let {message->
             fun closeMenu(){messageMenuId=null;messageEdit=null}
             AlertDialog(onDismissRequest=::closeMenu,title={Text(if(message.role=="assistant")"답변 메뉴"else"메시지 메뉴")},text={

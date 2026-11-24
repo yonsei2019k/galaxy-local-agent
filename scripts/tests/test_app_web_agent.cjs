@@ -313,3 +313,19 @@ test('scroll and back operate on the unchanged observed page', () => {
   assert.equal(invoke({action:'back', snapshotId:'snapshot-2'}).performed, true);
   assert.deepEqual(effects, [[0, -700], 'back']);
 });
+
+test('PDF source revalidation never clicks and rejects a moved link or replaced document', () => {
+  const {context,effects,invoke,Input,makeDocument}=fixture();
+  const link=new Input('Original document','A');
+  link.href='https://fixture.example.test/file.pdf';
+  context.document.nodes=[link];
+  const check=()=>invoke({action:'checkPdfLink',href:'https://fixture.example.test/file.pdf'});
+  invoke({action:'observe'});
+  assert.equal(check().current,true);
+  assert.equal(check().current,true);
+  link.href='https://fixture.example.test/another.pdf';
+  assert.equal(check().error,'SNAPSHOT_STALE');
+  context.document=makeDocument();
+  assert.equal(check().error,'SNAPSHOT_STALE');
+  assert.deepEqual(effects,[]);
+});

@@ -86,11 +86,12 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   )
 }
 
-function Message({ message, previews, enabled, onCopy, onMessageMenu }: {
+function Message({ message, previews, enabled, onCopy, onFiles, onMessageMenu }: {
   message: ConversationMessage
   previews: ResultPreview[]
   enabled: boolean
   onCopy(messageId: string): void
+  onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
 }) {
   const user = message.role === 'user'
@@ -101,6 +102,10 @@ function Message({ message, previews, enabled, onCopy, onMessageMenu }: {
       {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> {author}</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
       {assistant ? <RichAnswer text={message.text} /> : <div className="message-text" dir="auto">{message.text}</div>}
+      {assistant && !!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
+        onClick={() => onFiles(message.id)}><Icon name="file" />
+        {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
+      </button>}
       {assistant && previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}
       {(assistant || user) && (
         <div className="message-actions">
@@ -152,11 +157,12 @@ function TaskCard({ task }: { task: Task }) {
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMenu, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
   onCopy(messageId: string): void
+  onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
   onNavigate(panel: Panel): void
   onDismissOfficeGuide(): void
@@ -242,7 +248,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
             <div className="messages" role="log" aria-label="메시지">
               {messages.map(item => <Fragment key={item.id}>
                 <Message message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
-                  enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />
+                  enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
                 {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} />)}
               </Fragment>)}
             </div>

@@ -37,7 +37,7 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
             "Do one action on the $where page and return the re-read page. Pay/order/book/send/delete style clicks and typing outside "+
             "search boxes wait for owner approval. Login, payment card and verification fields are refused: the owner enters those. "+
             "Authentication takes place on the owner's phone. The re-read page is observation, not proof the site completed the task."+
-            if(navigationRule) " If the read exposes a recoverable-link and the page is changing, author a bounded navigation rule with the exact current ref, expectedLinkLabel and verifyPageText (new exact title or visible line expected at the destination). The phone may refresh the same link and verifies the new page. On an uncertain outcome only read again." else "",90_000))
+            if(navigationRule) " Use expectedLinkLabel and verifyPageText only for a recoverable-link when you already have evidence of the exact new destination title or line. Never guess it. Otherwise use an ordinary click on the observed ref, then inspect the returned page and choose your next step. The phone may refresh the same link and verifies the new page. On an uncertain outcome only read again." else "",90_000))
     val names=definitions.map{it.name}.toSet()
 
     fun validate(call:ToolCall){

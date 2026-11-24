@@ -273,8 +273,8 @@ object TaskHarness {
             if(step.tool==PcBrowserToolCatalog.ACTION||step.tool==PcBrowserToolCatalog.OPEN)pcBrowserEpoch++
             step.repeatFingerprint to when {
                 step.tool==ScreenControlToolCatalog.READ->screenEpoch
-                BrowserMediaRule.isRuleRead(step.tool,step.arguments)->
-                    if(step.tool==PcBrowserToolCatalog.READ)pcBrowserEpoch else appBrowserEpoch
+                step.tool==PcBrowserToolCatalog.READ->pcBrowserEpoch
+                step.tool==AppBrowserToolCatalog.READ->appBrowserEpoch
                 else->0
             }
         }
