@@ -3547,7 +3547,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val captured=QueuedChatRequest.fromJson(root.contextJson)
         val parent=captured.parentGoalStartRunId?.let { app.repository.chat.run(it) } ?: return null
         if(parent.threadId!=request.threadId||parent.branchId!=request.branchId||parent.projectId!=request.projectId)return null
-        val owner=app.repository.getMessage(parent.userMessageId) ?: return null
+        val owner=parent.userMessageId?.let { app.repository.getMessage(it) } ?: return null
         if(owner.role!="user"||owner.threadId!=request.threadId||owner.branchId!=request.branchId||
             owner.text.lineSequence().none { it.trim()==line })return null
         return com.user.localagent.core.DelegatedSubmission.fromConstraints(listOf(line))
