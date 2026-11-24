@@ -601,7 +601,7 @@
       "category": "automation",
       "version": "1",
       "asset": "skills/elearning-completion/SKILL.md",
-      "sha256": "da2dffc2222295fdfe39853d3616b3590019dc66bda9a2df8196b90e30af4851",
+      "sha256": "fc55066e3e38a251a7640e78ef8c0f2962445e7ca5e67deb10fb7ac7131be583",
       "tools": [
         "open_app_browser_page",
         "read_app_browser_page",
