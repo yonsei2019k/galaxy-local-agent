@@ -16,6 +16,21 @@ class CloudAgentFinalsTest {
         assertTrue(text.contains("강의실 입장"))
         assertTrue(text.contains("영상 재생"))
     }
+    @Test fun showsTheLastBrowserActionAndWhatPreventedIt(){
+        val id="10000000-0000-4000-8000-000000000002"
+        val click=ExternalAgentProposal(id,1,"app_browser_action",buildJsonObject{put("action","click")},
+            "a".repeat(64),"binding",3)
+        fun outcome(content:String,success:Boolean)=PhoneAgentExecution(id,"binding",3,click,
+            ToolResult(id,success,content,if(success)VerificationState.VERIFIED else VerificationState.FAILED))
+        val opened=outcome("""{"pageChanged":false,"performed":{"control":"강의실 입장"}}""",true)
+        val obscured=outcome("""{"error":"ELEMENT_OBSCURED","attemptedControl":"동영상 재생"}""",false)
+        val unavailable=outcome("""{"error":"ACTION_OUTCOME_UNKNOWN","attemptedControl":"강의실 입장","navigationError":"TLS_ERROR"}""",false)
+        assertTrue(CloudAgentFinals.unfinishedNotice(listOf(opened)).contains("재생 버튼을 확인하지 못했어요"))
+        assertEquals("다른 화면이 ‘동영상 재생’ 버튼을 가려 누르지 못했어요.",
+            CloudAgentFinals.unfinishedNotice(listOf(opened,obscured)))
+        assertEquals("‘강의실 입장’ 버튼을 누른 뒤 다음 화면에 안전하게 연결할 수 없었어요.",
+            CloudAgentFinals.unfinishedNotice(listOf(opened,unavailable)))
+    }
     @Test fun onlyAPlanlessCallFreeDoneReportIsAPlainAnswer(){
         assertTrue(CloudAgentFinals.isToolFreeAnswer("reported_done",false,0,0))
         assertFalse(CloudAgentFinals.isToolFreeAnswer("reported_done",true,0,0))

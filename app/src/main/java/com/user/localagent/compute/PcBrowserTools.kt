@@ -166,6 +166,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         val pcAction=catalog==PcBrowserToolCatalog&&call.name==catalog.action
         val observed=last
         val ref=call.arguments["ref"]?.jsonPrimitive?.contentOrNull
+        val attemptedControl=if(call.arguments["action"]==JsonPrimitive("click")&&
+            call.arguments["snapshotId"]?.jsonPrimitive?.contentOrNull==observed?.first)
+            ref?.let { observed?.third?.get(it)?.label } else null
         val approvedPcTarget=pcAction&&approvedSnapshot!=null&&observed!=null&&observed.first==approvedSnapshot&&
             call.arguments["snapshotId"]?.jsonPrimitive?.contentOrNull==approvedSnapshot&&ref!=null&&ref in observed.third
         if(pcAction&&(review(call).first||approvedSnapshot!=null)&&!approvedPcTarget)
@@ -222,11 +225,12 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 last=null
                 lastPage=null
                 ruleRecoveryBlocked=true
-                return ToolResult(call.id,false,buildJsonObject{put("error",error);put("hint",hint(error))}.toString(),
+                return ToolResult(call.id,false,browserFailure(error,attemptedControl=attemptedControl,
+                    navigationError=result.string("navigationError")),
                     VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
             }
             if(error in setOf("SNAPSHOT_STALE","ELEMENT_OBSCURED")){last=null;lastPage=null}
-            return refused(call,error,(result["phoneBrowserVisible"] as? JsonPrimitive)?.booleanOrNull)
+            return refused(call,error,(result["phoneBrowserVisible"] as? JsonPrimitive)?.booleanOrNull,attemptedControl)
         }
         remember(result)
         return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,
@@ -491,9 +495,18 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         result["loginRequired"]!=JsonPrimitive(true)&&samePage(url,result)&&
             result["text"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true
 
-    private fun refused(call:ToolCall,error:String,shown:Boolean?=null)=ToolResult(call.id,false,
-        buildJsonObject{put("error",error);put("hint",hint(error));shown?.let{put("phoneBrowserVisible",it)}}.toString(),
+    private fun refused(call:ToolCall,error:String,shown:Boolean?=null,attemptedControl:String?=null)=ToolResult(call.id,false,
+        browserFailure(error,shown,attemptedControl),
         VerificationState.FAILED,"$where 거부 · $error",effectNotApplied=true)
+
+    private fun browserFailure(error:String,shown:Boolean?=null,attemptedControl:String?=null,navigationError:String?=null)=buildJsonObject {
+        put("error",error)
+        put("hint",hint(error))
+        shown?.let { put("phoneBrowserVisible",it) }
+        attemptedControl?.trim()?.take(60)?.takeIf(String::isNotBlank)?.let { put("attemptedControl",it) }
+        navigationError?.takeIf { it in setOf("PAGE_TIMEOUT","PAGE_UNREACHABLE","HTTP_ERROR","TLS_ERROR","HTTPS_REQUIRED","NAVIGATION_BLOCKED") }
+            ?.let { put("navigationError",it) }
+    }.toString()
 
     private fun hint(code:String)=when(code){
         "SNAPSHOT_STALE"->"페이지가 바뀌었습니다. ${catalog.read}로 다시 읽은 뒤 새 snapshotId와 ref를 사용하세요."

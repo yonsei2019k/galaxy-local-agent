@@ -872,6 +872,11 @@ class AppWebAgent private constructor(private val context:Context) {
         val target=if(action in setOf("click","type","select","press_enter"))current.second[ref]
             ?.takeIf{it["disabled"]?.jsonPrimitive?.booleanOrNull!=true}
             ?:return@guarded fail("ELEMENT_UNAVAILABLE") else null
+        fun actionFailure(code:String)=buildJsonObject{
+            put("error",code)
+            if(action=="click")target?.s("label")?.trim()?.take(60)?.takeIf(String::isNotBlank)
+                ?.let{put("attemptedControl",it)}
+        }
         if("ruleHref" in arguments&&(action!="click"||target?.s("ruleHref")!=arguments.s("ruleHref")||
                 arguments.s("ruleHref").isEmpty()||approvedSnapshot!=null))
             return@guarded fail("ELEMENT_UNAVAILABLE")
@@ -920,16 +925,16 @@ class AppWebAgent private constructor(private val context:Context) {
             }
             val refusal=result?.s("error")
             if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","ELEMENT_OBSCURED","OPTION_UNKNOWN"))
-                return@guarded fail(checkNotNull(refusal))
-            if(result?.get("performed")!=JsonPrimitive(true))return@guarded fail("ACTION_OUTCOME_UNKNOWN")
+                return@guarded actionFailure(checkNotNull(refusal))
+            if(result?.get("performed")!=JsonPrimitive(true))return@guarded actionFailure("ACTION_OUTCOME_UNKNOWN")
             settle()
             val navigationError=navigation.value.error
             if(navigationError!=null){
                 com.user.localagent.FailureLog.record(context,"app_browser_navigation",null,navigationError)
-                return@guarded JsonObject(fail("ACTION_OUTCOME_UNKNOWN")+("navigationError" to JsonPrimitive(navigationError)))
+                return@guarded JsonObject(actionFailure("ACTION_OUTCOME_UNKNOWN")+("navigationError" to JsonPrimitive(navigationError)))
             }
             val page=afterOwnerLogin(sourceUrl,readPage())
-            if(page["error"]!=null)return@guarded fail("ACTION_OUTCOME_UNKNOWN")
+            if(page["error"]!=null)return@guarded actionFailure("ACTION_OUTCOME_UNKNOWN")
             val after=snapshot?.second
             val changed=sourceUrl!=view().url || after!=current.second || page["loginRequired"]==JsonPrimitive(true)
             if(!changed&&action=="click")
@@ -938,11 +943,11 @@ class AppWebAgent private constructor(private val context:Context) {
                 "pageChanged" to JsonPrimitive(changed),
                 "evidence" to JsonPrimitive("동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.")))
         }catch(timeout:TimeoutCancellationException){
-            fail("ACTION_OUTCOME_UNKNOWN")
+            actionFailure("ACTION_OUTCOME_UNKNOWN")
         }catch(cancel:CancellationException){
             throw cancel
         }catch(error:Exception){
-            fail("ACTION_OUTCOME_UNKNOWN")
+            actionFailure("ACTION_OUTCOME_UNKNOWN")
         }
     }
 
@@ -1002,11 +1007,17 @@ class AppWebAgent private constructor(private val context:Context) {
                     websiteWorkFor(work)?.takeIf{it.host==requestedHost&&it.binding==work}?.let{work->
                         val performed=page["performed"] as? JsonObject
                         val target=performed?.s("control")?.trim()?.take(60).orEmpty()
+                        val attempted=page.s("attemptedControl").takeIf(String::isNotBlank)?.let{"‘$it’ 버튼"}?: "누르려던 버튼"
                         val title=page.s("title").trim().take(60)
                         val outcome=when{
                             page["loginRequired"]==JsonPrimitive(true)->"사이트 인증 필요"
-                            page["error"]!=null->"페이지 또는 화면 동작을 확인하지 못함"
-                            performed!=null&&page["pageChanged"]==JsonPrimitive(false)->"동작 뒤 화면이 그대로예요. 다음 방법을 확인 중"
+                            page.s("error")=="ELEMENT_OBSCURED"->"다른 화면이 ${attempted}을 가려 누르지 못했어요"
+                            page.s("error")=="ELEMENT_UNAVAILABLE"->"${attempted}을 찾지 못했어요"
+                            page.s("error")=="ACTION_OUTCOME_UNKNOWN"->"${attempted}이 눌렸는지 확인하지 못했어요"
+                            page.s("error")=="PAGE_TIMEOUT"->"사이트에서 페이지를 보내줄 때까지 기다렸어요"
+                            page["error"]!=null->"사이트 화면을 다시 열지 못했어요"
+                            performed!=null&&page["pageChanged"]==JsonPrimitive(false)->
+                                if(target.isBlank())"버튼을 눌렀지만 화면이 그대로예요" else "‘$target’ 버튼을 눌렀지만 화면이 그대로예요"
                             performed!=null->if(target.isBlank())"화면 동작 뒤 페이지 확인" else "$target 항목 동작 뒤 페이지 확인"
                             page["snapshotId"]!=null->if(title.isBlank())"페이지 확인" else "$title 페이지 확인"
                             else->"페이지에서 현재 상태를 다시 확인해야 함"
