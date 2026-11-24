@@ -449,7 +449,9 @@ class MainActivity : ComponentActivity() {
                     if(inlineCredentials!=null||visibleWebsiteWork!=null)put("websiteCard",buildJsonObject{
                         val workRun=visibleWebsiteWork?.anchorRunId?:websiteBinding?.runId
                         put("id",websiteSlotId?:workRun.orEmpty())
-                        messages.lastOrNull { workRun!=null&&it.role=="user"&&it.runId==workRun }?.let { put("messageId",it.id) }
+                        val anchor=activeExecutions.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
+                            ?:roomActivities.values.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
+                        anchor?.let { put("messageId",it) }
                         val domain=inlineCredentials?.host?:visibleWebsiteWork?.host.orEmpty()
                         put("title",if(domain=="www.kairb.org")"KAIRB 온라인 교육" else domain)
                         put("status",visibleWebsiteWork?.status.orEmpty())
