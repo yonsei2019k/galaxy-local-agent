@@ -44,6 +44,34 @@ import uniffi.ziphap_android.nativeScreenDispatchDecision
 import uniffi.ziphap_android.nativeScreenSnapshotId
 import uniffi.ziphap_android.nativeLessonProbeDelayMs
 
+internal enum class ScreenChecked { UNCHECKED, CHECKED, PARTIAL }
+
+internal data class ScreenCollectionItem(val row:Int,val column:Int,val label:String?) {
+    fun appendTo(target:JsonObjectBuilder) = with(target) {
+        put("collectionItem",buildJsonObject {
+            if(row>=0)put("rowIndex",row)
+            if(column>=0)put("columnIndex",column)
+            label?.let {put("label",it)}
+        })
+    }
+}
+
+internal data class ScreenControlState(val enabled:Boolean,val selected:Boolean,val checked:ScreenChecked?) {
+    val identity:String get()="$selected:${checked ?: "n/a"}"
+
+    fun appendTo(target:JsonObjectBuilder,requiresLabel:Boolean) {
+        if(!enabled)target.put("enabled",false)
+        if(selected)target.put("selected",true)
+        when(checked){
+            ScreenChecked.CHECKED->target.put("checked",true)
+            ScreenChecked.UNCHECKED->target.put("checked",false)
+            ScreenChecked.PARTIAL->target.put("partiallyChecked",true)
+            null->Unit
+        }
+        if(!enabled||requiresLabel)target.put("blocked",true)
+    }
+}
+
 /**
  * Agent control of the foreground app through the owner-enabled accessibility service.
  * The owner turns it on twice: Android's accessibility consent and the in-app switch.
@@ -90,7 +118,7 @@ class ScreenControl(context:Context) {
     /** Element of a read: ref is its index in a deterministic traversal of the same screen. */
     private data class Element(
         val ref:String,val role:NativeScreenRole,val label:String,val node:AccessibilityNodeInfo,
-        val sensitive:Boolean,val browserUi:Boolean,val webContent:Boolean,
+        val browserUi:Boolean,val webContent:Boolean,val state:ScreenControlState,val item:ScreenCollectionItem?,
     )
     private data class Snapshot(val packageName:String,val texts:List<String>,val elements:List<Element>,
         val truncated:Boolean,val evidence:ScreenReadEvidence,val windowBounds:Rect,
@@ -195,11 +223,11 @@ class ScreenControl(context:Context) {
         var lastClockChangeAt=SystemClock.elapsedRealtime()
         var lastClock:ScreenPlaybackEvidence?=null
         while(true){
-            val enabled=current.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive&&
+            val enabled=current.elements.filter {it.role==NativeScreenRole.TAP&&it.state.enabled&&
                 (proof==null||!it.browserUi)}
             val buttons=enabled.map {it.label}
             var status=request.status(current.packageName,current.evidence.windowId==originalWindow,
-                current.texts+current.elements.filterNot {it.sensitive}.map {it.label},buttons)
+                current.texts+current.elements.filter {it.state.enabled}.map {it.label},buttons)
             if(status==ScreenObservationWait.Status.CONTEXT_CHANGED){
                 playbackWait=null
                 throw ScreenRefused("대기 중 원래 강의 화면을 확인할 수 없었습니다.")
@@ -459,14 +487,14 @@ class ScreenControl(context:Context) {
                     fingerprint,nativeRef,play,recoveryKey)
             }
             val unlabeled=onMain {
-                screen.elements.filter {it.webContent&&!it.sensitive&&it.role==NativeScreenRole.TAP&&it.label.isBlank()}
+                screen.elements.filter {it.webContent&&it.state.enabled&&it.role==NativeScreenRole.TAP&&it.label.isBlank()}
                     .mapNotNull { element ->
                         val bounds=relative(Rect().also(element.node::getBoundsInScreen))
                         (element.ref to bounds).takeIf {crop.contains(bounds)&&bounds.width()>=24&&bounds.height()>=24}
                     }
             }
             val nativeTaps=onMain {
-                screen.elements.filter {it.role==NativeScreenRole.TAP&&!it.sensitive&&it.label.isNotBlank()}
+                screen.elements.filter {it.role==NativeScreenRole.TAP&&(!it.state.enabled||it.label.isNotBlank())}
                     .map {relative(Rect().also(it.node::getBoundsInScreen))}
             }
             withContext(Dispatchers.Default) {
@@ -578,12 +606,14 @@ class ScreenControl(context:Context) {
             }
             "type"->{
                 checkNotNull(target){"입력칸 $ref 를 찾지 못했습니다."}
-                if(target.sensitive||target.role!=NativeScreenRole.EDIT)throw ScreenRefused("이 요소에는 입력하지 않습니다.")
+                if(!target.state.enabled||target.role!=NativeScreenRole.EDIT)throw ScreenRefused("이 요소에는 입력하지 않습니다.")
                 val args=Bundle().apply{putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,a.getValue("text").jsonPrimitive.content)}
                 check(target.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args)){"글자를 입력하지 못했습니다."}
             }
             "scroll"->{
-                val node=(target?:screen.elements.firstOrNull{it.role==NativeScreenRole.SCROLL})?.node?:error("스크롤할 영역이 없습니다.")
+                fun canScroll(element:Element)=element.role==NativeScreenRole.SCROLL&&element.state.enabled
+                val region=if(ref==null)screen.elements.firstOrNull(::canScroll) else target?.takeIf(::canScroll)
+                val node=region?.node?:throw ScreenRefused("현재 화면에서 움직일 수 있는 영역을 찾지 못했습니다.")
                 val id=if(a["direction"]?.jsonPrimitive?.content=="backward")AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                 check(node.performAction(id)){"더 스크롤할 수 없습니다."}
             }
@@ -593,9 +623,10 @@ class ScreenControl(context:Context) {
     private fun requireTapTarget(target:Element?,arguments:JsonObject):Element {
         val expected=(arguments["expectedLabel"] as? JsonPrimitive)?.takeIf {it.isString}?.content
         val area=(arguments["targetArea"] as? JsonPrimitive)?.takeIf {it.isString}?.content
-        if(target==null||target.role!=NativeScreenRole.TAP||target.sensitive||
+        if(target==null||target.role!=NativeScreenRole.TAP||
             !ScreenControlToolCatalog.matchesTapLabel(target.label,expected))
             throw ScreenRefused("누를 버튼의 실제 이름과 번호가 일치하지 않아 실행하지 않았습니다. 화면을 다시 읽어 같은 요소를 확인하세요.")
+        if(!target.state.enabled)throw ScreenRefused("이 버튼은 현재 화면에서 비활성 상태라 누를 수 없습니다.")
         if(!ScreenControlToolCatalog.matchesTapArea(target.browserUi,area))
             throw ScreenRefused("웹페이지 안의 버튼과 크롬 자체 조작 버튼을 혼동해 누르지 않았습니다. 현재 페이지를 다시 확인하세요.")
         return target
@@ -673,19 +704,22 @@ class ScreenControl(context:Context) {
         var browserPage:String?=null
         var protectedForm=false
         var visited=0;var truncated=false;var textBudget=6000
-        fun visit(node:AccessibilityNodeInfo,depth:Int,sensitiveAncestor:Boolean,webAncestor:Boolean,videoAncestor:Boolean) {
+        fun visit(node:AccessibilityNodeInfo,depth:Int,webAncestor:Boolean,videoAncestor:Boolean,
+            parentItem:ScreenCollectionItem?) {
             if(visited>=600||depth>30){truncated=true;return}
             visited++
             if(!node.isVisibleToUser)return
-            val sensitive=sensitiveAncestor||sensitive(node)
+            if(sensitive(node)){
+                protectedForm=true
+                return
+            }
             val className=node.className?.toString()
             val webContent=webAncestor||className=="android.webkit.WebView"
-            if(sensitive)protectedForm=true
             if(className=="android.webkit.WebView") {
                 Rect().also(node::getBoundsInScreen).takeIf {it.intersect(windowBounds)}?.let(webAreas::add)
             }
             val mediaRole=node.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")?.toString()
-            val video=webContent&&!sensitive&&(className in setOf("android.widget.VideoView","android.webkit.HTMLVideoElement")||
+            val video=webContent&&(className in setOf("android.widget.VideoView","android.webkit.HTMLVideoElement")||
                 mediaRole in setOf("video","비디오","동영상"))
             if(video){
                 val area=Rect().also(node::getBoundsInScreen)
@@ -693,15 +727,19 @@ class ScreenControl(context:Context) {
             }
             val browserUi=ScreenControlToolCatalog.isBrowserUi(packageName,webContent)
             val label=labelOf(node)
-            if(webContent&&!sensitive&&node.isHeading&&label.isNotBlank()&&headings.size<12)headings+=label.take(120)
+            val item=node.collectionItemInfo?.let {info->
+                ScreenCollectionItem(info.rowIndex,info.columnIndex,
+                    label.takeIf {!node.isClickable&&!node.isEditable&&it.isNotBlank()}?.take(80))
+            }?:parentItem
+            if(webContent&&node.isHeading&&label.isNotBlank()&&headings.size<12)headings+=label.take(120)
             if(browserUi&&node.viewIdResourceName=="com.android.chrome:id/url_bar")
                 browserPage=node.text?.toString()?.takeIf {it.isNotBlank()}
-            if(webContent&&!sensitive&&!node.isEnabled&&
+            if(webContent&&!node.isEnabled&&
                 (node.isClickable||className=="android.widget.Button")&&disabledContentButtons.size<48) {
                 label.ifBlank {singleVisibleButtonLabel(node)}.take(120).takeIf {it.isNotBlank()}
                     ?.let {disabledContentButtons+=it to Rect().also(node::getBoundsInScreen)}
             }
-            if(!sensitive&&(video||videoAncestor)&&videoLabels.size<32){
+            if((video||videoAncestor)&&videoLabels.size<32){
                 val qualified=mediaRole?.takeIf {
                     it.lowercase(Locale.ROOT) in setOf("elapsed time","remaining time","경과 시간","남은 시간")
                 }?.let {"$it: $label"}
@@ -711,22 +749,27 @@ class ScreenControl(context:Context) {
             val actions=node.actionList.map{it.id}.toSet()
             val role=when {
                 node.isEditable&&AccessibilityNodeInfo.ACTION_SET_TEXT in actions->NativeScreenRole.EDIT
-                node.isClickable&&AccessibilityNodeInfo.ACTION_CLICK in actions&&node.isEnabled->NativeScreenRole.TAP
+                node.isClickable&&AccessibilityNodeInfo.ACTION_CLICK in actions->NativeScreenRole.TAP
+                !node.isEnabled&&(node.isClickable||className=="android.widget.Button")->NativeScreenRole.TAP
                 node.isScrollable->NativeScreenRole.SCROLL
                 else->null
             }
             if(role!=null&&elements.size<150){
-                val shown=if(node.isPassword)"[보호된 입력칸]" else label.ifBlank {
+                val shown=label.ifBlank {
                     if(role==NativeScreenRole.TAP)singleVisibleButtonLabel(node) else descendantLabel(node)
                 }.take(120)
-                elements+=Element("e${elements.size+1}",role,shown,node,sensitive||node.isPassword,browserUi,webContent)
-            } else if(label.isNotBlank()&&!node.isPassword&&textBudget>0){
+                val state=ScreenControlState(node.isEnabled,node.isSelected,checkedState(node))
+                elements+=Element("e${elements.size+1}",role,shown,node,browserUi,webContent,state,item)
+            } else if(label.isNotBlank()&&textBudget>0){
                 val piece=label.take(200);texts+=piece;textBudget-=piece.length
             }
-            for(index in 0 until node.childCount.coerceAtMost(80))node.getChild(index)?.let{visit(it,depth+1,sensitive,webContent,video||videoAncestor)}
+            val childItem=if(node.collectionInfo==null)item else null
+            for(index in 0 until node.childCount.coerceAtMost(80))node.getChild(index)?.let {
+                visit(it,depth+1,webContent,video||videoAncestor,childItem)
+            }
             if(node.childCount>80)truncated=true
         }
-        visit(root,0,false,false,false)
+        visit(root,0,false,false,null)
         if(elements.size>=150||textBudget<=0)truncated=true
         val digest=MessageDigest.getInstance("SHA-256")
         fun hash(value:String)=digest.digest(value.toByteArray(Charsets.UTF_8))
@@ -745,12 +788,13 @@ class ScreenControl(context:Context) {
             val uniqueId=if(Build.VERSION.SDK_INT>=33) node.uniqueId else null
             val resourceId=node.viewIdResourceName
             // Use fixed-width field digests so adjacent identity components cannot alias.
-            for (part in listOf(node.packageName,node.className,resourceId,uniqueId,element.browserUi,element.webContent)) {
+            for (part in listOf(node.packageName,node.className,resourceId,uniqueId,element.browserUi,element.webContent,
+                element.state.identity,element.item?.row,element.item?.column,element.item?.label)) {
                 identity.update(hash(part?.toString().orEmpty()))
             }
             val target=NativeScreenTarget(element.role,hash(element.label),identity.digest(),bounds.left,bounds.top,
-                bounds.right,bounds.bottom,element.sensitive,node.isEnabled)
-            if(!target.sensitive&&target.enabled&&element.label.isNotBlank()&&
+                bounds.right,bounds.bottom,false,element.state.enabled)
+            if(target.enabled&&element.label.isNotBlank()&&
                 (!resourceId.isNullOrBlank()||!uniqueId.isNullOrBlank())){
                 identity.update(target.role.ordinal.toByte())
                 identity.update(target.labelDigest)
@@ -796,11 +840,13 @@ class ScreenControl(context:Context) {
         })
         put("untrustedScreenData",true);put("packageName",screen.packageName);put("app",appLabel(screen.packageName))
         put("snapshotId",screen.id);put("truncated",screen.truncated)
+        if(screen.protectedForm)put("protectedInputPresent",true)
         put("texts",JsonArray(screen.texts.map(::JsonPrimitive)))
         put("elements",buildJsonArray{screen.elements.forEach{e->add(buildJsonObject{
             put("ref",e.ref);put("role",e.role.name.lowercase(Locale.ROOT));put("label",e.label)
             if(e.browserUi)put("targetArea","browser_ui")
-            if(e.sensitive||(e.role==NativeScreenRole.TAP&&e.label.isBlank()))put("blocked",true)
+            e.state.appendTo(this, requiresLabel=e.role==NativeScreenRole.TAP&&e.label.isBlank())
+            e.item?.appendTo(this)
         })}
             image?.targets?.forEach { target->add(buildJsonObject {
                 put("ref",target.ref);put("role","tap");put("label",target.label);put("source","image")
@@ -832,14 +878,27 @@ class ScreenControl(context:Context) {
         if(depth>4)return ""
         for(i in 0 until node.childCount.coerceAtMost(12)){
             val child=node.getChild(i)?:continue
-            val own=if(child.isPassword)"" else labelOf(child)
+            if(!child.isVisibleToUser||sensitive(child))continue
+            val own=labelOf(child)
             if(own.isNotBlank())return own
             descendantLabel(child,depth+1).takeIf{it.isNotBlank()}?.let{return it}
         }
         return node.viewIdResourceName?.substringAfter(":id/").orEmpty()
     }
+    @Suppress("DEPRECATION")
+    private fun checkedState(node:AccessibilityNodeInfo):ScreenChecked? {
+        if(!node.isCheckable)return null
+        if(Build.VERSION.SDK_INT<36)return if(node.isChecked)ScreenChecked.CHECKED else ScreenChecked.UNCHECKED
+        return when(node.checked) {
+            AccessibilityNodeInfo.CHECKED_STATE_TRUE->ScreenChecked.CHECKED
+            AccessibilityNodeInfo.CHECKED_STATE_FALSE->ScreenChecked.UNCHECKED
+            AccessibilityNodeInfo.CHECKED_STATE_PARTIAL->ScreenChecked.PARTIAL
+            else->null
+        }
+    }
+
     private fun sensitive(node:AccessibilityNodeInfo):Boolean {
-        if(node.isPassword)return true
+        if(node.isPassword||(Build.VERSION.SDK_INT>=34&&node.isAccessibilityDataSensitive))return true
         val inputClass=node.inputType and InputType.TYPE_MASK_CLASS
         val variation=node.inputType and InputType.TYPE_MASK_VARIATION
         if((inputClass==InputType.TYPE_CLASS_TEXT&&variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,

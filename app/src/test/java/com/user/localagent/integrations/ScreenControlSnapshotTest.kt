@@ -2,6 +2,8 @@ package com.user.localagent.integrations
 
 import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -10,6 +12,34 @@ import uniffi.ziphap_android.NativeScreenTarget
 import uniffi.ziphap_android.nativeScreenSnapshotId
 
 class ScreenControlSnapshotTest {
+    @Test
+    fun checkedStateChangesEvidenceWhileDisabledControlsAreNeverPresentedAsActionable() {
+        val unchecked=ScreenControlState(enabled=true,selected=false,checked=ScreenChecked.UNCHECKED)
+        val checked=unchecked.copy(checked=ScreenChecked.CHECKED)
+        val disabled=checked.copy(enabled=false,selected=true)
+        fun snapshot(state:ScreenControlState):String {
+            val option=NativeScreenTarget(NativeScreenRole.TAP,digest("Option"),digest(state.identity),
+                0,0,120,40,false,state.enabled)
+            return checkNotNull(nativeScreenSnapshotId(ByteArray(32){1},digest("com.example"),5,
+                false,emptyList(),listOf(option)))
+        }
+
+        assertThrows(ScreenControl.SnapshotChanged::class.java) {
+            ScreenControl.requireCurrentSnapshot(snapshot(unchecked),snapshot(checked))
+        }
+        assertEquals(JsonPrimitive(false),buildJsonObject {unchecked.appendTo(this,false)}["checked"])
+        val output=buildJsonObject {disabled.appendTo(this,false)}
+        assertEquals(JsonPrimitive(false),output["enabled"])
+        assertEquals(JsonPrimitive(true),output["selected"])
+        assertEquals(JsonPrimitive(true),output["checked"])
+        assertEquals(JsonPrimitive(true),output["blocked"])
+        val partial=buildJsonObject {checked.copy(checked=ScreenChecked.PARTIAL).appendTo(this,false)}
+        assertEquals(JsonPrimitive(true),partial["partiallyChecked"])
+        assertEquals(null,partial["checked"])
+        assertEquals("""{"collectionItem":{"rowIndex":2,"columnIndex":1,"label":"Third lesson"}}""",
+            buildJsonObject {ScreenCollectionItem(2,1,"Third lesson").appendTo(this)}.toString())
+    }
+
     @Test
     fun changedVisibleTotalRejectsPreviousSnapshotEvenWithSamePayButton() {
         val payButton=NativeScreenTarget(NativeScreenRole.TAP,digest("Pay"),digest("checkout_button"),
