@@ -52,6 +52,15 @@ test('phone browser asset checks actionability and refreshes stale references in
     await page.locator('#next').evaluate(element => element.setAttribute('inert', ''));
     assert.deepEqual(await click('fourth', ref), { error: 'ELEMENT_OBSCURED' });
     assert.equal(await page.evaluate(() => window.steps), 1);
+
+    await page.locator('#next').evaluate(element => element.removeAttribute('inert'));
+    await observe('trusted');
+    const { trustedTap } = await run({ action:'prepareTrustedTap', snapshotId:'trusted', ref });
+    assert.ok(trustedTap.x > 0 && trustedTap.x < trustedTap.viewportWidth);
+    assert.equal(await page.evaluate(() => window.steps), 1);
+    await page.touchscreen.tap(trustedTap.x, trustedTap.y);
+    assert.equal(await page.evaluate(() => window.steps), 2);
+    assert.deepEqual(await run({ action:'prepareTrustedTap', snapshotId:'trusted', ref }), { error:'SNAPSHOT_STALE' });
   } finally {
     await browser.close();
   }

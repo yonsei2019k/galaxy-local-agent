@@ -280,6 +280,19 @@ function (request) {
           }
           e.click();
           break;
+        case 'prepareTrustedTap': {
+          e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+          if (!stillCurrent()) return fail('SNAPSHOT_STALE');
+          if (!receivesClick(e)) return fail('ELEMENT_OBSCURED');
+          const rect = e.getBoundingClientRect();
+          const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+          const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+          if (left >= right || top >= bottom) return fail('ELEMENT_OBSCURED');
+          const x = (left + right) / 2, y = (top + bottom) / 2;
+          const hit = document.elementFromPoint(x, y);
+          if (hit !== e && !e.contains(hit)) return fail('ELEMENT_OBSCURED');
+          return {trustedTap: {x, y, viewportWidth:innerWidth}};
+        }
         case 'type': {
           e.scrollIntoView({block:'center'});
           e.focus();

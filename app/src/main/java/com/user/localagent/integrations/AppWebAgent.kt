@@ -910,7 +910,14 @@ class AppWebAgent private constructor(private val context:Context) {
                 put("needsApproval",needsApproval);put("approvedSnapshot",approvedSnapshot)
                 arguments["ruleHref"]?.let {put("ruleHref",it)}
             }
-            val result=if(action=="click"&&secureOrigin(sourceUrl)!=null)dispatchObservedClick(request) else dom(request)
+            val hallymClassroom=action=="click"&&secureOrigin(sourceUrl)?.host=="hallymedu.co.kr"&&
+                "ruleHref" !in arguments&&target?.s("label")?.filterNot(Char::isWhitespace) in
+                    setOf("강의실입장","학습시작하기","학습진행하기","이어듣기")
+            val result=when {
+                hallymClassroom->dispatchHallymTap(request)
+                action=="click"&&secureOrigin(sourceUrl)!=null->dispatchObservedClick(request)
+                else->dom(request)
+            }
             val refusal=result?.s("error")
             if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","ELEMENT_OBSCURED","OPTION_UNKNOWN"))
                 return@guarded fail(checkNotNull(refusal))
@@ -940,6 +947,31 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     /** A validated tool click may start a player or follow its new-window link in this WebView. */
+    private suspend fun dispatchHallymTap(request:JsonObject):JsonObject? {
+        val browser=view()
+        val url=browser.url
+        val coordinates=dom(JsonObject(request+("action" to JsonPrimitive("prepareTrustedTap"))))?:return null
+        val target=coordinates["trustedTap"] as? JsonObject ?: return coordinates
+        val viewport=target["viewportWidth"]?.jsonPrimitive?.doubleOrNull ?: return fail("ELEMENT_UNAVAILABLE")
+        if(browser!==webView||browser.url!=url||viewport<=0||browser.width<=0)return fail("SNAPSHOT_STALE")
+        val x=((target["x"]?.jsonPrimitive?.doubleOrNull?:return fail("ELEMENT_UNAVAILABLE")) * browser.width/viewport).toFloat()
+        val y=((target["y"]?.jsonPrimitive?.doubleOrNull?:return fail("ELEMENT_UNAVAILABLE")) * browser.width/viewport).toFloat()
+        if(!x.isFinite()||!y.isFinite()||x !in 0f..browser.width.toFloat()||y !in 0f..browser.height.toFloat())
+            return fail("ELEMENT_OBSCURED")
+        val now=android.os.SystemClock.uptimeMillis()
+        val down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,x,y,0)
+        val up=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_UP,x,y,0)
+        try {
+            down.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+            up.source=android.view.InputDevice.SOURCE_TOUCHSCREEN
+            if(!browser.dispatchTouchEvent(down)||!browser.dispatchTouchEvent(up)){
+                com.user.localagent.FailureLog.record(context,"app_browser_navigation",null,"HALLYM_TOUCH_NOT_CONFIRMED")
+                return fail("ACTION_OUTCOME_UNKNOWN")
+            }
+        } finally {down.recycle();up.recycle()}
+        return buildJsonObject {put("performed",true)}
+    }
+
     private suspend fun dispatchObservedClick(request:JsonObject):JsonObject? {
         val settings=view().settings
         val allowWindows=settings.javaScriptCanOpenWindowsAutomatically
