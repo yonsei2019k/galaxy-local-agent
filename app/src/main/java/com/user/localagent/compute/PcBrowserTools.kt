@@ -54,12 +54,13 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         fun pc(context:Context)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
             pcRequest(context,operation,body)
         }
-        fun app(context:Context)=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
+        fun app(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null})=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
             val web=com.user.localagent.integrations.AppWebAgent.get(context)
+            val binding=work()
             when(operation){
-                "open"->web.open(body.getValue("url").jsonPrimitive.content,body["showOnPhone"]==JsonPrimitive(true))
-                "read"->web.read(body["observeMedia"]==JsonPrimitive(true))
-                else->web.act(body,body[APP_APPROVED_SNAPSHOT]?.jsonPrimitive?.contentOrNull)
+                "open"->web.open(body.getValue("url").jsonPrimitive.content,body["showOnPhone"]==JsonPrimitive(true),binding)
+                "read"->web.read(body["observeMedia"]==JsonPrimitive(true),binding)
+                else->web.act(body,body[APP_APPROVED_SNAPSHOT]?.jsonPrimitive?.contentOrNull,binding)
             }
         }
     }

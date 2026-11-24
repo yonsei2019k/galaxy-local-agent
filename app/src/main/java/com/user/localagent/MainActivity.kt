@@ -325,6 +325,7 @@ class MainActivity : ComponentActivity() {
         val loginCard by webAgent.ownerLoginCard.collectAsState()
         val websiteLogin by webAgent.ownerWebsiteLogin.collectAsState()
         val websiteWork by webAgent.ownerWebsiteWork.collectAsState()
+        val websiteBinding by webAgent.ownerWorkBinding.collectAsState()
         val loginStatus by webAgent.ownerLoginStatus.collectAsState()
         var connectionsOpen by rememberSaveable {mutableStateOf(false)}
         var connectionStatus by remember {mutableStateOf<String?>(null)}
@@ -434,7 +435,7 @@ class MainActivity : ComponentActivity() {
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
-                    put("inlineLogin",loginCard!=null||connectionsOpen)
+                    put("inlineLogin",loginCard!=null&&websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true||connectionsOpen)
                     (if(connectionsOpen)connectionStatus else loginStatus?:connectionStatus)?.let{put("browserLoginStatus",it)}
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
                     put("voiceDraftEpoch",voiceDraftEpoch)
@@ -608,18 +609,21 @@ class MainActivity : ComponentActivity() {
                         status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
                 })}
-                val website=websiteLogin
+                val inWebsiteRoom=websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
+                val website=websiteLogin.takeIf{inWebsiteRoom}
                 if(website!=null)key(website.card.id){
                     com.user.localagent.integrations.InlineWebsiteLogin(webAgent,website,window,
                         Modifier.fillMaxWidth().fillMaxHeight(0.76f).padding(horizontal=12.dp))
-                } else loginCard?.let { card -> key(card.id) {
+                } else loginCard.takeIf{inWebsiteRoom}?.let { card -> key(card.id) {
                     com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,card,window,
                         Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
                 }} ?: if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
                         onClose={connectionsOpen=false},onStatus={connectionStatus=it},
                         modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
-                } else websiteWork?.let{work->
+                } else websiteWork?.takeIf{work->
+                    work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
+                }?.let{work->
                     com.user.localagent.integrations.InlineWebsiteWorkCard(webAgent,work,
                         Modifier.fillMaxWidth().padding(horizontal=12.dp))
                 }

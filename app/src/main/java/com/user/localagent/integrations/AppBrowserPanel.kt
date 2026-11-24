@@ -106,11 +106,11 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     SecureBrowserWindow(window)
     val scope=rememberCoroutineScope()
     val keyboard=LocalSoftwareKeyboardController.current
+    val loginStatus by agent.ownerLoginStatus.collectAsState()
     var account by remember {mutableStateOf("")}
     var password by remember {mutableStateOf("")}
     var submitting by remember {mutableStateOf(false)}
-    var declined by remember {mutableStateOf(false)}
-    val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting&&!declined
+    val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting
     fun submit(){
         if(!ready)return
         val enteredAccount=account
@@ -122,7 +122,6 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
         scope.launch {
             if(!agent.submitLoginCard(login.id,enteredAccount,enteredPassword)){
                 submitting=false
-                declined=true
             }
         }
     }
@@ -132,13 +131,12 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 Text("사이트 로그인",style=MaterialTheme.typography.titleLarge)
                 Text(login.host,style=MaterialTheme.typography.titleSmall)
                 Text("입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
-                if(declined)Text("로그인 양식이 바뀌었어요. 사이트에서 직접 로그인해 주세요.",
-                    color=MaterialTheme.colorScheme.error)
+                loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
                 OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
-                    enabled=!submitting&&!declined,label={Text("아이디")},
+                    enabled=!submitting,label={Text("아이디")},
                     keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
                 OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth(),singleLine=true,
-                    enabled=!submitting&&!declined,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
+                    enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
                     keyboardActions=KeyboardActions(onGo={submit()}))
                 Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=ready){
@@ -158,6 +156,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
     SecureBrowserWindow(window)
     val scope=rememberCoroutineScope()
     val navigation by agent.navigationStatus.collectAsState()
+    val loginStatus by agent.ownerLoginStatus.collectAsState()
     var reload by remember {mutableIntStateOf(0)}
     var visible by remember {mutableStateOf(false)}
     var checking by remember {mutableStateOf(false)}
@@ -165,6 +164,24 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
     LaunchedEffect(request.card.id,reload){
         visible=false
         visible=agent.loadWebsiteLogin(request.card.id)
+        if(!visible)return@LaunchedEffect
+        var sawLoginForm=false
+        var readbacks=0
+        while(!returned){
+            if(!checking){
+                when(agent.websiteLoginFormPresent(request.card.id)){
+                    true->{sawLoginForm=true;readbacks=0}
+                    false->if(sawLoginForm&&++readbacks>=2){
+                        checking=true
+                        val confirmed=try{agent.finishWebsiteLogin(request.card.id)}finally{checking=false}
+                        if(confirmed)return@LaunchedEffect
+                        readbacks=0
+                    }
+                    null->readbacks=0
+                }
+            }
+            kotlinx.coroutines.delay(500)
+        }
     }
     fun goBack(){
         if(returned)return
@@ -175,6 +192,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
     Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
         Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text(request.card.host,style=MaterialTheme.typography.titleSmall)
+            loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
             if(navigation.loading||checking||returned)LinearProgressIndicator(Modifier.fillMaxWidth())
             if(navigation.error!=null)Text(when(navigation.error){
                 "HTTPS_REQUIRED"->"사이트가 보안 연결을 제공하지 않는 페이지로 이동했어요."

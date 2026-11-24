@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.launch
 
 internal fun playbackConditions(context: Context): Boolean {
     val network=context.getSystemService(ConnectivityManager::class.java)
@@ -49,11 +50,22 @@ internal class GoalWaitWork(private val context: Context) {
         WorkManager.getInstance(context).enqueueUniqueWork("goal-wait-"+record.id, ExistingWorkPolicy.KEEP, request.build()).await()
     }
 
-    suspend fun confirmAuth(binding:String) {
+    suspend fun confirmAuth(binding:String):Boolean {
         val previous=store.all().singleOrNull { it.condition==WaitCondition.OwnerAuth(binding) && it.observedEvent==null &&
-            it.resumedOnceFor!=it.id && it.deadlineAt>System.currentTimeMillis() } ?: return
+            it.resumedOnceFor!=it.id && it.deadlineAt>System.currentTimeMillis() } ?: return false
         val confirmed=previous.copy(id=java.util.UUID.randomUUID().toString(),observedEvent=WakeEvent.OWNER_AUTH_DONE)
-        if(store.replace(confirmed,previous))arm(confirmed)
+        if(!store.replace(confirmed,previous))return false
+        val app=(context.applicationContext as? LocalAgentApplication)?.container
+        app?.runs?.scope?.launch {
+            repeat(40) {
+                val handled=if(confirmed.ordinaryBrowserAuth)app.runs.wakeBrowserAuth(confirmed)
+                    else app.runs.isGoalWaitReady(confirmed)&&app.runs.wakeGoal(confirmed,WakeEvent.OWNER_AUTH_DONE)
+                if(handled)return@launch
+                delay(250)
+            }
+        }
+        arm(confirmed)
+        return true
     }
 
     suspend fun cancel(record: GoalWaitRecord) {
@@ -72,6 +84,8 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val goalId = inputData.getString("goalId") ?: return Result.failure()
         var record = app.goalWaits.store.get(goalId) ?: return Result.success()
         if (record.id != inputData.getString("waitId")) return Result.success()
+        if(record.ordinaryBrowserAuth)return if(app.runs.wakeBrowserAuth(record))Result.success()
+            else if(runAttemptCount<5)Result.retry() else Result.failure()
         if(!app.runs.isGoalWaitReady(record))
             return if(runAttemptCount<5 && app.runs.isRunLive(record.parentRunId))Result.retry() else Result.success()
         val existing=record.observedEvent

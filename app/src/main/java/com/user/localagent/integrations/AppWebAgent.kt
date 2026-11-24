@@ -64,7 +64,10 @@ class AppWebAgent private constructor(private val context:Context) {
     private var nextLoginId=0L
     data class LoginCard(val id:Long,val host:String)
     data class WebsiteLogin(val card:LoginCard,val url:String)
-    data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false)
+    data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
+    data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,val binding:WorkBinding?=null)
+    private val browserWorkBinding=MutableStateFlow<WorkBinding?>(null)
+    val ownerWorkBinding:StateFlow<WorkBinding?> get()=browserWorkBinding
     private val websiteWork=MutableStateFlow<WebsiteWork?>(null)
     val ownerWebsiteWork:StateFlow<WebsiteWork?> get()=websiteWork
     private val websiteLogin=MutableStateFlow<WebsiteLogin?>(null)
@@ -133,11 +136,26 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private val loginProcess = token()
-    internal fun waitingAuthBinding():String? = loginCard.value?.let { "$loginProcess:${it.id}" }
+    private var lastConfirmedCard:Long?=null
+    private var lastConfirmedOrigin:URI?=null
+    private var expiredLoginBinding: String? = null
+    internal fun waitingAuthBinding(runId:String):String? {
+        if(browserWorkBinding.value?.runId!=runId)return null
+        return loginCard.value?.let { "$loginProcess:${it.id}" } ?: expiredLoginBinding
+    }
 
-    private suspend fun notifyGoalAuth(id:Long) {
-        val app=(context as? com.user.localagent.LocalAgentApplication)?.container ?: return
-        app.goalWaits.confirmAuth("$loginProcess:$id")
+    internal fun authAlreadyConfirmed(binding:String):Boolean =
+        lastConfirmedCard?.let { "$loginProcess:$it"==binding }==true
+
+    internal fun isConfirmedBrowserCurrent(runId:String):Boolean =
+        browserWorkBinding.value?.runId==runId && lastConfirmedOrigin!=null &&
+            secureOrigin(webView?.url)==lastConfirmedOrigin
+
+    private suspend fun notifyGoalAuth(id:Long):Boolean {
+        lastConfirmedCard=id
+        lastConfirmedOrigin=secureOrigin(webView?.url)
+        val app=(context as? com.user.localagent.LocalAgentApplication)?.container ?: return false
+        return app.goalWaits.confirmAuth("$loginProcess:$id")
     }
 
     internal suspend fun sampleGoalMedia():MediaEndWatcher.Observation? = mutex.withLock {
@@ -161,31 +179,60 @@ class AppWebAgent private constructor(private val context:Context) {
 
     fun dismissWebsiteWork(){websiteWork.value=null}
 
+    internal fun bindResumedWork(originalRunId:String,binding:WorkBinding) {
+        if(browserWorkBinding.value?.runId!=originalRunId)return
+        browserWorkBinding.value=binding
+        val prior=websiteWork.value?.takeIf{it.binding?.runId==originalRunId} ?: return
+        websiteWork.value=prior.copy(binding=binding,status="로그인 확인 후 원래 작업 이어가는 중",
+            steps=(prior.steps+"원래 요청 재개").takeLast(4),working=true)
+    }
+
+    internal fun finishWork(runId:String,actualState:String,errorCode:String?) {
+        val prior=websiteWork.value?.takeIf{it.binding?.runId==runId} ?: return
+        val label=when {
+            errorCode in setOf("waiting_browser_auth","waiting_goal_condition","browser_auth_on_phone") -> "재개 조건 확인 대기"
+            actualState=="completed" -> "웹 작업 응답 완료"
+            actualState=="paused" -> "일시 정지 · 채팅에서 마지막 확인 결과를 볼 수 있어요."
+            actualState=="failed" -> "웹 작업을 이어가지 못했어요. 채팅의 결과를 확인해 주세요."
+            actualState=="cancelled"||actualState=="interrupted" -> "웹 작업 중지"
+            else -> return
+        }
+        websiteWork.value=prior.copy(status=label,working=false)
+    }
+
     private fun showWebsiteWork(host:String,waiting:Boolean){
         websiteWork.value=WebsiteWork(host,
-            if(waiting)"다음 작업을 보내 주세요." else "이전 작업을 계속하고 있어요.",
-            listOf("사이트 로그인 화면에서 이동 확인"))
+            if(waiting)"로그인 확인 · 재개 상태 확인 중" else "이전 작업을 계속하고 있어요.",
+            listOf("사이트 로그인 화면에서 이동 확인"),working=!waiting,binding=browserWorkBinding.value)
     }
 
     suspend fun finishWebsiteLogin(id:Long):Boolean{
         val request=websiteLogin.value?.takeIf{it.card.id==id}?:return false
-        settle()
-        if(websiteLogin.value!=request)return false
-        if(navigation.value.error!=null||navigation.value.loading||secureOrigin(view().url)!=cardOrigin||
-            loginFormPresent()!=false){
-            loginStatus.value="사이트 로그인이 확인되지 않았어요. 다시 시도하거나 입력창으로 돌아갈 수 있어요."
-            return false
-        }
-        val waiter=loginCompletion
-        websiteLogin.value=null
-        loginCard.value=null
-        cardOrigin=null
-        val continues=waiter?.complete(true)==true
-        if(!continues)notifyGoalAuth(id)
-        showWebsiteWork(request.card.host,!continues)
-        loginStatus.value=if(continues)"로그인 화면에서 이동했어요. 작업을 이어가고 있어요."
-            else "로그인 화면에서 이동했어요. 이어서 할 일을 보내 주세요."
-        return true
+        if(loginSubmitting)return false
+        loginSubmitting=true
+        try{
+            settle()
+            if(websiteLogin.value!=request)return false
+            if(websiteLoginFormPresent(id)!=false){
+                loginStatus.value="사이트 로그인이 확인되지 않았어요. 다시 시도하거나 입력창으로 돌아갈 수 있어요."
+                return false
+            }
+            val continues=loginCompletion?.complete(true)==true
+            showWebsiteWork(request.card.host,waiting=!continues)
+            val queued=notifyGoalAuth(id)
+            loginStatus.value=if(continues||queued)"로그인 확인 · 원래 요청을 이어갈 준비를 하고 있어요."
+                else "로그인 화면에서 이동했어요. 이어서 할 일을 보내 주세요."
+            websiteLogin.value=null
+            loginCard.value=null
+            cardOrigin=null
+            return true
+        }finally{loginSubmitting=false}
+    }
+
+    internal suspend fun websiteLoginFormPresent(id:Long):Boolean? {
+        if(websiteLogin.value?.card?.id!=id||navigation.value.error!=null||navigation.value.loading||
+            loading||secureOrigin(view().url)!=cardOrigin)return null
+        return loginFormPresent()
     }
 
     fun cancelLoginCard(id:Long){
@@ -193,6 +240,7 @@ class AppWebAgent private constructor(private val context:Context) {
         websiteLogin.value=null
         loginCard.value=null
         cardOrigin=null
+        expiredLoginBinding=null
         loginStatus.value="로그인을 취소했어요. 현재 작업은 멈춰 있습니다."
         loginCompletion?.complete(false)
     }
@@ -209,25 +257,33 @@ class AppWebAgent private constructor(private val context:Context) {
             val submitted=loginDom("submit",id,origin,account,password)
             if(submitted&&loginCard.value?.id==id){
                 loginStatus.value="로그인 정보를 제출했어요. 다음 페이지를 확인하고 있어요."
-                val waiter=loginCompletion
-                if(waiter==null){
-                    settle()
+                if(!awaitLoginReadback(id,origin)){
                     loginStatus.value=loginReadbackStatus()
-                    if(navigation.value.error==null&&!navigation.value.loading&&secureOrigin(view().url)==origin&&
-                        loginFormPresent()==false){
-                        notifyGoalAuth(id)
-                        showWebsiteWork(origin.host,waiting=true)
-                    }
+                    return false
                 }
+                val continued=loginCompletion?.complete(true)==true
+                showWebsiteWork(origin.host,waiting=!continued)
+                val queued=notifyGoalAuth(id)
                 loginCard.value=null
                 cardOrigin=null
-                waiter?.complete(true)
+                loginStatus.value=if(continued||queued)"로그인 확인 · 원래 요청을 이어갈 준비를 하고 있어요."
+                    else "로그인 화면에서 이동했어요. 다음 작업을 알려 주세요."
                 return true
             }
             loginStatus.value="현재 로그인 양식에 제출하지 못했어요. 사이트에서 직접 로그인할 수 있어요."
             return false
         }finally{loginSubmitting=false}
     }
+
+    private suspend fun awaitLoginReadback(id:Long,origin:URI):Boolean = withTimeoutOrNull(14_000) {
+        delay(400)
+        while(loginCard.value?.id==id){
+            if(navigation.value.error!=null || secureOrigin(view().url)!=origin)return@withTimeoutOrNull false
+            if(!loading && !navigation.value.loading && loginFormPresent()==false)return@withTimeoutOrNull true
+            delay(350)
+        }
+        false
+    } ?: false
 
     private suspend fun loginReadbackStatus():String {
         if(navigation.value.error!=null||navigation.value.loading)
@@ -240,7 +296,7 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private suspend fun loginFormPresent():Boolean? =
-        try{(eval("Boolean(document.querySelector('input[type=password],input[autocomplete=one-time-code]'))",4_000) as? JsonPrimitive)?.booleanOrNull}
+        try{(eval("document.readyState === 'complete' && document.body ? Boolean(document.querySelector('input[type=password],input[autocomplete=one-time-code]')) : null",4_000) as? JsonPrimitive)?.booleanOrNull}
         catch(_:TimeoutCancellationException){null}
         catch(cancel:CancellationException){throw cancel}
         catch(_:Exception){null}
@@ -620,6 +676,7 @@ class AppWebAgent private constructor(private val context:Context) {
         loginCompletion=completion
         val id=++nextLoginId
         loginWait.value=id
+        expiredLoginBinding=null
         var keepCard=false
         try {
             if(requiredOrigin==loginOrigin&&loginDom("capture",id,loginOrigin)){
@@ -632,6 +689,7 @@ class AppWebAgent private constructor(private val context:Context) {
             val ownerFinished=withTimeoutOrNull(55_000){completion.await()}
             if(ownerFinished!=true){
                 keepCard=ownerFinished==null&&loginCard.value?.id==id
+                if(keepCard)expiredLoginBinding="$loginProcess:$id"
                 if(keepCard)loginStatus.value="작업이 인증 대기에서 일시정지됐어요. 여기서 로그인할 수 있어요."
                 return JsonObject(initial+("phoneBrowserVisible" to JsonPrimitive(isPresented())))
             }
@@ -659,7 +717,7 @@ class AppWebAgent private constructor(private val context:Context) {
         }
     }
 
-    suspend fun open(url:String,showOnPhone:Boolean=false):JsonObject = guarded("페이지 여는 중",url){
+    suspend fun open(url:String,showOnPhone:Boolean=false,work:WorkBinding?=null):JsonObject = guarded("페이지 여는 중",url,work){
         if(!WebAgentPolicy.urlAllowed(url))return@guarded fail("URL_NOT_ALLOWED")
         if(showOnPhone)showBrowser(url)
         beginNavigation(url)
@@ -676,14 +734,14 @@ class AppWebAgent private constructor(private val context:Context) {
         if(showOnPhone&&"phoneBrowserVisible" !in page)
             JsonObject(page+("phoneBrowserVisible" to JsonPrimitive(isPresented()))) else page
     }
-    suspend fun read(observeMedia:Boolean=false):JsonObject = guarded("페이지 상태 확인 중"){
+    suspend fun read(observeMedia:Boolean=false,work:WorkBinding?=null):JsonObject = guarded("페이지 상태 확인 중",work=work){
         navigation.value.error?.let {return@guarded fail(it)}
         if(navigation.value.loading)return@guarded fail("PAGE_TIMEOUT")
         val url=view().url
         afterOwnerLogin(url,readPage(observeMedia))
     }
 
-    suspend fun act(arguments:JsonObject,approvedSnapshot:String?):JsonObject = guarded("요청한 화면 동작 진행 중"){
+    suspend fun act(arguments:JsonObject,approvedSnapshot:String?,work:WorkBinding?=null):JsonObject = guarded("요청한 화면 동작 진행 중",work=work){
         val action=arguments.s("action")
         val current=snapshot
         if(current==null||current.first!=arguments.s("snapshotId"))return@guarded fail("SNAPSHOT_STALE")
@@ -748,17 +806,18 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     /** Serialises agent access on the main thread and marks the browser as agent-driven meanwhile. */
-    private suspend fun guarded(label:String,targetUrl:String?=null,block:suspend()->JsonObject):JsonObject = mutex.withLock{
+    private suspend fun guarded(label:String,targetUrl:String?=null,work:WorkBinding?=null,block:suspend()->JsonObject):JsonObject = mutex.withLock{
         withContext(Dispatchers.Main){
             agentActive.value=true
+            if(loginCard.value==null&&work!=null)browserWorkBinding.value=work
             val requestedHost=secureOrigin(targetUrl?:webView?.url)?.host
-            val statusBefore=websiteWork.value?.takeIf{it.host==requestedHost&&loginCard.value==null}
+            val statusBefore=websiteWork.value?.takeIf{it.host==requestedHost&&it.binding==work&&loginCard.value==null}
             if(statusBefore!=null)websiteWork.value=statusBefore.copy(status=label,working=true)
             try{
                 if(loginCard.value!=null||loginSubmitting)buildJsonObject{
                     put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",false)
                 }else block().also { page ->
-                    websiteWork.value?.takeIf{it.host==secureOrigin(webView?.url)?.host&&it.host==requestedHost}?.let{work->
+                    websiteWork.value?.takeIf{it.host==secureOrigin(webView?.url)?.host&&it.host==requestedHost&&it.binding==work}?.let{work->
                         val performed=page["performed"] as? JsonObject
                         val target=performed?.s("control")?.trim()?.take(60).orEmpty()
                         val title=page.s("title").trim().take(60)
@@ -773,7 +832,7 @@ class AppWebAgent private constructor(private val context:Context) {
                     }
                 }
             }catch(timeout:TimeoutCancellationException){fail("PAGE_TIMEOUT")}finally{
-                websiteWork.value?.takeIf{it.working&&it.host==requestedHost}?.let{
+                websiteWork.value?.takeIf{it.working&&it.host==requestedHost&&it.binding==work}?.let{
                     websiteWork.value=it.copy(status="이 단계의 결과를 확인하지 못했어요.",working=false)
                 }
                 agentActive.value=false

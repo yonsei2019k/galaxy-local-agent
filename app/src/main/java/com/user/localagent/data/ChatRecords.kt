@@ -527,13 +527,13 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val mayLearnOwner=project?.settings?.learnOwnerFacts?:thread.allowOwnerLearning
         if(mayLearnOwner)"owner"else accessScope(thread.id).scopeKey
     }
-    suspend fun createRun(threadId:String,branchId:String,userMessageId:String?=null,modelId:String="auto",contextSize:Int=4096,thinking:Boolean=false,contextJson:String="",runId:String=UUID.randomUUID().toString()):ChatRunRecord=database.withTransaction {
+    suspend fun createRun(threadId:String,branchId:String,userMessageId:String?=null,modelId:String="auto",contextSize:Int=4096,thinking:Boolean=false,contextJson:String="",runId:String=UUID.randomUUID().toString(),reserveAssistant:Boolean=true):ChatRunRecord=database.withTransaction {
         val t=activeBranch(threadId,branchId);require(contextSize in 512..131072&&modelId.length<=200&&contextJson.length<=2_000_000)
         require(runId.length in 1..128&&runId.none {it.code<32});check(dao.run(runId)==null){"기존 작업의 ID를 재사용하지 않습니다."}
         if(userMessageId!=null)check(local.messageById(userMessageId)?.let {it.role=="user"&&it.threadId==threadId&&dao.refs(branchId).any {ref->ref.messageId==it.id}}==true){"요청 메시지가 현재 대화에 없습니다."}
         val p=t.projectId?.let {dao.project(it)}
         ChatRunRecord(id=runId,threadId=threadId,branchId=branchId,userMessageId=userMessageId,projectId=t.projectId,threadRevision=t.revision,
-            projectRevision=p?.revision?:0,modelId=modelId,contextSize=contextSize,thinking=thinking,contextJson=contextJson).also {dao.run(it);if(userMessageId!=null)beginAssistant(it.id)}
+            projectRevision=p?.revision?:0,modelId=modelId,contextSize=contextSize,thinking=thinking,contextJson=contextJson).also {dao.run(it);if(userMessageId!=null&&reserveAssistant)beginAssistant(it.id)}
     }
     suspend fun startRun(runId:String):ChatRunRecord=database.withTransaction {
         val r=validRun(runId);check(r.status=="queued"){"대기 상태인 작업만 시작할 수 있습니다."}
@@ -563,6 +563,23 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val run=createRun(threadId,branchId,user.id,modelId,4096,thinking,runId=runId)
         updateRunContext(run.id,contextFactory(user,run))
     }
+    /** Starts the continuation under the same original user message, once per parked authentication. */
+    internal suspend fun enqueueAuthenticatedBrowserResume(parent:ChatRunRecord,child:com.user.localagent.QueuedChatRequest):ChatRunRecord? =
+        database.withTransaction {
+            val current=validRun(parent.id)
+            check(current==parent && current.status=="paused" && current.errorCode=="waiting_browser_auth")
+            check(child.browserAuthParentRunId==parent.id && child.userMessageId==parent.userMessageId)
+            check(child.threadId==parent.threadId&&child.branchId==parent.branchId&&child.projectId==parent.projectId)
+            if(dao.run(child.runId)!=null)return@withTransaction null
+            val newest=dao.messagePage(parent.threadId,parent.branchId,null,1).singleOrNull()
+            if(newest?.runId!=parent.id || newest.role!="assistant")return@withTransaction null
+            val created=createRun(parent.threadId,parent.branchId,parent.userMessageId,parent.modelId,parent.contextSize,
+                parent.thinking,child.toJson(),child.runId,reserveAssistant=false)
+            insertMessage(MessageRecord(role="assistant",text="",threadId=parent.threadId,branchId=parent.branchId,runId=child.runId))
+            dao.run(current.copy(errorCode="browser_auth_resumed",updatedAt=now()))
+            created
+        }
+
     internal suspend fun scheduleRead(registrationRunId: String, title: String, prompt: String, at: Long, tool: String,
         clockReceiptOnly: Boolean = false): ChatRunRecord =
         database.withTransaction {

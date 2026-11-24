@@ -98,7 +98,13 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         else null
     suspend fun browserActionNeedsOwner(call:ToolCall):Boolean=browserFor(call.name)?.review(call)?.first==true
     private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context)}
-    private val appBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.app(context)}
+    private val appBrowser by lazy {
+        com.user.localagent.compute.BrowserAgentTools.app(context) {
+            connectionRunId?.let { repository.chat.run(it) }?.takeIf { it.threadId==connectionThreadId }?.let {
+                com.user.localagent.integrations.AppWebAgent.WorkBinding(it.id,it.threadId,it.branchId)
+            }
+        }
+    }
     private fun browserFor(name:String)=when(name){
         in com.user.localagent.core.PcBrowserToolCatalog.names->pcBrowser
         in com.user.localagent.core.AppBrowserToolCatalog.names->appBrowser

@@ -24,5 +24,12 @@ internal class GoalWaitStore(private val load: () -> String?, private val save: 
         true
     }
 
+    fun remove(expected: GoalWaitRecord): Boolean = synchronized(lock) {
+        val records=read()
+        if(records.singleOrNull{it.goalId==expected.goalId}!=expected)return false
+        save(Json.encodeToString(codec, records.filterNot{it.goalId==expected.goalId}))
+        true
+    }
+
     private companion object { val lock = Any() }
 }
