@@ -34,6 +34,25 @@ class DelegatedSubmissionTest {
         assertNull(DelegatedSubmission.fromConstraints(listOf(DelegatedSubmission.CONSTRAINT_PREFIX+
             """{"origins":["http://kairb.org"],"actions":["quiz_submit"]}""")))
     }
+    @Test fun actionsAreEnforced(){
+        val lesson=DelegationScope(setOf("https://kairb.org"),setOf(LESSON_COMPLETE))
+        assertTrue(DelegatedSubmission.permits(lesson,"https://kairb.org/q","다음"))
+        assertFalse(DelegatedSubmission.permits(lesson,"https://kairb.org/q","제출"))
+        assertFalse(DelegatedSubmission.permits(lesson,"https://kairb.org/q","완료 제출"))
+        val quiz=DelegationScope(setOf("https://kairb.org"),setOf(QUIZ_SUBMIT))
+        assertTrue(DelegatedSubmission.permits(quiz,"https://kairb.org/q","제출"))
+        assertTrue(DelegatedSubmission.permits(quiz,"https://kairb.org/q","다음"))
+    }
+    @Test fun labelIsNormalizedAndFailsClosed(){
+        val u="https://kairb.org/q"
+        assertFalse(DelegatedSubmission.permits(scope,u,"결​제 제출"))
+        assertFalse(DelegatedSubmission.permits(scope,u,"a".repeat(130)+"제출"))
+        assertTrue(DelegatedSubmission.permits(scope,u,"ｓｕｂｍｉｔ"))
+    }
+    @Test fun lookalikeOriginsRejected(){
+        for(u in listOf("https://kairb.org.evil.example/q","https://kairb.org@evil.example/q","https://kairb.org./q"))
+            assertFalse(u,DelegatedSubmission.permits(scope,u,"제출"))
+    }
     @Test fun scopeValidation(){
         assertThrows(IllegalArgumentException::class.java){DelegationScope(emptySet(),setOf(QUIZ_SUBMIT))}
         assertThrows(IllegalArgumentException::class.java){DelegationScope(setOf("https://kairb.org"),emptySet())}

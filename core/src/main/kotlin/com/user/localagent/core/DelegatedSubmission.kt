@@ -1,6 +1,7 @@
 package com.user.localagent.core
 
 import java.net.URI
+import java.text.Normalizer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -28,7 +29,10 @@ object DelegatedSubmission {
     const val CONSTRAINT_PREFIX = "delegate:v1 "
 
     private val json=Json{ignoreUnknownKeys=false}
-    private val allowedLabel=Regex("제출|확인|완료|다음|응시|submit|confirm|finish|next",RegexOption.IGNORE_CASE)
+    private val submitLabel=Regex("제출|응시|확인|submit|confirm",RegexOption.IGNORE_CASE)
+    private val progressLabel=Regex("완료|다음|finish|next",RegexOption.IGNORE_CASE)
+    private val formatChars=Regex("\\p{Cf}")
+    private val spaces=Regex("\\s+")
     private val forbiddenLabel=Regex("결제|구매|주문|송금|이체|보내기|전송|삭제|탈퇴|해지|가입|pay|buy|purchase|send|transfer|delete|unsubscribe",
         RegexOption.IGNORE_CASE)
 
@@ -52,8 +56,12 @@ object DelegatedSubmission {
         if(scope==null)return false
         val origin=normalizeOrigin(pageUrl)?:return false
         if(origin !in scope.origins)return false
-        val label=controlLabel.trim().replace(Regex("\\s+")," ").take(120)
+        val label=Normalizer.normalize(formatChars.replace(controlLabel,""),Normalizer.Form.NFKC)
+            .replace(spaces," ").trim()
+        if(label.length>120)return false
         if(forbiddenLabel.containsMatchIn(label))return false
-        return allowedLabel.containsMatchIn(label)
+        val submit=DelegatedAction.QUIZ_SUBMIT in scope.actions||DelegatedAction.SURVEY_SUBMIT in scope.actions
+        if(submitLabel.containsMatchIn(label))return submit
+        return progressLabel.containsMatchIn(label)&&(submit||DelegatedAction.LESSON_COMPLETE in scope.actions)
     }
 }
