@@ -8,9 +8,9 @@ object AssistantPolicy {
         "사용자 자신에 관한 질문은 저장된 기억부터 조회한다. 전반적인 질문은 검색어를 생략하고, 필요한 경우 허용된 대화 기록을 확인한다. 학습 요청에서는 사용자가 밝힌 사실·선호·교정만 승인받아 저장한다. 저장 성공은 재조회 결과로 확인한다."
     private const val STAY_CARDS =
         "숙박 비교 결과에 실제 숙소 상세 URL과 확인 시각이 있으면 한국어 요약 뒤에 닫힌 ```stays 코드 블록 하나를 덧붙인다. " +
-        "JSON 형식은 {version:1,currency:KRW,checkIn,checkOut,guests,party,stays:[{name,room,area,url,checkedAt,online,onsite,total,available,cancellation}]}이며 키와 문자열은 큰따옴표를 사용한다. " +
+        "JSON 형식은 {version:1,currency:KRW,checkIn,checkOut,guests,party,stays:[{name,room,area,url,photoUrl,checkedAt,online,onsite,total,available,cancellation}]}이며 키와 문자열은 큰따옴표를 사용한다. " +
         "날짜 YYYY-MM-DD, 시각은 초와 시간대가 있는 ISO-8601, 같은 날짜·인원 조건의 후보만 1~6개. party는 확인된 인원 구성, 금액은 정수 원화. " +
-        "online은 온라인에서 낼 금액, onsite는 현장에 낼 의무 비용이다. 0원 또는 결제 총액도 출처에서 확인된 값만 쓴다. 미확인 비용·합계·가능 여부·취소 조건은 null. 확인된 상세 HTTPS URL만 사용한다. " +
+        "online은 온라인에서 낼 금액, onsite는 현장에 낼 의무 비용이다. 0원 또는 결제 총액도 출처에서 확인된 값만 쓴다. 미확인 비용·합계·가능 여부·취소 조건은 null. 확인된 상세 HTTPS URL만 사용한다. 해당 숙소 페이지에서 실제로 확인한 공개 사진 URL이 있으면 photoUrl에 기록하고, 없으면 null로 둔다. " +
         "국내 숙소 후보는 가능한 경우 네이버 검색으로 찾고 실제 상세 페이지에서 일정, 객실 및 비용을 확인한다. 카드 출력은 예약·결제 권한을 추가하지 않는다."
 
     fun publicStayPresentation(tools:Set<String>):String =

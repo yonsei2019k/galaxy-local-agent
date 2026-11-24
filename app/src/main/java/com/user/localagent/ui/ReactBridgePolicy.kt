@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -35,6 +35,7 @@ internal object ReactBridgePolicy {
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
             "copy","messageFiles","messageMenu"->setOf("messageId")
+            "stayPhoto"->setOf("messageId","index")
             "renameThread"->setOf("title")
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
             "collabRefresh"->setOf("bindingEpoch")
@@ -52,7 +53,8 @@ internal object ReactBridgePolicy {
         if(action=="saveOfficeProfile")requireOfficeEntries(payload.getValue("entries"))
         else for((key,value) in payload){
             val p=value.jsonPrimitive
-            if(key in setOf("actionEpoch","bindingEpoch"))require(!p.isString&&p.long in 0..9007199254740991L)
+            if(key=="index")require(!p.isString&&p.int in 0..5)
+            else if(key in setOf("actionEpoch","bindingEpoch"))require(!p.isString&&p.long in 0..9007199254740991L)
             else {require(p.isString);require(p.content.length<=if(key=="text")when(action){"steer"->4000;"collabSend"->8000;else->12000}else 128);require(!p.content.contains('\u0000'))}
         }
         if(action in setOf("steer","collabSend"))require(payload.getValue("text").jsonPrimitive.content.isNotBlank())

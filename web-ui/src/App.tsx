@@ -141,6 +141,7 @@ export default function App() {
           onHistoryChange={open => setWorkHistoryScope(open ? conversationKey : null)}
           onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
           onFiles={messageId => request({ action: 'messageFiles', payload: { messageId } })}
+          onStayPhoto={(messageId, index) => request({ action: 'stayPhoto', payload: { messageId, index } })}
           onStopGoalWait={runId => request({ action: 'stopGoalWait', payload: { runId } })}
           onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })}
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}

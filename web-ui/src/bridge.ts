@@ -136,6 +136,7 @@ type Intent =
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
   | { action: 'copy' | 'messageFiles' | 'messageMenu'; payload: { messageId: string } }
+  | { action: 'stayPhoto'; payload: { messageId: string; index: number } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }
   | { action: 'steer'; payload: RunTarget & { text: string } }
@@ -318,7 +319,7 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if ((intent.action === 'saveOfficeProfile' || intent.action === 'clearOfficeProfile' ||
     intent.action === 'dismissOfficeGuide' || intent.action === 'requestOfficeCalendar') && !scope?.officeSelected) return false
   if (intent.action === 'saveOfficeProfile' && !officeEntries(intent.payload.entries)) return false
-  if (intent.action === 'copy' && !scope?.messages.some(message => message.role === 'assistant' && message.id === intent.payload.messageId)) return false
+  if ((intent.action === 'copy' || intent.action === 'stayPhoto') && !scope?.messages.some(message => message.role === 'assistant' && message.id === intent.payload.messageId)) return false
   if (intent.action === 'stop' || intent.action === 'steer') {
     const target = runTarget(scope)
     if (!target || target.runId !== intent.payload.runId || target.actionEpoch !== intent.payload.actionEpoch) return false

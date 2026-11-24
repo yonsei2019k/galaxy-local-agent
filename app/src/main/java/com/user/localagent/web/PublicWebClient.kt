@@ -377,7 +377,7 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
 }
 
 /** Validated DNS addresses are used directly for the TLS connection, preventing DNS rebinding. */
-class PinnedPublicHttpsTransport(private val pdf:Boolean=false,private val resolve:(String)->List<InetAddress> = {InetAddress.getAllByName(it).toList()}):PublicWebTransport {
+class PinnedPublicHttpsTransport(private val pdf:Boolean=false,private val image:Boolean=false,private val resolve:(String)->List<InetAddress> = {InetAddress.getAllByName(it).toList()}):PublicWebTransport {
     private var pdfSession: BoundPdfGet? = null
     internal constructor(session: BoundPdfGet): this(pdf=true) { pdfSession=session }
 
@@ -400,7 +400,11 @@ class PinnedPublicHttpsTransport(private val pdf:Boolean=false,private val resol
                     socket.startHandshake()
                     val path=target.rawPath.ifEmpty {"/"}+(target.rawQuery?.let {"?$it"}?:"")
                     val authority=if(host.contains(':'))"[$host]"else host
-                    val accept=if(pdf)"application/pdf,application/octet-stream;q=0.8" else "text/html,application/rss+xml,application/xhtml+xml,application/json,text/plain"
+                    val accept=when {
+                        pdf->"application/pdf,application/octet-stream;q=0.8"
+                        image->"image/jpeg,image/png,image/webp"
+                        else->"text/html,application/rss+xml,application/xhtml+xml,application/json,text/plain"
+                    }
                     val cookie = pdfSession?.headerFor(target.toString()).orEmpty()
                     socket.outputStream.write(("GET $path HTTP/1.1\r\nHost: $authority\r\nUser-Agent: ZipHap.Agent/1.0 PublicWebReader\r\nAccept: $accept\r\nAccept-Encoding: identity\r\n${cookie}Connection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
                     socket.outputStream.flush()

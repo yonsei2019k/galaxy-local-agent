@@ -13,7 +13,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
-import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import androidx.compose.ui.geometry.Rect
@@ -59,6 +62,9 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
     val receiveWebsiteSlot by rememberUpdatedState(onWebsiteSlot)
     var host by remember { mutableStateOf<WebView?>(null) }
     var ready by remember { mutableStateOf(false) }
+    val photoScope=rememberCoroutineScope()
+    val photoLoader=remember {StayPhotoLoader()}
+    val photoRequests=remember {mutableSetOf<Triple<String,String,Int>>()}
     LaunchedEffect(host,websiteSlotId,ready) {
         val view=host
         val id=websiteSlotId
@@ -149,7 +155,34 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                             if(value.action=="ready"){
                                 if(!ready){ready=true;firstReady()}
                                 publish(view)
-                            } else command(value)
+                            } else if(value.action=="stayPhoto"&&ready){
+                                val id=value.payload.getValue("messageId").jsonPrimitive.content
+                                val index=value.payload.getValue("index").jsonPrimitive.int
+                                val candidate=StayPhotoLoader.candidate(currentSnapshot,value.threadId,value.branchId,id,index)
+                                val key=Triple(value.threadId,id,index)
+                                fun reply(result:StayPhotoLoader.Thumbnail?){
+                                    if(host!==view)return
+                                    val response=buildJsonObject {
+                                        put("messageId",id);put("index",index)
+                                        result?.let {put("src",it.data);put("representative",it.representative)}
+                                    }
+                                    view.evaluateJavascript("window.dispatchEvent(new CustomEvent('ziphap:stayPhoto',{detail:$response}));",null)
+                                }
+                                if(key !in photoRequests){
+                                    if(candidate==null||photoRequests.size>=2)reply(null)
+                                    else {
+                                        photoRequests.add(key)
+                                        photoScope.launch {
+                                            val result=try {withTimeoutOrNull(35_000){photoLoader.load(candidate)}}
+                                            catch(cancel:CancellationException){throw cancel}
+                                            catch(_:Exception){null}
+                                            finally {photoRequests.remove(key)}
+                                            if(StayPhotoLoader.candidate(currentSnapshot,value.threadId,value.branchId,id,index)==candidate)
+                                                reply(result)
+                                        }
+                                    }
+                                }
+                            } else if(value.action!="stayPhoto")command(value)
                         }
                     }
                 }

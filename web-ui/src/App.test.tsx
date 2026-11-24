@@ -1041,3 +1041,27 @@ describe('office staff profile form', () => {
     expect(postIntent(office, { action: 'clearOfficeProfile' })).toBe(true)
   })
 })
+
+it('loads a selected photo using the original row after price sorting', () => {
+  mount()
+  const source = {
+    room: '테스트 객실', area: '테스트 지역', checkedAt: '2026-11-24T20:10:00+09:00',
+    onsite: 0, available: true, cancellation: null
+  }
+  const stays = [
+    { ...source, name: '두 번째로 보이는 숙소', url: 'https://example.org/stay/a', online: 280000, total: 280000 },
+    { ...source, name: '처음 보이는 숙소', url: 'https://example.org/stay/b', online: 90000, total: 90000 }
+  ]
+  const value = JSON.stringify({ version: 1, currency: 'KRW', checkIn: '2026-12-01', checkOut: '2026-12-02', guests: 2, stays })
+  snapshot({ ...base, messages: [{ id: 'stay-answer', role: 'assistant', text: '```stays\n' + value + '\n```' }] })
+  expect(requests().some(entry => entry.action === 'stayPhoto')).toBe(false)
+  const row = host.querySelector('details')!
+  row.open = true
+  act(() => { row.querySelector<HTMLButtonElement>('.stay-actions button')!.click() })
+  expect(requests().find(entry => entry.action === 'stayPhoto')?.payload).toEqual({ messageId: 'stay-answer', index: 1 })
+  act(() => { window.dispatchEvent(new CustomEvent('ziphap:stayPhoto', {
+    detail: { messageId: 'stay-answer', index: 1, src: 'data:image/jpeg;base64,/9j/', representative: true }
+  })) })
+  expect(row.querySelector('figcaption')?.textContent).toBe('숙소 대표 사진')
+  expect(row.querySelector<HTMLImageElement>('.stay-thumbnail')?.getAttribute('src')).toBe('data:image/jpeg;base64,/9j/')
+})

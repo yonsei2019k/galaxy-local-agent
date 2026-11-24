@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { parseStayComparison, StayComparison } from './StayComparison'
+import type { StayPhotoRequest } from './StayComparison'
 import './answer.css'
 
 const inlineToken = /(!?)\[([^\]\n]*)\]\(([^\s()]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*/g
@@ -68,10 +69,11 @@ function chart(code: string): ReactNode | null {
     </li>)}</ul></figure>
 }
 
-function renderAnswer(text: string, onPrepareStay?: (text: string) => void): ReactNode[] {
+function renderAnswer(text: string, onPrepareStay?: (text: string) => void, photo?: StayPhotoRequest): ReactNode[] {
   const lines = text.split(/\r?\n/)
   const result: ReactNode[] = []
   let i = 0
+  let firstStayBlock = true
   while (i < lines.length) {
     const key = i
     const line = lines[i++]
@@ -86,8 +88,9 @@ function renderAnswer(text: string, onPrepareStay?: (text: string) => void): Rea
       const code = body.join('\n')
       if (opening[2] === 'stays') {
         const data = closed ? parseStayComparison(code) : null
-        result.push(data ? <StayComparison key={key} data={data} onPrepare={onPrepareStay} /> :
+        result.push(data ? <StayComparison key={key} data={data} onPrepare={onPrepareStay} photo={firstStayBlock ? photo : undefined} /> :
           <p key={key}>숙소 비교표를 표시할 수 없어요.</p>)
+        firstStayBlock = false
         continue
       }
       result.push(<div key={key}>{(closed && opening[2] === 'chart' && chart(code)) ||
@@ -134,7 +137,7 @@ function renderAnswer(text: string, onPrepareStay?: (text: string) => void): Rea
   return result
 }
 
-export function RichAnswer({ text, onPrepareStay }: { text: string; onPrepareStay?: (text: string) => void }) {
-  const blocks = useMemo(() => renderAnswer(text, onPrepareStay), [text, onPrepareStay])
+export function RichAnswer({ text, onPrepareStay, photo }: { text: string; onPrepareStay?: (text: string) => void; photo?: StayPhotoRequest }) {
+  const blocks = useMemo(() => renderAnswer(text, onPrepareStay, photo), [text, onPrepareStay, photo])
   return <div className="rich-answer" dir="auto">{blocks}</div>
 }
