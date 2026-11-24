@@ -35,7 +35,7 @@ class AppWebAgent private constructor(private val context:Context) {
     private var webView:WebView?=null
     private var loading=false
     private var snapshot:Pair<String,Map<String,JsonObject>>?=null
-    private class PdfDocument(val view:WebView,val url:String,val snapshotId:String,val sessionDigests:Map<String,ByteArray>)
+    private class PdfDocument(val view:WebView,val url:String,val snapshotId:String,val sessionDigests:Map<String,ByteArray>,val blobLinks:Set<String>)
     private var pdfDocument:PdfDocument?=null
 
     private fun sessionCookie(view:WebView,target:String):String? {
@@ -132,6 +132,33 @@ class AppWebAgent private constructor(private val context:Context) {
         return drawn
     }
 
+    private val loginProcess = token()
+    internal fun waitingAuthBinding():String? = loginCard.value?.let { "$loginProcess:${it.id}" }
+
+    private suspend fun notifyGoalAuth(id:Long) {
+        val app=(context as? com.user.localagent.LocalAgentApplication)?.container ?: return
+        app.goalWaits.confirmAuth("$loginProcess:$id")
+    }
+
+    internal suspend fun sampleGoalMedia():MediaEndWatcher.Observation? = mutex.withLock {
+        withContext(Dispatchers.Main.immediate) {
+            if (webView==null || loading || navigation.value.error!=null) return@withContext null
+            val page=dom(buildJsonObject{put("key",domKey);put("action","observeBoundMedia");put("snapshotId",token())})
+                ?: return@withContext null
+            MediaEndWatcher.Observation(page.s("url"),(page["media"] as? JsonObject)
+                ?.let(com.user.localagent.core.BrowserMediaSample::from),page["loginRequired"]==JsonPrimitive(true))
+        }
+    }
+
+    internal suspend fun stopGoalMedia(condition:com.user.localagent.core.WaitCondition.MediaEnd) = mutex.withLock {
+        withContext(Dispatchers.Main.immediate) {
+            if(webView?.url==condition.pageUrl&&!loading){
+                dom(buildJsonObject{put("key",domKey);put("action","pauseBoundMedia");put("snapshotId",token())
+                    put("pageUrl",condition.pageUrl);put("playerSignature",condition.playerSignature)})
+            }
+        }
+    }
+
     fun dismissWebsiteWork(){websiteWork.value=null}
 
     private fun showWebsiteWork(host:String,waiting:Boolean){
@@ -154,6 +181,7 @@ class AppWebAgent private constructor(private val context:Context) {
         loginCard.value=null
         cardOrigin=null
         val continues=waiter?.complete(true)==true
+        if(!continues)notifyGoalAuth(id)
         showWebsiteWork(request.card.host,!continues)
         loginStatus.value=if(continues)"로그인 화면에서 이동했어요. 작업을 이어가고 있어요."
             else "로그인 화면에서 이동했어요. 이어서 할 일을 보내 주세요."
@@ -186,7 +214,10 @@ class AppWebAgent private constructor(private val context:Context) {
                     settle()
                     loginStatus.value=loginReadbackStatus()
                     if(navigation.value.error==null&&!navigation.value.loading&&secureOrigin(view().url)==origin&&
-                        loginFormPresent()==false)showWebsiteWork(origin.host,waiting=true)
+                        loginFormPresent()==false){
+                        notifyGoalAuth(id)
+                        showWebsiteWork(origin.host,waiting=true)
+                    }
                 }
                 loginCard.value=null
                 cardOrigin=null
@@ -209,7 +240,7 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private suspend fun loginFormPresent():Boolean? =
-        try{(eval("Boolean(document.querySelector('input[type=password]'))",4_000) as? JsonPrimitive)?.booleanOrNull}
+        try{(eval("Boolean(document.querySelector('input[type=password],input[autocomplete=one-time-code]'))",4_000) as? JsonPrimitive)?.booleanOrNull}
         catch(_:TimeoutCancellationException){null}
         catch(cancel:CancellationException){throw cancel}
         catch(_:Exception){null}
@@ -227,6 +258,21 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     fun showBrowser(address:String=""){presentation.value=address}
+    /** Android's public print flow. The owner chooses Save as PDF and its destination. */
+    fun openPrintPreview(owner:Context):Boolean {
+        val activity=owner as? android.app.Activity ?: return false
+        val page=webView ?: return false
+        if(!RuntimeGate.foreground.get() || presentation.value==null || agentActive.value ||
+            credentialScreen.value || loginCard.value!=null || websiteLogin.value!=null ||
+            loading || navigation.value.error!=null || secureOrigin(page.url)==null || !page.isShown)return false
+        return runCatching {
+            val name="ZipHap 화면 사본"
+            activity.getSystemService(android.print.PrintManager::class.java)
+                .print(name,page.createPrintDocumentAdapter(name),android.print.PrintAttributes.Builder()
+                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4).build())
+        }.getOrNull()!=null
+    }
+
     fun closeBrowser(){presentation.value=null;loginCompletion?.complete(false)}
     fun ownerFinishedBrowserLogin(id:Long){
         if(loginWait.value==id)loginCompletion?.complete(true)
@@ -394,6 +440,7 @@ class AppWebAgent private constructor(private val context:Context) {
         }
         credentialScreen.value=false
         val digests=mutableMapOf<String,ByteArray>()
+        val blobs=mutableSetOf<String>()
         val sourceView=view()
         val elements=raw.zip(parsed).map{(json,e)->
             val sensitive=e.editable&&WebAgentPolicy.sensitiveField(e)
@@ -415,10 +462,21 @@ class AppWebAgent private constructor(private val context:Context) {
                             }
                         }
                     }
+                json.s("assessmentForm").takeIf{ it.length in 1..2048 && secureOrigin(it)==secureOrigin(url)&&
+                    secureOrigin(url)!=null&&!sensitive }?.let { put("assessmentForm",it) }
+                val blob=json.s("ruleHref")
+                if(!sensitive && !WebAgentPolicy.riskyControl(e) && blobs.size<8 &&
+                    blob.length<=2048 && blob.startsWith("blob:") &&
+                    secureOrigin(blob.removePrefix("blob:"))==secureOrigin(url) &&
+                    secureOrigin(url)!=null && sourceView.url==url) {
+                    blobs+=blob
+                    put("ruleHref",blob)
+                    put("sessionPdf",true)
+                }
                 json["options"]?.let{put("options",it)}
             }
         }
-        pdfDocument=if(digests.isEmpty())null else PdfDocument(sourceView,url,id,digests)
+        pdfDocument=if(digests.isEmpty()&&blobs.isEmpty())null else PdfDocument(sourceView,url,id,digests,blobs)
         snapshot=id to elements.associateBy{it.s("ref")}
         return buildJsonObject{
             put("snapshotId",id);put("url",url);put("title",value.s("title"));put("text",value.s("text"))
@@ -444,7 +502,7 @@ class AppWebAgent private constructor(private val context:Context) {
         }
         val target=withContext(Dispatchers.Main.immediate) {
             snapshot?.takeIf{it.first==id}?.second?.get(ref)?.takeIf{it["sessionPdf"]==JsonPrimitive(true)}
-                ?.s("ruleHref")?.takeIf{it in document.sessionDigests}?:error("현재 페이지에서 확인한 PDF 링크가 아니에요.")
+                ?.s("ruleHref")?.takeIf{it in document.sessionDigests||it in document.blobLinks}?:error("현재 페이지에서 확인한 PDF 링크가 아니에요.")
         }
         suspend fun freshCookie():String {
             val previousStage=progress.stage
@@ -466,6 +524,7 @@ class AppWebAgent private constructor(private val context:Context) {
             }.also { progress.stage=previousStage }
         }
         try {
+            if(target in document.blobLinks)return@withLock saveBlobPdf(document,ref,target,progress,verifyRun)
             val session=com.user.localagent.web.BoundPdfGet(target,::freshCookie)
             withContext(Dispatchers.IO) {
                 com.user.localagent.tools.PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),target,
@@ -479,6 +538,62 @@ class AppWebAgent private constructor(private val context:Context) {
             }
         } finally {
             withContext(NonCancellable+Dispatchers.Main.immediate){if(pdfDocument===document)pdfDocument=null}
+        }
+    }
+
+    private suspend fun saveBlobPdf(document:PdfDocument,ref:String,target:String,progress:com.user.localagent.tools.PdfSaveProgress,
+        verifyRun:suspend ()->Unit):String {
+        val transfer=token()
+        suspend fun request(action:String,offset:Int=0):JsonObject {
+            verifyRun()
+            return withContext(Dispatchers.Main.immediate) {
+                fun current()=pdfDocument===document && webView===document.view && document.view.url==document.url &&
+                    snapshot?.first==document.snapshotId && !loading && !loginSubmitting && loginCard.value==null
+                check(current())
+                val reply=dom(buildJsonObject{
+                    put("key",domKey);put("snapshotId",document.snapshotId);put("ref",ref);put("action",action)
+                    put("href",target);put("transferId",transfer);put("offset",offset);put("approvedSnapshot",JsonNull)
+                })
+                check(current()&&reply!=null&&reply["error"]==null)
+                reply
+            }
+        }
+        val max=10*1024*1024
+        try {
+            progress.stage=com.user.localagent.tools.PdfSaveStage.FETCH
+            check(request("startBlobPdf")["started"]==JsonPrimitive(true))
+            val bytes=withTimeout(40_000){
+                val buffer=java.io.ByteArrayOutputStream()
+                var total=0
+                while(total==0||buffer.size()<total){
+                    val page=request("readBlobPdf",buffer.size())
+                    if(page["pending"]==JsonPrimitive(true)){delay(100);continue}
+                    val length=page["total"]?.jsonPrimitive?.intOrNull ?: error("PDF size missing")
+                    require(length in 5..max && (total==0||total==length))
+                    total=length
+                    val encoded=page.s("chunk")
+                    require(encoded.length in 1..262144)
+                    val chunk=java.util.Base64.getDecoder().decode(encoded)
+                    require(chunk.isNotEmpty()&&buffer.size()+chunk.size<=total)
+                    buffer.write(chunk)
+                }
+                buffer.toByteArray()
+            }
+            return withContext(Dispatchers.IO){
+                com.user.localagent.tools.PublicPdfArtifact.saveBytes(java.io.File(context.filesDir,"exports"),bytes,max,progress,
+                    publish={commit->withContext(Dispatchers.Main.immediate){
+                        check(request("checkPdfLink")["current"]==JsonPrimitive(true))
+                        currentCoroutineContext().ensureActive()
+                        commit()
+                    }})
+            }
+        } finally {
+            withContext(NonCancellable+Dispatchers.Main.immediate){
+                if(pdfDocument===document && document.view.url==document.url)runCatching {
+                    dom(buildJsonObject{put("key",domKey);put("snapshotId",document.snapshotId);put("ref",ref)
+                        put("action","clearBlobPdf");put("transferId",transfer);put("approvedSnapshot",JsonNull)})
+                }
+            }
         }
     }
 

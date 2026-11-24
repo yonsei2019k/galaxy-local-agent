@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../../public/app-web-agent.
 
 function fixture() {
   const effects = [];
-  const location = {href: 'https://fixture.example.test/details', assign(url) { effects.push(url); }};
+  const location = {origin: 'https://fixture.example.test', href: 'https://fixture.example.test/details', assign(url) { effects.push(url); }};
   const view = {innerWidth: 800, innerHeight: 600, getComputedStyle: node => ({display: node.hidden ? 'none' : 'block', visibility: 'visible'})};
   const makeDocument = () => ({
     nodes: [],
@@ -19,12 +19,13 @@ function fixture() {
     querySelectorAll(selector) {
       if (selector === 'video,audio') return this.nodes.filter(node => ['VIDEO','AUDIO'].includes(node.tagName));
       if (selector === 'iframe,frame') return this.nodes.filter(node => ['IFRAME','FRAME'].includes(node.tagName));
-      if (selector === 'input[type=password]') return this.nodes.filter(node => node.tagName==='INPUT' && node.type==='password');
+      if (selector === 'input[type=password]' || selector === 'input[type=password],input[autocomplete=one-time-code]') return this.nodes.filter(node => node.tagName==='INPUT' && node.type==='password');
       return this.nodes.filter(node => !['IFRAME','FRAME'].includes(node.tagName));
     },
   });
   const context = vm.createContext({
-    document: makeDocument(), location, innerHeight: 600,
+    document: makeDocument(), location, innerHeight: 600, URL, Uint8Array,
+    btoa: value => Buffer.from(value, "binary").toString("base64"),
     getComputedStyle: node => ({display: node.hidden ? 'none' : 'block', visibility: 'visible'}),
     window: {scrollBy(...position) { effects.push(position); }},
     history: {back() { effects.push('back'); }},
@@ -328,4 +329,31 @@ test('PDF source revalidation never clicks and rejects a moved link or replaced 
   context.document=makeDocument();
   assert.equal(check().error,'SNAPSHOT_STALE');
   assert.deepEqual(effects,[]);
+});
+
+test('copies a same-origin observed PDF blob and rejects an unbound target', async () => {
+  const {context, invoke, Input, effects} = fixture();
+  const link = new Input('Saved PDF', 'A');
+  link.attrs.download = 'issued.pdf';
+  link.href = 'blob:https://fixture.example.test/document';
+  context.document.nodes = [link];
+  context.fetch = async href => {
+    assert.equal(href, link.href);
+    const bytes = new Uint8Array(Buffer.from('%PDF-1.7 fixture'));
+    let sent = false;
+    return { ok:true, body:{ getReader:() => ({
+      async read() { if (sent) return {done:true}; sent = true; return {done:false, value:bytes}; },
+      async cancel(){}, releaseLock(){}
+    }) }};
+  };
+  const page = invoke({action:'observe'});
+  const input = {ref:page.elements[0].ref, transferId:'test-transfer'};
+  assert.equal(invoke({...input, action:'startBlobPdf', href:'blob:https://other.test/doc'}).error,'SNAPSHOT_STALE');
+  assert.equal(invoke({...input, action:'startBlobPdf', href:link.href}).started,true);
+  await new Promise(resolve => setImmediate(resolve));
+  const reply = invoke({...input, action:'readBlobPdf', offset:0});
+  assert.equal(Buffer.from(reply.chunk,'base64').toString(),'%PDF-1.7 fixture');
+  assert.equal(effects.length,0);
+  assert.equal(invoke({...input, action:'clearBlobPdf'}).cleared,true);
+  assert.equal(invoke({...input, action:'readBlobPdf', offset:0}).error,'SNAPSHOT_STALE');
 });

@@ -3086,6 +3086,24 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val where=site?.let{" ($it)"}.orEmpty()
         val next=if(requiresReadback)"로그인한 뒤에는 같은 동작을 다시 하기 전에 이전 결과부터 확인해 주세요."
             else "로그인이 끝나면 이 채팅에서 이어갈 수 있어요."
+        if(request.goalSegment!=null && outcome.result.effectNotApplied &&
+            outcome.call.name in setOf("read_app_browser_page","open_app_browser_page")) {
+            val binding=com.user.localagent.integrations.AppWebAgent.get(context).waitingAuthBinding()
+            if(binding!=null) {
+                val prepared=goalMutation.withLock {
+                    val access=app.repository.chat.accessScope(request.threadId)
+                    val live=goals.loadGuarded(access)
+                    if(live==null || live.status!=GoalStatus.ACTIVE || live.linkedRunIds.lastOrNull()!=request.runId)return@withLock false
+                    val previous=app.goalWaits.store.get(live.id)
+                    val record=newWaitRecord(request,live,WaitCondition.OwnerAuth(binding),previous)
+                    check(app.goalWaits.store.replace(record,previous))
+                    app.goalWaits.arm(record)
+                    requestedGoalWait=record
+                    true
+                }
+                if(prepared){finishGoalWait(request);return true}
+            }
+        }
         val login=if(shown)"휴대폰에 열린 집합 화면에서 직접 로그인해 주세요."
             else "휴대폰 집합 앱에서 사이트에 직접 로그인해 주세요."
         answer("여기서 로그인이 필요해요$where. $login $next")
@@ -3216,25 +3234,45 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             check(request.goalSegment != null)
             check(GoalToolCatalog.revision(call.arguments.getValue("expectedUpdatedAt")) == live.updatedAt)
             val condition = GoalWaitToolCatalog.parse(call)
-            require(condition is WaitCondition.AtTime && !condition.needsPlayback) { "현재 시각 대기만 사용할 수 있어요." }
-            val now = System.currentTimeMillis()
-            val previous = app.goalWaits.store.get(live.id)
-            require(previous == null || previous.threadId == request.threadId && previous.branchId == request.branchId)
-            val start = previous?.startedAt ?: now
-            val deadline = GoalWaitPolicy.deadline(start,null)
-            require(condition.atEpochMillis in now+30_000..deadline)
-            val day = java.time.LocalDate.now(ZoneId.systemDefault()).toString()
-            val minute=java.time.Instant.ofEpochMilli(condition.atEpochMillis).atZone(ZoneId.systemDefault())
-                .let { it.hour*60+it.minute }
-            val record = GoalWaitRecord(UUID.randomUUID().toString(),live.id,request.threadId,request.branchId,
-                request.runId,request.externalAgentRevision,condition,now,start,deadline,
-                wakesToday=previous?.takeIf { it.dayKey == day }?.wakesToday ?: 0,
-                wakesTotal=previous?.wakesTotal ?: 0,dayKey=day,anchorMinuteOfDay=minute)
+            when(condition) {
+                is WaitCondition.AtTime -> require(!condition.needsPlayback)
+                is WaitCondition.MediaEnd -> {
+                    check(com.user.localagent.scheduling.playbackConditions(context)) { "Wi-Fi와 충전이 필요해요." }
+                    val seen=observedOutcomes.lastOrNull { it.call.name=="read_app_browser_page" && it.result.success &&
+                        it.result.verification==VerificationState.VERIFIED }
+                    val page=seen?.let{Json.parseToJsonElement(it.result.content).jsonObject}
+                    val evidence=page?.get("playbackEvidence") as? JsonObject
+                    require(page?.get("url")==JsonPrimitive(condition.pageUrl) &&
+                        evidence?.get("playerSignature")==JsonPrimitive(condition.playerSignature) &&
+                        evidence["playbackStatus"]==JsonPrimitive("playing"))
+                    require(app.goalProgress.hasMediaItem(goalDigest(live.id+":"+request.branchId+":"+access.scopeKey),condition.ledgerItemId))
+                }
+                is WaitCondition.OwnerAuth -> error("인증 대기는 휴대폰 로그인 카드가 열릴 때 등록돼요.")
+            }
+            val previous=app.goalWaits.store.get(live.id)
+            val record=newWaitRecord(request,live,condition,previous)
             check(app.goalWaits.store.replace(record,previous))
             app.goalWaits.arm(record)
             requestedGoalWait = record
             ToolResult(call.id,true,"목표의 다음 실행 시각을 예약했어요.",VerificationState.VERIFIED,"재개 예약 확인")
         }
+
+    private fun newWaitRecord(request:QueuedChatRequest,goal:GoalDefinition,condition:WaitCondition,previous:GoalWaitRecord?):GoalWaitRecord {
+        require(previous==null || previous.threadId==request.threadId && previous.branchId==request.branchId)
+        val now=System.currentTimeMillis()
+        val start=previous?.startedAt?:now
+        val zone=ZoneId.systemDefault()
+        val day=java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString()
+        val deadline=GoalWaitPolicy.deadline(start,if(condition is WaitCondition.OwnerAuth) now+30*60_000 else null)
+        val scheduled=condition as? WaitCondition.AtTime
+        require(now<deadline && (scheduled==null || scheduled.atEpochMillis in now+30_000..deadline))
+        val minute=scheduled?.let { java.time.Instant.ofEpochMilli(it.atEpochMillis).atZone(zone) }
+            ?.let { it.hour*60+it.minute }
+        return GoalWaitRecord(UUID.randomUUID().toString(),goal.id,request.threadId,request.branchId,
+            request.runId,request.externalAgentRevision,condition,now,start,deadline,
+            wakesToday=previous?.takeIf { it.dayKey==day }?.wakesToday?:0,
+            wakesTotal=previous?.wakesTotal?:0,dayKey=day,anchorMinuteOfDay=minute)
+    }
 
     private suspend fun finishGoalWait(request: QueuedChatRequest) = goalMutation.withLock {
         val record = checkNotNull(requestedGoalWait)
@@ -3244,18 +3282,22 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val live = checkNotNull(goals.loadGuarded(access))
         check(live.id == record.goalId && live.status == GoalStatus.ACTIVE && live.linkedRunIds.lastOrNull() == request.runId)
         val parked = goals.saveGuarded(access,live.copy(status=GoalStatus.WAITING))
-        val due = java.time.Instant.ofEpochMilli((record.condition as WaitCondition.AtTime).atEpochMillis)
-            .atZone(ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("M월 d일 HH:mm"))
+        val label=when(val condition=record.condition) {
+            is WaitCondition.AtTime -> java.time.Instant.ofEpochMilli(condition.atEpochMillis)
+                .atZone(ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("M월 d일 HH:mm"))+" 이후"
+            is WaitCondition.MediaEnd -> "영상이 끝나는지 확인하는 동안 대기"
+            is WaitCondition.OwnerAuth -> "휴대폰에서 로그인 또는 인증 완료 대기"
+        }
         val summary = withContext(Dispatchers.IO) {
             app.goalProgress.summary(goalDigest(live.id+":"+request.branchId+":"+access.scopeKey))
         }
-        val detail = listOfNotNull("$due 이후",summary?.takeIf { it.isNotBlank() }).joinToString(" · ")
-        publishActionFinal(request,emptySet(),"목표를 저장했어요. $due 이후에 이어갈 수 있는지 확인할게요.",true,"waiting_goal_condition")
+        val detail = listOfNotNull(label,summary?.takeIf { it.isNotBlank() }).joinToString(" · ")
+        publishActionFinal(request,emptySet(),"목표를 저장했어요. $label 상태예요.",true,"waiting_goal_condition")
         val row=checkNotNull(app.repository.chat.run(request.runId))
         val stored=Json.parseToJsonElement(row.contextJson).jsonObject
         app.repository.chat.updateRunContext(row.id,JsonObject(stored+("hostGoalWaitDetail" to JsonPrimitive(detail))).toString())
         if (queueOwner.selectedThreadId.value == request.threadId) queueOwner.goalState.value = parked
-        status.value = "재개 시각 대기 · $due"
+        status.value = label
     }
 
     internal suspend fun cancelParkedGoal(threadId: String, expectedRunId: String? = null, branchId: String? = null) = goalMutation.withLock {
@@ -3273,11 +3315,25 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         app.goalWaits.cancel(record)
     }
 
-    internal suspend fun wakeTimedGoal(record: GoalWaitRecord): Boolean = withContext(Dispatchers.Main.immediate) {
+    internal suspend fun isGoalWaitReady(record:GoalWaitRecord):Boolean = withContext(Dispatchers.Main.immediate) {
+        val parent=app.repository.chat.run(record.parentRunId) ?: return@withContext false
+        if(parent.status!="paused"||parent.errorCode!="waiting_goal_condition"||executionForRun(parent.id)!=null)return@withContext false
+        runCatching {
+            val access=app.repository.chat.accessScope(record.threadId)
+            val goal=checkNotNull(goals.loadGuarded(access))
+            val request=requireGoalRunBinding(goal,parent)
+            requireGoalSegmentScope(request,access)
+            requireCapturedGoalAuthority(request)
+            goal.status==GoalStatus.WAITING && goal.linkedRunIds.lastOrNull()==parent.id &&
+                app.repository.chat.thread(record.threadId)?.activeBranchId==record.branchId
+        }.onFailure{if(it is CancellationException) throw it}.getOrDefault(false)
+    }
+
+    internal suspend fun wakeGoal(record: GoalWaitRecord,event:WakeEvent): Boolean = withContext(Dispatchers.Main.immediate) {
         goalMutation.withLock {
-            val condition = record.condition as? WaitCondition.AtTime ?: return@withLock true
             val now = System.currentTimeMillis()
-            if (now < condition.atEpochMillis) return@withLock false
+            val scheduled=record.condition as? WaitCondition.AtTime
+            if (scheduled!=null && now<scheduled.atEpochMillis)return@withLock false
             if (app.goalWaits.store.get(record.goalId)!=record) return@withLock true
             val parent = app.repository.chat.run(record.parentRunId) ?: return@withLock true
             if (parent.status=="running" || executionForRun(parent.id)!=null) return@withLock false
@@ -3296,12 +3352,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 requireCapturedGoalAuthority(original)
                 check(!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
                 check(record.resumedOnceFor!=record.id)
+                check(event in setOf(WakeEvent.TIME_REACHED,WakeEvent.MEDIA_ENDED,WakeEvent.OWNER_AUTH_DONE))
                 val pcNeeded=ExternalAgentSettings.isCloud(original.modelId) || original.capturedPcTextDefault!=null
                 val pcAvailable=!pcNeeded || com.user.localagent.compute.PcTransport(context).available()!=null
-                when (val outcome=GoalWaitPolicy.onWake(record,WakeEvent.TIME_REACHED,System.currentTimeMillis(),ZoneId.systemDefault(),pcAvailable)) {
+                when (val outcome=GoalWaitPolicy.onWake(record,event,System.currentTimeMillis(),ZoneId.systemDefault(),pcAvailable)) {
                     is WaitDecision.RetryLater -> {
                         val retry=outcome.record.copy(id=UUID.randomUUID().toString(),
-                            condition=condition.copy(atEpochMillis=outcome.atEpochMillis))
+                            condition=WaitCondition.AtTime(outcome.atEpochMillis,false),observedEvent=event)
                         check(app.goalWaits.store.replace(retry,record))
                         app.goalWaits.arm(retry)
                         return@withLock true
@@ -3315,7 +3372,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     is WaitDecision.Resume -> {
                         val row = app.repository.chat.updateRun(parent.id,"paused",errorCode="waiting_goal_condition",
                             contextJson=JsonObject(Json.parseToJsonElement(parent.contextJson).jsonObject +
-                                ("hostGoalWake" to buildJsonObject { put("parkedAt",record.createdAt); put("wokeAt",now) })).toString())
+                                ("hostGoalWake" to buildJsonObject { put("parkedAt",record.createdAt); put("wokeAt",now); put("event",event.name) })).toString())
                         val next = goalSegmentDecision(row,active,access.scopeKey,now,false,useNativeBudget=true)
                         check(next is GoalSegmentDecision.Continue)
                         check(app.goalWaits.store.replace(outcome.record,record))
@@ -3334,6 +3391,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if (current!=null && (current==goal || current==savedActive)) {
                     val paused=goals.saveGuarded(access,current.copy(status=GoalStatus.PAUSED))
                     if (selectedThreadId.value==record.threadId)goalState.value=paused
+                    answerWaitingOutcome(parent.id,event)
                     app.repository.chat.updateRun(parent.id,"paused",errorCode="goal_wait_resume_unavailable")
                 }
                 return@withLock true
@@ -3341,6 +3399,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             drain()
             true
         }
+    }
+
+    private suspend fun answerWaitingOutcome(runId:String,event:WakeEvent) {
+        val message=when(event) {
+            WakeEvent.MEDIA_STALLED -> "영상 재생 시간이 더 이상 늘지 않아 멈췄어요. 재생 상태를 확인해 주세요."
+            WakeEvent.PLAYER_GONE -> "기존 플레이어를 찾지 못했어요. 실제 수강 진도부터 확인해야 해요."
+            WakeEvent.LOGIN_EXPIRED, WakeEvent.OWNER_AUTH_TIMEOUT -> "사이트 인증을 확인하지 못했어요. 휴대폰에서 로그인해 주세요."
+            WakeEvent.MEDIA_LIMIT -> "영상 확인 시간이 끝났어요. 사이트 진도를 다시 확인해 주세요."
+            WakeEvent.CONDITIONS_UNMET -> "휴대폰에서 재생을 계속 확인할 수 없는 상태예요. Wi-Fi와 충전 상태를 확인해 주세요."
+            else -> "기존 작업을 저장했어요. 재개 조건이나 권한을 확인해 주세요."
+        }
+        app.repository.chat.writeRunAnswer(runId,message)
     }
 
     private suspend fun enforceGoalToolFence(request:QueuedChatRequest,call:ToolCall) {
@@ -3468,6 +3538,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return observed
     }
 
+    /** A model-written goal constraint alone cannot waive owner approval. */
+    private suspend fun educationDelegation(request:QueuedChatRequest):com.user.localagent.core.DelegationScope? {
+        val goal=request.goal?:return null
+        val line=goal.constraints.singleOrNull { it.startsWith(com.user.localagent.core.DelegatedSubmission.CONSTRAINT_PREFIX) }
+            ?:return null
+        val root=request.goalSegment?.rootRunId?.let { app.repository.chat.run(it) } ?: return null
+        val captured=QueuedChatRequest.fromJson(root.contextJson)
+        val parent=captured.parentGoalStartRunId?.let { app.repository.chat.run(it) } ?: return null
+        if(parent.threadId!=request.threadId||parent.branchId!=request.branchId||parent.projectId!=request.projectId)return null
+        val owner=app.repository.getMessage(parent.userMessageId) ?: return null
+        if(owner.role!="user"||owner.threadId!=request.threadId||owner.branchId!=request.branchId||
+            owner.text.lineSequence().none { it.trim()==line })return null
+        return com.user.localagent.core.DelegatedSubmission.fromConstraints(listOf(line))
+    }
+
     private suspend fun performTool(call:ToolCall,targetConfirmed:Boolean=false):ToolResult {
         ToolRegistry.validate(call)
         enforceGoalToolFence(checkNotNull(activeRequest),call)
@@ -3540,8 +3625,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             (phoneReview?.first?:tools.browserActionNeedsOwner(call))
         val targetReview=phoneReview?.second?:tools.reviewForAction(call)
         var noteOwnerAccepted=false
-        var approvedScreenSnapshot:String?=null
-        if((confirmation&&!targetConfirmed||call.name=="patch_note")&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
+        val toolRequest=checkNotNull(activeRequest)
+        val delegated=if(confirmation&&call.name=="app_browser_action")
+            educationDelegation(toolRequest)?.let { tools.delegatedAssessmentSnapshot(call,it) } else null
+        var approvedScreenSnapshot:String?=delegated
+        if((confirmation&&!targetConfirmed&&delegated==null||call.name=="patch_note")&&call.name !in setOf("send_gmail_message","reply_gmail_message")) {
             traceAttempt?.let{workTraceSession?.approval(it,com.user.localagent.data.WorkTraceCode.APPROVAL_WAITING)}
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)

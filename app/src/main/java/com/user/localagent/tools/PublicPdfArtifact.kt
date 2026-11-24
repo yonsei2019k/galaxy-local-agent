@@ -69,9 +69,15 @@ internal object PublicPdfArtifact {
         progress.stage = PdfSaveStage.CONTENT
         val type = response.contentType.substringBefore(';').trim().lowercase()
         require(type in setOf("application/pdf","application/octet-stream")) { "다운로드 응답이 PDF 파일이 아니에요." }
-        val bytes = response.body
-        require(bytes.size in 5..PublicWebClient.MAX_BYTES &&
-            String(bytes,0,5,Charsets.US_ASCII) == "%PDF-") { "지원하는 크기의 PDF 원본을 확인하지 못했어요." }
+        return saveBytes(directory,response.body,PublicWebClient.MAX_BYTES,progress,publish,pageCount)
+    }
+
+    internal suspend fun saveBytes(directory:File,bytes:ByteArray,maxBytes:Int,progress:PdfSaveProgress,
+        publish:suspend (() -> Unit)->Unit,pageCount:(File)->Int=::inspectPages):String {
+        progress.stage=PdfSaveStage.CONTENT
+        require(bytes.size in 5..maxBytes && String(bytes,0,5,Charsets.US_ASCII)=="%PDF-") {
+            "지원하는 PDF 원본을 확인하지 못했어요."
+        }
         currentCoroutineContext().ensureActive()
         progress.stage = PdfSaveStage.STORAGE
         check(directory.isDirectory || directory.mkdirs() || directory.isDirectory)

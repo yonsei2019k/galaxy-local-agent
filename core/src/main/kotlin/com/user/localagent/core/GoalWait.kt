@@ -37,6 +37,7 @@ data class GoalWaitRecord(
     /** Local minute-of-day of the original timed wake, used for "next day, same time". */
     val anchorMinuteOfDay: Int? = null,
     val lastFailureKey: String? = null,
+    val observedEvent: WakeEvent? = null,
 ) {
     init {
         require(id.isNotBlank() && goalId.isNotBlank()) { "대기 기록에는 식별자가 필요합니다." }
@@ -45,6 +46,7 @@ data class GoalWaitRecord(
     }
 }
 
+@Serializable
 enum class WakeEvent {
     MEDIA_ENDED, MEDIA_STALLED, PLAYER_GONE, LOGIN_EXPIRED, MEDIA_LIMIT, CONDITIONS_UNMET,
     TIME_REACHED, OWNER_AUTH_DONE, OWNER_AUTH_TIMEOUT, RESTORED_PAST_DUE

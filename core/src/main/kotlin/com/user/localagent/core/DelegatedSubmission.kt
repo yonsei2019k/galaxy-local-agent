@@ -52,6 +52,23 @@ object DelegatedSubmission {
 
     fun toConstraint(scope:DelegationScope):String = CONSTRAINT_PREFIX+json.encodeToString(scope)
 
+    /** The DOM must show a same-origin assessment form. A generic Submit label proves no delegation. */
+    fun permitsAssessmentForm(scope:DelegationScope?,pageUrl:String,formUrl:String,controlLabel:String):Boolean {
+        if(!permits(scope,pageUrl,controlLabel))return false
+        if(normalizeOrigin(pageUrl)!=normalizeOrigin(formUrl))return false
+        fun assessment(url:String):DelegatedAction? {
+            val path=runCatching{URI(url).path.lowercase(java.util.Locale.ROOT)}.getOrNull()?:return null
+            if(forbiddenLabel.containsMatchIn(path))return null
+            return when {
+                Regex("(?:^|[/_.-])(?:survey|questionnaire)(?:[/_.-]|$)").containsMatchIn(path)->DelegatedAction.SURVEY_SUBMIT
+                Regex("(?:^|[/_.-])(?:quiz|exam|assessment)(?:[/_.-]|$)").containsMatchIn(path)->DelegatedAction.QUIZ_SUBMIT
+                else->null
+            }
+        }
+        val action=assessment(pageUrl)?:return false
+        return action==assessment(formUrl)&&scope?.actions?.contains(action)==true
+    }
+
     fun permits(scope:DelegationScope?,pageUrl:String,controlLabel:String):Boolean {
         if(scope==null)return false
         val origin=normalizeOrigin(pageUrl)?:return false

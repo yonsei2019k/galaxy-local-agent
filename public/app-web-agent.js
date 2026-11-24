@@ -48,6 +48,18 @@ function (request) {
         !node.hasAttribute('ping') && !node.hasAttribute('onclick') && !node.closest('form') &&
         (!node.target || node.target === '_self') && (!item.role || item.role === 'link')) {
       item.ruleHref = node.href;
+    } else if (tag === 'a' && node.hasAttribute('download') && !item.disabled &&
+        !node.closest('form') && !node.hasAttribute('onclick') && (!node.target || node.target === '_self')) {
+      try {
+        const url = new URL(node.href);
+        if (url.protocol === 'blob:' && url.origin === location.origin)
+          item.ruleHref = node.href;
+      } catch (_) { /* No eligible link. */ }
+    }
+    if (form && node.type === 'submit' && ['INPUT','BUTTON'].includes(node.tagName) &&
+        (node.getAttribute('formmethod') || form.method || '').toLowerCase() === 'post' &&
+        (!node.getAttribute('formtarget') && (!form.target || form.target === '_self'))) {
+      item.assessmentForm = (node.getAttribute('formaction') ? node.formAction : form.action).slice(0,2049);
     }
     const row = node.closest('tr,[role=row]');
     const nearby = (row?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 144);
@@ -105,9 +117,10 @@ function (request) {
   if (!Object.prototype.hasOwnProperty.call(ownerDocument, request.key)) {
     if (request.action !== 'observe') return fail('SNAPSHOT_STALE');
     let observed;
+    let blobPdf;
     const mediaPlayers = new WeakMap();
     let nextMediaId = 0;
-    const mediaEvidence = () => {
+    const mediaEvidence = (pauseSignature = null) => {
       const candidates = [];
       const documents = [{doc: ownerDocument, depth: 0}];
       let frames = 0;
@@ -144,6 +157,7 @@ function (request) {
         identity.epoch++;
         identity.source = player.currentSrc;
       }
+      if (pauseSignature === identity.id + ':' + identity.epoch) player.pause();
       const millis = value => Number.isFinite(value) && value >= 0 && value <= 86400 ? Math.round(value * 1000) : null;
       return {status: 'observed', playerId: identity.id, epoch: identity.epoch,
         positionMs: millis(player.currentTime), durationMs: millis(player.duration),
@@ -153,7 +167,7 @@ function (request) {
     const dispatch = input => {
       if (input.action === 'observe') {
         // Detect an owner's password form before collecting any page text or field values.
-        if ([...ownerDocument.querySelectorAll('input[type=password]')].some(visible)) {
+        if ([...ownerDocument.querySelectorAll('input[type=password],input[autocomplete=one-time-code]')].some(visible)) {
           observed = null;
           return {url: location.href, loginRequired: true};
         }
@@ -163,9 +177,19 @@ function (request) {
           truncated: observed.page.truncated || observed.navigation.controlsIncomplete,
           ...(input.observeMedia ? {media: mediaEvidence()} : {})};
       }
+      if (input.action === 'observeBoundMedia' || input.action === 'pauseBoundMedia') {
+        if (document !== ownerDocument) return fail('SNAPSHOT_STALE');
+        if ([...ownerDocument.querySelectorAll('input[type=password],input[autocomplete=one-time-code]')].some(visible))
+          return {loginRequired: true, url: location.href};
+        const pause = input.action === 'pauseBoundMedia' && location.href === input.pageUrl ? input.playerSignature : null;
+        return {url: location.href, media: mediaEvidence(pause)};
+      }
       const expected = observed;
       if (!expected || expected.id !== input.snapshotId) return fail('SNAPSHOT_STALE');
-      if (input.action !== 'checkPdfLink') observed = null;
+      if (!['checkPdfLink', 'startBlobPdf', 'readBlobPdf', 'clearBlobPdf'].includes(input.action)) {
+        observed = null;
+        blobPdf = null;
+      }
       if ((input.needsApproval || input.approvedSnapshot !== null) && input.approvedSnapshot !== expected.id)
         return fail('APPROVAL_MISMATCH');
       const current = collect();
@@ -195,6 +219,50 @@ function (request) {
         case 'checkPdfLink':
           return stillCurrent() && e.tagName.toLowerCase() === 'a' && control.item.ruleHref === input.href
             ? {current: true} : fail('SNAPSHOT_STALE');
+        case 'startBlobPdf': {
+          if (!stillCurrent() || control.item.ruleHref !== input.href) return fail('SNAPSHOT_STALE');
+          const url = new URL(input.href);
+          if (url.protocol !== 'blob:' || url.origin !== location.origin) return fail('URL_NOT_ALLOWED');
+          const capture = {id: input.transferId, bytes: null, failed: false};
+          blobPdf = capture;
+          fetch(url.href).then(async response => {
+            const reader = response.body?.getReader();
+            if (!response.ok || !reader) throw new Error();
+            const parts = [];
+            let size = 0;
+            try {
+              while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                size += value.length;
+                if (size > 10 * 1024 * 1024 || blobPdf !== capture) throw new Error();
+                parts.push(value);
+              }
+              if (size < 5) throw new Error();
+              const bytes = new Uint8Array(size);
+              let offset = 0;
+              for (const part of parts) { bytes.set(part,offset); offset += part.length; }
+              capture.bytes = bytes;
+            } finally {
+              await reader.cancel().catch(() => {});
+              reader.releaseLock();
+            }
+          }).catch(() => { capture.failed = true; });
+          return {started: true};
+        }
+        case 'readBlobPdf': {
+          if (!stillCurrent() || blobPdf?.id !== input.transferId || blobPdf.failed) return fail('SNAPSHOT_STALE');
+          if (!blobPdf.bytes) return {pending: true};
+          if (!Number.isInteger(input.offset) || input.offset < 0 || input.offset >= blobPdf.bytes.length)
+            return fail('ELEMENT_UNAVAILABLE');
+          const chunk = blobPdf.bytes.subarray(input.offset, input.offset + 192 * 1024);
+          let packet = '';
+          for (let i=0; i<chunk.length; i+=4096) packet += String.fromCharCode(...chunk.subarray(i,i+4096));
+          return {total:blobPdf.bytes.length, chunk:btoa(packet)};
+        }
+        case 'clearBlobPdf':
+          if (blobPdf?.id === input.transferId) blobPdf = null;
+          return {cleared:true};
         case 'click':
           e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
           if (!stillCurrent()) return fail('SNAPSHOT_STALE');

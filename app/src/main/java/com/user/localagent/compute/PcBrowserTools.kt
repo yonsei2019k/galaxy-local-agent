@@ -98,6 +98,18 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         return needs to review
     }
 
+    internal fun delegatedAssessmentSnapshot(call:ToolCall,scope:com.user.localagent.core.DelegationScope):String? {
+        if(catalog!=AppBrowserToolCatalog||call.name!=catalog.action||call.arguments["action"]!=JsonPrimitive("click")||
+            BrowserNavigationRule.from(call)!=null)return null
+        val page=lastPage?:return null
+        val id=page.string("snapshotId")
+        if(!rulePage(page)||id!=call.arguments.string("snapshotId"))return null
+        val field=ruleElements(page).singleOrNull { it.string("ref")==call.arguments.string("ref") }?:return null
+        if(field["disabled"]!=JsonPrimitive(false)||field["sensitive"]!=JsonPrimitive(false))return null
+        return id.takeIf { com.user.localagent.core.DelegatedSubmission.permitsAssessmentForm(
+            scope,page.string("url"),field.string("assessmentForm"),field.string("label")) }
+    }
+
     suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null,
         verifyRuleAccess:suspend ()->Unit={}):ToolResult {
         catalog.validate(call)
@@ -357,6 +369,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             put("mediaRuleResult",ruleResult.name.lowercase(Locale.ROOT))
             reading?.let {
                 put("positionMs",it.sample.positionMs)
+                if(catalog==AppBrowserToolCatalog)put("playerSignature",it.sample.playerId+":"+it.sample.epoch)
                 it.sample.durationMs?.let {duration->put("durationMs",duration)}
                 it.remainingSeconds?.let {seconds->
                     put("remainingPlaybackSeconds",seconds)

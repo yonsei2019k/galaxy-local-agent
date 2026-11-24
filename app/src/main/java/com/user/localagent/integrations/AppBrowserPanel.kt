@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
     val navigation by agent.navigationStatus.collectAsState()
     val ownerLogin by agent.waitingForOwnerLogin.collectAsState()
     val credentialPage by agent.showingCredentialPage.collectAsState()
+    var printError by remember(initialAddress){mutableStateOf(false)}
     val keyboard=LocalSoftwareKeyboardController.current
     val scope=rememberCoroutineScope()
     var address by remember(initialAddress){mutableStateOf(initialAddress)}
@@ -81,10 +82,13 @@ import kotlinx.coroutines.launch
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
+                    if(!busy && !credentialPage && ownerLogin==null && !navigation.loading && navigation.error==null)
+                        TextButton(onClick={ printError=!agent.openPrintPreview(context) }){Text("화면 PDF 저장")}
                     val loginId=ownerLogin
                     if(loginId!=null)Button(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
                     else if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
                 }
+                if(printError)Text("현재 페이지의 PDF 저장 창을 열지 못했어요.",color=MaterialTheme.colorScheme.error)
                 if(ownerLogin!=null)Text("사이트에서 직접 로그인한 다음 ‘로그인했어요’를 눌러 주세요.",
                     style=MaterialTheme.typography.bodyMedium)
                 Box(Modifier.weight(1f).fillMaxWidth()){

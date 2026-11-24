@@ -104,6 +104,9 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         in com.user.localagent.core.AppBrowserToolCatalog.names->appBrowser
         else->null
     }
+    internal fun delegatedAssessmentSnapshot(call:ToolCall,scope:com.user.localagent.core.DelegationScope):String? =
+        appBrowser.delegatedAssessmentSnapshot(call,scope)
+
     suspend fun reviewForAction(call:ToolCall):String? {
         ToolRegistry.validate(call)
         if(call.name=="patch_note")return checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.review(resolveOwnerText(call))

@@ -13,6 +13,15 @@ import com.user.localagent.core.summary
 import kotlinx.serialization.json.*
 
 internal class GoalProgressStore(private val store: ConnectionStore) {
+    fun hasMediaItem(key:String,itemId:String):Boolean = synchronized(lock) {
+        store.read("goal.progress.v1.$key")?.let {
+            GoalProgressLimits.json.decodeFromString<GoalProgressLedger>(it).validate().items.any { item ->
+                item.id==itemId && item.kind==com.user.localagent.core.LedgerKind.LECTURE &&
+                    item.status!=com.user.localagent.core.LedgerStatus.DONE
+            }
+        } ?: false
+    }
+
     fun summary(key: String): String? = synchronized(lock) {
         store.read("goal.progress.v1.$key")?.let {
             GoalProgressLimits.json.decodeFromString<GoalProgressLedger>(it).validate().summary().take(320)

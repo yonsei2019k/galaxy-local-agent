@@ -601,7 +601,7 @@
       "category": "automation",
       "version": "1",
       "asset": "skills/elearning-completion/SKILL.md",
-      "sha256": "fc55066e3e38a251a7640e78ef8c0f2962445e7ca5e67deb10fb7ac7131be583",
+      "sha256": "f829f49b88eca854958d275dadaefda95b9f1e850de932dd088f96832a94a896",
       "tools": [
         "open_app_browser_page",
         "read_app_browser_page",
@@ -614,8 +614,8 @@
       ],
       "sourceUrls": [],
       "limitations": [
-        "현재 자동 재개는 지정 시각 대기만 지원합니다.",
-        "직접 확인한 같은 사이트 PDF 링크만 저장할 수 있습니다."
+        "영상 재개는 같은 플레이어 종료 관찰이 필요하고, 화면이 꺼진 상태의 재생은 기기에 따라 달라집니다.",
+        "직접 확인한 같은 사이트 PDF와 blob 링크에 한해 원본을 읽습니다. 인쇄형 화면은 Android 저장 창을 사용합니다."
       ]
     }
   ]

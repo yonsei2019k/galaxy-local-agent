@@ -60,4 +60,15 @@ class DelegatedSubmissionTest {
         assertThrows(IllegalArgumentException::class.java){
             DelegationScope((1..5).map{"https://a$it.org"}.toSet(),setOf(QUIZ_SUBMIT))}
     }
+    @org.junit.Test fun requiresTheActualAssessmentCategoryAndSameOriginAction() {
+        val scope=DelegationScope(setOf("https://example.org"),setOf(DelegatedAction.QUIZ_SUBMIT))
+        org.junit.Assert.assertTrue(DelegatedSubmission.permitsAssessmentForm(scope,
+            "https://example.org/quiz/view","https://example.org/quiz/submit","Submit"))
+        org.junit.Assert.assertFalse(DelegatedSubmission.permitsAssessmentForm(scope,
+            "https://example.org/quiz/view","https://other.example/quiz/submit","Submit"))
+        org.junit.Assert.assertFalse(DelegatedSubmission.permitsAssessmentForm(scope,
+            "https://example.org/quiz/view","https://example.org/checkout","Submit"))
+        org.junit.Assert.assertFalse(DelegatedSubmission.permitsAssessmentForm(scope,
+            "https://example.org/survey/view","https://example.org/survey/submit","Submit"))
+    }
 }

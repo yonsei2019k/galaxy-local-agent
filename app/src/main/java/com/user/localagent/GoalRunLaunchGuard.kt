@@ -131,9 +131,15 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
             ?: return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
         val parkedAt=wake["parkedAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
         val wokeAt=wake["wokeAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+        val finalStep=request.previousSteps.lastOrNull()
+        val authReady=wake["event"]==JsonPrimitive(WakeEvent.OWNER_AUTH_DONE.name) &&
+            finalStep?.tool in setOf("read_app_browser_page","open_app_browser_page") &&
+            finalStep?.evidence?.effectNotApplied==true &&
+            finalStep.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED
+        val waitReady=finalStep?.tool==GoalWaitToolCatalog.WAIT && finalStep.evidence.state==VerificationState.VERIFIED
         if(parkedAt !in segment.startedAtMs..wokeAt || wokeAt>nowMs ||
             wokeAt-parkedAt>GoalWaitPolicy.MAX_DAYS*86_400_000L ||
-            request.previousSteps.lastOrNull()?.let { it.tool==GoalWaitToolCatalog.WAIT && it.evidence.state==VerificationState.VERIFIED }!=true)
+            (!authReady && !waitReady))
             return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
         wokeAt-parkedAt
     } else {
