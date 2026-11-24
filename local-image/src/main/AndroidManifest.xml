@@ -3,6 +3,7 @@
     <!-- This merger tombstone removes the library's optional assistant permission;
          it is not a permission request in the packaged image-only application. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:node="remove" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" tools:node="remove" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
@@ -23,6 +24,8 @@
         <service android:name="com.user.localagent.images.ImageGenerationService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started local image generation with progress and cancellation" />
         </service>
+        <service android:name="androidx.work.impl.foreground.SystemForegroundService"
+            tools:remove="android:foregroundServiceType" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files"
             android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />

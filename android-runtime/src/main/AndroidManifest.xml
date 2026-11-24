@@ -4,8 +4,12 @@
     <!-- Optional assistant usage analysis uses Settings/AppOps, never a runtime grant.
          Image-only consumers remove this unused capability from their merged manifest. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Components and the remaining permissions belong to the consuming app. -->
     <application>
         <meta-data android:name="com.user.localagent.UPDATE_URL" android:value="${ziphapUpdateUrl}" />
+        <!-- GoalWaitWork runs its playback watcher through WorkManager's shared foreground service. -->
+        <service android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="mediaPlayback" tools:node="merge" />
     </application>
 </manifest>
