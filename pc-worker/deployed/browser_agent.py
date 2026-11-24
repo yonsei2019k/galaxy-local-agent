@@ -135,6 +135,7 @@ class _Socket:
 class _Page:
     def __init__(self, ws_url):
         self.ws = _Socket(ws_url); self.next_id = 0
+        self.target_id = urllib.parse.urlsplit(ws_url).path.rsplit('/', 1)[-1]
         self.owner_login_dialogs = None
 
     def call(self, method, params=None, timeout=30):
@@ -170,15 +171,15 @@ SNAPSHOT_JS = r"""(() => {
   document.querySelectorAll('[data-ziphap-ref]').forEach(e => e.removeAttribute('data-ziphap-ref'));
   const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none' && r.bottom > 0 && r.top < innerHeight * 3; };
-  const label = e => (e.getAttribute('aria-label') || (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') || e.innerText || e.value && e.type !== 'password' && e.type !== 'hidden' && e.value || e.placeholder || e.title || e.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  const selector = 'a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=option],[onclick],[contenteditable=true]';
+  const label = e => (e.getAttribute('aria-label') || (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') || e.innerText || e.value && e.type !== 'password' && e.type !== 'hidden' && e.value || e.placeholder || e.title || e.alt || e.querySelector('img[alt]')?.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const selector = 'a[href],button,input:not([type=hidden]),select,textarea,video,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=option],[onclick],[contenteditable=true]';
   const out = []; let n = 0;
   for (const e of document.querySelectorAll(selector)) {
     if (out.length >= MAX_ELEMENTS) break;
     if (!visible(e)) continue;
     const ref = 'e' + (++n); e.setAttribute('data-ziphap-ref', ref);
     const item = {ref, tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || '', type: (e.getAttribute('type') || '').toLowerCase(),
-      label: label(e), name: e.name || '', id: e.id || '', placeholder: e.placeholder || '', autocomplete: e.autocomplete || '',
+      label: label(e) || (e.tagName === 'VIDEO' ? '동영상 재생' : ''), name: e.name || '', id: e.id || '', placeholder: e.placeholder || '', autocomplete: e.autocomplete || '',
       disabled: !!e.disabled, editable: e.isContentEditable || ['input','textarea','select'].includes(e.tagName.toLowerCase())};
     if (e.tagName === 'A') { try { item.host = new URL(e.href).host; } catch (_) {} }
     if (e.tagName === 'SELECT') item.options = Array.from(e.options).slice(0, 30).map(o => o.text.trim().slice(0, 60));
@@ -406,6 +407,38 @@ class BrowserAgent:
             time.sleep(0.4)
         time.sleep(0.4)
 
+    def _follow_opened_page(self, before, source_url):
+        opener = self.page
+        source = urllib.parse.urlsplit(source_url)
+        if source.scheme != 'https':
+            return
+        try:
+            targets = opener.call('Target.getTargets', timeout=3)['targetInfos']
+        except (BrowserError, OSError, ValueError, KeyError):
+            return
+        matches = [t for t in targets if t['targetId'] not in before and t.get('type') == 'page' and
+                   t.get('openerId') == opener.target_id and url_allowed(t.get('url')) and
+                   urllib.parse.urlsplit(t['url']).netloc == source.netloc and t['url'].startswith('https://')]
+        if len(matches) != 1:
+            return
+        port = self._port()
+        if port is None:
+            return
+        new_page = _Page(f"ws://127.0.0.1:{port}/devtools/page/{matches[0]['targetId']}")
+        try:
+            new_page.call('Page.enable', timeout=4)
+            new_page.call('Runtime.enable', timeout=4)
+            current = new_page.evaluate('location.origin', timeout=4)
+            if current != f'{source.scheme}://{source.netloc}':
+                new_page.close()
+                return
+        except (BrowserError, OSError, ValueError):
+            new_page.close()
+            raise
+        self.page = new_page
+        opener.close()
+        self.snapshot = None
+
     def _read(self):
         value = self.page.evaluate(SNAPSHOT_JS, timeout=20)
         if not isinstance(value, dict): raise BrowserError('PAGE_UNREADABLE', 502)
@@ -481,6 +514,7 @@ class BrowserAgent:
         if action not in ('click', 'type', 'select', 'press_enter', 'scroll', 'back'): raise BrowserError('ACTION_UNKNOWN')
         with self.lock:
             self._ensure()
+            prior_tabs = None
             current = self.snapshot
             if current is None or current['id'] != request['snapshotId']: raise BrowserError('SNAPSHOT_STALE', 409)
             # The page must still be the one the caller read.
@@ -507,7 +541,15 @@ class BrowserAgent:
                     if not pending or not hmac.compare_digest(str(token), pending['id']) or pending['snapshot'] != current['id'] or pending['ref'] != element['ref']:
                         raise BrowserError('APPROVAL_MISMATCH', 403)
                     self.pending = None
-                self._click(element['ref'])
+                if self.process is not None:
+                    try:
+                        prior_tabs = {tab['targetId'] for tab in self.page.call('Target.getTargets', timeout=3)['targetInfos']}
+                    except (BrowserError, OSError, ValueError, KeyError):
+                        pass
+                if element.get('tag') == 'video':
+                    self._play_video(element['ref'])
+                else:
+                    self._click(element['ref'])
             elif action == 'type':
                 if not element.get('editable') or element.get('sensitive'): raise BrowserError('FIELD_NOT_ALLOWED', 403)
                 if not safe_text(request.get('text')): raise BrowserError('TEXT_NOT_ALLOWED', 403)
@@ -534,6 +576,8 @@ class BrowserAgent:
             elif action == 'back':
                 self.page.evaluate('history.back()')
             self._settle()
+            if prior_tabs is not None:
+                self._follow_opened_page(prior_tabs, current['url'])
             result = self._read()
             result['performed'] = {'action': action, 'ref': request.get('ref'), 'control': element['label'] if element else None}
             result['evidence'] = '동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.'
@@ -541,6 +585,21 @@ class BrowserAgent:
 
     def _focus(self, ref):
         self.page.evaluate(f"(() => {{ const e = document.querySelector('[data-ziphap-ref=\"{ref}\"]'); e.scrollIntoView({{block:'center'}}); e.focus(); }})()")
+
+    def _play_video(self, ref):
+        # This is only the standard Play action on the same observed video. Never seek or change rate.
+        expression = """(async (ref) => {
+            const video = document.querySelector('[data-ziphap-ref="' + ref + '"]');
+            if (!(video instanceof HTMLVideoElement) || !video.currentSrc || video.ended ||
+                video.getClientRects().length === 0 || getComputedStyle(video).visibility !== 'visible') return false;
+            video.muted = true;
+            if (video.paused) await video.play();
+            return !video.paused;
+        })(%s)""" % json.dumps(ref)
+        answer = self.page.call('Runtime.evaluate', {'expression':expression,'userGesture':True,
+            'awaitPromise':True,'returnByValue':True},timeout=12)
+        if answer.get('result', {}).get('value') is not True:
+            raise BrowserError('PLAYBACK_NOT_STARTED', 409)
 
     def _click(self, ref):
         box = self.page.evaluate(f"(() => {{ const e = document.querySelector('[data-ziphap-ref=\"{ref}\"]'); if (!e) return null; "

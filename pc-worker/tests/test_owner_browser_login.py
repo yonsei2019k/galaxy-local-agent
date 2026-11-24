@@ -39,6 +39,33 @@ except ImportError:
 @unittest.skipUnless(sync_playwright and any(Path(p).is_file() for p in browser.CHROME_CANDIDATES),
                      'Headless browser fixture requires Playwright and installed Chrome')
 class OwnerLogin(unittest.TestCase):
+    def test_image_link_follows_its_same_origin_popup(self):
+        from concurrent.futures import ThreadPoolExecutor
+        origin = 'https://example.org'
+        agent = browser.BrowserAgent()
+        try:
+            agent._ensure()
+            with sync_playwright() as pw:
+                chrome = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{agent._port()}')
+                context = chrome.contexts[0]
+                context.route(origin + '/**', lambda route: route.fulfill(
+                    content_type='text/html; charset=utf-8',
+                    body=('<video controls></video>' if route.request.url.endswith('/player')
+                          else '<a href="/player" target="_blank" rel="opener"><img alt="수강하기" width="36" height="36"></a>')))
+                def open_popup():
+                    opened = agent.open({'url': origin + '/'})
+                    control = next(e for e in opened['elements'] if e['label'] == '수강하기')
+                    return agent.act({'snapshotId':opened['snapshotId'],'ref':control['ref'],'action':'click'})
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(open_popup)
+                    for _ in range(120):
+                        if future.done(): break
+                        context.pages[0].wait_for_timeout(100)
+                    result = future.result(timeout=2)
+                self.assertEqual(result['url'], origin + '/player')
+                self.assertIn('동영상 재생', [e['label'] for e in result['elements']])
+        finally:
+            agent.dispose()
     def test_worker_reads_through_the_result_alert(self):
         origin = 'https://www.kairb.org'
         agent = browser.BrowserAgent()
