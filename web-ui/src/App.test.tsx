@@ -113,6 +113,19 @@ describe('native conversation', () => {
     expect(requests().some(request => request.action === 'selectThread')).toBe(false)
   })
 
+  it('keeps credentials and the observed status in the transcript, with the composer open', () => {
+    mount()
+    const active = { ...base, draft: '기존 초안', messages: [{ id: 'user', role: 'user' as const, text: '수강해줘' }],
+      websiteCard: { id: 'login', messageId: 'user', title: 'KAIRB 온라인 교육', status: '', steps: [], working: false, inputHeight: 400 } }
+    snapshot(active)
+    const slot = host.querySelector('main [data-native-website-slot]')
+    expect(slot?.previousElementSibling?.textContent).toContain('수강해줘')
+    expect(input().value).toBe('기존 초안')
+    snapshot({ ...active, websiteCard: { ...active.websiteCard, inputHeight: undefined, status: '수강 목록 확인' } })
+    expect(host.querySelector('main [aria-label="KAIRB 온라인 교육"]')?.textContent).toContain('수강 목록 확인')
+    expect(input().value).toBe('기존 초안')
+  })
+
   it('routes the single chat menu and mobile shortcuts to the existing capabilities', () => {
     mount()
     snapshot({ ...base, singleConversation: true })

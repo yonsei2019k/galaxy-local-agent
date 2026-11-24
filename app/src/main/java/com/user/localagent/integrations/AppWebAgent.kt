@@ -83,12 +83,15 @@ class AppWebAgent private constructor(private val context:Context) {
     internal fun recordPcWork(binding:WorkBinding,status:String,step:String,working:Boolean=true) {
         if(loginCard.value!=null && browserWorkBinding.value!=binding)return
         browserWorkBinding.value=binding
-        val steps=websiteWork.value?.takeIf { it.binding==binding }?.steps.orEmpty()
-        websiteWork.value=WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding)
+        val prior=websiteWork.value?.takeIf { it.binding==binding }
+        val steps=prior?.steps.orEmpty()
+        websiteWork.value=WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding,
+            prior?.anchorRunId?:binding.runId)
     }
     data class WebsiteLogin(val card:LoginCard,val url:String)
     data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
-    data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,val binding:WorkBinding?=null)
+    data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,
+        val binding:WorkBinding?=null,val anchorRunId:String?=binding?.runId)
     private val browserWorkBinding=MutableStateFlow<WorkBinding?>(null)
     val ownerWorkBinding:StateFlow<WorkBinding?> get()=browserWorkBinding
     private val websiteWork=MutableStateFlow<WebsiteWork?>(null)

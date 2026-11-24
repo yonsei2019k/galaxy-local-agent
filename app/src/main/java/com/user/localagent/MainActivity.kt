@@ -326,7 +326,6 @@ class MainActivity : ComponentActivity() {
         val websiteLogin by webAgent.ownerWebsiteLogin.collectAsState()
         val websiteWork by webAgent.ownerWebsiteWork.collectAsState()
         val websiteBinding by webAgent.ownerWorkBinding.collectAsState()
-        val loginStatus by webAgent.ownerLoginStatus.collectAsState()
         var connectionsOpen by rememberSaveable {mutableStateOf(false)}
         var connectionStatus by remember {mutableStateOf<String?>(null)}
         LaunchedEffect(loginCard?.id){if(loginCard!=null){chatManagerOpen=false;openPanel(0)}}
@@ -432,11 +431,32 @@ class MainActivity : ComponentActivity() {
                 val epoch=(runForRoom.orEmpty()+currentBranchId).hashCode().toLong().and(0x7fffffff)
                 val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex",com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID to "Claude",
                     com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION to com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)
+                val inWebsiteRoom=websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
+                val inlineSite=websiteLogin.takeIf{inWebsiteRoom&&!connectionsOpen}
+                val inlineCredentials=loginCard.takeIf{inWebsiteRoom&&!connectionsOpen}
+                val visibleWebsiteWork=websiteWork?.takeIf{work->
+                    work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
+                }
+                val websiteSlotId=inlineCredentials?.id?.toString()
+                var websiteSlot by remember(websiteSlotId,composerThreadId,currentBranchId){
+                    mutableStateOf<com.user.localagent.ui.NativeWebsiteSlot?>(null)
+                }
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
-                    put("inlineLogin",loginCard!=null&&websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true||connectionsOpen)
-                    (if(connectionsOpen)connectionStatus else loginStatus?:connectionStatus)?.let{put("browserLoginStatus",it)}
+                    put("inlineLogin",connectionsOpen)
+                    if(connectionsOpen)connectionStatus?.let{put("browserLoginStatus",it)}
+                    if(inlineCredentials!=null||visibleWebsiteWork!=null)put("websiteCard",buildJsonObject{
+                        val workRun=visibleWebsiteWork?.anchorRunId?:websiteBinding?.runId
+                        put("id",websiteSlotId?:workRun.orEmpty())
+                        messages.lastOrNull { workRun!=null&&it.role=="user"&&it.runId==workRun }?.let { put("messageId",it.id) }
+                        val domain=inlineCredentials?.host?:visibleWebsiteWork?.host.orEmpty()
+                        put("title",if(domain=="www.kairb.org")"KAIRB 온라인 교육" else domain)
+                        put("status",visibleWebsiteWork?.status.orEmpty())
+                        put("working",visibleWebsiteWork?.working==true)
+                        put("steps",JsonArray(visibleWebsiteWork?.steps.orEmpty().map(::JsonPrimitive)))
+                        if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 400)
+                    })
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
                     put("voiceDraftEpoch",voiceDraftEpoch)
                     voicePrompt?.takeIf{it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{put("voicePrompt",it.stage)}
@@ -505,8 +525,10 @@ class MainActivity : ComponentActivity() {
                 }.toString()
                 Box(Modifier.fillMaxSize().padding(padding).imePadding()){
                 Column(Modifier.fillMaxSize()){
+                Box(Modifier.weight(1f).fillMaxWidth()){
                 key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={launchIntroPending=false;chatScreenUnavailable=true},
-                    onFirstReady={launchIntroPending=false},modifier=Modifier.weight(1f).fillMaxWidth(),onCommand={command->
+                    onFirstReady={launchIntroPending=false},modifier=Modifier.fillMaxSize(),websiteSlotId=websiteSlotId,
+                    onWebsiteSlot={websiteSlot=it},onCommand={command->
                     val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
                     if(sameRoom){
                         val payload=command.payload
@@ -609,23 +631,17 @@ class MainActivity : ComponentActivity() {
                         status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
                 })}
-                val inWebsiteRoom=websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
-                val website=websiteLogin.takeIf{inWebsiteRoom}
-                if(website!=null)key(website.card.id){
-                    com.user.localagent.integrations.InlineWebsiteLogin(webAgent,website,window,
-                        Modifier.fillMaxWidth().fillMaxHeight(0.76f).padding(horizontal=12.dp))
-                } else loginCard.takeIf{inWebsiteRoom}?.let { card -> key(card.id) {
-                    com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,card,window,
-                        Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
-                }} ?: if(connectionsOpen) {
+                if(inlineCredentials!=null)key(inlineCredentials.id){
+                    com.user.localagent.ui.NativeWebsiteOverlay(websiteSlot){
+                        if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
+                        else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,Modifier.fillMaxSize())
+                    }
+                }
+                }
+                if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
                         onClose={connectionsOpen=false},onStatus={connectionStatus=it},
                         modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
-                } else websiteWork?.takeIf{work->
-                    work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
-                }?.let{work->
-                    com.user.localagent.integrations.InlineWebsiteWorkCard(webAgent,work,
-                        Modifier.fillMaxWidth().padding(horizontal=12.dp))
                 }
                 }
                 if(launchIntroPending) LaunchIntro(Modifier.matchParentSize())

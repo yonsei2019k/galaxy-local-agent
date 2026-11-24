@@ -15,17 +15,79 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.delay
+import org.json.JSONArray
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
+
+internal data class NativeWebsiteSlot(val frame:Rect,val visible:Rect)
+
+/** Compose retains ownership of sensitive fields. The page supplies only their on-screen rectangle. */
+@Composable
+internal fun NativeWebsiteOverlay(slot:NativeWebsiteSlot?,content:@Composable ()->Unit) {
+    Layout(content={
+        Layout(content=content,modifier=Modifier.clipToBounds()){ children,_ ->
+            val frame=slot?.frame ?: Rect.Zero
+            val visible=slot?.visible ?: Rect.Zero
+            val card=children.single().measure(Constraints.fixed(frame.width.roundToInt().coerceIn(0,4000),
+                frame.height.roundToInt().coerceIn(0,4000)))
+            layout(visible.width.roundToInt().coerceIn(0,4000),visible.height.roundToInt().coerceIn(0,4000)) {
+                card.place((frame.left-visible.left).roundToInt(),(frame.top-visible.top).roundToInt())
+            }
+        }
+    },measurePolicy={ children, available ->
+        val card=children.single().measure(available.copy(minWidth=0,minHeight=0))
+        layout(available.maxWidth,available.maxHeight) {
+            if(slot!=null)card.place(slot.visible.left.roundToInt(),slot.visible.top.roundToInt())
+        }
+    })
+}
 
 /** React is packaged offline. Remote websites never share this WebView or its native UI message bridge. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUnavailable:()->Unit,modifier:Modifier=Modifier,
-    onFirstReady:()->Unit={}){
+    onFirstReady:()->Unit={},websiteSlotId:String?=null,onWebsiteSlot:(NativeWebsiteSlot?)->Unit={}){
     val firstReady by rememberUpdatedState(onFirstReady)
     val command by rememberUpdatedState(onCommand)
     val unavailable by rememberUpdatedState(onUnavailable)
     val currentSnapshot by rememberUpdatedState(snapshot)
+    val receiveWebsiteSlot by rememberUpdatedState(onWebsiteSlot)
+    var host by remember { mutableStateOf<WebView?>(null) }
     var ready by remember { mutableStateOf(false) }
+    LaunchedEffect(host,websiteSlotId,ready) {
+        val view=host
+        val id=websiteSlotId
+        if(view==null||id==null||!ready){receiveWebsiteSlot(null);return@LaunchedEffect}
+        val quoted=JsonPrimitive(id).toString()
+        val geometry="""(() => {
+            const node = document.querySelector('[data-native-website-slot]');
+            const pane = node?.closest('.conversation');
+            if (!node || !pane || node.dataset.nativeWebsiteSlot !== $quoted) return null;
+            const r = node.getBoundingClientRect(), p = pane.getBoundingClientRect();
+            return [r.left,r.top,r.right,r.bottom,Math.max(r.left,p.left),Math.max(r.top,p.top),
+                Math.min(r.right,p.right),Math.min(r.bottom,p.bottom),innerWidth];
+        })()"""
+        while(true) {
+            val bounds=kotlinx.coroutines.suspendCancellableCoroutine<NativeWebsiteSlot?> { continuation ->
+                view.evaluateJavascript(geometry){ raw ->
+                    if(!continuation.isActive)return@evaluateJavascript
+                    val slot=runCatching {
+                        val a=JSONArray(raw)
+                        val scale=(view.width/a.getDouble(8)).toFloat()
+                        fun rect(i:Int)=Rect((a.getDouble(i)*scale).toFloat(),(a.getDouble(i+1)*scale).toFloat(),
+                            (a.getDouble(i+2)*scale).toFloat(),(a.getDouble(i+3)*scale).toFloat())
+                        NativeWebsiteSlot(rect(0),rect(4))
+                    }.getOrNull()
+                    continuation.resumeWith(Result.success(slot))
+                }
+            }
+            receiveWebsiteSlot(bounds)
+            delay(40)
+        }
+    }
     LaunchedEffect(ready){
         if(!ready){delay(20_000);unavailable()}
     }
@@ -37,6 +99,7 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
     }
     AndroidView(modifier=modifier,factory={context->
         WebView(context).apply{
+            host=this
             // A WRAP_CONTENT WebView can report a zero CSS viewport inside AndroidView even
             // when Compose gives its native view a full-height frame.
             layoutParams=android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,android.view.ViewGroup.LayoutParams.MATCH_PARENT)
@@ -91,5 +154,5 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                 loadUrl("https://appassets.androidplatform.net/assets/react/index.html")
             }
         }
-    },update={view->publish(view)},onRelease={view->view.stopLoading();view.removeAllViews();view.destroy()})
+    },update={view->publish(view)},onRelease={view->if(host===view)host=null;view.stopLoading();view.removeAllViews();view.destroy()})
 }

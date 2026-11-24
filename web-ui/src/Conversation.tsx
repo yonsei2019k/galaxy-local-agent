@@ -183,10 +183,21 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const pausedTasks = tasks.filter(task => task.phase === 'paused')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
   const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'waiting_input' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
-  const empty = messages.length === 0 && tasks.length === 0
+  const website = snapshot?.websiteCard
+  const empty = messages.length === 0 && tasks.length === 0 && !website
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
   const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
+  const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
+  const websiteCard = website && (website.inputHeight ?
+    <article className="task-card website-input-slot" data-native-website-slot={website.id}
+      style={{height:website.inputHeight}} aria-label={website.title} /> :
+    <article className="task-card task-card--active" aria-label={website.title}>
+      <div className="task-heading"><span className="task-icon"><Icon name="activity" /></span><h2>{website.title}</h2></div>
+      <p className="task-detail" role="status">{website.status}</p>
+      {website.working && <div className="task-progress" role="progressbar" aria-label="웹 작업 진행 중"><span /></div>}
+      {website.steps.filter(step => step !== website.status).slice(-2).map(step => <p className="task-detail" key={step}>{step}</p>)}
+    </article>)
   const cardsByMessage = new Map<string, Task[]>()
   for (const task of tasks) {
     if (!task.messageId || !visibleUserIds.has(task.messageId) ||
@@ -210,7 +221,11 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   useLayoutEffect(() => {
     if (pinnedToEnd.current) scrollToEnd()
-  }, [scrollToEnd, snapshot?.messages, snapshot?.tasks])
+  }, [scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight])
+
+  useLayoutEffect(() => {
+    if (website?.inputHeight) view.current?.querySelector('[data-native-website-slot]')?.scrollIntoView?.({ block: 'nearest' })
+  }, [website?.id, website?.inputHeight])
 
   useLayoutEffect(() => {
     const pane = view.current
@@ -254,7 +269,9 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                 <Message message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
                   enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
                 {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
+                {websiteAnchor === item.id && websiteCard}
               </Fragment>)}
+              {!websiteAnchor && websiteCard}
             </div>
             {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
