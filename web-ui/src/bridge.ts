@@ -1,3 +1,16 @@
+import { isCharacterChoice, type CharacterChoice } from './character/characterData'
+
+type CharacterChange = {
+  [Field in keyof CharacterChoice]: { field: Field; value: CharacterChoice[Field] }
+}[keyof CharacterChoice]
+
+export function characterChange(current: CharacterChoice, next: CharacterChoice): CharacterChange | null {
+  if (current.variant !== next.variant) return { field: 'variant', value: next.variant }
+  if (current.color !== next.color) return { field: 'color', value: next.color }
+  if (current.expr !== next.expr) return { field: 'expr', value: next.expr }
+  return null
+}
+
 export interface ResultPreview {
   messageId: string
   kind: 'image' | 'chart'
@@ -10,6 +23,7 @@ export interface ConversationMessage {
   text: string
   fileFormats?: string[]
   authorLabel?: string
+  sentAt?: number
 }
 
 interface Thread {
@@ -77,6 +91,8 @@ export interface Snapshot {
   composerEpoch?: number
   singleConversation?: boolean
   inlineLogin?: boolean
+  character?: CharacterChoice
+  approvalCard?: { id: string; messageId?: string }
   websiteCard?: { id: string; messageId?: string; runId?: string; title: string; status: string; steps: string[]; working: boolean; inputHeight?: number; keyboardOpen?: boolean }
   browserLoginStatus?: string
   voicePrompt?: 'permission' | 'listening' | 'finishing'
@@ -133,6 +149,7 @@ export const MAX_COLLAB_TEXT = 8_000
 export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'historySearch' | 'collab' | 'capabilities' | 'connections' | 'privacy'
 
 type Intent =
+  | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
   | { action: 'copy' | 'messageFiles' | 'messageMenu'; payload: { messageId: string } }
@@ -185,6 +202,7 @@ function resultPreview(value: unknown): value is ResultPreview {
 function message(value: unknown): value is ConversationMessage {
   return record(value) && strings(value, 'id', 'text') &&
     (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool') &&
+    (value.sentAt === undefined || (epoch(value.sentAt) && value.sentAt <= 8.64e15)) &&
     (value.fileFormats === undefined || (value.role === 'assistant' && Array.isArray(value.fileFormats) &&
       value.fileFormats.length <= 16 && value.fileFormats.every(format =>
         typeof format === 'string' && ['pdf', 'docx', 'xlsx', 'txt', 'csv'].includes(format)))) &&
@@ -278,6 +296,10 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.attachments !== undefined && !list(value.attachments, attachment)) return null
   if (value.singleConversation !== undefined && typeof value.singleConversation !== 'boolean') return null
   if (value.inlineLogin !== undefined && typeof value.inlineLogin !== 'boolean') return null
+  if (value.character !== undefined && !isCharacterChoice(value.character)) return null
+  const approval = value.approvalCard
+  if (approval !== undefined && (!record(approval) || typeof approval.id !== 'string' || approval.id.length !== 36 ||
+    (approval.messageId !== undefined && typeof approval.messageId !== 'string'))) return null
   const card = value.websiteCard
   if (card !== undefined && (!record(card) || typeof card.id !== 'string' || card.id.length > 128 ||
     (card.messageId !== undefined && typeof card.messageId !== 'string') ||
@@ -314,6 +336,8 @@ export function hasNativeBridge() {
 /** A message hands control to Android. Android owns scope, authorization and the actual result. */
 export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if (intent.action !== 'ready' && !scope?.ready) return false
+  if (intent.action === 'setCharacter' && (!scope?.character ||
+    !isCharacterChoice({ ...scope.character, [intent.payload.field]: intent.payload.value }))) return false
   if (intent.action === 'selectThread' && !scope?.threads.some(thread => thread.id === intent.payload.id)) return false
   if (intent.action === 'selectModel' && !scope?.models.some(model => model.id === intent.payload.id)) return false
   if ((intent.action === 'saveOfficeProfile' || intent.action === 'clearOfficeProfile' ||

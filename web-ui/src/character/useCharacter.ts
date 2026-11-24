@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from 'react'
-import { COLORS, DEFAULT_CHARACTER, EXPR_OPTIONS, VARIANTS, type CharacterChoice } from './characterData'
+import { createContext, useContext, useSyncExternalStore } from 'react'
+import { DEFAULT_CHARACTER, isCharacterChoice, type CharacterChoice } from './characterData'
 
 export const STORAGE_KEY = 'ziphap.character.v1'
 
@@ -7,10 +7,7 @@ function parse(raw: string | null): CharacterChoice {
   if (!raw) return DEFAULT_CHARACTER
   try {
     const value: unknown = JSON.parse(raw)
-    if (typeof value !== 'object' || value === null) return DEFAULT_CHARACTER
-    const { variant, color, expr } = value as Record<string, unknown>
-    const ok = VARIANTS.some(v => v.id === variant) && COLORS.some(c => c.id === color) && EXPR_OPTIONS.some(x => x.id === expr)
-    return ok ? { variant, color, expr } as CharacterChoice : DEFAULT_CHARACTER
+    return isCharacterChoice(value) ? value : DEFAULT_CHARACTER
   } catch {
     return DEFAULT_CHARACTER
   }
@@ -50,6 +47,11 @@ export function resetCharacterStoreForTest() {
   current = null
 }
 
-export function useCharacter(): [CharacterChoice, (next: CharacterChoice) => void] {
-  return [useSyncExternalStore(subscribe, snapshot, () => DEFAULT_CHARACTER), setCharacter]
+type CharacterSetting = [CharacterChoice, (next: CharacterChoice) => void]
+export const NativeCharacterSetting = createContext<CharacterSetting | null>(null)
+
+export function useCharacter(): CharacterSetting {
+  const native = useContext(NativeCharacterSetting)
+  const fallback = useSyncExternalStore(subscribe, snapshot, () => DEFAULT_CHARACTER)
+  return native ?? [fallback, setCharacter]
 }

@@ -324,7 +324,7 @@ svg { width: 20px; height: 20px; flex: none; }
 .answer-menu-list button:hover, .answer-menu-list button:focus-visible { background: var(--color-cobalt-soft); }
 .message--user .message-actions { justify-content: flex-end; margin: 0 -5px -5px 0; }
 
-/* Work cards live in work/work.css; .task-card remains only as the empty slot the native website input overlays. */
+/* Work cards live in work/work.css; .task-card remains only as the empty slot for native chat cards. */
 .messages > .task-card { align-self: flex-start; width: min(100%, 37rem); }
 .task-card {
   padding: 11px 13px;

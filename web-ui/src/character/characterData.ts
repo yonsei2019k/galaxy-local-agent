@@ -6,6 +6,13 @@ export type CharacterState = 'none' | 'work' | 'wait' | 'done' | 'alert'
 
 export interface CharacterChoice { variant: CharacterVariant; color: CharacterColor; expr: CharacterExpr }
 
+export function isCharacterChoice(value: unknown): value is CharacterChoice {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const choice = value as Partial<CharacterChoice>
+  return VARIANTS.some(item => item.id === choice.variant) &&
+    COLORS.some(item => item.id === choice.color) && EXPR_OPTIONS.some(item => item.id === choice.expr)
+}
+
 export const DEFAULT_CHARACTER: CharacterChoice = { variant: 'bear', color: 'butter', expr: 'basic' }
 
 export const INK = '#3B2F3A'

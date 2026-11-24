@@ -447,7 +447,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val records=page.first
             workActivityController.acceptMessages(id,thread.activeBranchId,records)
             hasEarlier.value=page.third>page.second
-            visibleLines.value=records.map {ChatLine(it.id,it.role,it.text)}
+            visibleLines.value=records.map {ChatLine(it.id,it.role,it.text,createdAt=it.createdAt)}
             if(viewportBranchId!=thread.activeBranchId){
                 val key=id to thread.activeBranchId
                 val anchor=saved?.scrollMessageId?.let {runCatching {com.user.localagent.core.ChatViewportAnchorCodec.decode(it)}.getOrNull()}
@@ -497,6 +497,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             catch(_:Exception){/* A cleared, deleted or changed branch must never be resurrected. */}
         }
     }
+
+    internal fun isCurrentApprovalRoom(action:PendingAction):Boolean =
+        selectionReady.value&&selectedThreadId.value==action.threadId&&viewportBranchId==action.branchId
 
     fun loadEarlier(){if(hasEarlier.value)historyLimit.value=(historyLimit.value.toLong()+60).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()}
 
@@ -2996,7 +2999,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         currentCoroutineContext().ensureActive()
         val deferred=CompletableDeferred<Boolean>()
         val action=PendingAction(original,deferred,runId=request.runId,threadId=request.threadId,
-            projectId=request.projectId,reviewText=preview.approvalText()+"\n\n확인하면 위 수신자에게 실제 메일을 발송합니다. 반복 전송을 허용하는 승인이 아닙니다.")
+            projectId=request.projectId,branchId=request.branchId,reviewText=preview.approvalText()+"\n\n확인하면 위 수신자에게 실제 메일을 발송합니다. 반복 전송을 허용하는 승인이 아닙니다.")
         check(approval.value==null){"다른 실행 확인이 진행 중입니다."}
         approval.value=action;status.value="실제 메일 내용과 수신자를 확인해주세요."
         val allowed=try {deferred.await()}finally {if(approval.value===action)approval.value=null}
@@ -3281,7 +3284,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val request=checkNotNull(activeRequest)
         endScreenWork(request.runId)
         val decision=CompletableDeferred<Boolean>()
-        val action=PendingAction(call,decision,runId=request.runId,threadId=request.threadId,projectId=request.projectId,
+        val action=PendingAction(call,decision,runId=request.runId,threadId=request.threadId,projectId=request.projectId,branchId=request.branchId,
             reviewText="여러 연락처 중 수신자를 선택해주세요. 선택 전에는 문자 앱을 열지 않습니다.\n문자 내용:\n"+call.arguments.getValue("message").jsonPrimitive.content,recipientChoices=choices)
         check(approval.value==null)
         approval.value=action;status.value="문자 수신자 선택 대기"
@@ -3861,7 +3864,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)
             endScreenWork(request.runId)
-            val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId,reviewText=targetReview);approval.value=action
+            val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId,branchId=request.branchId,reviewText=targetReview);approval.value=action
             val allowed=try { deferred.await() } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")

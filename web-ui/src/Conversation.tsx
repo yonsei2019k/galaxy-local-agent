@@ -103,6 +103,12 @@ function AnswerMenu({ messageId, enabled, onCopy, onMessageMenu }: {
   )
 }
 
+const conversationDate = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'full' })
+
+function dateLabel(message?: ConversationMessage) {
+  return message?.sentAt === undefined ? null : conversationDate.format(message.sentAt)
+}
+
 function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu, onPrepareStay, onStayPhoto }: {
   message: ConversationMessage
   previous?: ConversationMessage
@@ -182,14 +188,18 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const setHistoryOpen = onHistoryChange ?? setLocalHistoryOpen
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
   const website = snapshot?.websiteCard
+  const approval = snapshot?.ready ? snapshot.approvalCard : undefined
   const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
-  const empty = messages.length === 0 && tasks.length === 0 && !website
+  const empty = messages.length === 0 && tasks.length === 0 && !website && !approval
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
   const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
   const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
+  const approvalAnchor = approval?.messageId && visibleUserIds.has(approval.messageId) ? approval.messageId : null
+  const approvalCard = approval && <article className="task-card approval-input-slot"
+    data-native-approval-slot={approval.id} aria-label="작업 확인이 필요해요" />
   const websiteWork = websiteWorkFor(snapshot)
   const openWorkHistory = () => { setOpenWorkId(null); setHistoryOpen(true) }
   const websiteCard = website && (website.inputHeight ?
@@ -248,13 +258,17 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   useLayoutEffect(() => {
     if (pinnedToEnd.current) scrollToEnd()
-  }, [scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight])
+  }, [scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight, approval?.id])
 
   useLayoutEffect(() => {
     if (website?.inputHeight) view.current?.querySelector('[data-native-website-slot]')?.scrollIntoView?.({
       block: website.keyboardOpen ? 'start' : 'nearest',
     })
   }, [website?.id, website?.inputHeight, website?.keyboardOpen])
+
+  useLayoutEffect(() => {
+    if (approval?.id) view.current?.querySelector('[data-native-approval-slot]')?.scrollIntoView?.({ block: 'nearest' })
+  }, [approval?.id])
 
   useLayoutEffect(() => {
     const pane = view.current
@@ -282,16 +296,25 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
             <div className="messages" role="log" aria-label="메시지">
-              {messages.map((item, index) => <Fragment key={item.id}>
-                <Message message={item} previous={messages[index - 1]}
-                  previousHasCards={index > 0 && (!!cardsByMessage.get(messages[index - 1].id)?.length || websiteAnchor === messages[index - 1].id)}
-                  previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
-                  enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu}
-                  onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} onStayPhoto={enabled ? onStayPhoto : undefined} />
-                {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
-                {websiteAnchor === item.id && websiteCard}
-              </Fragment>)}
+              {messages.map((item, index) => {
+                const date = dateLabel(item)
+                const newDay = date !== null && date !== dateLabel(messages[index - 1])
+                return <Fragment key={item.id}>
+                  {newDay && <div className="conversation-date">{date}</div>}
+                  <Message message={item} previous={messages[index - 1]}
+                    previousHasCards={newDay || (index > 0 && (
+                      !!cardsByMessage.get(messages[index - 1].id)?.length ||
+                      websiteAnchor === messages[index - 1].id || approvalAnchor === messages[index - 1].id))}
+                    previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
+                    enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu}
+                    onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} onStayPhoto={enabled ? onStayPhoto : undefined} />
+                  {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
+                  {websiteAnchor === item.id && websiteCard}
+                  {approvalAnchor === item.id && approvalCard}
+                </Fragment>
+              })}
               {!websiteAnchor && websiteCard}
+              {!approvalAnchor && approvalCard}
             </div>
             {unplacedTasks.length > 0 && <section className="work-cards" aria-label="작업">
               {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}

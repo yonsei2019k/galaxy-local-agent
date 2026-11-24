@@ -1,10 +1,12 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { SNAPSHOT_EVENT, hasNativeBridge, postIntent, readSnapshot } from './bridge'
+import { SNAPSHOT_EVENT, characterChange, hasNativeBridge, postIntent, readSnapshot, type Snapshot } from './bridge'
 import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
 import { Collaboration } from './Collaboration'
 import { BottomNavigation, Composer, Header, MobileSidebar, Sidebar } from './Workspace'
 import { OfficeProfileForm } from './OfficeProfile'
+
+import { NativeCharacterSetting } from './character/useCharacter'
 
 type Intent = Parameters<typeof postIntent>[1]
 
@@ -124,7 +126,14 @@ export default function App() {
   }
   const openMenu = () => setMobileOpen(true)
 
+  const appearance = snapshot?.character
+  function setAppearance(choice: NonNullable<Snapshot['character']>) {
+    const patch = appearance && characterChange(appearance, choice)
+    if (patch) request({ action: 'setCharacter', payload: patch })
+  }
+
   return (
+    <NativeCharacterSetting.Provider value={appearance ? [appearance, setAppearance] : null}>
     <div className="workspace">
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
@@ -183,5 +192,6 @@ export default function App() {
         onRefresh={bindingEpoch => request({ action: 'collabRefresh', payload: { bindingEpoch } })}
         onSend={payload => request({ action: 'collabSend', payload })} />}
     </div>
+    </NativeCharacterSetting.Provider>
   )
 }

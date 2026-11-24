@@ -73,9 +73,11 @@ private val Background = ZipHapColors.DeepNavy
 private val Panel = ZipHapColors.NavySurface
 private val Accent = ZipHapColors.Periwinkle
 private val Mint = ZipHapColors.Mint
-data class ChatLine(val id:String = UUID.randomUUID().toString(), val role:String, val text:String,val requestText:String?=null)
+data class ChatLine(val id:String = UUID.randomUUID().toString(), val role:String, val text:String,val requestText:String?=null,val createdAt:Long?=null)
 data class PendingAction(val call:ToolCall, val decision:CompletableDeferred<Boolean>,val remember:MutableStateFlow<Boolean> = MutableStateFlow(false),val runId:String="",val threadId:String="",val projectId:String?=null,val reviewText:String?=null,
-    val recipientChoices:List<com.user.localagent.core.ContactCandidate> =emptyList(),val selectedRecipient:MutableStateFlow<String?> = MutableStateFlow(null))
+    val recipientChoices:List<com.user.localagent.core.ContactCandidate> =emptyList(),val selectedRecipient:MutableStateFlow<String?> = MutableStateFlow(null),val branchId:String=""){
+    val presentationId:String=UUID.randomUUID().toString()
+}
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { (application as LocalAgentApplication).container }
@@ -345,6 +347,8 @@ class MainActivity : ComponentActivity() {
         var officeProfileRevision by remember{mutableIntStateOf(0)}
         val officeOpen=composerThreadId==ZipHapRoom.OFFICE.threadId
         val calendarGranted by officeCalendarReadGranted.collectAsState()
+        val characterSettings=remember {getSharedPreferences("jipsooni-character",MODE_PRIVATE)}
+        var character by remember {mutableStateOf(com.user.localagent.ui.CharacterPreference.load(characterSettings))}
         val guideSettings=remember{getSharedPreferences("jipsooni-introduction",MODE_PRIVATE)}
         var officeGuideDismissed by remember{mutableStateOf(guideSettings.getBoolean("dismissed",false))}
         fun dismissOfficeGuide(){
@@ -390,6 +394,7 @@ class MainActivity : ComponentActivity() {
         var messageEdit by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
         val answerStates by chat.answerStates.collectAsState()
         val pending by approval.collectAsState()
+        val pendingActions by chat.pendingActions.collectAsState()
         var otherApprovalOpened by remember {mutableStateOf<String?>(null)}
         val messages by lines.collectAsState()
         val previewMessageIds = messages.takeLast(160).filter { it.role == "assistant" }.map { it.id }.toSet()
@@ -437,11 +442,16 @@ class MainActivity : ComponentActivity() {
                 val visibleWebsiteWork=websiteWorks.lastOrNull{work->
                     work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
                 }
+                val inlineApproval=pending?.takeIf {
+                    composerReady&&it.threadId==composerThreadId&&it.branchId==currentBranchId&&
+                        inlineCredentials==null&&!connectionsOpen&&!it.decision.isCompleted
+                }
                 val websiteSlotId=inlineCredentials?.id?.toString()
+                val nativeSlotId=websiteSlotId?:inlineApproval?.presentationId
                 val websiteKeyboardOpen=inlineCredentials!=null&&WindowInsets.ime.getBottom(
                     androidx.compose.ui.platform.LocalDensity.current)>0
-                var websiteSlot by remember(websiteSlotId,composerThreadId,currentBranchId){
-                    mutableStateOf<com.user.localagent.ui.NativeWebsiteSlot?>(null)
+                var nativeSlot by remember(nativeSlotId,composerThreadId,currentBranchId){
+                    mutableStateOf<com.user.localagent.ui.NativeChatSlot?>(null)
                 }
                 val visibleMessages=messages.takeLast(160)
                 val visibleMessageIds=visibleMessages.mapTo(hashSetOf()){it.id}
@@ -454,6 +464,7 @@ class MainActivity : ComponentActivity() {
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
+                    put("character",character.toJson())
                     put("inlineLogin",connectionsOpen)
                     if(connectionsOpen)connectionStatus?.let{put("browserLoginStatus",it)}
                     if(inlineCredentials!=null||visibleWebsiteWork!=null)put("websiteCard",buildJsonObject{
@@ -471,6 +482,10 @@ class MainActivity : ComponentActivity() {
                         if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 308)
                         if(websiteKeyboardOpen)put("keyboardOpen",true)
                     })
+                    inlineApproval?.let { action->put("approvalCard",buildJsonObject {
+                        put("id",action.presentationId)
+                        activeExecutions.firstOrNull{it.runId==action.runId}?.userMessageId?.let{put("messageId",it)}
+                    }) }
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
                     put("voiceDraftEpoch",voiceDraftEpoch)
                     voicePrompt?.takeIf{it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{put("voicePrompt",it.stage)}
@@ -483,6 +498,7 @@ class MainActivity : ComponentActivity() {
                     put("messages",buildJsonArray{visibleMessages.forEach{message->add(buildJsonObject{
                         val author = officeAuthor(message.role).takeIf { composerThreadId == officeRoomId }
                         put("id",message.id);put("role",if (author == null) message.role else "assistant")
+                        message.createdAt?.let{put("sentAt",it)}
                         val text = if (message.role == "assistant" || author != null)
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
                         val files = verifiedFiles[message.id].orEmpty()
@@ -552,12 +568,17 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()){
                 Box(Modifier.weight(1f).fillMaxWidth()){
                 key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={launchIntroPending=false;chatScreenUnavailable=true},
-                    onFirstReady={launchIntroPending=false},modifier=Modifier.fillMaxSize(),websiteSlotId=websiteSlotId,
-                    onWebsiteSlot={websiteSlot=it},onCommand={command->
+                    onFirstReady={launchIntroPending=false},modifier=Modifier.fillMaxSize(),nativeSlotId=nativeSlotId,
+                    onNativeSlot={nativeSlot=it},onCommand={command->
                     val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
                     if(sameRoom){
                         val payload=command.payload
                         when(command.action){
+                            "setCharacter"->{
+                                character=character.update(payload.getValue("field").jsonPrimitive.content,
+                                    payload.getValue("value").jsonPrimitive.content)
+                                character.save(characterSettings)
+                            }
                             "draft"->chat.updateDraft(payload.getValue("text").jsonPrimitive.content,composerThreadId)
                             "startVoicePrompt"->if(currentBranchId.isNotBlank())
                                 startVoicePrompt(composerThreadId,currentBranchId)
@@ -650,17 +671,24 @@ class MainActivity : ComponentActivity() {
                                 if(attachmentJobThreadId==composerThreadId)attachmentJob?.cancel()
                                 else chat.auxiliaryExecution.value?.takeIf{it.threadId==composerThreadId}?.let{chat.stopAuxiliary(it.operationId,it.threadId)}
                             }
-                            "openWaitingApproval"->otherApprovalOpened=pending?.takeIf{it.threadId==approvalThread}?.runId
+                            "openWaitingApproval"->otherApprovalOpened=pendingActions.firstOrNull{it.threadId==approvalThread}?.presentationId
                         }
                     }else if(command.action in setOf("send","steer","attach","removeAttachment")){
                         status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
                     }
                 })}
                 if(inlineCredentials!=null)key(inlineCredentials.id){
-                    com.user.localagent.ui.NativeWebsiteOverlay(websiteSlot,websiteKeyboardOpen){
+                    com.user.localagent.ui.NativeChatOverlay(nativeSlot,websiteKeyboardOpen){
                         if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
                         else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,
                             Modifier.fillMaxSize(),websiteKeyboardOpen)
+                    }
+                }else if(inlineApproval!=null)key(inlineApproval.presentationId){
+                    com.user.localagent.ui.NativeChatOverlay(nativeSlot,false){
+                        InlineActionApproval(inlineApproval,inlineApproval.reviewText?:actionSummary(inlineApproval.call)){ accepted->
+                            if(approval.value===inlineApproval&&chat.isCurrentApprovalRoom(inlineApproval))
+                                inlineApproval.decision.complete(accepted)
+                        }
                     }
                 }
                 }
@@ -827,7 +855,17 @@ class MainActivity : ComponentActivity() {
                 onDismiss={goalEditorThreadId=null},feedback=state,
                 onDeleteVersioned={snapshot->chat.deleteGoal(goalThread,snapshot){if(goalEditorThreadId==goalThread)goalEditorThreadId=null}})
         }
-        pending?.takeIf{it.threadId==composerThreadId||it.runId==otherApprovalOpened}?.let { action -> ActionApprovalDialog(action,action.reviewText?:actionSummary(action.call)) }
+        val dialogApproval=pendingActions.firstOrNull{it.presentationId==otherApprovalOpened&&!it.decision.isCompleted}
+            ?:pending?.takeIf{(tab!=0||chatScreenUnavailable)&&it.threadId==composerThreadId&&
+                it.branchId==currentBranchId&&!it.decision.isCompleted}
+        dialogApproval?.let { action->key(action.presentationId){
+            ActionApprovalDialog(action,action.reviewText?:actionSummary(action.call)){accepted->
+                if(chat.pendingActions.value.any{it===action}&&
+                    (action.presentationId==otherApprovalOpened||chat.isCurrentApprovalRoom(action)))
+                    action.decision.complete(accepted)
+                otherApprovalOpened=null
+            }
+        } }
     }
     @Composable private fun ColumnScope.VoiceSettingsScreen() {
         val installed by app.models.models.collectAsState()

@@ -25,11 +25,11 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import kotlin.math.roundToInt
 
-internal data class NativeWebsiteSlot(val frame:Rect,val visible:Rect)
+internal data class NativeChatSlot(val frame:Rect,val visible:Rect)
 
-/** Compose retains ownership of sensitive fields. The page supplies only their on-screen rectangle. */
+/** Compose retains ownership of credentials and action decisions. The page supplies only their on-screen rectangle. */
 @Composable
-internal fun NativeWebsiteOverlay(slot:NativeWebsiteSlot?,fitVisibleHeight:Boolean,content:@Composable ()->Unit) {
+internal fun NativeChatOverlay(slot:NativeChatSlot?,fitVisibleHeight:Boolean,content:@Composable ()->Unit) {
     Layout(content={
         Layout(content=content,modifier=Modifier.clipToBounds()){ children,_ ->
             val frame=slot?.frame ?: Rect.Zero
@@ -54,32 +54,33 @@ internal fun NativeWebsiteOverlay(slot:NativeWebsiteSlot?,fitVisibleHeight:Boole
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUnavailable:()->Unit,modifier:Modifier=Modifier,
-    onFirstReady:()->Unit={},websiteSlotId:String?=null,onWebsiteSlot:(NativeWebsiteSlot?)->Unit={}){
+    onFirstReady:()->Unit={},nativeSlotId:String?=null,onNativeSlot:(NativeChatSlot?)->Unit={}){
     val firstReady by rememberUpdatedState(onFirstReady)
     val command by rememberUpdatedState(onCommand)
     val unavailable by rememberUpdatedState(onUnavailable)
     val currentSnapshot by rememberUpdatedState(snapshot)
-    val receiveWebsiteSlot by rememberUpdatedState(onWebsiteSlot)
+    val receiveNativeSlot by rememberUpdatedState(onNativeSlot)
     var host by remember { mutableStateOf<WebView?>(null) }
     var ready by remember { mutableStateOf(false) }
     val photoScope=rememberCoroutineScope()
     val photoLoader=remember {StayPhotoLoader()}
     val photoRequests=remember {mutableSetOf<Triple<String,String,Int>>()}
-    LaunchedEffect(host,websiteSlotId,ready) {
+    LaunchedEffect(host,nativeSlotId,ready) {
         val view=host
-        val id=websiteSlotId
-        if(view==null||id==null||!ready){receiveWebsiteSlot(null);return@LaunchedEffect}
+        val id=nativeSlotId
+        if(view==null||id==null||!ready){receiveNativeSlot(null);return@LaunchedEffect}
         val quoted=JsonPrimitive(id).toString()
         val geometry="""(() => {
-            const node = document.querySelector('[data-native-website-slot]');
+            const node = Array.from(document.querySelectorAll('[data-native-website-slot], [data-native-approval-slot]'))
+                .find(item => (item.dataset.nativeWebsiteSlot ?? item.dataset.nativeApprovalSlot) === $quoted);
             const pane = node?.closest('.conversation');
-            if (!node || !pane || node.dataset.nativeWebsiteSlot !== $quoted) return null;
+            if (!pane || document.querySelector('dialog[open]')) return null;
             const r = node.getBoundingClientRect(), p = pane.getBoundingClientRect();
             return [r.left,r.top,r.right,r.bottom,Math.max(r.left,p.left),Math.max(r.top,p.top),
                 Math.min(r.right,p.right),Math.min(r.bottom,p.bottom),innerWidth];
         })()"""
         while(true) {
-            val bounds=kotlinx.coroutines.suspendCancellableCoroutine<NativeWebsiteSlot?> { continuation ->
+            val bounds=kotlinx.coroutines.suspendCancellableCoroutine<NativeChatSlot?> { continuation ->
                 view.evaluateJavascript(geometry){ raw ->
                     if(!continuation.isActive)return@evaluateJavascript
                     val slot=runCatching {
@@ -87,12 +88,14 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                         val scale=(view.width/a.getDouble(8)).toFloat()
                         fun rect(i:Int)=Rect((a.getDouble(i)*scale).toFloat(),(a.getDouble(i+1)*scale).toFloat(),
                             (a.getDouble(i+2)*scale).toFloat(),(a.getDouble(i+3)*scale).toFloat())
-                        NativeWebsiteSlot(rect(0),rect(4))
+                        val visible=rect(4)
+                        if(scale.isFinite()&&scale>0f&&visible.width>0f&&visible.height>0f)
+                            NativeChatSlot(rect(0),visible) else null
                     }.getOrNull()
                     continuation.resumeWith(Result.success(slot))
                 }
             }
-            receiveWebsiteSlot(bounds)
+            receiveNativeSlot(bounds)
             delay(40)
         }
     }

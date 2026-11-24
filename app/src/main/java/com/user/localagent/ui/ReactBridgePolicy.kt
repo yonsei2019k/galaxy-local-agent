@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -45,6 +45,7 @@ internal object ReactBridgePolicy {
             "steer"->setOf("runId","actionEpoch","text")
             "navigate"->setOf("panel")
             "saveOfficeProfile"->setOf("entries")
+            "setCharacter"->setOf("field","value")
             else->emptySet()
         }
         require(payload.keys==allowed)
@@ -58,6 +59,8 @@ internal object ReactBridgePolicy {
             else {require(p.isString);require(p.content.length<=if(key=="text")when(action){"steer"->4000;"collabSend"->8000;else->12000}else 128);require(!p.content.contains('\u0000'))}
         }
         if(action in setOf("steer","collabSend"))require(payload.getValue("text").jsonPrimitive.content.isNotBlank())
+        if(action=="setCharacter")require(CharacterPreference.accepts(
+            payload.getValue("field").jsonPrimitive.content,payload.getValue("value").jsonPrimitive.content))
         if(action=="renameThread")require(payload.getValue("title").jsonPrimitive.content.let{it.isNotBlank()&&it.none{c->c.isISOControl()}})
         if(action=="collabSend"){
             val id=payload.getValue("clientMessageId").jsonPrimitive.content
