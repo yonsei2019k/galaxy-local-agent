@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { parseStayComparison, StayComparison } from './StayComparison'
 import type { StayPhotoRequest } from './StayComparison'
+import { parseServiceResult, ServiceResultCard } from './ServiceResultCard'
 import './answer.css'
 
 const inlineToken = /(!?)\[([^\]\n]*)\]\(([^\s()]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*/g
@@ -86,6 +87,11 @@ function renderAnswer(text: string, onPrepareStay?: (text: string) => void, phot
       const closed = i < lines.length
       if (closed) i++
       const code = body.join('\n')
+      if (opening[2] === 'service-result') {
+        const data = closed ? parseServiceResult(code) : null
+        if (data) result.push(<ServiceResultCard key={key} result={data} />)
+        continue
+      }
       if (opening[2] === 'stays') {
         const data = closed ? parseStayComparison(code) : null
         result.push(data ? <StayComparison key={key} data={data} onPrepare={onPrepareStay} photo={firstStayBlock ? photo : undefined} /> :

@@ -64,3 +64,23 @@ test('shows a compact comparison and degrades invalid or incomplete results safe
   }
   expect(render(stayBlock([quote], '2026-11-31'))).not.toContain('숙소 상세')
 })
+
+test.each([
+  ['mail', 'sender', '보낸 사람'],
+  ['calendar', 'start', '시작'],
+  ['contact', 'phone', '전화번호'],
+  ['file', 'format', '형식'],
+])('renders observed %s card fields as inert text', (kind, key, label) => {
+  const json = JSON.stringify({ version: 1, kind, items: [{ title: '<img src=x>', [key]: 'fixture', action: 'send' }] })
+  const markup = render('```service-result\n' + json + '\n```')
+  expect(markup).toContain(label)
+  expect(markup).toContain('&lt;img src=x&gt;')
+  expect(markup).not.toMatch(/<img|<button|<a\s|>send</)
+})
+
+test('does not expose raw card text while streaming or for unknown templates', () => {
+  const unknown = JSON.stringify({ version: 1, kind: 'constructor', items: [{ title: 'private fixture' }] })
+  expect(render('요약\n```service-result\n' + unknown + '\n```')).not.toContain('private fixture')
+  expect(render('요약\n```service-result\n' + unknown)).toContain('<p>요약</p>')
+  expect(render('요약\n```service-result\n' + unknown)).not.toContain('private fixture')
+})
