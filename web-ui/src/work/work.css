@@ -1,0 +1,61 @@
+/* One-line work cards and their detail sheet. State is carried by icon shape + label + tone, never by color alone. */
+.work-card, .work-sheet-head {
+  --tone-bg: var(--color-bg);
+  --tone-fg: var(--color-muted);
+}
+.work-card--active { --tone-bg: var(--color-cobalt-soft); --tone-fg: var(--color-cobalt-text); }
+.work-card--waiting { --tone-bg: var(--color-sun-soft); --tone-fg: var(--color-sun-text); }
+.work-card--review, .work-card--failed { --tone-bg: var(--color-coral-soft); --tone-fg: var(--color-coral-text); }
+.work-card--complete { --tone-bg: var(--color-mint-soft); --tone-fg: var(--color-mint-text); }
+
+.work-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  justify-self: start;
+  width: min(100%, 37rem);
+  min-width: 0;
+  min-height: 56px;
+  max-height: 72px;
+  padding: 10px var(--space-3);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  text-align: start;
+}
+.work-card:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
+.work-card--review, .work-card--failed { border-color: var(--color-coral-soft); }
+.work-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; background: var(--tone-bg); color: var(--tone-fg); }
+.work-icon svg { width: 18px; height: 18px; }
+.work-text { display: grid; gap: 1px; min-width: 0; }
+.work-title, .work-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-title { font-size: var(--fs-body); font-weight: 700; line-height: 1.35; }
+.work-meta { color: var(--color-muted); font-size: var(--fs-small); line-height: 1.35; }
+.work-state { color: var(--tone-fg); font-weight: 700; }
+.work-chevron { color: var(--color-muted); font-size: 22px; line-height: 1; }
+.work-progress { position: absolute; inset: auto 0 0 0; height: 3px; background: var(--color-cobalt-soft); overflow: hidden; }
+.work-progress span { display: block; width: 28%; height: 100%; background: var(--color-cobalt); border-radius: var(--radius-pill); }
+@media (prefers-reduced-motion: no-preference) {
+  .work-progress span { animation: work-progress-slide 1.65s ease-in-out infinite alternate; }
+}
+@keyframes work-progress-slide { to { transform: translateX(255%); } }
+
+.work-cards { display: grid; gap: var(--space-2); min-width: 0; margin-top: var(--space-4); }
+
+.work-sheet-head { display: flex; align-items: center; gap: var(--space-3); }
+.work-sheet .work-sheet-title { margin: 0; color: var(--color-text); font-size: var(--fs-subtitle); font-weight: 700; overflow-wrap: anywhere; }
+.work-sheet .work-state { margin: 0; font-size: var(--fs-small); }
+.work-sheet-detail { margin: 0; color: var(--color-text); font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.work-steps, .work-evidence { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.work-steps li { padding: 2px 0 2px var(--space-3); border-inline-start: 2px solid var(--color-line); color: var(--color-text); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.work-steps li:last-child { border-color: var(--color-cobalt); }
+.work-evidence li { padding: var(--space-3); border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-bg); }
+.work-evidence .evidence-label { font-size: var(--fs-small); font-weight: 700; overflow-wrap: anywhere; }
+.work-evidence p { margin: 2px 0 0; color: var(--color-muted); font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.work-stop { min-height: 44px; border: 1px solid var(--color-cobalt); border-radius: var(--radius-control); background: var(--color-cobalt-soft); color: var(--color-cobalt-text); font: inherit; font-size: var(--fs-body); font-weight: 700; cursor: pointer; }
+.work-stop:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }

@@ -47,6 +47,10 @@ function button(label: string) {
 
 function click(label: string) { act(() => { button(label).click() }) }
 
+function openWork(taskId: string) {
+  act(() => { (host.querySelector(`#work-${taskId}`) as HTMLButtonElement).click() })
+}
+
 function input() {
   const textarea = host.querySelector('textarea')
   if (!textarea) throw new Error('Textarea missing')
@@ -98,7 +102,8 @@ describe('native conversation', () => {
     expect(host.querySelector('.main-column textarea')).toBeNull()
     expect(host.querySelector('.browser-login-status')?.textContent).toBe(active.browserLoginStatus)
     expect(host.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBeNull()
-    expect(host.querySelector('.task-step-line li')?.textContent).toBe('로그인 화면 확인')
+    openWork('run-a')
+    expect(host.querySelector('.work-sheet .work-steps li')?.textContent).toBe('로그인 화면 확인')
     snapshot({ ...active, inlineLogin: false, tasks: [{ ...active.tasks[0], phase: 'paused' }] })
     expect(input().value).toBe('기존 초안')
     expect(host.querySelector('[role="progressbar"]')).toBeNull()
@@ -132,8 +137,8 @@ describe('native conversation', () => {
       websiteCard: { id: 'run-a', runId: 'run-a', messageId: 'u', title: '한림에듀', status: '강의실 확인 중', steps: [], working: true } })
     snapshot(active)
     expect(host.querySelector('.current-work')?.textContent).toContain('한림에듀')
-    expect(host.querySelectorAll('main .task-card')).toHaveLength(1)
-    expect(host.querySelector('main [aria-label="웹 작업 진행 중"]')).not.toBeNull()
+    expect(host.querySelectorAll('main .work-card')).toHaveLength(1)
+    expect(host.querySelector('main .website-work-card [role="progressbar"]')).not.toBeNull()
     snapshot({ ...active, busy: false, activeRunId: null, websiteCard: { ...active.websiteCard!, working: false, status: '화면 전환 확인 필요' } })
     expect(host.querySelector('main .website-work-card')?.textContent).toContain('화면 전환 확인 필요')
     expect(host.querySelector('main [role="progressbar"]')).toBeNull()
@@ -169,7 +174,8 @@ describe('native conversation', () => {
         evidence: [{ id: 'web-read', label: '페이지 조회 결과 확인', detail: '' }] }] })
     expect(host.querySelector('.message--user + #work-run-a + .message--assistant')).not.toBeNull()
     expect(host.querySelector('#work-run-a [role="progressbar"]')).toBeNull()
-    expect(host.querySelector('#work-run-a .task-step-line')?.textContent).toBe('페이지 조회 결과 확인')
+    openWork('run-a')
+    expect(host.querySelector('.work-sheet .work-steps li')?.textContent).toBe('페이지 조회 결과 확인')
   })
 
   it('uses microphone actions scoped to this room and leaves recognized text unsent', () => {
@@ -378,10 +384,11 @@ describe('native conversation', () => {
     })
     expect(host.querySelectorAll('.message')).toHaveLength(1)
     expect(Array.from(host.querySelectorAll('.rich-answer > p'), node => node.textContent).join('\n')).toBe(text)
-    expect(host.querySelector('.task-evidence p')?.textContent).toBe(text)
-    expect(host.querySelector('.message img, .task-evidence img, .message b')).toBeNull()
+    openWork('run-a')
+    expect(host.querySelector('.work-evidence p')?.textContent).toBe(text)
+    expect(host.querySelector('.message img, .work-evidence img, .message b')).toBeNull()
     expect(postIntent(base, { action: 'copy', payload: { messageId: 'answer-a' } })).toBe(false)
-    expect(host.querySelector('.task-state')?.textContent).toBe('승인 필요')
+    expect(host.querySelector('.work-card .work-state')?.textContent).toBe('승인 필요')
     click('답변 메뉴')
     click('더 보기')
     expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'answer-a' } })
@@ -541,7 +548,8 @@ describe('native conversation', () => {
     snapshot({ ...base, messages: [...messages, { id: 'reply-a', role: 'user', text: 'Busan' }],
       tasks: [{ ...task, phase: 'clarification_record' }] })
     expect(host.querySelector('.reply-needed')).toBeNull()
-    expect(host.querySelector('.task-evidence summary')?.textContent).toContain('이전 작업 기록')
+    expect(host.querySelector('.work-card .work-state')?.textContent).toBe('질문 기록')
+    expect(host.querySelector('details.task-evidence')).toBeNull()
   })
 
   it('cancels a timed goal from its own chat card without stopping another run', () => {
@@ -549,7 +557,9 @@ describe('native conversation', () => {
     snapshot({ ...base, messages: [{ id: 'work-a', role: 'user', text: 'Continue tomorrow' }],
       tasks: [{ id: 'wait-a', messageId: 'work-a', phase: 'waiting_goal', label: '예약 시각에 이어가기',
         detail: '11월 25일 09:00 이후', canCancel: true }] })
-    expect(host.querySelector('.task-state')?.textContent).toBe('재개 대기')
+    expect(host.querySelector('.work-card .work-state')?.textContent).toBe('재개 대기')
+    expect([...host.querySelectorAll('button')].some(item => item.textContent === '예약 중지')).toBe(false)
+    openWork('wait-a')
     click('예약 중지')
     expect(requests().at(-1)).toMatchObject({ action: 'stopGoalWait', payload: { runId: 'wait-a' } })
   })
@@ -564,14 +574,15 @@ describe('native conversation', () => {
       messages: [{ id: 'question', role: 'assistant', text: question }], tasks: [paused, completed] })
     snapshot(staleNativeTarget)
     expect(host.querySelector('.rich-answer')?.textContent).toBe(question)
-    expect(host.querySelector('[aria-label="일시 정지된 작업"] .task-state')?.textContent).toBe('일시 정지')
-    expect(host.querySelector('.task-evidence:not([open]) summary')?.textContent).toContain('이전 작업 기록')
+    expect(host.querySelector('#work-run-a .work-state')?.textContent).toBe('일시 정지')
+    expect(host.querySelector('#work-run-b .work-state')?.textContent).toBe('응답 종료')
+    expect(host.querySelector('details.task-evidence')).toBeNull()
     expect(host.querySelector('.active-model, [aria-label="추가 지시"], [aria-label="현재 작업 중단"]')).toBeNull()
     expect(input().value).toBe('이전 질문의 답을 작성 중')
     expect(button('보내기').disabled).toBe(false)
     const approval = { ...paused, phase: 'waiting_approval' }
     snapshot({ ...staleNativeTarget, actionEpoch: 3, tasks: [approval, completed] })
-    expect(host.querySelector('.task-card--review .task-state')?.textContent).toBe('승인 필요')
+    expect(host.querySelector('.work-card--review .work-state')?.textContent).toBe('승인 필요')
     click('현재 작업 중단')
     expect(requests().at(-1)).toMatchObject({ action: 'stop', payload: { runId: 'run-a', actionEpoch: 3 } })
     expect(input().value).toBe('이전 질문의 답을 작성 중')

@@ -320,13 +320,10 @@ svg { width: 20px; height: 20px; flex: none; }
 .loading svg { width: 17px; height: 17px; }
 
 .transcript { width: min(100%, var(--content-width)); margin: 0 auto; padding: clamp(14px, 3vh, 28px) 0 18px; }
-.messages, .tasks { display: grid; gap: 14px; min-width: 0; }
-.tasks { gap: 12px; }
-.messages:not(:empty) + .tasks { margin-top: 24px; }
+.messages { display: grid; gap: 14px; min-width: 0; }
 .message { min-width: 0; }
 .message-label { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 13px; font-weight: 750; }
 .message-text { white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; font-size: var(--fs-body); line-height: 1.7; word-break: keep-all; }
-.message--assistant .message-text { max-width: 68ch; }
 .assistant-text { min-width: 0; max-width: 100%; background: transparent; color: var(--color-text); font-size: var(--fs-body); line-height: 1.6; }
 .assistant-text .rich-answer { line-height: 1.6; }
 .message--continued { margin-top: -6px; }
@@ -349,62 +346,18 @@ svg { width: 20px; height: 20px; flex: none; }
 .answer-menu-list button:hover, .answer-menu-list button:focus-visible { background: var(--color-cobalt-soft); }
 .message--user .message-actions { justify-content: flex-end; margin: 0 -5px -5px 0; }
 
-/* Task cards: state is carried by tile shape + label + color, never by color alone ---------------- */
+/* Work cards live in work/work.css; .task-card remains only as the empty slot the native website input overlays. */
 .messages > .task-card { align-self: flex-start; width: min(100%, 37rem); }
 .task-card {
-  --phase-color: var(--neutral);
-  --phase-bg: var(--neutral-soft);
-
   padding: 11px 13px;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px 18px 18px 18px;
   background: var(--surface);
 }
-.task-card--neutral { --phase-color: var(--neutral); --phase-bg: var(--neutral-soft); }
-.task-card--active { --phase-color: var(--accent); --phase-bg: var(--accent-soft); }
-.task-card--review { --phase-color: var(--review); --phase-bg: var(--review-soft); border-color: var(--review-ring); }
-.task-card--failed { --phase-color: var(--fail); --phase-bg: var(--fail-soft); }
-.task-card--complete { --phase-color: var(--complete); --phase-bg: var(--complete-soft); }
-.task-heading { display: flex; align-items: center; gap: 9px; overflow-wrap: anywhere; }
-.task-heading > div { min-width: 0; }
-.task-icon { position: relative; display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; background: var(--phase-bg); color: var(--phase-color); }
-.task-icon svg { width: 18px; height: 18px; }
-/* Settled outcomes are filled tiles. */
-.task-card--complete .task-icon, .task-card--failed .task-icon { background: var(--phase-color); color: var(--surface); }
-/* Waiting for the owner: an open ring around the tile, like a clasp left undone. */
-.task-card--review .task-icon { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--review-ring); }
-/* Neutral / stopped: outline only. */
-.task-card--neutral .task-icon { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-strong); }
-/* Running: a ring that turns only while the host reports "running" (task-card--active). */
-.task-card--active .task-icon::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: 12px;
-  border: 2px solid transparent;
-  border-top-color: var(--accent);
-}
-.task-heading h2 { margin: 2px 0 0; font-size: var(--fs-body); font-weight: 720; line-height: 1.4; }
-.task-state { margin: 0; color: var(--phase-color); font-size: 12px; line-height: 1.3; font-weight: 750; letter-spacing: .01em; }
-.task-detail { color: var(--muted); font-size: var(--fs-small); line-height: 1.55; margin: 6px 0 0; }
-.task-detail, .task-evidence p { white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
-.task-evidence { margin-top: 12px; border-top: 1px solid var(--line); }
-.task-evidence summary { display: flex; align-items: center; gap: 7px; width: 100%; min-height: var(--tap); color: var(--secondary); cursor: pointer; list-style: none; font-size: var(--fs-small); font-weight: 670; }
-.task-evidence summary::-webkit-details-marker { display: none; }
-.task-evidence summary > svg { width: 16px; height: 16px; }
-.task-evidence .details-chevron { margin-inline-start: auto; }
-.task-evidence[open] .details-chevron { transform: rotate(180deg); }
-.task-evidence ul { display: grid; gap: 8px; margin: 0; padding: 0 0 2px; list-style: none; }
-/* Evidence rows read like receipts: label, then the host's own words. */
-.task-evidence li { padding: 10px 12px; border-radius: 10px; background: var(--surface-soft); border: 1px solid var(--line); }
-.evidence-label { overflow-wrap: anywhere; font-size: var(--fs-small); font-weight: 700; }
-.task-evidence p { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-small); line-height: 1.5; }
 .text-button { display: inline-flex; align-items: center; gap: 6px; min-height: var(--tap); padding: 4px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--accent); font-size: var(--fs-small); font-weight: 700; }
 .text-button:disabled { opacity: .5; }
 .text-button svg { width: 16px; height: 16px; }
-.task-action { margin: 5px 0 -4px -9px; }
-.task-card--review .task-action { color: var(--review); }
 .scroll-latest { position: absolute; inset: auto 50% 10px auto; transform: translateX(50%); border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); box-shadow: 0 4px 14px var(--shadow); }
 
 /* Composer ------------------------------------------------------------------------------------------ */
@@ -426,15 +379,6 @@ svg { width: 20px; height: 20px; flex: none; }
 .editor textarea { position: absolute; inset: 0; height: 100%; resize: none; margin: 0; border: 0; outline: 0; background: transparent; }
 .editor textarea::placeholder { color: var(--muted); opacity: 1; }
 .composer:has(textarea[aria-invalid="true"]) { border-color: var(--fail); }
-.task-progress { height: 4px; margin: 10px 0; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
-.task-progress span { display: block; height: 100%; width: 28%; background: var(--accent); border-radius: inherit; }
-@media (prefers-reduced-motion: no-preference) {
-  .task-progress span { animation: task-progress-slide 1.65s ease-in-out infinite alternate; }
-}
-@keyframes task-progress-slide { to { transform: translateX(255%); } }
-.task-step-line { padding: 0; margin: 10px 0; list-style: none; color: var(--muted); font-size: var(--fs-small); }
-.task-step-line li { padding: 2px 0 4px 12px; border-inline-start: 2px solid var(--line); }
-.task-step-line li:last-child { border-color: var(--accent); color: var(--ink); }
 .browser-login-status { padding: 8px var(--pad); color: var(--muted); font-size: var(--fs-small); }
 .composer-tools { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 0 6px 5px; }
 .composer-actions { display: flex; align-items: center; gap: 6px; }
@@ -538,8 +482,6 @@ svg { width: 20px; height: 20px; flex: none; }
 
 @media (prefers-reduced-motion: no-preference) {
   button, select { transition: background-color 150ms, border-color 150ms, color 150ms, box-shadow 150ms; }
-  .task-evidence .details-chevron { transition: transform 160ms; }
-  .task-card--active .task-icon::after { animation: ziphap-clasp-turn 1.1s linear infinite; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* No motion: a still, full ring still reads as "running" next to the 진행 중 label. */
@@ -681,7 +623,6 @@ svg { width: 20px; height: 20px; flex: none; }
 }
 .current-work span { flex: 1; overflow: hidden; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
 .current-work:hover { background: var(--accent-soft); }
-.website-work-card:not(.task-card--active) .task-icon { background: var(--surface-soft); }
 .reply-needed {
   max-width: var(--content-max, 46rem);
   margin-inline: auto;

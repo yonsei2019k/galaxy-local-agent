@@ -1,33 +1,15 @@
 import { Fragment, useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
-import type { IconName } from './Icon'
 import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { isLiveTaskPhase } from './composer'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
+import { WorkCard } from './work/WorkCard'
+import { WorkSheet } from './work/WorkSheet'
+import { taskPhase } from './work/workPresentation'
 
-const phasePresentation: Record<string, { title: string; tone: string; icon: IconName }> = {
-  queued: { title: '대기 중', tone: 'neutral', icon: 'clock' },
-  running: { title: '진행 중', tone: 'active', icon: 'activity' },
-  waiting_resource: { title: '작업 순서 기다리는 중', tone: 'neutral', icon: 'clock' },
-  approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
-  waiting_approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
-  paused: { title: '일시 정지', tone: 'review', icon: 'pause' },
-  waiting_goal: { title: '재개 대기', tone: 'neutral', icon: 'clock' },
-  waiting_input: { title: '답변 대기', tone: 'review', icon: 'chat' },
-  clarification_record: { title: '질문 기록', tone: 'neutral', icon: 'chat' },
-  failed: { title: '실패', tone: 'failed', icon: 'alert' },
-  completed: { title: '응답 종료', tone: 'complete', icon: 'check' },
-  cancelled: { title: '중단됨', tone: 'neutral', icon: 'stop' },
-  interrupted: { title: '재시작으로 중단됨', tone: 'neutral', icon: 'stop' },
-}
-
-const unknownPhase = { title: '작업 상태', tone: 'neutral', icon: 'clock' } as const
-
-export function taskPhase(task: Task) {
-  return Object.hasOwn(phasePresentation, task.phase) ? phasePresentation[task.phase] : unknownPhase
-}
+export { taskPhase }
 
 export function BrandMark({ className }: { className?: string }) {
   return <span className={`brand-mark ${className ?? ''}`} aria-hidden="true" />
@@ -120,9 +102,10 @@ function AnswerMenu({ messageId, enabled, onCopy, onMessageMenu }: {
   )
 }
 
-function Message({ message, previous, previews, enabled, onCopy, onFiles, onMessageMenu }: {
+function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu }: {
   message: ConversationMessage
   previous?: ConversationMessage
+  previousHasCards: boolean
   previews: ResultPreview[]
   enabled: boolean
   onCopy(messageId: string): void
@@ -133,7 +116,7 @@ function Message({ message, previous, previews, enabled, onCopy, onFiles, onMess
   const user = message.role === 'user'
   const assistant = message.role === 'assistant'
   const author = assistant ? message.authorLabel ?? '집순이' : undefined
-  const startsGroup = assistant && !(previous?.role === 'assistant' && (previous.authorLabel ?? '집순이') === author)
+  const startsGroup = assistant && (previousHasCards || !(previous?.role === 'assistant' && (previous.authorLabel ?? '집순이') === author))
   return (
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
@@ -168,37 +151,6 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
   </figure>
 }
 
-function TaskCard({ task, stopWaiting }: { task: Task; stopWaiting?: (runId: string) => void }) {
-  const phase = taskPhase(task)
-  const heading = useId()
-  const recent = [...new Map((task.evidence ?? [])
-    .filter(item => item.label && !/^(모델 추론|후속 조건 검증 기록|답변 구간 저장 확인)/.test(item.label))
-    .map(item => [item.label, item])).values()].slice(-3)
-  return (
-    <article id={`work-${task.id}`} className={`task-card task-card--${phase.tone}`} aria-labelledby={heading}>
-      <div className="task-heading">
-        <span className="task-icon"><Icon name={phase.icon} /></span>
-        <div><p className="task-state">{phase.title}</p><h2 id={heading}>{task.label || '작업'}</h2></div>
-      </div>
-      {task.detail && <p className="task-detail" dir="auto">{task.detail}</p>}
-      {task.phase === 'waiting_goal' && task.canCancel && stopWaiting &&
-        <button type="button" className="text-button" onClick={() => stopWaiting(task.id)}>예약 중지</button>}
-      {task.phase === 'running' && <div className="task-progress" role="progressbar" aria-label="작업 진행 중"><span /></div>}
-      {recent.length > 0 && <ol className="task-step-line" aria-label="최근 확인된 작업 단계">
-        {recent.map(item => <li key={item.id}>{item.label}</li>)}
-      </ol>}
-      {task.evidence && task.evidence.length > 0 && (
-        <details className="task-evidence">
-          <summary><Icon name="file" /> 작업 내역 <Icon name="down" className="details-chevron" /></summary>
-          <ul>{task.evidence.map(item => (
-            <li key={item.id}><div className="evidence-label">{item.label}</div>{item.detail && <p dir="auto">{item.detail}</p>}</li>
-          ))}</ul>
-        </details>
-      )}
-    </article>
-  )
-}
-
 export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
@@ -216,36 +168,29 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const view = useRef<HTMLElement>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
+  const [openWorkId, setOpenWorkId] = useState<string | null>(null)
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
   const website = snapshot?.websiteCard
   const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
-  const pausedTasks = tasks.filter(task => task.phase === 'paused')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
-  const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'waiting_input' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
   const websiteTask = snapshot?.tasks.find(task => task.id === website?.runId)
   const empty = messages.length === 0 && tasks.length === 0 && !website
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
   const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
   const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
+  const websiteWork: Task | null = website && !website.inputHeight ? {
+    id: website.runId ?? `website-${website.id}`,
+    phase: website.working ? 'running' : websiteTask && !isLiveTaskPhase(websiteTask.phase) ? websiteTask.phase : 'website',
+    label: website.title, detail: website.status, canCancel: websiteTask?.canCancel ?? false, evidence: websiteTask?.evidence,
+  } : null
   const websiteCard = website && (website.inputHeight ?
     <article className="task-card website-input-slot" data-native-website-slot={website.id}
       style={{height:website.inputHeight}} aria-label={website.title} /> :
-    <article id="website-work" className={`task-card website-work-card${website.working ? ' task-card--active' : ''}`} aria-label={website.title}>
-      <div className="task-heading"><span className="task-icon"><Icon name={website.working ? 'activity' : 'compass'} /></span><h2>{website.title}</h2></div>
-      <p className="task-detail" role="status">{website.status}</p>
-      {website.working && <div className="task-progress" role="progressbar" aria-label="웹 작업 진행 중"><span /></div>}
-      {website.steps.filter(step => step !== website.status).slice(-2).map(step => <p className="task-detail" key={step}>{step}</p>)}
-      {websiteTask?.phase === 'waiting_goal' && websiteTask.canCancel && enabled &&
-        <button type="button" className="text-button" onClick={() => onStopGoalWait(websiteTask.id)}>예약 중지</button>}
-      {!!websiteTask?.evidence?.length && <details className="task-evidence">
-        <summary>확인한 내용 <Icon name="down" className="details-chevron" /></summary>
-        <ul>{websiteTask.evidence.filter(item => item.label || item.detail).map(item => <li key={item.id}>
-          <div className="evidence-label">{item.label}</div>{item.detail && <p>{item.detail}</p>}
-        </li>)}</ul>
-      </details>}
-    </article>)
+    websiteWork && <section id="website-work" className="website-work-card" aria-label={website.title}>
+      <WorkCard task={websiteWork} onOpen={setOpenWorkId} />
+    </section>)
   const cardsByMessage = new Map<string, Task[]>()
   for (const task of tasks) {
     if (!task.messageId || !visibleUserIds.has(task.messageId) ||
@@ -255,9 +200,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
     cardsByMessage.set(task.messageId, peers)
   }
   const placed = new Set([...cardsByMessage.values()].flatMap(cards => cards.map(card => card.id)))
-  const floatingLive = liveTasks.filter(task => !placed.has(task.id))
-  const floatingPrevious = previousTasks.filter(task => !placed.has(task.id))
-  const floatingPaused = pausedTasks.filter(task => !placed.has(task.id))
+  const unplacedTasks = tasks.filter(task => !placed.has(task.id) && task.phase !== 'waiting_input')
+  const sheetTask = openWorkId === null ? null : websiteWork?.id === openWorkId ? websiteWork : tasks.find(task => task.id === openWorkId) ?? null
   const loading = connected && !snapshot?.ready
   const staff = snapshot?.singleConversation ? undefined : snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
 
@@ -308,34 +252,29 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
-            {floatingPrevious.length > 0 && <details className="task-evidence">
-              <summary><Icon name="history" /> 이전 작업 기록 <Icon name="down" className="details-chevron" /></summary>
-              <div className="tasks">
-                {floatingPrevious.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
-              </div>
-            </details>}
-            {floatingPaused.length > 0 && <section className="tasks" aria-label="일시 정지된 작업">
-              {floatingPaused.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
-            </section>}
             <div className="messages" role="log" aria-label="메시지">
               {messages.map((item, index) => <Fragment key={item.id}>
-                <Message message={item} previous={messages[index - 1]} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
+                <Message message={item} previous={messages[index - 1]}
+                  previousHasCards={index > 0 && (!!cardsByMessage.get(messages[index - 1].id)?.length || websiteAnchor === messages[index - 1].id)}
+                  previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
                   enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
-                {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
+                {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={setOpenWorkId} />)}
                 {websiteAnchor === item.id && websiteCard}
               </Fragment>)}
               {!websiteAnchor && websiteCard}
             </div>
+            {unplacedTasks.length > 0 && <section className="work-cards" aria-label="작업">
+              {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={setOpenWorkId} />)}
+            </section>}
             {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
               calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
-            {floatingLive.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
-              {floatingLive.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
-            </section>}
           </div>
         )}
       </main>
+      <WorkSheet task={sheetTask} enabled={enabled} steps={sheetTask && sheetTask === websiteWork ? website?.steps : undefined}
+        onClose={() => setOpenWorkId(null)} onStopGoalWait={onStopGoalWait} />
       {scrolledUp && !empty && (
         <button type="button" className="icon-button scroll-latest" aria-label="최근 메시지로 이동" title="최근 메시지로 이동" onClick={scrollToEnd}>
           <Icon name="arrowDown" />
