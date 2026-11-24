@@ -4,6 +4,7 @@ function (request) {
   const ownerDocument = document;
   const selector = 'a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=option],[onclick],[contenteditable=true]';
   const maxElements = 120;
+  const maxScanned = 4096;
   const maxText = 12000;
   const fail = error => ({error});
   const textOf = e => (e.getAttribute('aria-label') ||
@@ -48,6 +49,9 @@ function (request) {
         (!node.target || node.target === '_self') && (!item.role || item.role === 'link')) {
       item.ruleHref = node.href;
     }
+    const row = node.closest('tr,[role=row]');
+    const nearby = (row?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 144);
+    if (nearby) item.nearby = nearby;
     if (tag === 'select') item.options = options.map(o => o.text.trim().slice(0, 60));
     // The host receives only eligible link destinations and keeps them out of the model view.
     const binding = JSON.stringify([item, node.href, node.target, node.type, node.formAction, node.formMethod,
@@ -65,12 +69,34 @@ function (request) {
   };
 
   const collect = () => {
-    const controls = [];
-    for (const node of document.querySelectorAll(selector)) {
-      if (visible(node)) controls.push(describe(node, 'e' + (controls.length + 1)));
-      if (controls.length === maxElements) break;
+    const content = [];
+    const surrounding = [];
+    const nodes = document.querySelectorAll(selector);
+    let omitted = nodes.length > maxScanned;
+    for (let i = 0; i < Math.min(nodes.length, maxScanned); i++) {
+      const node = nodes[i];
+      if (!visible(node)) continue;
+      const main = node.closest('main,[role=main],article,tbody,[role=row]');
+      const bucket = main ? content : surrounding;
+      if (bucket.length < maxElements) bucket.push(node);
+      else omitted = true;
     }
-    return {page: page(), controls};
+    const ordered = content.concat(surrounding);
+    const controls = ordered.slice(0, maxElements).map((node, i) => describe(node, 'e' + (i + 1)));
+    const scroll = document.scrollingElement;
+    const viewport = ownerDocument.defaultView.innerHeight;
+    const navigation = {
+      canScrollUp: !!scroll && scroll.scrollTop > 2,
+      canScrollDown: !!scroll && scroll.scrollHeight - scroll.scrollTop - viewport > 2,
+      controlsIncomplete: omitted || ordered.length > maxElements,
+    };
+    return {page: page(), controls, navigation};
+  };
+
+  const observationControl = ({node, item}) => {
+    const rect = node.getBoundingClientRect();
+    return {...item,
+      ...(rect.top >= ownerDocument.defaultView.innerHeight ? {position: 'below_viewport'} : {})};
   };
 
   const sameControl = (a, b) => a.node === b.node && a.form === b.form && a.binding === b.binding &&
@@ -132,8 +158,9 @@ function (request) {
           return {url: location.href, loginRequired: true};
         }
         observed = {id: input.snapshotId, ...collect()};
-        return {...observed.page, elements: observed.controls.map(e => e.item),
-          truncated: observed.page.truncated || observed.controls.length === maxElements,
+        return {...observed.page, elements: observed.controls.map(observationControl),
+          navigation: observed.navigation,
+          truncated: observed.page.truncated || observed.navigation.controlsIncomplete,
           ...(input.observeMedia ? {media: mediaEvidence()} : {})};
       }
       const expected = observed;

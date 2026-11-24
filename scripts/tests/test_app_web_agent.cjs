@@ -71,6 +71,28 @@ function fixture() {
   return {context, effects, button, invoke, Input, makeDocument};
 }
 
+test('observes content controls ahead of noisy menus and binds the row to its action', () => {
+  const {context, effects, invoke, Input} = fixture();
+  const nav = Array.from({length: 140}, (_, i) => new Input('Section ' + i));
+  const next = new Input('Continue');
+  const row = {innerText: 'Process fixture A     29.3%'};
+  const content = {};
+  next.closest = selector => selector === 'tr,[role=row]' ? row : selector.startsWith('main') ? content : null;
+  next.getBoundingClientRect = () => ({width: 80, height: 28, left: 10, right: 90, top: 670, bottom: 698});
+  context.document.scrollingElement = {scrollTop: 20, scrollHeight: 1600};
+  context.document.nodes = [...nav, next];
+  const page = invoke({action:'observe'});
+  assert.equal(page.elements.length, 120);
+  assert.equal(page.elements[0].label, 'Continue');
+  assert.equal(page.elements[0].nearby, 'Process fixture A 29.3%');
+  assert.equal(page.elements[0].position, 'below_viewport');
+  assert.equal(page.navigation.canScrollDown, true);
+  assert.equal(page.navigation.controlsIncomplete, true);
+  row.innerText = 'Different target B 0%';
+  assert.equal(invoke({action:'click'}).error, 'SNAPSHOT_STALE');
+  assert.deepEqual(effects, []);
+});
+
 test('reads the timeline of a static muted player without collecting audio or media URLs', () => {
   const {context, effects, invoke, Input} = fixture();
   const media = new Input('Static lesson','VIDEO');

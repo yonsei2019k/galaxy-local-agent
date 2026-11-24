@@ -463,7 +463,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus")
+        listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
             .forEach{key->result[key]?.let{put(key,it)}}
         put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))
@@ -474,6 +474,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 "owner-only-field".takeIf{e["sensitive"]?.jsonPrimitive?.booleanOrNull==true},
                 "disabled".takeIf{e["disabled"]?.jsonPrimitive?.booleanOrNull==true},
                 "recoverable-link".takeIf{e.string("ruleHref").isNotBlank()},
+                "below-viewport".takeIf{e.string("position")=="below_viewport"},
+                e.string("nearby").take(144).takeIf{it.isNotBlank()}?.let{"row:$it"},
                 e["options"]?.jsonArray?.joinToString("/"){o->o.jsonPrimitive.content}?.let{"options:"+it.take(300)})
             JsonPrimitive("${e.getValue("ref").jsonPrimitive.content}|${e["tag"]?.jsonPrimitive?.content}|${e["label"]?.jsonPrimitive?.content.orEmpty()}"+
                 if(flags.isEmpty())"" else "|"+flags.joinToString(","))
