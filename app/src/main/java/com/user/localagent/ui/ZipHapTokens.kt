@@ -16,7 +16,7 @@ object ZipHapTokens {
     val Divider = Color(0xFFEEF0F4)
     val Text = Color(0xFF171B33)
     val TextSub = Color(0xFF5B6178)
-    val TextFaint = Color(0xFF7B8199)
+    val TextFaint = Color(0xFF676D85)
     val Muted = Color(0xFF5E6480)
     val Line = Color(0xFFE3E6EF)
     val Cobalt = Color(0xFF3355F0)

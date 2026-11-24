@@ -103,7 +103,7 @@ class GenDesignTokensTest(unittest.TestCase):
         for group in ("shadow", "font", "fw", "lh", "ls", "control", "layout"):
             self.assertIn(group, tokens)
 
-    def test_text_sub_passes_aa_on_surface_and_bg(self):
+    def test_text_sub_and_faint_pass_aa_on_surface_and_bg(self):
         def lum(h):
             c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
             c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
@@ -116,7 +116,7 @@ class GenDesignTokensTest(unittest.TestCase):
         colors = json.loads(gen.SOURCE.read_text(encoding="utf-8"))["color"]
         for bg in ("surface", "bg", "surface-sunken"):
             self.assertGreaterEqual(ratio(colors["text-sub"], colors[bg]), 4.5)
-            self.assertGreaterEqual(ratio(colors["text-faint"], colors[bg]), 3.0)
+            self.assertGreaterEqual(ratio(colors["text-faint"], colors[bg]), 4.5)
 
 
 class CheckModeTest(unittest.TestCase):
