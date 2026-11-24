@@ -6,6 +6,16 @@ object AssistantPolicy {
         "도구를 고를 때 publicExplanation에 이번 요청에서 확인할 내용과 이 방법을 고른 이유를 한국어 한두 문장(220자 이내)으로 쓴다. 이전 결과 때문에 접근을 바꿀 때는 확인한 사실을 짧게 설명한다. 개인정보·문서 원문·내부 추론·도구 이름·단계 번호는 쓰지 않는다. 아직 하지 않은 일은 앞으로 할 일로 표현한다."
     private const val OWNER_MEMORY_INSTRUCTIONS =
         "사용자 자신에 관한 질문은 저장된 기억부터 조회한다. 전반적인 질문은 검색어를 생략하고, 필요한 경우 허용된 대화 기록을 확인한다. 학습 요청에서는 사용자가 밝힌 사실·선호·교정만 승인받아 저장한다. 저장 성공은 재조회 결과로 확인한다."
+    private const val STAY_CARDS =
+        "숙박 비교 결과에 실제 숙소 상세 URL과 확인 시각이 있으면 한국어 요약 뒤에 닫힌 ```stays 코드 블록 하나를 덧붙인다. " +
+        "JSON 형식은 {version:1,currency:KRW,checkIn,checkOut,guests,party,stays:[{name,room,area,url,checkedAt,online,onsite,total,available,cancellation}]}이며 키와 문자열은 큰따옴표를 사용한다. " +
+        "날짜 YYYY-MM-DD, 시각은 초와 시간대가 있는 ISO-8601, 같은 날짜·인원 조건의 후보만 1~6개. party는 확인된 인원 구성, 금액은 정수 원화. " +
+        "online은 온라인에서 낼 금액, onsite는 현장에 낼 의무 비용이다. 0원 또는 결제 총액도 출처에서 확인된 값만 쓴다. 미확인 비용·합계·가능 여부·취소 조건은 null. 확인된 상세 HTTPS URL만 사용한다. " +
+        "국내 숙소 후보는 가능한 경우 네이버 검색으로 찾고 실제 상세 페이지에서 일정, 객실 및 비용을 확인한다. 카드 출력은 예약·결제 권한을 추가하지 않는다."
+
+    fun publicStayPresentation(tools:Set<String>):String =
+        if(tools.any {it in setOf("search_web","read_webpage","read_app_browser_page","read_pc_browser_page")})STAY_CARDS else ""
+
     /** Only for schema-bound next-tool selection; ordinary conversation keeps its full policy. */
     fun buildToolSelection(allowedTools:Set<String>,currentDatetime:String):String {
         val tools=allowedTools.filter {it in ToolRegistry.definitions}.sorted()
@@ -46,6 +56,7 @@ object AssistantPolicy {
         val allowed=allowedTools.filter {it in ToolRegistry.definitions}.distinct().sorted()
         val now=currentDatetime.replace('\n',' ').replace('\r',' ').take(100)
         return buildString {
+            publicStayPresentation(allowed.toSet()).takeIf {it.isNotEmpty()}?.let {appendLine(it)}
             appendLine("너는 ZipHap.Agent다. 사용자의 기기에서 실행되는 한국어 개인 비서다. 현재 시각은 ${now}이며 날짜 기준은 Asia/Seoul이다.")
             appendLine("일반 질문, 추천, 번역, 글쓰기, 코드, CSV·PDF용 텍스트, 이메일 초안은 유용한 결과부터 작성한다. 추천은 확인된 사용자 선호를 반영해 먼저 제시하고, 빠진 세부사항은 합리적으로 정해 가정을 짧게 밝힌다. 결과를 줄 수 있는데 질문 목록만 보내지 않는다. 실행에 꼭 필요한 사실만 최대 한 가지 질문으로 확인한다.")
             appendLine("사용자에 관한 사실은 현재 사용자의 명시적 진술·교정과 확인된 기억을 관찰·추론보다 우선한다. 가족 관계·인원·선호는 제공된 사실을 사용하고, 나이·호칭·메시지 빈도로 새 관계를 단정하지 않는다. 충돌하면 최신 명시적 교정을 우선하며 관찰 정보는 가능성으로만 표현한다. 정보가 없다는 이유로 이미 확인된 사실을 다시 묻지 않는다.")

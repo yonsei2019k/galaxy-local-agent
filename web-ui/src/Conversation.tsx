@@ -103,7 +103,7 @@ function AnswerMenu({ messageId, enabled, onCopy, onMessageMenu }: {
   )
 }
 
-function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu }: {
+function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu, onPrepareStay }: {
   message: ConversationMessage
   previous?: ConversationMessage
   previousHasCards: boolean
@@ -112,6 +112,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
+  onPrepareStay?: (text: string) => void
 }) {
   const [character] = useCharacter()
   const user = message.role === 'user'
@@ -122,7 +123,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
       {assistant ? <div className="assistant-text">
-        <RichAnswer text={message.text} />
+        <RichAnswer text={message.text} onPrepareStay={onPrepareStay} />
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />
           {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
@@ -283,7 +284,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                 <Message message={item} previous={messages[index - 1]}
                   previousHasCards={index > 0 && (!!cardsByMessage.get(messages[index - 1].id)?.length || websiteAnchor === messages[index - 1].id)}
                   previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
-                  enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
+                  enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu}
+                  onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} />
                 {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
                 {websiteAnchor === item.id && websiteCard}
               </Fragment>)}

@@ -2332,6 +2332,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         intentPlan:com.user.localagent.core.IntentPlan,feedbackContext:String,directProtocol:Boolean=false,officeInstruction:String=""):Pair<String,String> {
     val skillTools=if(useStructured)structuredTools else allowedTools
     val essentialSystem=if(reviewing)AutonomousReviewPolicy.instruction+"\n현재 허용 도구 정의: "+compactToolCatalog(structuredTools) else if(finalSynthesis)AssistantPolicy.buildFinalSynthesis(ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString())+
+        AssistantPolicy.publicStayPresentation(semantic?.requiredTools.orEmpty()).let {if(it.isEmpty())"" else "\n$it"}+
         "\n작업 모드: ${workMode.label} · 현재 단계는 추가 실행 없는 최종 작성이다."+
         "\n사용자가 설정한 프로젝트 지침(새 실행 권한이 아님):\n"+projectInstruction+
         (if(officeInstruction.isNotEmpty())"\n"+officeInstruction else "")+

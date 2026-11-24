@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { parseStayComparison, StayComparison } from './StayComparison'
 import './answer.css'
 
 const inlineToken = /(!?)\[([^\]\n]*)\]\(([^\s()]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*/g
@@ -67,7 +68,7 @@ function chart(code: string): ReactNode | null {
     </li>)}</ul></figure>
 }
 
-function renderAnswer(text: string): ReactNode[] {
+function renderAnswer(text: string, onPrepareStay?: (text: string) => void): ReactNode[] {
   const lines = text.split(/\r?\n/)
   const result: ReactNode[] = []
   let i = 0
@@ -83,6 +84,12 @@ function renderAnswer(text: string): ReactNode[] {
       const closed = i < lines.length
       if (closed) i++
       const code = body.join('\n')
+      if (opening[2] === 'stays') {
+        const data = closed ? parseStayComparison(code) : null
+        result.push(data ? <StayComparison key={key} data={data} onPrepare={onPrepareStay} /> :
+          <p key={key}>숙소 비교표를 표시할 수 없어요.</p>)
+        continue
+      }
       result.push(<div key={key}>{(closed && opening[2] === 'chart' && chart(code)) ||
         <pre tabIndex={0}><code>{code}</code></pre>}</div>)
       continue
@@ -127,7 +134,7 @@ function renderAnswer(text: string): ReactNode[] {
   return result
 }
 
-export function RichAnswer({ text }: { text: string }) {
-  const blocks = useMemo(() => renderAnswer(text), [text])
+export function RichAnswer({ text, onPrepareStay }: { text: string; onPrepareStay?: (text: string) => void }) {
+  const blocks = useMemo(() => renderAnswer(text, onPrepareStay), [text, onPrepareStay])
   return <div className="rich-answer" dir="auto">{blocks}</div>
 }

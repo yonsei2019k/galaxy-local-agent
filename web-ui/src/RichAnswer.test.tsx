@@ -30,3 +30,37 @@ test('makes a chart only from a complete, valid label/value block', () => {
   expect(render(input + '\n```')).toContain('<meter min="0" max="4" value="4"')
   expect(render(input.replace('4', 'NaN') + '\n```')).not.toContain('<meter')
 })
+
+const quote = {
+  name: '해안가 시험 숙소', room: '바다 전망 객실', area: '테스트 지역',
+  url: 'https://example.org/stay/a', checkedAt: '2026-11-24T20:10:00+09:00',
+  online: 179000, onsite: 40000, total: 219000, available: true, cancellation: '입실 3일 전부터 일부 환불'
+}
+const stayBlock = (stays: object[], checkIn = '2026-12-01') =>
+  '```stays\n' + JSON.stringify({ version: 1, currency: 'KRW', checkIn, checkOut: '2026-12-02',
+    guests: 4, party: '성인 2명, 아동 2명', stays }) + '\n```'
+
+test('compares a shared party with only arithmetically complete totals ranked first', () => {
+  const html = render(stayBlock([
+    { ...quote, name: '요금 미확인', online: 80000, onsite: null, total: 80000 },
+    quote, { ...quote, name: '총액이 더 낮은 곳', online: 101000, onsite: 10000, total: 111000 }
+  ]))
+  expect(html).toContain('1박 · 4명 (성인 2명, 아동 2명)')
+  expect(html).toContain('총액 미확인')
+  expect(html).toContain('현장 미확인')
+  expect(html).toContain('219,000원')
+  expect(html.indexOf('총액이 더 낮은 곳')).toBeLessThan(html.indexOf('해안가 시험 숙소'))
+  expect(html.indexOf('해안가 시험 숙소')).toBeLessThan(html.indexOf('요금 미확인'))
+})
+
+test('shows a compact comparison and degrades invalid or incomplete results safely', () => {
+  const html = render(stayBlock(Array.from({ length: 4 }, (_, i) => ({ ...quote, name: '시험 숙소 ' + i }))))
+  expect(html).toContain('후보 4곳 모두 보기')
+  expect(html).not.toContain('시험 숙소 3')
+  for (const url of ['javascript:alert(1)', 'https://user:secret@example.org/a', 'https://127.0.0.1/a']) {
+    const invalid = render(stayBlock([{ ...quote, url }]))
+    expect(invalid).toContain('숙소 비교표를 표시할 수 없어요')
+    expect(invalid).not.toContain('href=')
+  }
+  expect(render(stayBlock([quote], '2026-11-31'))).not.toContain('숙소 상세')
+})

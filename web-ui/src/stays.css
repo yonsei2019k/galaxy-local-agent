@@ -1,0 +1,24 @@
+.stay-comparison { margin-block: var(--space-2); border: 1px solid var(--color-line); border-radius: var(--radius-card); overflow: hidden; background: var(--color-surface); }
+.stay-header { padding: var(--space-3) var(--space-4); background: var(--color-cobalt-soft); border-bottom: 1px solid var(--color-line); }
+.rich-answer .stay-header h3, .rich-answer .stay-name strong { margin: 0; color: var(--color-text); font-size: var(--fs-body); line-height: 1.4; }
+.rich-answer .stay-comparison p { margin: 3px 0 0; }
+.stay-header p, .stay-name span, .stay-facts, .stay-source, .stay-cancellation, .stay-price span { color: var(--color-muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.rich-answer .stay-list { list-style: none; margin: 0; padding: 0; }
+.rich-answer .stay-list li { margin: 0; padding: var(--space-3) var(--space-4); }
+.stay-list li + li { border-top: 1px solid var(--color-line); }
+.stay-top { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); align-items: start; justify-content: space-between; }
+.stay-name { display: grid; gap: 3px; flex: 1 1 118px; min-width: 0; overflow-wrap: anywhere; }
+.stay-price { display: grid; gap: 2px; text-align: end; margin-inline-start: auto; }
+.stay-price strong { color: var(--color-cobalt-text); font-variant-numeric: tabular-nums; }
+.stay-facts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-top: var(--space-2); }
+.stay-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.stay-actions a, .stay-actions button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding-inline: var(--space-3); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-cobalt-text); font: inherit; font-size: var(--fs-small); text-decoration: none; background: var(--color-surface); }
+.stay-actions button { background: var(--color-cobalt-soft); border-color: transparent; cursor: pointer; }
+.stay-actions a:focus-visible, .stay-actions button:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
+
+
+.stay-top { cursor: pointer; list-style: none; min-height: 44px; }
+.stay-top::-webkit-details-marker { display: none; }
+.stay-top::after { content: "+"; margin-inline-start: auto; color: var(--color-cobalt-text); }
+.stay-list details[open] .stay-top::after { content: "−"; }
+.stay-toggle { width: 100%; min-height: 44px; border: 0; border-top: 1px solid var(--color-line); background: var(--color-surface); color: var(--color-cobalt-text); font: inherit; cursor: pointer; }
