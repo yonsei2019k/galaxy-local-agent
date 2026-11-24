@@ -49,6 +49,7 @@ data class UiRunActivity(
     val mode:String="act",val startedAt:Long=0,val updatedAt:Long=0,val events:List<UiRunActivityEvent> = emptyList(),
     val totalEvents:Long=events.size.toLong(),val hasOlder:Boolean=false,val loadingOlder:Boolean=false,
     val waitingForReply:Boolean=false,
+    val replyChoices:List<com.user.localagent.core.NextActionQuestion.Choice> = emptyList(),
     val waitingForGoal:Boolean=false,
     val goalWaitDetail:String="",
     val userMessageId:String?=null,

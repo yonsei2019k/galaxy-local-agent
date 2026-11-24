@@ -129,7 +129,7 @@ class PcExternalAgentClient(
             ExternalAgentContract.bounded(code,128)
         }
         root.getValue("report").takeUnless{it==JsonNull}?.jsonObject?.let { report ->
-            ExternalAgentContract.fields(report,setOf("state","answer","question","elapsedMs","mcpCalls"))
+            ExternalAgentContract.fields(report,setOf("state","answer","question","elapsedMs","mcpCalls"),setOf("choices"))
             require(ExternalAgentContract.text(report,"state") in setOf("reported_done","needs_input","partial","failed"))
             val answer=ExternalAgentContract.text(report,"answer");val question=ExternalAgentContract.text(report,"question")
             require(answer.codePointCount(0,answer.length)<=12_000&&question.codePointCount(0,question.length)<=300)

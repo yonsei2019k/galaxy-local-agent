@@ -156,6 +156,8 @@ export default function App() {
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
           onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}
           onOfficeCalendar={() => request({action:'requestOfficeCalendar'})}
+          onChooseReply={(runId, index) => !pending && !draft.trim() &&
+            request({ action: 'chooseReply', payload: { runId, index } })}
           hasDraft={!!draft.trim() || snapshot?.inlineLogin === true} onDraftExample={text => {
             if (!draft.trim() && !snapshot?.inlineLogin) editDraft(text)
           }} />

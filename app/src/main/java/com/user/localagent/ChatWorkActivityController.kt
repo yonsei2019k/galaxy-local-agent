@@ -160,10 +160,16 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
         }.toMutableList()
         if(run.id in unavailable)events+=UiRunActivityEvent("unavailable:${run.id}",UiWorkEventKind.CONTEXT,"일부 진행 기록의 저장·조회를 확인하지 못했습니다.",evidence=UiWorkEvidence.UNVERIFIED)
         val total=maxOf(totals[run.id]?:0,records.size.toLong())
+        val waitingForReply=run.status=="paused"&&run.errorCode in setOf(
+            com.user.localagent.core.NextActionQuestion.PAUSE_CODE,com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE)
+        val choices=if(waitingForReply)runCatching {
+            val metadata=Json.parseToJsonElement(run.contextJson).jsonObject
+            com.user.localagent.core.NextActionQuestion.readChoices(metadata[com.user.localagent.core.NextActionQuestion.CHOICES_KEY])
+        }.getOrDefault(emptyList()) else emptyList()
         val mode=runCatching{val value=Json.parseToJsonElement(run.contextJson).jsonObject["mode"]?.jsonPrimitive?.content?:"act";AgentWorkMode.parse(value).wireName}.getOrDefault("act")
         put(target.messageId,UiRunActivity(run.id,threadId,target.messageId,run.status,mode,run.startedAt?:0L,
             maxOf(run.updatedAt,records.maxOfOrNull{it.atEpochMillis}?:0L),events,totalEvents=total,hasOlder=total>records.size,loadingOlder=run.id in loading,
-            waitingForReply=run.status=="paused"&&run.errorCode=="cloud_clarification_read_only",waitingForGoal=run.status=="paused"&&run.errorCode=="waiting_goal_condition"&&
+            waitingForReply=waitingForReply,replyChoices=choices,waitingForGoal=run.status=="paused"&&run.errorCode=="waiting_goal_condition"&&
                 runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
             userMessageId=run.userMessageId,finishedAt=run.finishedAt))

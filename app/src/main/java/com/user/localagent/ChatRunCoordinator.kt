@@ -535,8 +535,30 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return submit(text,threadId,modelId,emptyList(),runId,expectedBranchId,previousRunId,stillAuthorized,threadRevision,publicResearchOnly)
     }
 
+    private fun supportsOwnerChoices(request:QueuedChatRequest):Boolean =
+        request.attachments.isEmpty()&&request.goal==null&&request.officeStage==null&&
+            request.scheduledReadTool==null&&request.browserAuthParentRunId==null&&request.continuation==null
+
+    internal fun sendOwnerChoice(runId:String,index:Int,threadId:String,branchId:String){
+        if(!selectionReady.value||selectedThreadId.value!=threadId||viewportBranchId!=branchId)return
+        scope.launch {
+            val source=app.repository.chat.run(runId)
+            val metadata=source?.takeIf { it.threadId==threadId&&it.branchId==branchId&&it.status=="paused"&&
+                it.errorCode in setOf(com.user.localagent.core.NextActionQuestion.PAUSE_CODE,com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE)
+            }?.let { runCatching { Json.parseToJsonElement(it.contextJson).jsonObject }.getOrNull() }
+            val choice=com.user.localagent.core.NextActionQuestion.readChoices(metadata?.get(com.user.localagent.core.NextActionQuestion.CHOICES_KEY)).getOrNull(index)
+            val original=metadata?.let{runCatching{QueuedChatRequest.fromJson(it.toString())}.getOrNull()}
+            if(choice==null||original==null||!supportsOwnerChoices(original)||!selectionReady.value||selectedThreadId.value!=threadId||viewportBranchId!=branchId){
+                status.value="이 선택지는 더 이상 사용할 수 없어요. 필요한 답은 메시지로 보내주세요."
+                return@launch
+            }
+            submit(choice.label,threadId,original.modelId,emptyList(),UUID.randomUUID().toString(),expectedBranchId=branchId,
+                previousRunId=runId,singleAssistant=true,choiceSource=original)
+        }
+    }
+
     private fun submit(inputText:String,threadId:String,model:String,snapshot:List<com.user.localagent.workspace.ChatAttachment>,reservedRunId:String,expectedBranchId:String?=null,
-        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null,publicResearchOnly:Boolean=false,singleAssistant:Boolean=false):Boolean {
+        previousRunId:String?=null,remoteAuthority:(()->Boolean)?=null,remoteThreadRevision:Long?=null,publicResearchOnly:Boolean=false,singleAssistant:Boolean=false,choiceSource:QueuedChatRequest?=null):Boolean {
         val submission=com.user.localagent.core.ConversationSubmissionPolicy.parse(inputText)
         val routedInput=if(submission.explicitModeCommand!=null) {
             if(submission.commandOnly&&submission.explicitModeCommand!="/goal"&&snapshot.isEmpty()) {
@@ -556,7 +578,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         if(text.length>12000){status.value="12,000자를 넘는 요청은 파일로 첨부해주세요. 입력 내용은 유지됩니다.";return false}
         val thinking=modelOptions.value.thinking
-        val mode=if(publicResearchOnly)AgentWorkMode.RESEARCH.wireName else submission.mode.wireName
+        val mode=choiceSource?.mode?:if(publicResearchOnly)AgentWorkMode.RESEARCH.wireName else submission.mode.wireName
         // Keep the process unfrozen for the whole run, including while screen control puts another app in front.
         com.user.localagent.voice.AgentRunService.track(context,reservedRunId,threadId,text)
         scope.launch {
@@ -568,6 +590,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val thread=app.repository.chat.thread(threadId)?:error("전송할 대화가 삭제되었습니다.")
             check(expectedBranchId==null||thread.activeBranchId==expectedBranchId){"전송 전 대화 버전이 변경되었습니다. 입력을 보존했습니다."}
             if(app.repository.chat.run(reservedRunId)!=null)return@withLock
+            if(choiceSource!=null)check(thread.projectId==choiceSource.projectId&&
+                selectedThreadId.value==threadId&&selectionReady.value&&viewportBranchId==thread.activeBranchId){"OWNER_CHOICE_SCOPE_CHANGED"}
             if(snapshot.isNotEmpty())app.chatAttachments.captureForRequest(reservedRunId,threadId,snapshot)
             val binding=app.workspaceFor(thread.projectId).bindingFingerprint()
             val pcBinding=capturePcDataBindingForNewRun(threadId)
@@ -580,18 +604,35 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val imageOnly=snapshot.isNotEmpty() && snapshot.all {it.mimeType.startsWith("image/")}
             val selection=if(model=="auto" && remoteAuthority==null && app.repository.chat.awaitingPrivateReply(threadId,thread.activeBranchId))
                 com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION else model
+            if(choiceSource!=null&&ExternalAgentSettings.isCloud(choiceSource.modelId))
+                check(externalAuthority.enabled&&choiceSource.allowExternalAgent&&
+                    externalAuthority.revision==choiceSource.externalAgentRevision){"OWNER_CHOICE_AUTHORITY_CHANGED"}
             val resolvedModel=com.user.localagent.core.ConversationPrivacy.modelForNewRequest(
                 selection,if(ExternalAgentSettings.isCloud(selection))selection else automaticModel,text,imageOnly,
                 allowCloudPersonalData=mode!=AgentWorkMode.RESEARCH.wireName&&externalAuthority.allowsPersonalData)
+            if(choiceSource!=null)check(resolvedModel==choiceSource.modelId){"OWNER_CHOICE_MODEL_CHANGED"}
             val run=app.repository.chat.enqueueUserRun(threadId,thread.activeBranchId,text,resolvedModel,thinking,runId=reservedRunId,
-                expectedPreviousRunId=previousRunId,remoteTestThreadRevision=remoteThreadRevision,
-                beforeCommit={check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}}){user,run->
-                QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
+                expectedPreviousRunId=previousRunId,remoteTestThreadRevision=remoteThreadRevision,ownerChoice=choiceSource!=null,
+                beforeCommit={
+                    check(remoteAuthority?.invoke()!=false){"REMOTE_TEST_AUTHORITY_CHANGED"}
+                    if(choiceSource!=null)check(selectionReady.value&&selectedThreadId.value==threadId&&
+                        viewportBranchId==thread.activeBranchId&&draft.value.isBlank()&&app.chatAttachments.state.value.isEmpty()){
+                        "OWNER_CHOICE_SCOPE_CHANGED"
+                    }
+                }){user,run->
+                val fresh=QueuedChatRequest(run.id,threadId,thread.activeBranchId,thread.projectId,text,resolvedModel,thinking,snapshot,user.id,allowTools=true,mode=mode,workspaceBinding=binding,pcDataBinding=pcBinding,kakaoReadBinding=com.user.localagent.integrations.KakaoScreenReader(context).binding(),pcImageRecoveryAllowed=true,capturedPcRevision=pcTextAuthority.revision,allowCloudText=false,
                     allowExternalAgent=ExternalAgentSettings.isCloud(resolvedModel)&&externalAuthority.enabled,externalAgentRevision=if(ExternalAgentSettings.isCloud(resolvedModel))externalAuthority.revision else null,
                     cloudReadOnlyModes=ExternalAgentSettings.isCloud(resolvedModel) && externalAuthority.enabled,
                     officeStage = OfficeStage.WORKFLOW.takeIf { office },
                     screenVisualBinding=com.user.localagent.integrations.ScreenControl(context).visualBinding()
-                        .takeIf {mode in setOf("act","debug")&&!office}).also {submitted=it}.toJson()
+                        .takeIf {mode in setOf("act","debug")&&!office})
+                (if(choiceSource==null)fresh else fresh.copy(
+                    allowTools=choiceSource.allowTools, workspaceBinding=choiceSource.workspaceBinding,
+                    pcDataBinding=choiceSource.pcDataBinding, kakaoReadBinding=choiceSource.kakaoReadBinding,
+                    pcImageRecoveryAllowed=choiceSource.pcImageRecoveryAllowed,capturedPcRevision=choiceSource.capturedPcRevision,
+                    capturedPcTextDefault=choiceSource.capturedPcTextDefault,
+                    cloudReadOnlyModes=choiceSource.cloudReadOnlyModes,screenVisualBinding=choiceSource.screenVisualBinding
+                )).also {submitted=it}.toJson()
             }
             committed=true
             val request=checkNotNull(submitted)
@@ -606,8 +647,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 withContext(NonCancellable){queueMutation.withLock{
                     if(!committed){
                         val released=runCatching{app.chatAttachments.releaseRequest(reservedRunId)}.isSuccess
-                        val preserved=remoteAuthority==null&&runCatching{preserveUnsubmittedRequest(app.repository,threadId,text)}.getOrDefault(false)
-                        status.value=if(preserved)"요청을 전송하지 못해 원래 대화 기록에 보존했습니다. 작성 중인 초안과 모델 선택은 유지됩니다." else "요청 전송과 원문 보존을 확인하지 못했습니다. 대화와 저장 상태를 확인해주세요."
+                        val preserved=choiceSource==null&&remoteAuthority==null&&runCatching{preserveUnsubmittedRequest(app.repository,threadId,text)}.getOrDefault(false)
+                        status.value=if(choiceSource!=null)"선택지를 적용하지 못했어요. 새 메시지로 답해 주세요." else if(preserved)"요청을 전송하지 못해 원래 대화 기록에 보존했습니다. 작성 중인 초안과 모델 선택은 유지됩니다." else "요청 전송과 원문 보존을 확인하지 못했습니다. 대화와 저장 상태를 확인해주세요."
                         if(!released)status.value+=" 첨부 사용권 정리는 확인이 필요합니다."
                     }else{
                         val recovery=recoverCommittedSubmission(app.repository.chat,reservedRunId)
@@ -2006,7 +2047,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     persistNativeState(nativeJournal.sealCheckpoint())
                 }
                 publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"이어서 하려면 정보가 조금 더 필요해요."},true,
-                    if(canAnswerInSameTest)"cloud_clarification_read_only" else "execution_not_verified")
+                    if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE else "execution_not_verified",
+                    if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.readChoices(report["choices"]) else emptyList())
                 return
             }
             if(CloudAgentFinals.isToolFreeAnswer(resultState,plan!=null,actual.size,requestSteps.size)){
@@ -3123,6 +3165,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         pauseForHarness(request,guard.reason,com.user.localagent.core.StuckRecovery.STOP_CODE)
         return null
     }
+    private suspend fun storeOwnerChoices(request:QueuedChatRequest,code:String,choices:List<com.user.localagent.core.NextActionQuestion.Choice>){
+        val stored=if(choices.isEmpty()||!supportsOwnerChoices(request))null else app.repository.chat.run(request.runId)?.let { row->
+            val old=Json.parseToJsonElement(row.contextJson).jsonObject
+            JsonObject(old+(com.user.localagent.core.NextActionQuestion.CHOICES_KEY to JsonArray(choices.map{it.toJson()}))).toString()
+        }
+        app.repository.chat.updateRun(request.runId,"paused",errorCode=code,contextJson=stored)
+    }
+
     /** No action is executed while an essential owner choice is outstanding. */
     private suspend fun publishOwnerQuestion(request:QueuedChatRequest,question:String){
         answer(question);persistStepEvidence()
@@ -3151,13 +3201,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
     private suspend fun pauseForOwnerInput(request:QueuedChatRequest,raw:String,truncated:Boolean):Boolean {
         var invalid=false
-        val question=try{com.user.localagent.core.NextActionQuestion.parse(raw)}catch(_:Exception){invalid=true;null}
+        val question=try{com.user.localagent.core.NextActionQuestion.parsePrompt(raw)}catch(_:Exception){invalid=true;null}
         recordHostClarificationBranch(request,question!=null||invalid)
         if(question==null&&!invalid)return false
         invalid=invalid||truncated
-        answer(if(invalid)"추가 확인 질문의 형식을 확인하지 못해 실행하지 않고 멈췄습니다."else checkNotNull(question))
+        answer(if(invalid)"추가 확인 질문의 형식을 확인하지 못해 실행하지 않고 멈췄습니다."else checkNotNull(question).question)
         persistStepEvidence()
-        app.repository.chat.updateRun(request.runId,"paused",errorCode=if(invalid)"invalid_clarification"else com.user.localagent.core.NextActionQuestion.PAUSE_CODE)
+        val choices=question?.choices.orEmpty().takeIf{
+            !invalid&&requestSteps.all{step->com.user.localagent.core.ToolReadPolicy.isReadOnly(step.tool)}
+        }.orEmpty()
+        storeOwnerChoices(request,if(invalid)"invalid_clarification"else com.user.localagent.core.NextActionQuestion.PAUSE_CODE,choices)
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_PAUSED)
         return true
     }
@@ -3187,13 +3240,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(blockedReason!=null){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
     }
     private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean,
-        pauseCode:String="execution_not_verified"){
+        pauseCode:String="execution_not_verified",choices:List<com.user.localagent.core.NextActionQuestion.Choice> = emptyList()){
         if(paused&&pauseCode=="execution_not_verified"&&pauseForBrowserAuthentication(request))return
         if(paused&&pauseCode=="execution_not_verified"&&pauseForScreenSetup(request))return
         answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,reason)else reason)
         if(paused){
             persistStepEvidence()
-            app.repository.chat.updateRun(request.runId,"paused",errorCode=pauseCode)
+            storeOwnerChoices(request,pauseCode,choices)
             status.value=if(pauseCode=="cloud_clarification_read_only")"추가 정보 대기 중" else "작업 일시정지"
         }
     }

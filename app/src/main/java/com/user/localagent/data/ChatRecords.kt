@@ -541,7 +541,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     /** User text and its restartable queue envelope commit together before submission is acknowledged. */
     suspend fun enqueueUserRun(threadId:String,branchId:String,text:String,modelId:String,thinking:Boolean,runId:String=UUID.randomUUID().toString(),
-        expectedPreviousRunId:String?=null,remoteTestThreadRevision:Long?=null,beforeCommit:()->Unit={},
+        expectedPreviousRunId:String?=null,remoteTestThreadRevision:Long?=null,ownerChoice:Boolean=false,beforeCommit:()->Unit={},
         contextFactory:(MessageRecord,ChatRunRecord)->String):ChatRunRecord=database.withTransaction {
         if(remoteTestThreadRevision!=null){
             val thread=activeBranch(threadId,branchId)
@@ -550,6 +550,14 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         if(expectedPreviousRunId!=null){
             val last=dao.messagePage(threadId,branchId,null,1).singleOrNull()
             check(last?.role=="assistant"&&last.runId==expectedPreviousRunId){"REMOTE_TEST_HISTORY_CHANGED"}
+        }
+        if(ownerChoice){
+            val source=dao.run(checkNotNull(expectedPreviousRunId))
+            val question=com.user.localagent.core.NextActionQuestion
+            check(source!=null&&source.status=="paused"&&source.threadId==threadId&&source.branchId==branchId&&
+                source.modelId==modelId&&source.errorCode in setOf(question.PAUSE_CODE,question.CLOUD_PAUSE_CODE)){"OWNER_CHOICE_SCOPE_CHANGED"}
+            val metadata=Json.parseToJsonElement(source.contextJson).jsonObject
+            check(question.readChoices(metadata[question.CHOICES_KEY]).any{it.label==text}){"OWNER_CHOICE_TEXT_CHANGED"}
         }
         beforeCommit()
         if(remoteTestThreadRevision==null){

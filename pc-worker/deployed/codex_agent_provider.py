@@ -144,7 +144,13 @@ FINAL_SCHEMA = {
         "state": {"type": "string", "enum": ["reported_done", "needs_input", "partial", "failed"]},
         "answer": {"type": "string", "maxLength": 12000},
         "question": {"type": "string", "maxLength": 300},
-    }, "required": ["state", "answer", "question"],
+        "choices": {"type": "array", "maxItems": 4,
+                    "description": "Only for a finite needs_input question: 2 to 4 short ordinary replies and exactly one recommended. Otherwise return []. Never offer approval or credentials here.",
+                    "items": {"type": "object", "additionalProperties": False,
+                              "properties": {"label": {"type": "string", "maxLength": 40},
+                                             "recommended": {"type": "boolean"}},
+                              "required": ["label", "recommended"]}},
+    }, "required": ["state", "answer", "question", "choices"],
 }
 
 
@@ -285,6 +291,25 @@ class AgentReport:
     question: str = field(repr=False)
     elapsed_ms: int
     mcp_calls: int
+    choices: tuple = field(default=(), repr=False)
+
+
+def owner_choices(state, raw):
+    if state != "needs_input" or not isinstance(raw, (list, tuple)) or not 2 <= len(raw) <= 4:
+        return ()
+    choices = []
+    for item in raw:
+        if (not isinstance(item, dict) or set(item) != {"label", "recommended"} or
+                type(item["label"]) is not str or type(item["recommended"]) is not bool):
+            return ()
+        label = item["label"].strip()
+        if (not label or len(label) > 40 or label.startswith("/") or
+                any(ord(char) < 32 or 127 <= ord(char) <= 159 or char in "<>" for char in label)):
+            return ()
+        choices.append({"label": label, "recommended": item["recommended"]})
+    if sum(item["recommended"] for item in choices) != 1 or len({item["label"] for item in choices}) != len(choices):
+        return ()
+    return tuple(choices)
 
 
 def bootstrap_secret(bootstrap):
@@ -528,7 +553,7 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
                 raise ProviderError("PROVIDER_RUN_FAILED")
             try:
                 value = _parse(final)
-                if (type(value) is not dict or set(value) != {"state", "answer", "question"} or
+                if (type(value) is not dict or set(value) not in ({"state", "answer", "question"}, set(FINAL_SCHEMA["required"])) or
                         value["state"] not in FINAL_SCHEMA["properties"]["state"]["enum"] or
                         not isinstance(value["answer"], str) or len(value["answer"]) > 12000 or
                         not isinstance(value["question"], str) or len(value["question"]) > 300):
@@ -536,7 +561,8 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
             except (ValueError, TypeError, UnicodeError, RecursionError):
                 raise ProviderError("PROVIDER_FINAL_FORMAT") from None
             return AgentReport(value["state"], value["answer"], value["question"],
-                               round((time.monotonic() - started) * 1000), calls)
+                               round((time.monotonic() - started) * 1000), calls,
+                               owner_choices(value["state"], value.get("choices")))
         finally:
             readers_stop.set()
             if tree is not None:

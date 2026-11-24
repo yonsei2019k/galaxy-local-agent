@@ -40,6 +40,11 @@ interface Evidence {
   at?: number
 }
 
+export interface ReplyChoice {
+  label: string
+  recommended: boolean
+}
+
 export interface Task {
   id: string
   phase: string
@@ -48,6 +53,7 @@ export interface Task {
   canCancel: boolean
   messageId?: string
   evidence?: Evidence[]
+  choices?: ReplyChoice[]
   startedAt?: number
   finishedAt?: number
 }
@@ -149,6 +155,7 @@ export const MAX_COLLAB_TEXT = 8_000
 export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'historySearch' | 'collab' | 'capabilities' | 'connections' | 'privacy'
 
 type Intent =
+  | { action: 'chooseReply'; payload: { runId: string; index: number } }
   | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
@@ -225,12 +232,21 @@ function evidence(value: unknown): value is Evidence {
     (value.at === undefined || taskTime(value.at))
 }
 
+function replyChoice(value: unknown): value is ReplyChoice {
+  return record(value) && typeof value.label === 'string' && value.label.trim().length > 0 &&
+    value.label.length <= 40 && typeof value.recommended === 'boolean'
+}
+
 function task(value: unknown): value is Task {
   return record(value) && strings(value, 'id', 'phase', 'label', 'detail') &&
     typeof value.canCancel === 'boolean' && (value.messageId === undefined || typeof value.messageId === 'string') &&
     (value.startedAt === undefined || taskTime(value.startedAt)) &&
     (value.finishedAt === undefined || taskTime(value.finishedAt)) &&
-    (value.evidence === undefined || list(value.evidence, evidence))
+    (value.evidence === undefined || list(value.evidence, evidence)) &&
+    (value.choices === undefined || (value.phase === 'waiting_input' && list(value.choices, replyChoice) &&
+      value.choices.length >= 2 && value.choices.length <= 4 &&
+      value.choices.filter(choice => choice.recommended).length === 1 &&
+      new Set(value.choices.map(choice => choice.label)).size === value.choices.length))
 }
 
 function model(value: unknown): value is Model {
@@ -336,6 +352,8 @@ export function hasNativeBridge() {
 /** A message hands control to Android. Android owns scope, authorization and the actual result. */
 export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if (intent.action !== 'ready' && !scope?.ready) return false
+  if (intent.action === 'chooseReply' && !scope?.tasks.some(task => task.id === intent.payload.runId &&
+    task.phase === 'waiting_input' && task.choices?.[intent.payload.index])) return false
   if (intent.action === 'setCharacter' && (!scope?.character ||
     !isCharacterChoice({ ...scope.character, [intent.payload.field]: intent.payload.value }))) return false
   if (intent.action === 'selectThread' && !scope?.threads.some(thread => thread.id === intent.payload.id)) return false

@@ -263,6 +263,8 @@ pub enum ProviderEvent {
         state: String,
         answer: String,
         question: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        choices: Option<Value>,
         calls: u32,
     },
     Cancelled {
@@ -898,6 +900,7 @@ impl AppServerClient {
                     state: value["state"].as_str().unwrap_or("failed").to_owned(),
                     answer: value["answer"].as_str().unwrap_or("").to_owned(),
                     question: value["question"].as_str().unwrap_or("").to_owned(),
+                    choices: owner_choices(&value),
                     calls: a.calls,
                 };
                 let progress = self.progress("verifying", None)?;
@@ -1081,7 +1084,13 @@ fn is_sha(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
 }
 fn final_schema() -> Value {
-    json!({"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","enum":["reported_done","needs_input","partial","failed"]},"answer":{"type":"string","maxLength":12000},"question":{"type":"string","maxLength":300}},"required":["state","answer","question"]})
+    json!({"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","enum":["reported_done","needs_input","partial","failed"]},"answer":{"type":"string","maxLength":12000},"question":{"type":"string","maxLength":300},"choices":{
+        "type":"array","maxItems":4,
+        "description":"For a finite needs_input question only. Provide 2 to 4 brief choices and exactly one recommended. Otherwise return [].",
+        "items":{"type":"object","additionalProperties":false,"properties":{
+            "label":{"type":"string","maxLength":40},"recommended":{"type":"boolean"}
+        },"required":["label","recommended"]}
+    }},"required":["state","answer","question","choices"]})
 }
 fn isolation_blocker(value: &Value) -> Option<&'static str> {
     let Some(config) = value.get("config").and_then(Value::as_object) else {
@@ -1228,7 +1237,7 @@ fn discardable_startup_metadata(message: &Value) -> bool {
 }
 fn validate_report(value: &Value) -> Result<()> {
     let object = value.as_object().ok_or_else(|| error("FINAL_FORMAT"))?;
-    if object.len() != 3
+    if (object.len() != 3 && !(object.len() == 4 && object.contains_key("choices")))
         || !matches!(
             value["state"].as_str(),
             Some("reported_done" | "needs_input" | "partial" | "failed")
@@ -1243,6 +1252,39 @@ fn validate_report(value: &Value) -> Result<()> {
         return Err(error("FINAL_FORMAT"));
     }
     Ok(())
+}
+
+fn owner_choices(report: &Value) -> Option<Value> {
+    if report["state"].as_str() != Some("needs_input") {
+        return None;
+    }
+    let rows = report["choices"].as_array()?;
+    if !(2..=4).contains(&rows.len()) {
+        return None;
+    }
+    let mut choices = Vec::new();
+    let mut labels = BTreeSet::new();
+    let mut recommended = 0;
+    for row in rows {
+        if row.as_object()?.len() != 2 {
+            return None;
+        }
+        let label = row["label"].as_str()?.trim();
+        let recommendation = row["recommended"].as_bool()?;
+        if label.is_empty()
+            || label.chars().count() > 40
+            || label.starts_with('/')
+            || label.chars().any(|c| c.is_control() || matches!(c, '<' | '>'))
+            || !labels.insert(label)
+        {
+            return None;
+        }
+        if recommendation {
+            recommended += 1;
+        }
+        choices.push(json!({"label": label, "recommended": recommendation}));
+    }
+    (recommended == 1).then_some(Value::Array(choices))
 }
 
 /// Extract only the top-level report's answer string from partial constrained JSON.

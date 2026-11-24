@@ -17,7 +17,7 @@ import time
 
 from codex_agent_provider import (BOOTSTRAP_ENV, FINAL_SCHEMA, MAX_LINE,
                                   MAX_OUTPUT, MAX_STDERR, AgentReport, ProviderError, _parse, _pin,
-                                  _ProcessTree, bootstrap_secret, instructions_for)
+                                  _ProcessTree, bootstrap_secret, instructions_for, owner_choices)
 from provider_conversation_context import (ConversationContextError, provider_input,
                                            validate_conversation_context)
 
@@ -80,7 +80,7 @@ def build_launch(config, bootstrap, static, external_allowed=False, *, allowed_t
 
 
 def _valid_final(value):
-    return (type(value) is dict and set(value) == {"state", "answer", "question"} and
+    return (type(value) is dict and set(value) in ({"state", "answer", "question"}, set(FINAL_SCHEMA["required"])) and
             value["state"] in FINAL_SCHEMA["properties"]["state"]["enum"] and
             isinstance(value["answer"], str) and len(value["answer"]) <= 12000 and
             isinstance(value["question"], str) and len(value["question"]) <= 300)
@@ -290,7 +290,8 @@ def run(config, bootstrap, owner_request, *, external_allowed=False, cancelled=N
             except (ValueError, TypeError, UnicodeError, RecursionError):
                 raise ProviderError("PROVIDER_FINAL_FORMAT") from None
             return AgentReport(value["state"], value["answer"], value["question"],
-                               round((time.monotonic() - started) * 1000), calls)
+                               round((time.monotonic() - started) * 1000), calls,
+                               owner_choices(value["state"], value.get("choices")))
         finally:
             readers_stop.set()
             if tree is not None:

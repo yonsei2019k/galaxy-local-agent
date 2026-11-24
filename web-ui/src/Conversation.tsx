@@ -162,7 +162,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -176,10 +176,12 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   hasDraft: boolean
   onDraftExample(text: string): void
   onStayPhoto?: (messageId: string, index: number) => boolean
+  onChooseReply?(runId: string, index: number): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
 }) {
   const view = useRef<HTMLElement>(null)
+  const [sentChoice, setSentChoice] = useState<string | null>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [openWorkId, setOpenWorkId] = useState<string | null>(null)
@@ -192,6 +194,11 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
+  useEffect(() => {
+    if (!sentChoice) return
+    const timer = window.setTimeout(() => setSentChoice(null), 8_000)
+    return () => window.clearTimeout(timer)
+  }, [sentChoice])
   const empty = messages.length === 0 && tasks.length === 0 && !website && !approval
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
@@ -319,7 +326,18 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             {unplacedTasks.length > 0 && <section className="work-cards" aria-label="작업">
               {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
             </section>}
-            {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
+            {waitingInput && !liveTasks.length && <div className="reply-needed">
+              <div role="status">{waitingInput.detail || waitingInput.label}</div>
+              {waitingInput.choices && onChooseReply && <div className="reply-options" role="group" aria-label="답변 선택지">
+                {waitingInput.choices.map((choice, index) => <button key={choice.label} type="button"
+                  disabled={!enabled || hasDraft || !!snapshot?.attachments?.length || sentChoice === waitingInput.id}
+                  onClick={() => {
+                    if (onChooseReply(waitingInput.id, index)) setSentChoice(waitingInput.id)
+                  }}>
+                  {choice.label}{choice.recommended && <span>추천</span>}
+                </button>)}
+              </div>}
+            </div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
               calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}

@@ -575,3 +575,11 @@ svg { width: 20px; height: 20px; flex: none; }
   font-size: 13px;
 }
 @media (min-width: 940px), (max-height: 480px) { .bottom-nav { display: none; } }
+
+.reply-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.reply-options button {
+  min-height: 44px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  color: var(--color-text); background: var(--surface); font: inherit; text-align: start; overflow-wrap: anywhere;
+}
+.reply-options button span { margin-inline-start: 6px; color: var(--accent); font-size: var(--fs-small); }
+.reply-options button:disabled { opacity: .55; }

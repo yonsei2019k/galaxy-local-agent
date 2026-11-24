@@ -551,6 +551,8 @@ class MainActivity : ComponentActivity() {
                                     else->activity.status
                                 }
                                 put("id",activity.runId);put("phase",phase)
+                                if(latestQuestion&&activity.replyChoices.isNotEmpty())
+                                    put("choices",JsonArray(activity.replyChoices.map{it.toJson()}))
                                 activity.userMessageId?.let{put("messageId",it)}
                                 put("label",activity.userMessageId?.let(requestTitles::get)?.takeIf(String::isNotBlank)?:
                                     when(phase){"waiting_input"->"답변을 기다리고 있어요";"waiting_goal"->"조건이 되면 이어서 진행";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
@@ -574,6 +576,10 @@ class MainActivity : ComponentActivity() {
                     if(sameRoom){
                         val payload=command.payload
                         when(command.action){
+                            "chooseReply"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()&&chat.draft.value.isBlank()){
+                                chat.sendOwnerChoice(payload.getValue("runId").jsonPrimitive.content,
+                                    payload.getValue("index").jsonPrimitive.int,composerThreadId,currentBranchId)
+                            }
                             "setCharacter"->{
                                 character=character.update(payload.getValue("field").jsonPrimitive.content,
                                     payload.getValue("value").jsonPrimitive.content)

@@ -554,6 +554,28 @@ describe('native conversation', () => {
     expect(host.querySelector('details.task-evidence')).toBeNull()
   })
 
+  it('sends one answer to the current question and preserves a composed reply', () => {
+    mount()
+    const question: Snapshot = { ...base,
+      messages: [{ id: 'question', role: 'assistant', text: '어느 지역인가요?' }],
+      tasks: [{ id: 'question-run', phase: 'waiting_input', label: '', detail: '', canCancel: false,
+        choices: [{ label: '강릉', recommended: true }, { label: '삼척', recommended: false }] }],
+    }
+    snapshot({ ...question, draft: '직접 쓴 답' })
+    expect(button('삼척').disabled).toBe(true)
+    expect(input().value).toBe('직접 쓴 답')
+    snapshot({ ...question, composerEpoch: 1 })
+    expect(button('삼척').disabled).toBe(false)
+    click('삼척')
+    expect(button('삼척').disabled).toBe(true)
+    expect(requests().at(-1)).toMatchObject({ action: 'chooseReply', threadId: 'thread-a', branchId: 'branch-a',
+      payload: { runId: 'question-run', index: 1 } })
+    const answered = { ...question, tasks: [] }
+    snapshot(answered)
+    expect(host.querySelector('.reply-options')).toBeNull()
+    expect(postIntent(answered, { action: 'chooseReply', payload: { runId: 'question-run', index: 1 } })).toBe(false)
+  })
+
   it('cancels a timed goal from its own chat card without stopping another run', () => {
     mount()
     snapshot({ ...base, messages: [{ id: 'work-a', role: 'user', text: 'Continue tomorrow' }],

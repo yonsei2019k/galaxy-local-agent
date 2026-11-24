@@ -22,7 +22,7 @@ def _event(outcome, calls=None, elapsed_ms=None):
         pass
 
 from agent_bridge import BridgeError
-from codex_agent_provider import ProviderConfig, ProviderError, run
+from codex_agent_provider import ProviderConfig, ProviderError, owner_choices, run
 from claude_agent_provider import run as run_claude
 from provider_conversation_context import (ConversationContextError, conversation_context_digest,
                                            has_conversation_context, validate_conversation_context)
@@ -296,6 +296,9 @@ class AgentProviderSupervisor:
                     raise ProviderError("PROVIDER_CANCELLED")
                 child.report = {"state": result.state, "answer": result.answer, "question": result.question,
                                 "elapsedMs": total_ms, "mcpCalls": total_calls}
+                choices = owner_choices(result.state, getattr(result, "choices", ()))
+                if choices:
+                    child.report["choices"] = list(choices)
             _event("REPORT_" + str(result.state).upper()[:24], total_calls, total_ms)
         except ProviderError as error:
             child.cancel.set()
