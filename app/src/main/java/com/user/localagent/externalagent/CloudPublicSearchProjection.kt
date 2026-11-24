@@ -56,6 +56,17 @@ internal object CloudPublicSearchProjection {
         else (data["items"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.let(::safeUrl) }
     }
 
+    fun partialSources(executions:Collection<PhoneAgentExecution>):List<String> {
+        val sources=linkedMapOf<String,Boolean>()
+        for(execution in executions){
+            val pageRead=execution.proposal.tool=="read_webpage"
+            for(url in links(execution))sources[url]=sources[url]==true||pageRead
+        }
+        return sources.entries.sortedByDescending{it.value}.take(5).map{(url,pageRead)->
+            "- <$url> · "+if(pageRead)"본문을 읽었어요" else "검색에서 찾았어요"
+        }
+    }
+
     private fun safeUrl(row: JsonObject): String? {
         val url = safeField(row, "url", 2048) ?: return null
         val uri = runCatching { PublicWebSafety.requireHttps(url) }.getOrNull() ?: return null

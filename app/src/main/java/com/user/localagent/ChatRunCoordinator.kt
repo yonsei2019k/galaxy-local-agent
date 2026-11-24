@@ -1581,8 +1581,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     private val JIPSOONI_VOICE = "Your public name is 집순이, the assistant in ZipHap.Agent. " +
-        "Match the user's language. In Korean, use warm, concise everyday 존댓말 (해요체). " +
-        "Lead with what you can do next or what you verified. Only ask for setup needed for the current task; " +
+        "Match the user's language. In Korean, speak like a friendly personal assistant in everyday 해요체. " +
+        "Use short, natural sentences such as ‘좋아요, 확인해 볼게요’ or ‘여기까지 찾았어요’ when they fit. " +
+        "Skip repeated greetings, exaggerated enthusiasm, formal service-desk phrasing, and technical codes. " +
+        "Lead with the result. If blocked, tell the owner what you checked and the one thing you need next. " +
+        "Only ask for setup needed for the current task; " +
         "explain why in one short sentence. Infer the useful handoff from the user's goal and documented requirements. " +
         "If the next reversible step is clear, do it and observe the result. If the current route lacks a control, check the page structure, " +
         "public help, and permitted supported routes before asking. Ask when a real choice or owner action is needed. " +
@@ -1876,8 +1879,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 FailureLog.cloudStop(context,why,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
                 if(stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&pauseForScreenSetup(request))return
                 val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
-                    "마지막 작업의 결과를 확인하지 못했어요. 앞서 확인한 내용은 남겨뒀어요. 다시 시도하기 전에 마지막 결과를 확인해 주세요."
-                    else "연결이 끊겼거나 작업이 아직 끝나지 않았어요. 앞서 확인한 내용은 남겨뒀어요."
+                    "마지막 동작이 반영됐는지 확인하지 못했어요. 다시 시도하려면 현재 화면부터 확인해야 해요."
+                    else "작업이 도중에 멈췄어요. 확인한 내용은 남겨뒀어요."
                 publishActionFinal(request,requestAuthorizedTools,message,true,why);return
             }
             val resultState=report.getValue("state").jsonPrimitive.content
@@ -1899,7 +1902,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     controller.close();closed=true
                     persistNativeState(nativeJournal.sealCheckpoint())
                 }
-                publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"요청을 마치려면 추가 정보가 필요합니다."},true,
+                publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"이어서 하려면 정보가 조금 더 필요해요."},true,
                     if(canAnswerInSameTest)"cloud_clarification_read_only" else "execution_not_verified")
                 return
             }
@@ -1931,15 +1934,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val links=if(accepted!=null&&resultState in setOf("reported_done","partial")&&authority().permits(capture)&&
                     ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),
                         checkNotNull(bridgeSessionId),publicPartial=true)){
-                    val sources=linkedMapOf<String,Boolean>()
-                    for(execution in actual.values){
-                        val pageRead=execution.proposal.tool=="read_webpage"
-                        for(url in CloudPublicSearchProjection.links(execution))
-                            sources[url]=sources[url]==true||pageRead
-                    }
-                    sources.entries.take(5).map{(url,pageRead)->
-                        "- <$url> · "+if(pageRead)"페이지 읽음" else "검색 결과 · 내용 미확인"
-                    }
+                    CloudPublicSearchProjection.partialSources(actual.values)
                 }else emptyList()
                 val lastScreenAction=actual.values.lastOrNull { observation ->
                     observation.proposal.tool==com.user.localagent.core.ScreenControlToolCatalog.ACTION
@@ -1949,13 +1944,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         Json.parseToJsonElement(observation.content).jsonObject["screenChanged"]?.jsonPrimitive?.booleanOrNull
                     }.getOrNull() }
                 val notice=when(screenChanged){
-                    true->"마지막 조작 뒤 화면이 바뀐 것을 확인했습니다. 요청한 결과까지는 확인하지 못해 멈췄습니다."
-                    false->"마지막 조작 뒤 화면이 그대로였습니다. 요청한 결과까지는 확인하지 못해 멈췄습니다."
-                    null->"확인할 근거가 부족해 작업을 일시정지했습니다."
+                    true->"화면이 바뀐 건 확인했어요. 요청한 결과가 나왔는지는 확인이 더 필요해요."
+                    false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
+                    null->if(links.isEmpty())"결과를 확인할 정보가 부족해서 여기서 멈췄어요."
+                        else "일부 자료를 확인했어요. 아직 결론을 내리기에는 정보가 부족해요."
                 }
                 if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,notice,true)
                 else publishActionFinal(request,requestAuthorizedTools,
-                    "$notice\n\n조회 중 찾은 공개 링크\n"+links.joinToString("\n"),
+                    "$notice\n\n여기까지 찾은 자료\n"+links.joinToString("\n"),
                     true,"partial_verified_sources")
                 return
             }
@@ -3040,11 +3036,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val shown=auth?.get("phoneBrowserVisible")==JsonPrimitive(true)
         val requiresReadback=observedOutcomes.any{!it.result.effectNotApplied&&!com.user.localagent.core.ToolReadPolicy.isReadOnly(it.call.name)}
         val where=site?.let{" ($it)"}.orEmpty()
-        val next=if(requiresReadback)"인증 뒤 이전 동작의 결과를 먼저 확인해 주세요."
-            else "인증한 뒤 이 대화에서 이어서 요청해 주세요."
-        val login=if(shown)"휴대폰에 열린 집합 브라우저에서 직접 인증해 주세요."
-            else "휴대폰의 집합 앱 브라우저에서 직접 인증해 주세요."
-        answer("이 사이트는 인증이 필요해요$where. $login $next")
+        val next=if(requiresReadback)"로그인한 뒤에는 같은 동작을 다시 하기 전에 이전 결과부터 확인해 주세요."
+            else "로그인이 끝나면 이 채팅에서 이어갈 수 있어요."
+        val login=if(shown)"휴대폰에 열린 집합 화면에서 직접 로그인해 주세요."
+            else "휴대폰 집합 앱에서 사이트에 직접 로그인해 주세요."
+        answer("여기서 로그인이 필요해요$where. $login $next")
         persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode="browser_auth_on_phone")
         status.value="휴대폰 인증 대기"

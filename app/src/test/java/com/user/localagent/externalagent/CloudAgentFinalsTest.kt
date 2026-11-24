@@ -28,12 +28,31 @@ class CloudAgentFinalsTest {
         assertThrows(IllegalArgumentException::class.java){com.user.localagent.core.ToolRegistry.validate(bad.checkedCall(capture))}
         assertThrows(IllegalArgumentException::class.java){proposal("save_note",kotlinx.serialization.json.buildJsonObject{}).checkedCall(capture)}
     }
+    @Test fun verifiedPageStaysVisibleAfterManySearchOnlyResults(){
+        val id="10000000-0000-4000-8000-000000000002"
+        fun observed(tool:String,body:String,withheld:Boolean=false):PhoneAgentExecution {
+            val proposal=ExternalAgentProposal(id,1,tool,kotlinx.serialization.json.JsonObject(emptyMap()),
+                "a".repeat(64),"binding",3)
+            val result=com.user.localagent.core.ToolResult(id,true,body,com.user.localagent.core.VerificationState.VERIFIED)
+            return PhoneAgentExecution(id,"binding",3,proposal,result,withheld)
+        }
+        val rows=(1..5).joinToString(","){"""{"url":"https://example.org/result$it","title":"Source $it"}"""}
+        val search=observed("search_web","""{"success":true,"shopping":false,"privateSourcesRead":false,"untrustedSourceData":true,"items":[$rows]}""")
+        val read=observed("read_webpage","""{"url":"https://example.org/official","untrustedSourceData":true}""")
+        val hidden=observed("read_webpage","""{"url":"https://example.org/hidden","untrustedSourceData":true}""",withheld=true)
+        val links=CloudPublicSearchProjection.partialSources(listOf(search,read,read,hidden))
+        assertEquals(5,links.size)
+        assertEquals("- <https://example.org/official> · 본문을 읽었어요",links.first())
+        assertEquals(1,links.count{it.contains("/official")})
+        assertTrue(links.none{it.contains("/hidden")})
+    }
+
     @Test fun plainAndPreviouslySavedAnswersDoNotShowTheRepeatedNotice(){
         val legacy="휴대폰 도구로 확인하지 않고 클라우드 모델이 생성한 답변입니다. 기기 자료나 현재 시각을 조회한 근거는 없습니다."
         val body="안녕하세요. 집합의 김호영 과장입니다."
         assertEquals(body,CloudAgentFinals.toolFreeAnswer("  $body "))
         assertEquals(body,CloudAgentFinals.visibleAnswer("$legacy\n\n$legacy\n\n$body"))
         assertEquals("  $body ",CloudAgentFinals.visibleAnswer("  $body "))
-        assertTrue(CloudAgentFinals.PREPARED_PAUSE.contains("완료는 확인하지 않았습니다"))
+        assertTrue(CloudAgentFinals.PREPARED_PAUSE.contains("아직 확인하지 못했어요"))
     }
 }
