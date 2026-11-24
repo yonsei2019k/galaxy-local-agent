@@ -4,6 +4,8 @@ import { RichAnswer } from './RichAnswer'
 import type { IconName } from './Icon'
 import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { isLiveTaskPhase } from './composer'
+import { Character } from './character/Character'
+import { useCharacter } from './character/useCharacter'
 
 const phasePresentation: Record<string, { title: string; tone: string; icon: IconName }> = {
   queued: { title: '대기 중', tone: 'neutral', icon: 'clock' },
@@ -48,15 +50,11 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   onDismiss(): void
   onCalendar(): void
 }) {
-  const [mascotAvailable, setMascotAvailable] = useState(true)
+  const [character] = useCharacter()
   const [step, setStep] = useState(0)
   return (
     <div className={compact ? "welcome welcome--compact" : "welcome"}>
-      {!compact && <div className="mascot-field" aria-hidden="true">
-        {mascotAvailable
-          ? <img className="mascot" src={`${import.meta.env.BASE_URL}ziphap-mascot.png`} alt="" onError={() => setMascotAvailable(false)} />
-          : <BrandMark className="mascot-fallback" />}
-      </div>}
+      {!compact && <div className="mascot-field"><Character choice={character} size={160} /></div>}
       <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
@@ -95,12 +93,13 @@ function Message({ message, previews, enabled, onCopy, onFiles, onMessageMenu }:
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
 }) {
+  const [character] = useCharacter()
   const user = message.role === 'user'
   const assistant = message.role === 'assistant'
   const author = assistant ? message.authorLabel ?? '집순이' : undefined
   return (
     <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
-      {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> {author}</div>}
+      {assistant && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
       {assistant ? <div className="assistant-bubble">
         <RichAnswer text={message.text} />

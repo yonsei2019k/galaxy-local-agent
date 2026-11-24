@@ -3,6 +3,9 @@ import type { ReactNode } from 'react'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
 import { BrandMark } from './Conversation'
+import { Character } from './character/Character'
+import { CharacterPicker } from './character/CharacterPicker'
+import { useCharacter } from './character/useCharacter'
 import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 
@@ -116,12 +119,19 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
   const activeLabel = runControls(snapshot).active ? snapshot?.activeModelLabel : undefined
   const currentThread = snapshot?.threads.find(thread => thread.selected)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  const [character, setCharacter] = useCharacter()
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   return (
     <header className="topbar">
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
-        {snapshot?.singleConversation && <BrandMark className="topbar-brand" />}
+        {snapshot?.singleConversation && <>
+          <button type="button" className="character-button" aria-label="집순이 모습 바꾸기" onClick={() => setPickerOpen(true)}>
+            <Character choice={character} size={32} decorative />
+          </button>
+          <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={() => setPickerOpen(false)} />
+        </>}
         <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
         {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={onOfficeProfile}>직원 정보</button>}
