@@ -1825,7 +1825,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // SQLCipher commit is the write-ahead boundary. A process death after this point
                     // restores an uncertain in-flight call and cannot silently replay a write.
                     persistNativeState()
-                    val result=runTool(call)
+                      val result=runCloudPlanTool(call)
                     withContext(NonCancellable){nativeJournal.outcome(result);persistNativeState()}
                     result
                 }
@@ -1842,7 +1842,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     phoneBrowserAuthentication=true
                 if(PhoneCalendarReadEvidence.requiresPermission(entry.proposal.tool,entry.result))
                     calendarPermissionNeeded=true
-                check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
+                if(entry.proposal.tool !in SkillToolCatalog.names)
+                    check(observedOutcomes.any{it.call.id==entry.result.id&&it.call.name==entry.proposal.tool&&it.result===entry.result})
                 persistStepEvidence() // runTool has already recorded the actual effect; never import a server receipt.
             },onPlan={proposed->
                 check(authority().permits(capture))
@@ -1852,7 +1853,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     checkNotNull(requestTools).bindAvailableTools(requestAuthorizedTools)
                     requestDirectSelectedTools=requestAuthorizedTools
                     taskGoal=com.user.localagent.core.TaskGoal(request.text,listOf(proposed.goal)+proposed.constraints,
-                        com.user.localagent.core.WorkSegments.STEP_BUDGET,requestAuthorizedTools)
+                        com.user.localagent.core.WorkSegments.STEP_BUDGET,requestAuthorizedTools-SkillToolCatalog.names)
                     requestTaskGoalForLedger=taskGoal
                     val stored=checkNotNull(app.repository.chat.run(request.runId))
                     val old=Json.parseToJsonElement(stored.contextJson).jsonObject
@@ -2011,7 +2012,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val accepted=plan
             val evidence=client.taskEvidence()
             val hostComplete=accepted!=null&&ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),checkNotNull(bridgeSessionId))&&
-                (if(accepted.requiredTools.isEmpty())requestSteps.isEmpty() else taskGoal?.let{checkedTaskFinish(request,it,requestAuthorizedTools) is HarnessDecision.Finish}==true)
+                (if(accepted.requiredTools.isEmpty())requestSteps.isEmpty() else
+                    accepted.requiredTools.any { it !in SkillToolCatalog.names } &&
+                    taskGoal?.let{checkedTaskFinish(request,it,requestAuthorizedTools) is HarnessDecision.Finish}==true)
             if(resultState!="reported_done"||!hostComplete){
                 publishIncompleteCloudResult(request,resultState,accepted,evidence,actual.values,capture,
                     checkNotNull(bridgeSessionId),controller.stopMetadata(),
@@ -2672,6 +2675,25 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private fun previousEvidenceContext(steps:List<HarnessStep>):JsonArray=buildJsonArray {steps.forEach {step->add(buildJsonObject {
         put("tool",step.tool);put("arguments",step.arguments);put("verification",step.evidence.state.name);put("summary",step.evidence.summary);step.evidence.continuationId?.let {put("continuationId",it)}
     })}}
+    private suspend fun runCloudPlanTool(call:ToolCall):ToolResult {
+        if(call.name !in SkillToolCatalog.names)return runTool(call)
+        val guidance=try {
+            readGuidance(call,requestAuthorizedTools)
+        } catch(error:IllegalArgumentException) {
+            return ToolResult(call.id,false,"등록된 지침과 인자를 확인해주세요.",VerificationState.FAILED,"CONTEXT_ONLY",effectNotApplied=true)
+        }
+        if(!guidance.success)return guidance.copy(effectNotApplied=true)
+        val content=if(call.name=="read_skill"){
+            val id=call.arguments.getValue("id").jsonPrimitive.content
+            val read=requestGuidance.getValue(id)
+            buildJsonObject {
+                put("id",id);put("sha256",read.sha256);put("body",read.body);put("contextOnly",true)
+            }.toString()
+        }else guidance.content
+        // This verifies delivery of the guidance only. No action step or goal audit id is created.
+        return guidance.copy(content=content,verification=VerificationState.VERIFIED)
+    }
+
     /** Guidance is read separately from action evidence and never enters the 1100-character tool view. */
     private suspend fun readGuidance(call:ToolCall,allowedTools:Set<String>):ToolResult {
         ToolRegistry.validateForRequest(call,allowedTools)
