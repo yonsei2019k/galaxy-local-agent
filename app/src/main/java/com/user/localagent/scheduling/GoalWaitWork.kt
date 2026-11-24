@@ -5,13 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.os.BatteryManager
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.work.*
 import com.user.localagent.LocalAgentApplication
+import com.user.localagent.FailureLog
 import com.user.localagent.connections.ConnectionStore
 import com.user.localagent.core.GoalWaitPolicy
 import com.user.localagent.core.GoalWaitRecord
@@ -26,13 +24,6 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
-
-internal fun playbackConditions(context: Context): Boolean {
-    val network=context.getSystemService(ConnectivityManager::class.java)
-    val capabilities=network.getNetworkCapabilities(network.activeNetwork)
-    return capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true &&
-        context.getSystemService(BatteryManager::class.java).isCharging
-}
 
 internal class GoalWaitWork(private val context: Context) {
     private val encrypted = ConnectionStore(context)
@@ -86,7 +77,15 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         if (record.id != inputData.getString("waitId")) return Result.success()
         if(record.ordinaryBrowserAuth)return if(app.runs.wakeBrowserAuth(record))Result.success()
             else if(runAttemptCount<5)Result.retry() else Result.failure()
-        if(!app.runs.isGoalWaitReady(record))
+        val ready=if(app.runs.isGoalWaitReady(record))true
+            else if(record.condition is WaitCondition.MediaEnd)withTimeoutOrNull(12_000) {
+                while(app.runs.isRunLive(record.parentRunId)){
+                    delay(250)
+                    if(app.runs.isGoalWaitReady(record))return@withTimeoutOrNull true
+                }
+                app.runs.isGoalWaitReady(record)
+            }==true else false
+        if(!ready)
             return if(runAttemptCount<5 && app.runs.isRunLive(record.parentRunId))Result.retry() else Result.success()
         val existing=record.observedEvent
         val event = existing ?: when (val condition=record.condition) {
@@ -95,6 +94,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
             is WaitCondition.MediaEnd -> watchMedia(record,condition)
         }
         if(existing==null && record.condition is WaitCondition.MediaEnd) {
+            FailureLog.record(applicationContext,"goal_media_wait",null,event.name)
             val observed=record.copy(observedEvent=event)
             if(!app.goalWaits.store.replace(observed,record))return Result.success()
             record=observed
@@ -104,15 +104,17 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
     }
 
     private suspend fun watchMedia(record: GoalWaitRecord,condition: WaitCondition.MediaEnd):WakeEvent {
-        if(!playbackConditions(applicationContext))return WakeEvent.CONDITIONS_UNMET
         val app=(applicationContext as LocalAgentApplication).container
         val web=AppWebAgent.get(applicationContext)
-        fun active()=app.goalWaits.store.get(record.goalId)==record && playbackConditions(applicationContext)
+        fun active()=app.goalWaits.store.get(record.goalId)==record
         val observation=web.sampleGoalMedia() ?: return WakeEvent.PLAYER_GONE
         if(observation.loginRequired)return WakeEvent.LOGIN_EXPIRED
         val player=observation.player ?: return WakeEvent.PLAYER_GONE
-        if(observation.pageUrl!=condition.pageUrl || player.playerId+":"+player.epoch!=condition.playerSignature || player.paused)
+        if(observation.pageUrl!=condition.pageUrl || player.playerId+":"+player.epoch!=condition.playerSignature)
             return WakeEvent.PLAYER_GONE
+        if(MediaEndWatcher.endedDuringHandoff(player,record.playingPositionMs,record.playingDurationMs,
+                System.currentTimeMillis()-record.createdAt))return WakeEvent.MEDIA_ENDED
+        if(player.paused)return WakeEvent.MEDIA_STALLED
         try { setForeground(mediaNotification()) }
         catch(cancel:CancellationException){ throw cancel }
         catch(_:Exception){

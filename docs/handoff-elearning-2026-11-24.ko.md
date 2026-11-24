@@ -25,7 +25,7 @@
 - **유지하는 원칙**
   - 비밀번호·mOTP는 소유자가 직접 입력한다.
   - CAPTCHA·매크로 탐지 우회, 진도 조작, 배속 우회를 하지 않는다.
-- **재생 조건:** 휴대폰 앱 브라우저에서 Wi-Fi에 연결되어 있고 충전 중일 때만 재생한다.
+- **재생 조건:** 휴대폰 앱 브라우저에서 재생한다. 이후 소유자가 Wi-Fi·충전 제한을 해제했다.
 - **방식:** 작업 장부 + 호스트 대기 후 자동 재개(접근법 1).
 - **화면 꺼짐 재생 실험(계획 Task 0):** 소유자가 생략을 지시했다. 백그라운드 재생과 전경 재생 중 무엇을 택할지는 Codex가 실기에서 판단한다(아래 5장 위험 1).
 
@@ -61,7 +61,7 @@
 
 | 작업 | 내용 | 비고 |
 |---|---|---|
-| Task 4 | `app/.../scheduling/GoalWaitWork.kt`, `GoalWaitStore.kt` | 기존 `ScheduledReadWork` 패턴. 고유 작업 `KEEP`. 재생 대기에는 `UNMETERED`·`requiresCharging` 조건. 앱 시작 때 복원. 시험 실행은 `:android-runtime:testDebugUnitTest` |
+| Task 4 | `app/.../scheduling/GoalWaitWork.kt`, `GoalWaitStore.kt` | 기존 `ScheduledReadWork` 패턴. 고유 작업 `KEEP`. 앱 시작 때 복원. 시험 실행은 `:android-runtime:testDebugUnitTest` |
 | Task 5 | `app/.../integrations/MediaEndWatcher.kt` | 30초 간격으로 감시. 진행 정지 10분, 상한 6시간. 포그라운드 서비스와 웨이크락을 어디에 둘지는 실기 판단 |
 | Task 6 | `app/.../integrations/CertificatePdfCapture.kt`, `app/src/main/java/android/print/WebViewPdfWriter.kt` | 인쇄형·blob 이수증. `%PDF-`, 10MB 이하, `PdfRenderer` 1페이지 이상, 원자적 저장. 기존 `PublicPdfArtifact` 저장 루틴은 Codex 판단으로 공용화 |
 | Task 7 | 번들 스킬 `elearning-completion` | `SKILL.md`, `catalog.json`, sha256. 들어갈 문구는 계획 Task 7 참고 |
@@ -101,7 +101,7 @@
 1. **화면 꺼짐 재생:** 오프스크린 WebView가 화면 꺼짐이나 백그라운드 상태에서 영상을 계속 재생하는지 검증하지 않았다(실험 생략).
    - 실패하면 전경 재생으로 바꾼다. 집합 화면에 플레이어를 띄우고, 기존 화면 유지 배지 방식을 확장한다.
 2. **제스처 없는 재생:** 앱 WebView는 기본값(제스처 필요) 그대로다. 사이트가 제스처 없는 재생이나 백그라운드 재생을 막으면 우회하지 않고 소유자에게 안내한다.
-3. **데이터:** KAIRB 영상은 47분짜리 1.49GB 단일 파일이다. Wi-Fi·충전 조건을 꼭 지킨다.
+3. **데이터:** 조사한 KAIRB 사례에 47분짜리 1.49GB 영상이 있었다. 모바일 재생 성능은 실기에서 확인한다.
 4. **위임 판정의 한계**
    - 라벨은 페이지가 정하는 글자라 경험적 판정이다. 실제 경계는 출처 범위, 동작 범위, 스냅샷 재검증이다.
    - 영문 금지어가 부분 문자열로도 걸린다(예: repay). 막는 쪽으로 틀리는 것이라 그대로 둔다.

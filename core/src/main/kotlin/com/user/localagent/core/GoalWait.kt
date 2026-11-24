@@ -39,6 +39,8 @@ data class GoalWaitRecord(
     val lastFailureKey: String? = null,
     val observedEvent: WakeEvent? = null,
     val ordinaryBrowserAuth: Boolean = false,
+    val playingPositionMs: Long? = null,
+    val playingDurationMs: Long? = null,
 ) {
     init {
         require(id.isNotBlank() && goalId.isNotBlank()) { "대기 기록에는 식별자가 필요합니다." }

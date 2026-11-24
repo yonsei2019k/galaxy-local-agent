@@ -17,6 +17,18 @@ internal class MediaEndWatcher(
 ) {
     data class Observation(val pageUrl: String, val player: BrowserMediaSample?, val loginRequired: Boolean = false)
 
+    companion object {
+        /** An already-ended player can still be observed if the worker started just after the end. */
+        fun endedDuringHandoff(sample:BrowserMediaSample,earlierPosition:Long?,earlierDuration:Long?,elapsedMs:Long):Boolean {
+            val start=earlierPosition ?: return false
+            val duration=sample.durationMs ?: return false
+            val moved=sample.positionMs-start
+            return sample.ended && !sample.seeking && duration==earlierDuration &&
+                start in 0 until duration && sample.positionMs in (duration-250)..(duration+250) &&
+                elapsedMs in 0..GoalWaitPolicy.MEDIA_MAX_MS && moved in 100..(elapsedMs*sample.rate+2_000).toLong()
+        }
+    }
+
     suspend fun watch(pageUrl: String, initial: BrowserMediaSample): WakeEvent {
         val started = clock()
         var lastProgress = started

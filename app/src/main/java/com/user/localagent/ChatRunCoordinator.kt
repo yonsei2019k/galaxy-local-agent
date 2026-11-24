@@ -1704,8 +1704,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val payload=runCatching{Json.parseToJsonElement(run.contextJson).jsonObject}.getOrNull()?:continue
             val uncertain=goalNativeEffectsUnresolved(run,app.repository.chat.accessScope(source.threadId).scopeKey,true)
             val goal=(payload["externalAgentPlan"] as? JsonObject)?.get("goal")?.jsonPrimitive?.contentOrNull.orEmpty()
-            if(allowCloudPersonalData||!com.user.localagent.core.ConversationPrivacy.sensitiveText(goal))
-                previous=CloudConversationContext.PreviousTask(sourceBinding,run.status,source.text,goal,uncertain,sourceConfirmed=true)
+            val playbackEnded=!uncertain && request.goalSegment?.parentRunId==run.id &&
+                (payload["hostGoalWake"] as? JsonObject)?.get("event")==JsonPrimitive(WakeEvent.MEDIA_ENDED.name)
+            val currentGoal=if(playbackEnded)
+                "휴대폰에서 같은 영상의 종료를 확인했어요. 열린 페이지를 다시 읽고 사이트 진도와 다음 강의 진입 가능 여부를 확인하세요. $goal"
+                else goal
+            if(allowCloudPersonalData||!com.user.localagent.core.ConversationPrivacy.sensitiveText(currentGoal))
+                previous=CloudConversationContext.PreviousTask(sourceBinding,run.status,source.text,currentGoal,uncertain,sourceConfirmed=true)
         }
         return CloudConversationContext.build(currentBinding,turns,previous)
     }
@@ -3304,23 +3309,28 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             check(request.goalSegment != null)
             check(GoalToolCatalog.revision(call.arguments.getValue("expectedUpdatedAt")) == live.updatedAt)
             val condition = GoalWaitToolCatalog.parse(call)
+            var playingPosition:Long?=null
+            var playingDuration:Long?=null
             when(condition) {
                 is WaitCondition.AtTime -> require(!condition.needsPlayback)
                 is WaitCondition.MediaEnd -> {
-                    check(com.user.localagent.scheduling.playbackConditions(context)) { "Wi-Fi와 충전이 필요해요." }
+                    // Bind to the phone's observed player, independently of the connection and power source.
                     val seen=observedOutcomes.lastOrNull { it.call.name=="read_app_browser_page" && it.result.success &&
                         it.result.verification==VerificationState.VERIFIED }
                     val page=seen?.let{Json.parseToJsonElement(it.result.content).jsonObject}
-                    val evidence=page?.get("playbackEvidence") as? JsonObject
+                    val evidence=checkNotNull(page?.get("playbackEvidence") as? JsonObject)
                     require(page?.get("url")==JsonPrimitive(condition.pageUrl) &&
-                        evidence?.get("playerSignature")==JsonPrimitive(condition.playerSignature) &&
+                        evidence["playerSignature"]==JsonPrimitive(condition.playerSignature) &&
                         evidence["playbackStatus"]==JsonPrimitive("playing"))
+                    playingPosition=evidence["positionMs"]?.jsonPrimitive?.longOrNull
+                    playingDuration=evidence["durationMs"]?.jsonPrimitive?.longOrNull
                     require(app.goalProgress.hasMediaItem(goalDigest(live.id+":"+request.branchId+":"+access.scopeKey),condition.ledgerItemId))
                 }
                 is WaitCondition.OwnerAuth -> error("인증 대기는 휴대폰 로그인 카드가 열릴 때 등록돼요.")
             }
             val previous=app.goalWaits.store.get(live.id)
-            val record=newWaitRecord(request,live,condition,previous)
+            val record=newWaitRecord(request,live,condition,previous).copy(
+                playingPositionMs=playingPosition,playingDurationMs=playingDuration)
             check(app.goalWaits.store.replace(record,previous))
             app.goalWaits.arm(record)
             requestedGoalWait = record
@@ -3530,7 +3540,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             WakeEvent.PLAYER_GONE -> "기존 플레이어를 찾지 못했어요. 실제 수강 진도부터 확인해야 해요."
             WakeEvent.LOGIN_EXPIRED, WakeEvent.OWNER_AUTH_TIMEOUT -> "사이트 인증을 확인하지 못했어요. 휴대폰에서 로그인해 주세요."
             WakeEvent.MEDIA_LIMIT -> "영상 확인 시간이 끝났어요. 사이트 진도를 다시 확인해 주세요."
-            WakeEvent.CONDITIONS_UNMET -> "휴대폰에서 재생을 계속 확인할 수 없는 상태예요. Wi-Fi와 충전 상태를 확인해 주세요."
+            WakeEvent.CONDITIONS_UNMET -> "휴대폰에서 백그라운드 재생 확인을 시작하지 못했어요. 마지막으로 확인한 영상은 남겨뒀어요."
             else -> "기존 작업을 저장했어요. 재개 조건이나 권한을 확인해 주세요."
         }
         app.repository.chat.writeRunAnswer(runId,message)

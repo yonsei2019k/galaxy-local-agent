@@ -4,6 +4,8 @@ import com.user.localagent.core.BrowserMediaSample
 import com.user.localagent.core.WakeEvent
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaEndWatcherTest {
@@ -30,5 +32,14 @@ class MediaEndWatcherTest {
         var now=0L
         val watcher=MediaEndWatcher({MediaEndWatcher.Observation(url,initial)},{true},{now},{now+=it})
         assertEquals(WakeEvent.MEDIA_STALLED,watcher.watch(url,initial))
+    }
+
+    @Test fun acceptsPlausibleEndBetweenVerifiedPlaybackAndWatcherStart() {
+        val end=initial.copy(positionMs=56_000,paused=true,ended=true)
+        assertTrue(MediaEndWatcher.endedDuringHandoff(end,52_000,56_000,4_000))
+        assertFalse(MediaEndWatcher.endedDuringHandoff(end,1_000,56_000,4_000))
+        assertFalse(MediaEndWatcher.endedDuringHandoff(end.copy(seeking=true),52_000,56_000,4_000))
+        assertFalse(MediaEndWatcher.endedDuringHandoff(end,52_000,55_000,4_000))
+        assertFalse(MediaEndWatcher.endedDuringHandoff(end,null,56_000,4_000))
     }
 }

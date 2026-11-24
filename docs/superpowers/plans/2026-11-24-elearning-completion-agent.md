@@ -24,7 +24,7 @@
 - **로그인·인증·탐지**
   - 비밀번호·mOTP는 소유자가 직접 입력한다. 모델과 로그에 값이 남지 않는다.
   - CAPTCHA·매크로 탐지 우회, 진도 조작, 배속 우회를 하지 않는다.
-- **재생 조건:** 휴대폰 앱 브라우저에서 Wi-Fi(UNMETERED)에 연결되어 있고 충전 중일 때만 재생한다.
+- **재생 조건:** 휴대폰 앱 브라우저에서 재생한다. 소유자의 후속 지시에 따라 모바일 데이터와 배터리에서의 재생도 지원한다.
 - **장부**
   - 항목은 300개, 전체 크기는 64KB, `note`는 200자, `requirements`는 2,000자까지다.
   - `done`은 이번 목표에서 관찰한 도구 실행의 감사 ID가 있을 때만 받는다.
@@ -256,7 +256,7 @@
 - **Produces (작업자):** `class GoalWaitWork(context, onWake: suspend (GoalWaitRecord, WakeEvent)->Unit)`
   - `suspend fun arm(record:GoalWaitRecord)`
     - `AtTime`이면 `OneTimeWorkRequest`에 `setInitialDelay`를 건다.
-    - `needsPlayback`이면 `Constraints(UNMETERED, requiresCharging=true)`를 건다.
+    - `needsPlayback`은 재개 목적을 기록한다. 접속 방식 및 전원 조건과 관계없이 정해진 시각에 재개한다.
     - 등록은 `enqueueUniqueWork("goal-wait-"+record.id, KEEP)`로 한다.
   - `suspend fun cancel(goalId:String)`
   - `suspend fun restore(now:Long)`
