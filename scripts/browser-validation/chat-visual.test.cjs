@@ -6,8 +6,13 @@ const { test, before, after } = require('node:test');
 const { chromium } = require('playwright');
 const fixtures = require('./chat-fixtures.cjs');
 
-const dist = path.join(__dirname, '../../web-ui/dist');
+// CHAT_VISUAL_DIST: 다른 빌드(예: 원래 화면 기준선)를 측정할 때 쓰는 dist 경로. 기본은 현재 web-ui/dist.
+// CHAT_VISUAL_METRICS: 지표 파일 이름(기본 metrics.json). 사용자 지정 dist의 스크린샷은 out/custom-dist/에 저장한다.
+const customDist = !!process.env.CHAT_VISUAL_DIST;
+const dist = path.resolve(process.env.CHAT_VISUAL_DIST || path.join(__dirname, '../../web-ui/dist'));
 const out = path.join(__dirname, 'out');
+const shotDir = customDist ? path.join(out, 'custom-dist') : out;
+const metricsFile = process.env.CHAT_VISUAL_METRICS || 'metrics.json';
 const widths = [[360, 800], [393, 852], [412, 915]];
 const SNAPSHOT_EVENT = 'ziphap:snapshot'; // web-ui/src/bridge.ts
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
@@ -22,7 +27,7 @@ let server, browser, base;
 const metrics = [];
 
 before(async () => {
-  fs.mkdirSync(out, { recursive: true });
+  fs.mkdirSync(shotDir, { recursive: true });
   server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '') || 'index.html';
     const file = path.join(dist, rel);
@@ -35,7 +40,7 @@ before(async () => {
 });
 
 after(async () => {
-  fs.writeFileSync(path.join(out, 'metrics.json'), JSON.stringify(metrics, null, 2));
+  fs.writeFileSync(path.join(out, metricsFile), JSON.stringify(metrics, null, 2));
   await browser?.close();
   server?.close();
 });
@@ -94,6 +99,9 @@ function measure() {
   }).length;
   const renderedMessages = outer.filter(el => el.classList.contains('message')).length;
   const renderedCards = outer.length - renderedMessages;
+  const heights = outer.filter(el => !el.classList.contains('message')).map(el => el.getBoundingClientRect().height).sort((a, b) => a - b);
+  const medianCardHeight = heights.length === 0 ? null
+    : +(heights.length % 2 ? heights[(heights.length - 1) / 2] : (heights[heights.length / 2 - 1] + heights[heights.length / 2]) / 2).toFixed(1);
   // 가로 넘침: 문서와 .conversation 모두. 명시적 가로 스크롤 래퍼(overflow-x auto/scroll, 너비 안) 안쪽 후손은 허용.
   const insideScroller = el => {
     for (let e = el.parentElement; e && e !== main; e = e.parentElement) {
@@ -105,7 +113,7 @@ function measure() {
   const overflowing = [...main.querySelectorAll('*')]
     .filter(el => visible(el) && el.getBoundingClientRect().right > innerWidth + 1 && !insideScroller(el)).map(sel).slice(0, 5);
   return {
-    visibleItems, renderedMessages, renderedCards, loading: !!document.querySelector('.loading'),
+    visibleItems, medianCardHeight, renderedMessages, renderedCards, loading: !!document.querySelector('.loading'),
     welcome: !!document.querySelector('.welcome'),
     docScrollWidth: document.documentElement.scrollWidth, docOverflow: document.documentElement.scrollWidth > innerWidth,
     convScrollWidth: main.scrollWidth, convClientWidth: main.clientWidth,
@@ -119,7 +127,7 @@ const expectations = {
   empty: { messages: 0, cards: 0 }, chatShort: { messages: 2, cards: 0 }, chatLong: { messages: 20, cards: 0 },
   taskRunning: { messages: 1, cards: 1 }, taskPaused: { messages: 1, cards: 1 }, taskWaitingGoal: { messages: 1, cards: 1 },
   taskFailed: { messages: 1, cards: 1 }, taskCompleted: { messages: 2, cards: 1 }, unanchoredTasks: { messages: 1, cards: 3 },
-  twoLiveTasks: { messages: 1, cards: 2 }, websiteCard: { messages: 1, cards: 2 }, files: { messages: 2, cards: 0 },
+  mixedLong: { messages: 20, cards: 10 }, twoLiveTasks: { messages: 1, cards: 2 }, websiteCard: { messages: 1, cards: 2 }, files: { messages: 2, cards: 0 },
 };
 
 for (const [name, snapshot] of Object.entries(fixtures)) {
@@ -142,10 +150,10 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
           await document.fonts.ready;
           await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         });
-        await page.screenshot({ path: path.join(out, `${name}-${width}.png`) });
+        await page.screenshot({ path: path.join(shotDir, `${name}-${width}.png`) });
         const m = await page.evaluate(measure);
         metrics.push({
-          fixture: name, width, visibleItems: m.visibleItems, overflowX: m.docOverflow || m.convOverflow,
+          fixture: name, width, visibleItems: m.visibleItems, medianCardHeight: m.medianCardHeight, overflowX: m.docOverflow || m.convOverflow,
           docScrollWidth: m.docScrollWidth, convScrollWidth: m.convScrollWidth, convClientWidth: m.convClientWidth,
           renderedMessages: m.renderedMessages, renderedCards: m.renderedCards, minContrast: m.minContrast, contrastFailures: m.failures,
         });
