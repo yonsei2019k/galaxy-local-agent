@@ -17,6 +17,7 @@ data class ActiveChatExecution(
     val waitingForResource: String?,
     val status: String,
     val waitingForApproval: Boolean,
+    val userMessageId: String? = null,
 )
 
 data class AuxiliaryChatExecution(val operationId:String,val threadId:String)

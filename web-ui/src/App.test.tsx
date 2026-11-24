@@ -119,6 +119,21 @@ describe('native conversation', () => {
     expect(host.querySelector('.bottom-nav')).toBeNull()
   })
 
+  it('places a running browser task below its request and keeps the same card with its result', () => {
+    mount()
+    const message: Snapshot['messages'][number] = { id: 'web-request', role: 'user', text: '사이트 진도를 확인해줘.' }
+    const task = { id: 'run-a', messageId: message.id, phase: 'running', label: '웹 작업', detail: '사이트 읽는 중', canCancel: true }
+    snapshot({ ...running(), singleConversation: true, messages: [message], tasks: [task] })
+    expect(host.querySelector('.message--user + #work-run-a [role="progressbar"]')).not.toBeNull()
+    expect(host.querySelectorAll('#work-run-a')).toHaveLength(1)
+    snapshot({ ...base, singleConversation: true, messages: [message, { id: 'web-result', role: 'assistant', text: '진도를 확인했어요.' }],
+      tasks: [{ ...task, phase: 'completed', detail: '', canCancel: false,
+        evidence: [{ id: 'web-read', label: '페이지 조회 결과 확인', detail: '' }] }] })
+    expect(host.querySelector('.message--user + #work-run-a + .message--assistant')).not.toBeNull()
+    expect(host.querySelector('#work-run-a [role="progressbar"]')).toBeNull()
+    expect(host.querySelector('#work-run-a .task-step-line')?.textContent).toBe('페이지 조회 결과 확인')
+  })
+
   it('uses microphone actions scoped to this room and leaves recognized text unsent', () => {
     mount()
     snapshot({ ...base, voiceDraftEpoch: 0 })

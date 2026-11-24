@@ -454,12 +454,12 @@ class MainActivity : ComponentActivity() {
                     put("tasks",buildJsonArray{
                         queuedRequests.filter{q->q.threadId==composerThreadId&&activeExecutions.none{it.runId==q.runId}}.take(8).forEach{request->
                             add(buildJsonObject{
-                                put("id",request.runId);put("phase","queued");put("label","차례를 기다리는 일");put("detail",request.text.lineSequence().first().take(120));put("canCancel",false)
+                                put("id",request.runId);put("phase","queued");put("messageId",request.userMessageId);put("label","차례를 기다리는 일");put("detail",request.text.lineSequence().first().take(120));put("canCancel",false)
                             })
                         }
                         activeExecutions.filter{it.threadId==composerThreadId}.forEach{run->add(buildJsonObject{
                         val phase=when{run.waitingForApproval->"approval";run.waitingForResource!=null->"waiting_resource";else->"running"}
-                        put("id",run.runId);put("phase",phase)
+                        put("id",run.runId);put("phase",phase);run.userMessageId?.let{put("messageId",it)}
                         put("label",when(phase){"approval"->"확인이 필요한 일";"waiting_resource"->"사용 가능한 실행 환경 대기";else->"맡은 일 진행 중"});put("detail",run.status)
                         put("canCancel",run.runId==runForRoom)
                         put("evidence",buildJsonArray{publicActivityWindow(roomActivities.values.firstOrNull{it.runId==run.runId&&it.threadId==composerThreadId}?.events.orEmpty()).forEach{event->add(buildJsonObject{
@@ -475,6 +475,7 @@ class MainActivity : ComponentActivity() {
                                     else->activity.status
                                 }
                                 put("id",activity.runId);put("phase",phase)
+                                activity.userMessageId?.let{put("messageId",it)}
                                 put("label",when(phase){"waiting_input"->"답변을 기다리고 있어요";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
                                 put("detail",if(latestQuestion)"아래에 답해 주시면 이 대화에서 이어갈게요."else"");put("canCancel",false)
                                 put("evidence",buildJsonArray{publicActivityWindow(activity.events).forEach{event->add(buildJsonObject{

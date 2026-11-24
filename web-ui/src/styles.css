@@ -347,6 +347,7 @@ svg { width: 20px; height: 20px; flex: none; }
 .message-actions { display: flex; gap: 2px; margin: 6px 0 0 -6px; }
 
 /* Task cards: state is carried by tile shape + label + color, never by color alone ---------------- */
+.messages > .task-card { align-self: flex-start; width: min(100%, 37rem); }
 .task-card {
   --phase-color: var(--neutral);
   --phase-bg: var(--neutral-soft);

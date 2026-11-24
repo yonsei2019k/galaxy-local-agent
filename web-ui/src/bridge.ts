@@ -30,6 +30,7 @@ export interface Task {
   label: string
   detail: string
   canCancel: boolean
+  messageId?: string
   evidence?: Evidence[]
 }
 
@@ -193,7 +194,7 @@ function evidence(value: unknown): value is Evidence {
 
 function task(value: unknown): value is Task {
   return record(value) && strings(value, 'id', 'phase', 'label', 'detail') &&
-    typeof value.canCancel === 'boolean' && (value.evidence === undefined || list(value.evidence, evidence))
+    typeof value.canCancel === 'boolean' && (value.messageId === undefined || typeof value.messageId === 'string') && (value.evidence === undefined || list(value.evidence, evidence))
 }
 
 function model(value: unknown): value is Model {

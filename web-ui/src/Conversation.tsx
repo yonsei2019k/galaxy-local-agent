@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
 import type { IconName } from './Icon'
@@ -130,7 +130,7 @@ function TaskCard({ task }: { task: Task }) {
   const heading = useId()
   const recent = task.evidence?.slice(-3) ?? []
   return (
-    <article className={`task-card task-card--${phase.tone}`} aria-labelledby={heading}>
+    <article id={`work-${task.id}`} className={`task-card task-card--${phase.tone}`} aria-labelledby={heading}>
       <div className="task-heading">
         <span className="task-icon"><Icon name={phase.icon} /></span>
         <div><p className="task-state">{phase.title}</p><h2 id={heading}>{task.label || '작업'}</h2></div>
@@ -176,7 +176,19 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   const empty = messages.length === 0 && tasks.length === 0
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
-  const activeTasksRef = useRef<HTMLElement>(null)
+  const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
+  const cardsByMessage = new Map<string, Task[]>()
+  for (const task of tasks) {
+    if (!task.messageId || !visibleUserIds.has(task.messageId) ||
+      task.phase === 'waiting_input' || task.phase === 'clarification_record') continue
+    const peers = cardsByMessage.get(task.messageId) ?? []
+    peers.push(task)
+    cardsByMessage.set(task.messageId, peers)
+  }
+  const placed = new Set([...cardsByMessage.values()].flatMap(cards => cards.map(card => card.id)))
+  const floatingLive = liveTasks.filter(task => !placed.has(task.id))
+  const floatingPrevious = previousTasks.filter(task => !placed.has(task.id))
+  const floatingPaused = pausedTasks.filter(task => !placed.has(task.id))
   const loading = connected && !snapshot?.ready
   const staff = snapshot?.singleConversation ? undefined : snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
 
@@ -203,7 +215,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   return (
     <div className="conversation-wrap">
       {snapshot?.singleConversation && activeTask && <button type="button" className="current-work"
-        onClick={() => activeTasksRef.current?.scrollIntoView({ block: 'nearest' })}>
+        onClick={() => document.getElementById(`work-${activeTask.id}`)?.scrollIntoView?.({ block: 'nearest' })}>
         <Icon name={taskPhase(activeTask).icon} /><span>{taskPhase(activeTask).title} · {activeTask.label}</span><Icon name="down" />
       </button>}
       <main className="conversation" ref={view} aria-label="대화" tabIndex={0} onScroll={event => {
@@ -218,24 +230,28 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
-            {previousTasks.length > 0 && <details className="task-evidence">
+            {floatingPrevious.length > 0 && <details className="task-evidence">
               <summary><Icon name="history" /> 이전 작업 기록 <Icon name="down" className="details-chevron" /></summary>
               <div className="tasks">
-                {previousTasks.map(item => <TaskCard key={item.id} task={item} />)}
+                {floatingPrevious.map(item => <TaskCard key={item.id} task={item} />)}
               </div>
             </details>}
-            {pausedTasks.length > 0 && <section className="tasks" aria-label="일시 정지된 작업">
-              {pausedTasks.map(item => <TaskCard key={item.id} task={item} />)}
+            {floatingPaused.length > 0 && <section className="tasks" aria-label="일시 정지된 작업">
+              {floatingPaused.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
             <div className="messages" role="log" aria-label="메시지">
-              {messages.map(item => <Message key={item.id} message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />)}
+              {messages.map(item => <Fragment key={item.id}>
+                <Message message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
+                  enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />
+                {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} />)}
+              </Fragment>)}
             </div>
             {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
               calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
-            {liveTasks.length > 0 && <section ref={activeTasksRef} className="tasks" aria-label="현재 작업 상태">
-              {liveTasks.map(item => <TaskCard key={item.id} task={item} />)}
+            {floatingLive.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
+              {floatingLive.map(item => <TaskCard key={item.id} task={item} />)}
             </section>}
           </div>
         )}

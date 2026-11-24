@@ -368,7 +368,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val workers=activeWorkers.values.sortedBy {it.activeRequest?.queueOrder?:Long.MAX_VALUE}
         activeExecutions.value=workers.mapNotNull {worker->worker.activeRequest?.let {request->
             ActiveChatExecution(request.runId,request.threadId,request.projectId,worker.executionEngine.computeLocation.value?.name,
-                worker.executionEngine.waitingForResource.value?.name,worker.status.value,worker.approval.value!=null)
+                worker.executionEngine.waitingForResource.value?.name,worker.status.value,worker.approval.value!=null,request.userMessageId)
         }}
         hasActiveRuns.value=workers.isNotEmpty()||ownedRequestJob?.isActive==true
         phoneWorkPending.value=ownedRequestJob?.isActive==true||workers.any {worker->
