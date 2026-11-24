@@ -382,7 +382,7 @@ class BrowserAgent:
             # Headless: nothing ever appears on the PC screen while the owner may be using it.
             self.process = subprocess.Popen([self._chrome(), '--headless=new', '--window-size=1280,2000', f'--user-data-dir={self.profile}', '--remote-debugging-port=0',
                                              '--remote-debugging-address=127.0.0.1', '--no-first-run', '--no-default-browser-check',
-                                             '--disable-sync', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             '--disable-sync', '--mute-audio', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                              creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
             deadline = time.monotonic() + 20
             while port is None and time.monotonic() < deadline:
