@@ -20,7 +20,7 @@
 }
 .cloud-images-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .cloud-images-heading { min-width: 0; }
-.cloud-images-title { margin: 0; font-size: var(--fs-title); font-weight: 700; letter-spacing: -.02em; }
+.cloud-images-title { margin: 0; font-size: var(--fs-subtitle); font-weight: 700; letter-spacing: -.02em; }
 .cloud-images-subtitle { margin: 2px 0 0; color: var(--secondary); font-size: var(--fs-small); overflow-wrap: anywhere; }
 .cloud-images-field { display: flex; flex-direction: column; gap: 8px; }
 .cloud-images-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
@@ -115,7 +115,7 @@
 
 .cloud-images-result { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 0; }
 .cloud-images-result img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface-soft); }
-.cloud-images-result figcaption { color: var(--muted); font-size: var(--fs-caption); }
+.cloud-images-result figcaption { color: var(--muted); font-size: 11.5px; /* kept at pre-token size */ }
 
 .cloud-images-actions {
   position: sticky;

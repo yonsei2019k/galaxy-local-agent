@@ -85,11 +85,11 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   )
 }
 
-function Message({ message, previews, enabled, onCopy, onFiles, onMessageMenu }: {
+function Message({ message, previous, previews, enabled, onFiles, onMessageMenu }: {
   message: ConversationMessage
+  previous?: ConversationMessage
   previews: ResultPreview[]
   enabled: boolean
-  onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
 }) {
@@ -97,11 +97,11 @@ function Message({ message, previews, enabled, onCopy, onFiles, onMessageMenu }:
   const user = message.role === 'user'
   const assistant = message.role === 'assistant'
   const author = assistant ? message.authorLabel ?? '집순이' : undefined
+  const startsGroup = assistant && !(previous?.role === 'assistant' && (previous.authorLabel ?? '집순이') === author)
   return (
-    <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
-      {assistant && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
-      {!user && !assistant && <div className="message-label">작업 기록</div>}
-      {assistant ? <div className="assistant-bubble">
+    <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
+      {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
+      {assistant ? <div className="assistant-text">
         <RichAnswer text={message.text} />
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />
@@ -111,8 +111,6 @@ function Message({ message, previews, enabled, onCopy, onFiles, onMessageMenu }:
       </div> : <div className="message-text" dir="auto">{message.text}</div>}
       {(assistant || user) && (
         <div className="message-actions">
-          {assistant && <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
-            aria-label="답변 복사" title="답변 복사" onClick={() => onCopy(message.id)}><Icon name="copy" /></button>}
           <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
             aria-label={assistant ? '답변 메뉴' : '메시지 메뉴'} onClick={() => onMessageMenu(message.id)}>···</button>
         </div>
@@ -163,11 +161,10 @@ function TaskCard({ task, stopWaiting }: { task: Task; stopWaiting?: (runId: str
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
+export function Conversation({ snapshot, connected, enabled, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
-  onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
   onStopGoalWait(runId: string): void
@@ -282,9 +279,9 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
               {floatingPaused.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
             </section>}
             <div className="messages" role="log" aria-label="메시지">
-              {messages.map(item => <Fragment key={item.id}>
-                <Message message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
-                  enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
+              {messages.map((item, index) => <Fragment key={item.id}>
+                <Message message={item} previous={messages[index - 1]} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
+                  enabled={enabled} onFiles={onFiles} onMessageMenu={onMessageMenu} />
                 {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
                 {websiteAnchor === item.id && websiteCard}
               </Fragment>)}

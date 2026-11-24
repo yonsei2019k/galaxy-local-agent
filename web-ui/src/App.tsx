@@ -135,7 +135,6 @@ export default function App() {
           onSave={entries => request({ action: 'saveOfficeProfile', payload: { entries } })}
           onClear={() => request({ action: 'clearOfficeProfile' })} onClose={() => setOfficeProfileOpen(false)} />}
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
-          onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
           onFiles={messageId => request({ action: 'messageFiles', payload: { messageId } })}
           onStopGoalWait={runId => request({ action: 'stopGoalWait', payload: { runId } })}
           onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })}

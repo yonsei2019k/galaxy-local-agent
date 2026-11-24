@@ -368,7 +368,7 @@ describe('native conversation', () => {
     expect(host.querySelector('.transcript .welcome--compact h1')?.textContent).toBe('안녕하세요, 집순이예요!')
   })
 
-  it('renders assistant output and evidence as text and copies the selected answer by native identity', () => {
+  it('renders assistant output and evidence as text and opens the answer menu by native identity', () => {
     mount()
     const text = '<img src="https://invalid.example/image.png" onerror="alert(1)">\n<b>결과</b>'
     snapshot({
@@ -380,12 +380,36 @@ describe('native conversation', () => {
     expect(Array.from(host.querySelectorAll('.rich-answer > p'), node => node.textContent).join('\n')).toBe(text)
     expect(host.querySelector('.task-evidence p')?.textContent).toBe(text)
     expect(host.querySelector('.message img, .task-evidence img, .message b')).toBeNull()
-    click('답변 복사')
-    expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a', action: 'copy', payload: { messageId: 'answer-a' } })
     expect(postIntent(base, { action: 'copy', payload: { messageId: 'answer-a' } })).toBe(false)
     expect(host.querySelector('.task-state')?.textContent).toBe('승인 필요')
     click('답변 메뉴')
     expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'answer-a' } })
+  })
+
+  it('groupsConsecutiveAssistantAnswersUnderOneLabel', () => {
+    mount()
+    snapshot({ ...base, messages: [
+      { id: 'a1', role: 'assistant', text: '하나' }, { id: 'a2', role: 'assistant', text: '둘' }] })
+    expect(host.querySelectorAll('.message--assistant .message-label')).toHaveLength(1)
+    snapshot({ ...base, messages: [
+      { id: 'a1', role: 'assistant', text: '하나' }, { id: 'u1', role: 'user', text: '질문' }, { id: 'a2', role: 'assistant', text: '둘' }] })
+    expect(host.querySelectorAll('.message--assistant .message-label')).toHaveLength(2)
+  })
+
+  it('assistantAnswerHasNoBubbleBox', () => {
+    mount()
+    snapshot({ ...base, messages: [{ id: 'a1', role: 'assistant', text: '답' }] })
+    expect(host.querySelector('.assistant-bubble')).toBeNull()
+    expect(host.querySelector('.assistant-text')).not.toBeNull()
+  })
+
+  it('keepsSingleMenuAndRemovesCopyIcon', () => {
+    mount()
+    snapshot({ ...base, messages: [{ id: 'a1', role: 'assistant', text: '답' }] })
+    expect(host.querySelector('[aria-label="답변 복사"]')).toBeNull()
+    expect(host.querySelectorAll('.message-actions button')).toHaveLength(1)
+    click('답변 메뉴')
+    expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'a1' } })
   })
 
   it('keeps the first draft on a busy submission rejection and reuses its retry token', () => {

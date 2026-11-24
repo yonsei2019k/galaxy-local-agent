@@ -85,9 +85,6 @@ svg { width: 20px; height: 20px; flex: none; }
   --bead-highlight: #ffffff40;
 
   /* Type and rhythm */
-  /* Component sizes kept at their pre-token values (visual no-op); tokens.css defines caption 12 / title 20. */
-  --fs-caption: 11.5px;
-  --fs-title: 17px;
   --tap: 44px;
   --pad: clamp(16px, 4vw, 40px);
   --content-width: 760px;
@@ -149,7 +146,6 @@ svg { width: 20px; height: 20px; flex: none; }
   box-shadow: inset 0 1px 0 var(--bead-highlight);
 }
 .brand-mark--small { width: 26px; height: 26px; border-radius: 8px; }
-.topbar-brand { width: 30px; height: 30px; border-radius: 9px; }
 
 /* Top bar and model --------------------------------------------------------------------------------- */
 .topbar {
@@ -169,7 +165,7 @@ svg { width: 20px; height: 20px; flex: none; }
 .rename-thread-form input { min-width: 4em; width: min(27vw, 14em); }
 .rename-thread-form button { flex: none; white-space: nowrap; }
 .menu-button { color: var(--ink); margin-inline-end: -4px; }
-.topbar-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-title); font-weight: 700; letter-spacing: -.02em; }
+.topbar-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-subtitle); font-weight: 700; letter-spacing: -.02em; }
 
 .model-group { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; min-width: 0; max-width: 60%; }
 .model-control { position: relative; display: inline-grid; min-width: 0; }
@@ -191,7 +187,7 @@ svg { width: 20px; height: 20px; flex: none; }
   font-weight: 650;
 }
 .model-control select:not(:disabled):hover { border-color: var(--accent); }
-.active-model { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
+.active-model { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; /* kept at pre-token size */ }
 /* The dot is a tiny clasp bead: it only says which model is set, never that work is happening. */
 .active-model span { display: inline-block; width: 7px; height: 7px; margin-inline-end: 6px; border-radius: 50%; background: var(--accent); vertical-align: .06em; }
 
@@ -225,7 +221,7 @@ svg { width: 20px; height: 20px; flex: none; }
 .wordmark { display: flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 800; letter-spacing: -.05em; white-space: nowrap; }
 .wordmark > span:last-child { margin-inline-start: -8px; color: var(--muted); font-weight: 500; }
 .thread-nav { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.thread-nav h2 { margin: 0 10px 8px; color: var(--muted); font-size: var(--fs-caption); font-weight: 700; letter-spacing: .04em; }
+.thread-nav h2 { margin: 0 10px 8px; color: var(--muted); font-size: 11.5px; /* kept at pre-token size */ font-weight: 700; letter-spacing: .04em; }
 .thread-nav ul { margin: 0 -5px; padding: 3px 5px; list-style: none; }
 .room-working {
   width: 15px; height: 15px; flex: 0 0 15px; margin-inline-start: auto;
@@ -309,7 +305,6 @@ svg { width: 20px; height: 20px; flex: none; }
 .mascot-field::before { inset: 9%; background: radial-gradient(circle at 42% 30%, var(--halo-start) 20%, var(--halo-end) 95%); }
 .mascot-field::after { inset: 2%; border: 1px solid var(--halo-line); }
 .mascot { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 10px 12px var(--halo-shadow)); }
-.mascot-fallback { width: 50%; height: auto; aspect-ratio: 1; border-radius: 31%; }
 .welcome h1 { margin: 0; font-size: clamp(26px, 6vw, 40px); line-height: 1.24; font-weight: 800; letter-spacing: -.05em; word-break: keep-all; text-wrap: balance; }
 .welcome p { max-width: 34em; margin: 12px 0 0; color: var(--muted); font-size: clamp(13px, 3.6vw, 15px); line-height: 1.6; word-break: keep-all; text-wrap: balance; }
 .welcome--compact { min-height: 0; padding-block: 24px; }
@@ -332,29 +327,21 @@ svg { width: 20px; height: 20px; flex: none; }
 .message-label { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 13px; font-weight: 750; }
 .message-text { white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; font-size: var(--fs-body); line-height: 1.7; word-break: keep-all; }
 .message--assistant .message-text { max-width: 68ch; }
-.assistant-bubble {
-  width: fit-content;
-  min-width: 0;
-  max-width: min(100%, 42rem);
-  padding: 11px 14px;
-  border: 1px solid var(--line);
-  border-radius: 6px 18px 18px 18px;
-  background: var(--surface);
-  font-size: var(--fs-body);
-}
-.assistant-bubble .rich-answer { line-height: 1.6; }
+.assistant-text { min-width: 0; max-width: 100%; background: transparent; color: var(--color-text); font-size: var(--fs-body); line-height: 1.6; }
+.assistant-text .rich-answer { line-height: 1.6; }
+.message--continued { margin-top: -6px; }
 .message--user {
   justify-self: end;
   width: fit-content;
-  max-width: min(calc(100% - 14px), 86%);
+  max-width: 82%;
   padding: 9px 13px;
-  border: 1px solid var(--bubble-outline);
-  border-radius: 18px 7px 18px 18px;
-  background: var(--bubble-owner);
-  color: var(--ink);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--color-cobalt-soft);
+  color: var(--color-text);
 }
-.message--system, .message--tool { color: var(--muted); }
-.message--system .message-text, .message--tool .message-text { font-size: 14px; }
+.message--system, .message--tool { color: var(--color-muted); }
+.message--system .message-text, .message--tool .message-text { font-size: var(--fs-small); line-height: 1.4; color: var(--color-muted); }
 .message-actions { display: flex; gap: 3px; margin: 2px 0 0 -4px; }
 .message--user .message-actions { justify-content: flex-end; margin: 0 -5px -5px 0; }
 
@@ -492,7 +479,7 @@ svg { width: 20px; height: 20px; flex: none; }
   background: var(--surface);
 }
 .collab-message--user { justify-self: end; border-radius: 16px 16px 5px 16px; background: var(--accent-soft); border-color: transparent; }
-.collab-message-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; margin-bottom: 6px; color: var(--muted); font-size: var(--fs-caption); overflow-wrap: anywhere; }
+.collab-message-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; margin-bottom: 6px; color: var(--muted); font-size: 11.5px; /* kept at pre-token size */ overflow-wrap: anywhere; }
 .collab-message-meta strong { color: var(--ink); font-size: var(--fs-small); }
 /* Each agent is marked by a small bead in its own party color before its name. */
 .collab-message--codex .collab-message-meta strong, .collab-message--claude .collab-message-meta strong { display: inline-flex; align-items: center; gap: 6px; }
