@@ -38,20 +38,26 @@ export function taskPhase(task: Task): WorkPresentation {
   return workPresentation(task)
 }
 
-const hiddenSteps = /^(모델 추론|후속 조건 검증 기록|답변 구간 저장 확인)/
+// Only the exact known phrase (optionally followed by the host's record tail) is rewritten or hidden.
+// Anything else, such as a failure wording, stays verbatim so it is never turned into success.
+const hiddenSteps = /^(?:모델 추론|후속 조건 검증 기록|답변 구간 저장 확인)(?: · 실행 결과 기록)?$/
 const rewrittenSteps: Array<[RegExp, string]> = [
-  [/^사이트 화면 확인/, '사이트 화면을 읽었어요'],
-  [/^공개 웹 검색/, '웹에서 찾아봤어요'],
-  [/^웹페이지 읽기/, '웹페이지를 읽었어요'],
+  [/^사이트 화면 확인(?: · 실행 결과 기록)?$/, '사이트 화면을 읽었어요'],
+  [/^공개 웹 검색(?: · 실행 결과 기록)?$/, '웹에서 찾아봤어요'],
+  [/^웹페이지 읽기(?: · 실행 결과 기록)?$/, '웹페이지를 읽었어요'],
 ]
-const recordTail = /\s*·\s*실행 결과 기록$/
 
 /** Internal step wording in people's words. An empty result means "do not show". */
 export function friendlyStep(label: string): string {
   const text = label.trim()
   if (hiddenSteps.test(text)) return ''
   for (const [pattern, replacement] of rewrittenSteps) if (pattern.test(text)) return replacement
-  return text.replace(recordTail, '')
+  return text
+}
+
+/** Verbatim, non-empty, de-duplicated list (live steps reported by the host are never reworded). */
+export function verbatimSteps(labels: string[]): string[] {
+  return [...new Set(labels.map(label => label.trim()).filter(Boolean))]
 }
 
 /** Friendly, non-empty, de-duplicated step list in first-seen order. */

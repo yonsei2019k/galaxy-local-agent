@@ -64,11 +64,20 @@ describe('workPresentation', () => {
     expect(friendlyStep('사이트 화면 확인 · 실행 결과 기록')).toBe('사이트 화면을 읽었어요')
     expect(friendlyStep('공개 웹 검색 · 실행 결과 기록')).toBe('웹에서 찾아봤어요')
     expect(friendlyStep('웹페이지 읽기 · 실행 결과 기록')).toBe('웹페이지를 읽었어요')
-    expect(friendlyStep('설정 화면 확인 · 실행 결과 기록')).toBe('설정 화면 확인')
+    expect(friendlyStep('설정 화면 확인 · 실행 결과 기록')).toBe('설정 화면 확인 · 실행 결과 기록')
     expect(friendlyStep('모델 추론')).toBe('')
     expect(friendlyStep('후속 조건 검증 기록 · 실행 결과 기록')).toBe('')
     expect(friendlyStep('답변 구간 저장 확인')).toBe('')
     expect(friendlyStep('로그인 화면 확인')).toBe('로그인 화면 확인')
+  })
+
+  it('friendlyStepNeverTurnsFailuresIntoSuccessOrHidesThem', () => {
+    for (const label of ['사이트 화면 확인 실패', '웹페이지 읽기 오류 · 실행 결과 기록', '모델 추론 실패', '공개 웹 검색 시간 초과',
+      '후속 조건 검증 기록 실패 · 실행 결과 기록']) {
+      expect(friendlyStep(label)).toBe(label)
+    }
+    expect(friendlyStep('웹페이지 읽기')).toBe('웹페이지를 읽었어요')
+    expect(friendlyStep('모델 추론 · 실행 결과 기록')).toBe('')
   })
 })
 
@@ -164,23 +173,60 @@ describe('Conversation work cards', () => {
 
   it('websiteCardShowsItsStepsInTheSheetAndKeepsTheNativeSlot', () => {
     const website = { id: 'w1', runId: 'w1', messageId: 'u1', title: '한림에듀', status: '강의실 확인 중',
-      steps: ['접속 중', '사이트 화면 확인 · 실행 결과 기록', '강의실 확인 중'], working: true }
+      steps: ['접속 중', '웹페이지 읽기 오류', '강의실 확인 중'], working: true }
     const stop = vi.fn()
     renderConversation({ ...base, messages: [{ id: 'u1', role: 'user', text: '이어듣기' }],
-      tasks: [task({ id: 'w1', messageId: 'u1', phase: 'waiting_goal', canCancel: true })], websiteCard: { ...website, working: false } }, stop)
+      tasks: [task({ id: 'w1', messageId: 'u1', phase: 'waiting_goal', canCancel: true })], websiteCard: website }, stop)
     expect(host.querySelectorAll('.work-card')).toHaveLength(1)
     const card = host.querySelector('#website-work .work-card') as HTMLButtonElement
     expect(card.textContent).toContain('한림에듀')
     expect(card.textContent).toContain('재개 대기')
     act(() => card.click())
     expect([...host.querySelectorAll('.work-sheet .work-steps li')].map(item => item.textContent))
-      .toEqual(['접속 중', '사이트 화면을 읽었어요', '강의실 확인 중'])
+      .toEqual(['접속 중', '웹페이지 읽기 오류', '강의실 확인 중'])
     act(() => ([...host.querySelectorAll('.work-sheet button')].find(item => item.textContent === '예약 중지') as HTMLButtonElement).click())
     expect(stop).toHaveBeenCalledWith('w1')
     renderConversation({ ...base, messages: [{ id: 'u1', role: 'user', text: '이어듣기' }],
       websiteCard: { ...website, inputHeight: 320 } })
     expect(host.querySelector('[data-native-website-slot="w1"]')?.getAttribute('style')).toContain('320px')
     expect(host.querySelector('.work-card')).toBeNull()
+  })
+
+  it('websiteCardUsesReviewToneAndAnnouncesStatus', () => {
+    const website = { id: 'w2', runId: 'w2', messageId: 'u1', title: '한림에듀', status: '확인이 필요해요', steps: [], working: false }
+    renderConversation({ ...base, messages: [{ id: 'u1', role: 'user', text: '이어듣기' }],
+      tasks: [task({ id: 'w2', messageId: 'u1', phase: 'paused', canCancel: true })], websiteCard: website })
+    expect(host.querySelector('#website-work .work-card--review')).not.toBeNull()
+    const live = host.querySelector('.conversation-wrap > [role="status"]')
+    expect(live?.getAttribute('aria-live')).toBe('polite')
+    expect(live?.textContent).toContain('확인이 필요해요')
+  })
+
+  it('announcesTheActiveTaskDetail', () => {
+    renderConversation({ ...base, busy: true, activeRunId: 'r1', messages: [{ id: 'u1', role: 'user', text: '해줘' }],
+      tasks: [task({ id: 'r1', messageId: 'u1', detail: '문서를 읽는 중입니다' })] })
+    expect(host.querySelector('.conversation-wrap > [role="status"]')?.textContent).toContain('문서를 읽는 중입니다')
+  })
+
+  it('showsOnlyTheMostRecentClarificationRecord', () => {
+    renderConversation({ ...base, messages: [{ id: 'u1', role: 'user', text: '질문' }],
+      tasks: [task({ id: 'q1', phase: 'clarification_record', label: '옛 질문', canCancel: false }),
+        task({ id: 'q2', phase: 'clarification_record', label: '새 질문', canCancel: false })] })
+    expect([...host.querySelectorAll('.work-card')].map(card => card.id)).toEqual(['work-q2'])
+  })
+
+  it('closesTheSheetAndDropsItsButtonsWhenTheTaskDisappears', () => {
+    const waiting = task({ id: 'g1', messageId: 'u1', phase: 'waiting_goal', canCancel: true })
+    const withTask = { ...base, messages: [{ id: 'u1', role: 'user' as const, text: '내일' }], tasks: [waiting] }
+    renderConversation(withTask)
+    act(() => (host.querySelector('#work-g1') as HTMLButtonElement).click())
+    expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(true)
+    expect([...host.querySelectorAll('.work-sheet button')].some(item => item.textContent === '예약 중지')).toBe(true)
+    renderConversation({ ...withTask, tasks: [] })
+    expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(false)
+    expect(host.querySelectorAll('.work-sheet button')).toHaveLength(0)
+    renderConversation(withTask)
+    expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(false)
   })
 
   it('assistantAnswerAfterACardedRequestStartsANewGroup', () => {

@@ -483,14 +483,9 @@ svg { width: 20px; height: 20px; flex: none; }
 @media (prefers-reduced-motion: no-preference) {
   button, select { transition: background-color 150ms, border-color 150ms, color 150ms, box-shadow 150ms; }
 }
-@media (prefers-reduced-motion: reduce) {
-  /* No motion: a still, full ring still reads as "running" next to the 진행 중 label. */
-  .task-card--active .task-icon::after { border-color: var(--accent); opacity: .55; }
-}
-@keyframes ziphap-clasp-turn { to { transform: rotate(360deg); } }
 
 @media (forced-colors: active) {
-  .task-icon, .send-button, .brand-mark { forced-color-adjust: auto; border: 1px solid CanvasText; }
+  .work-icon, .send-button, .brand-mark { forced-color-adjust: auto; border: 1px solid CanvasText; }
 }
 
 /* Point color accents ("Sunlit Porcelain") ----------------------------------------------------------- */
@@ -532,10 +527,6 @@ svg { width: 20px; height: 20px; flex: none; }
 /* Collaboration: each party keeps its own bright color. */
 .collab-message--claude { border-color: var(--lilac-soft); }
 .collab-message--codex { border-color: var(--cobalt-soft); }
-
-/* Waiting tasks read as "on hold" in sunshine yellow rather than grey. */
-.task-card--neutral { --phase-color: var(--sun-text); --phase-bg: var(--sun-soft); }
-.task-card--neutral .task-icon { background: var(--sun-soft); box-shadow: inset 0 0 0 1.5px var(--sun); }
 
 /* Top bar on phones: the conversation name gets the room (owner report 2026-11-19: title cut to "사…").
    Rename becomes a compact pencil button (its text stays for screen readers); the model picker shrinks. */

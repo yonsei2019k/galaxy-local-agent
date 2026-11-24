@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
 import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
@@ -151,6 +151,8 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
   </figure>
 }
 
+const heldPhases = new Set(['waiting_goal', 'approval', 'waiting_approval', 'paused', 'waiting_input'])
+
 export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
@@ -182,7 +184,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
   const websiteWork: Task | null = website && !website.inputHeight ? {
     id: website.runId ?? `website-${website.id}`,
-    phase: website.working ? 'running' : websiteTask && !isLiveTaskPhase(websiteTask.phase) ? websiteTask.phase : 'website',
+    phase: websiteTask && heldPhases.has(websiteTask.phase) ? websiteTask.phase
+      : website.working ? 'running' : websiteTask && !isLiveTaskPhase(websiteTask.phase) ? websiteTask.phase : 'website',
     label: website.title, detail: website.status, canCancel: websiteTask?.canCancel ?? false, evidence: websiteTask?.evidence,
   } : null
   const websiteCard = website && (website.inputHeight ?
@@ -200,10 +203,17 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
     cardsByMessage.set(task.messageId, peers)
   }
   const placed = new Set([...cardsByMessage.values()].flatMap(cards => cards.map(card => card.id)))
-  const unplacedTasks = tasks.filter(task => !placed.has(task.id) && task.phase !== 'waiting_input')
+  const lastClarification = tasks.filter(task => task.phase === 'clarification_record').at(-1)
+  const unplacedTasks = tasks.filter(task => !placed.has(task.id) && task.phase !== 'waiting_input' &&
+    (task.phase !== 'clarification_record' || task === lastClarification))
   const sheetTask = openWorkId === null ? null : websiteWork?.id === openWorkId ? websiteWork : tasks.find(task => task.id === openWorkId) ?? null
+  const announcement = website?.working || (website && !website.inputHeight)
+    ? [website.title, website.status].filter(Boolean).join(': ')
+    : activeTask ? [activeTask.label, activeTask.detail].filter(Boolean).join(': ') : ''
   const loading = connected && !snapshot?.ready
   const staff = snapshot?.singleConversation ? undefined : snapshot?.staffRooms?.find(room => room.id === snapshot.threadId)?.title
+
+  useEffect(() => { if (openWorkId !== null && !sheetTask) setOpenWorkId(null) }, [openWorkId, sheetTask])
 
   const scrollToEnd = useCallback(() => {
     if (view.current) view.current.scrollTop = view.current.scrollHeight
@@ -233,6 +243,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   return (
     <div className="conversation-wrap">
+      <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
       {snapshot?.singleConversation && (activeTask || website?.working || website?.inputHeight) && <button type="button" className="current-work"
         onClick={() => (website?.inputHeight ? document.querySelector('[data-native-website-slot]') : website?.working ?
           document.getElementById('website-work') : activeTask && document.getElementById(`work-${activeTask.id}`))?.scrollIntoView?.({ block: 'nearest' })}>

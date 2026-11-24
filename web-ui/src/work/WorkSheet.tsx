@@ -3,12 +3,12 @@ import '../character/character.css'
 import './work.css'
 import { Icon } from '../Icon'
 import type { Task } from '../bridge'
-import { friendlyStep, friendlySteps, taskSteps, workPresentation } from './workPresentation'
+import { friendlyStep, taskSteps, verbatimSteps, workPresentation } from './workPresentation'
 
 export function WorkSheet({ task, enabled, steps, onClose, onStopGoalWait }: {
   task: Task | null
   enabled: boolean
-  /** Replaces the steps derived from the task's evidence (used by the website card). */
+  /** Replaces the steps derived from the task's evidence (website card live steps, shown verbatim). */
   steps?: string[]
   onClose(): void
   onStopGoalWait(runId: string): void
@@ -29,7 +29,7 @@ export function WorkSheet({ task, enabled, steps, onClose, onStopGoalWait }: {
   }, [open])
 
   const presentation = task && workPresentation(task)
-  const stepList = task ? (steps ? friendlySteps(steps) : taskSteps(task)) : []
+  const stepList = task ? (steps ? verbatimSteps(steps) : taskSteps(task)) : []
   const evidence = (task?.evidence ?? []).filter(item => item.detail)
   return <dialog ref={dialog} className="sheet work-sheet" aria-label={task ? `${task.label || '작업'} 상세` : '작업 상세'}
     onClose={onClose} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
