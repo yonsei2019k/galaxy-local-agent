@@ -3,7 +3,13 @@
         <activity
             android:name="com.user.localagent.ScreenObservationFixtureActivity"
             android:exported="true"
-            android:process=":screen_fixture" />
+            android:label="ZipHap QA Screen"
+            android:process=":screen_fixture">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
 
