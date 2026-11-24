@@ -3,6 +3,7 @@ package com.user.localagent.core
 import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GoalProgressLedgerTest {
@@ -44,6 +45,21 @@ class GoalProgressLedgerTest {
     @Test fun summaryCountsDonePerCourse() {
         val l=ledger(item("a",status=LedgerStatus.DONE,evidence=listOf("x")),item("b"),item("c"),item("d","OTHER"))
         assertEquals("KAIRB 1/3 · OTHER 0/1",l.summary())
+    }
+
+    @Test fun progressReportKeepsVideoAndCertificateSeparate() {
+        val report=ledger(
+            item("first","COI",LedgerStatus.DONE,listOf("done-record")).copy(unit="강의 영상"),
+            item("certificate","COI").copy(unit="이수증",kind=LedgerKind.CERTIFICATE),
+            item("next","보수 교육",LedgerStatus.ACTIVE).copy(unit="첫 강의",note="사이트에서 37% 확인"),
+            item("blocked","보수 교육",LedgerStatus.BLOCKED).copy(unit="시험")
+        ).validate().reportDetails()
+        assertTrue(report.contains("COI (1/2단계 확인)"))
+        assertTrue(report.contains("강의 영상 · 확인 완료"))
+        assertTrue(report.contains("이수증 · 시작 전"))
+        assertTrue(report.contains("첫 강의 · 진행 중 · 사이트에서 37% 확인"))
+        assertTrue(report.contains("시험 · 이 단계에서 멈춤"))
+        assertTrue(!report.contains("done-record"))
     }
 
     @Test fun setMetaLeavesNullFieldsUnchanged() {

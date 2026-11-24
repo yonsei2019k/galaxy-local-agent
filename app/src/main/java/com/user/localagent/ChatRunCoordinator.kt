@@ -1632,6 +1632,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         "Use short, natural sentences such as ‘좋아요, 확인해 볼게요’ or ‘여기까지 찾았어요’ when they fit. " +
         "Skip repeated greetings, exaggerated enthusiasm, formal service-desk phrasing, and technical codes. " +
         "Lead with the result. If blocked, tell the owner what you checked and the one thing you need next. " +
+        "For a progress question, open with a warm one-line overview, then group the work by course or deliverable. " +
+        "Name completed, active, waiting, and blocked steps, the most recent verified progress, and the next step. " +
+        "Separate a finished video, a passed quiz, a submitted survey, and a saved certificate. " +
+        "Use timestamps and time estimates only when supported by observations, and say when you last checked. " +
+        "Consult saved progress and use read-only checks when authorized. A status question does not authorize starting or replaying actions. " +
         "When an action fails, compare its expected effect to the last observation. Try a different permitted read to distinguish likely causes. " +
         "After an uncertain click, inspect the current state before deciding what to do; never blindly repeat it. " +
         "If the owner says they signed in while continuing a browser task, first read the current phone browser. Reuse that session. If the site still displays an authentication screen, report the observed screen and preserve the task. " +
@@ -1711,6 +1716,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 else goal
             if(allowCloudPersonalData||!com.user.localagent.core.ConversationPrivacy.sensitiveText(currentGoal))
                 previous=CloudConversationContext.PreviousTask(sourceBinding,run.status,source.text,currentGoal,uncertain,sourceConfirmed=true)
+        }
+        if(allowCloudPersonalData&&request.officeParentId==null){
+            val access=chat.accessScope(request.threadId)
+            val live=goals.loadGuarded(access)
+            val prior=previous
+            if(live!=null&&prior!=null&&access.projectId==request.projectId&&
+                prior.binding.runId in live.linkedRunIds&&chat.thread(request.threadId)?.activeBranchId==request.branchId){
+                val detail=withContext(Dispatchers.IO){
+                    app.goalProgress.reportDetails(goalDigest(live.id+":"+request.branchId+":"+access.scopeKey),live.id)
+                }
+                if(detail!=null)previous=prior.copy(goal=prior.goal.take(220)+"\n마지막으로 저장된 단계 기록입니다. 현재 재생·완료를 보장하지 않습니다.\n"+detail)
+            }
         }
         return CloudConversationContext.build(currentBinding,turns,previous)
     }
@@ -3429,11 +3446,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             is WaitCondition.MediaEnd -> "영상이 끝나는지 확인하는 동안 대기"
             is WaitCondition.OwnerAuth -> "휴대폰에서 로그인 또는 인증 완료 대기"
         }
-        val summary = withContext(Dispatchers.IO) {
-            app.goalProgress.summary(goalDigest(live.id+":"+request.branchId+":"+access.scopeKey))
+        val progressKey=goalDigest(live.id+":"+request.branchId+":"+access.scopeKey)
+        val (summary,progress)=withContext(Dispatchers.IO) {
+            app.goalProgress.summary(progressKey) to app.goalProgress.reportDetails(progressKey,live.id)
         }
         val detail = listOfNotNull(label,summary?.takeIf { it.isNotBlank() }).joinToString(" · ")
-        publishActionFinal(request,emptySet(),"목표를 저장했어요. $label 상태예요.",true,"waiting_goal_condition")
+        val explanation=when(record.condition){
+            is WaitCondition.AtTime -> "$label 다시 확인할게요."
+            is WaitCondition.MediaEnd -> "영상이 끝나면 사이트에 진도가 반영됐는지 이어서 확인할게요."
+            is WaitCondition.OwnerAuth -> "휴대폰에서 로그인이 확인되면 이어서 살펴볼게요."
+        }
+        val message=if(progress==null)explanation else "$explanation\n\n여기까지 확인했어요.\n$progress"
+        publishActionFinal(request,emptySet(),message,true,"waiting_goal_condition")
         val row=checkNotNull(app.repository.chat.run(request.runId))
         val stored=Json.parseToJsonElement(row.contextJson).jsonObject
         app.repository.chat.updateRunContext(row.id,JsonObject(stored+("hostGoalWaitDetail" to JsonPrimitive(detail))).toString())

@@ -10,6 +10,7 @@ import com.user.localagent.core.VerificationState
 import com.user.localagent.core.apply
 import com.user.localagent.core.validate
 import com.user.localagent.core.summary
+import com.user.localagent.core.reportDetails
 import kotlinx.serialization.json.*
 
 internal class GoalProgressStore(private val store: ConnectionStore) {
@@ -25,6 +26,13 @@ internal class GoalProgressStore(private val store: ConnectionStore) {
     fun summary(key: String): String? = synchronized(lock) {
         store.read("goal.progress.v1.$key")?.let {
             GoalProgressLimits.json.decodeFromString<GoalProgressLedger>(it).validate().summary().take(320)
+        }
+    }
+
+    fun reportDetails(key:String,goalId:String):String? = synchronized(lock) {
+        store.read("goal.progress.v1.$key")?.let {
+            GoalProgressLimits.json.decodeFromString<GoalProgressLedger>(it).validate()
+                .takeIf {ledger->ledger.goalId==goalId}?.reportDetails()?.takeIf(String::isNotBlank)
         }
     }
 

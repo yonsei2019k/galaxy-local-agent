@@ -106,3 +106,34 @@ fun GoalProgressLedger.apply(ops:List<LedgerOp>,observedAuditIds:Set<String>,now
 /** One-line chat card text: "<course> <done>/<total>" per course in first-appearance order. */
 fun GoalProgressLedger.summary():String =
     items.groupBy {it.course}.entries.joinToString(" · ") {(course,list)->"$course ${list.count {it.status==LedgerStatus.DONE}}/${list.size}"}
+
+/** Short source-labelled detail for the conversation. A saved item never implies overall completion. */
+fun GoalProgressLedger.reportDetails(maxChars:Int=1200):String {
+    require(maxChars>=100)
+    if(items.isEmpty())return ""
+    fun line(value:String)=value.map {if(it.isISOControl()) ' ' else it}.joinToString("").trim()
+    fun state(status:LedgerStatus)=when(status){
+        LedgerStatus.DONE->"확인 완료"
+        LedgerStatus.ACTIVE->"진행 중"
+        LedgerStatus.WAITING->"대기 중"
+        LedgerStatus.BLOCKED->"이 단계에서 멈춤"
+        LedgerStatus.TODO->"시작 전"
+    }
+    val groups=items.groupBy {it.course}
+    val rows=groups.flatMap { (course,units)->
+        listOf("• ${line(course)} (${units.count {it.status==LedgerStatus.DONE}}/${units.size}단계 확인)")+
+            units.map { item->
+                val note=line(item.note).takeIf(String::isNotBlank)
+                "  - ${line(item.unit)} · ${state(item.status)}"+(note?.let{" · $it"}?:"")
+            }
+    }
+    val omission="\n나머지 세부 단계는 작업 기록에 남아 있어요."
+    val taken=mutableListOf<String>()
+    var size=0
+    for(row in rows){
+        if(size+row.length+1>maxChars-omission.length)break
+        taken+=row
+        size+=row.length+1
+    }
+    return taken.joinToString("\n")+(if(taken.size<rows.size)omission else "")
+}
