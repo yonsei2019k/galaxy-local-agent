@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
-import '../character/character.css'
+import '../sheet.css'
 import './work.css'
 import { Icon } from '../Icon'
 import type { Task } from '../bridge'

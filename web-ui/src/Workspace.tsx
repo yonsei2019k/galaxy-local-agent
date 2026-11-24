@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
@@ -156,6 +156,23 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
   )
 }
 
+const STATUS_VISIBLE_MS = 6_000
+
+/** A host status line that appears when it changes and goes away on its own; the text present on mount is not new. */
+function useBriefStatus(status: string) {
+  const [shown, setShown] = useState('')
+  const seen = useRef(status)
+  useEffect(() => {
+    if (status === seen.current) return
+    seen.current = status
+    setShown(status)
+    if (!status) return
+    const timer = window.setTimeout(() => setShown(''), STATUS_VISIBLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [status])
+  return shown
+}
+
 const MAX_REQUEST_LENGTH = 12_000
 const MAX_STEER_LENGTH = 4_000
 
@@ -180,6 +197,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
 }) {
   const statusId = useId()
   const [sheetOpen, setSheetOpen] = useState(false)
+  const briefStatus = useBriefStatus(snapshot?.ready ? snapshot.status : '')
   const hasText = draft.trim().length > 0
   const attachments = snapshot?.ready ? snapshot.attachments ?? [] : []
   const controls = runControls(snapshot)
@@ -195,7 +213,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
   const sendLabel = busy ? '다음에 보내기' : '보내기'
   const voiceStatus = voice === 'listening' ? '듣고 있어요. 다 말했으면 마이크를 다시 누르세요.'
     : voice === 'finishing' ? '음성을 글로 바꾸고 있어요.' : voice === 'permission' ? '마이크 권한을 확인하고 있어요.' : ''
-  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : connectionNote)
+  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : connectionNote || briefStatus)
 
   return (
     <footer className="composer-footer">
@@ -230,7 +248,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
               {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="더하기 메뉴" title="더하기 메뉴" aria-haspopup="dialog" onClick={() => setSheetOpen(true)}><Icon name="plus" /></button>}
               {snapshot?.voiceDraftEpoch !== undefined && <button type="button" className="icon-button voice-button"
                 disabled={!enabled || pending || tooLong || voice === 'permission' || voice === 'finishing'}
-                aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={onVoice}>
+                aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={() => { setSheetOpen(false); onVoice() }}>
                 <Icon name="microphone" />
               </button>}
               {(voice === 'listening' || voice === 'finishing') && <button type="button" className="icon-button"

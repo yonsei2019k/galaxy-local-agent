@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import './character.css'
+import '../sheet.css'
 import { Character } from './Character'
 import {
   COLORS, EXPR_OPTIONS, PALETTES, VARIANTS, type CharacterChoice,

@@ -649,7 +649,10 @@ describe('native conversation', () => {
       Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true,
         value(this: Element, options?: unknown) { scrolled.push({ id: this.id, options }) } })
     })
-    afterEach(() => { delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView })
+    afterEach(() => {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+      vi.useRealTimers()
+    })
 
     const message: Snapshot['messages'][number] = { id: 'u1', role: 'user', text: '자료를 정리해줘.' }
 
@@ -743,6 +746,116 @@ describe('native conversation', () => {
       expect(region()).toBe('다음 작업')
       snapshot({ ...base, tasks: [task('completed'), task('failed', 'run-b', '다음 작업')] })
       expect(region()).toBe('다음 작업 실패')
+    })
+
+    it('announcesAllTasksThatEndInTheSameSnapshot', () => {
+      mount()
+      const region = () => host.querySelector('.conversation-wrap > .sr-only[role="status"]')?.textContent
+      const task = (id: string, phase: string, label: string) => ({ id, phase, label, detail: '', canCancel: false })
+      snapshot({ ...running(), tasks: [task('a', 'running', '자료 정리'), task('b', 'running', '표 만들기')] })
+      snapshot({ ...base, tasks: [task('a', 'completed', '자료 정리'), task('b', 'failed', '표 만들기')] })
+      expect(region()).toBe('작업 2개가 끝났어요: 자료 정리 응답 종료, 표 만들기 실패')
+    })
+
+    it('announcesOnlyTasksSeenRunningAndForgetsTasksThatLeftTheList', () => {
+      mount()
+      const region = () => host.querySelector('.conversation-wrap > .sr-only[role="status"]')?.textContent
+      const task = (id: string, phase: string, label: string) => ({ id, phase, label, detail: '', canCancel: false })
+      snapshot({ ...base, tasks: [task('q', 'queued', '대기만 한 작업')] })
+      snapshot({ ...base, tasks: [task('q', 'completed', '대기만 한 작업')] })
+      expect(region()).toBe('')
+      snapshot({ ...running(), tasks: [task('a', 'running', '사라진 작업')] })
+      snapshot({ ...base, tasks: [] })
+      snapshot({ ...base, tasks: [task('a', 'completed', '사라진 작업')] })
+      expect(region()).toBe('')
+    })
+
+    it('showsANewStatusForSixSecondsAndRestartsOnADifferentText', () => {
+      vi.useFakeTimers()
+      mount()
+      const status = () => host.querySelector('.composer-status')?.textContent
+      const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms) })
+      snapshot(base)
+      expect(status()).toBe('')
+      snapshot({ ...base, status: '현재 요청을 대기열에 넣을 수 없습니다.' })
+      expect(status()).toBe('현재 요청을 대기열에 넣을 수 없습니다.')
+      expect(host.querySelector('.composer-status')?.getAttribute('role')).toBe('status')
+      advance(5_999)
+      expect(status()).toBe('현재 요청을 대기열에 넣을 수 없습니다.')
+      advance(1)
+      expect(status()).toBe('')
+      snapshot({ ...base, status: '현재 요청을 대기열에 넣을 수 없습니다.', composerEpoch: 1 })
+      expect(status()).toBe('')
+      snapshot({ ...base, status: '확인할 내용이 있어 일시 정지했습니다.' })
+      advance(4_000)
+      snapshot({ ...base, status: '다른 안내' })
+      advance(4_000)
+      expect(status()).toBe('다른 안내')
+      advance(2_000)
+      expect(status()).toBe('')
+      snapshot({ ...base, status: '지워질 안내' })
+      expect(status()).toBe('지워질 안내')
+      snapshot({ ...base, status: '' })
+      expect(status()).toBe('')
+    })
+
+    it('keepsConnectionProblemsAheadOfATransientStatus', () => {
+      vi.useFakeTimers()
+      mount()
+      const status = () => host.querySelector('.composer-status')?.textContent
+      snapshot(base)
+      snapshot({ ...base, status: '잠깐 보이는 안내' })
+      expect(status()).toBe('잠깐 보이는 안내')
+      postMessage.mockImplementation(() => { throw new Error('bridge down') })
+      act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+      expect(status()).toBe('앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.')
+      act(() => { vi.advanceTimersByTime(6_000) })
+      expect(status()).toBe('앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.')
+    })
+
+    it('headerScrollTargetPrefersActiveRunThenWebsiteThenFirst', () => {
+      mount()
+      const tasks = [
+        { id: 'l1', messageId: 'u1', phase: 'running', label: '첫째 작업', detail: '', canCancel: true },
+        { id: 'l2', messageId: 'u1', phase: 'running', label: '둘째 작업', detail: '', canCancel: true },
+      ]
+      const press = () => { scrolled.length = 0; act(() => { host.querySelector<HTMLButtonElement>('.header-work')?.click() }) }
+      snapshot({ ...running({ activeRunId: 'l2' }), singleConversation: true, messages: [message], tasks })
+      press()
+      expect(scrolled.map(item => item.id)).toEqual(['work-l2'])
+      const website = { id: 'w', runId: 'wr', messageId: 'u1', title: '한림에듀', status: '확인 중', steps: [], working: true }
+      snapshot({ ...running({ activeRunId: 'l2' }), singleConversation: true, messages: [message], tasks, websiteCard: website })
+      expect(host.querySelector('.header-work')?.textContent).toBe('작업 3개')
+      press()
+      expect(scrolled.map(item => item.id)).toEqual(['work-l2'])
+      snapshot({ ...running({ activeRunId: null }), singleConversation: true, messages: [message], tasks, websiteCard: website })
+      press()
+      expect(scrolled.map(item => item.id)).toEqual(['website-work'])
+      snapshot({ ...running({ activeRunId: null }), singleConversation: true, messages: [message], tasks })
+      press()
+      expect(scrolled.map(item => item.id)).toEqual(['work-l1'])
+    })
+
+    it('startingVoiceInputClosesTheComposerSheetForGood', () => {
+      mount()
+      snapshot({ ...base, voiceDraftEpoch: 0 })
+      click('더하기 메뉴')
+      expect(host.querySelector('.composer-sheet .sheet-body')).not.toBeNull()
+      click('음성으로 입력')
+      expect(requests().at(-1)).toMatchObject({ action: 'startVoicePrompt' })
+      expect(host.querySelector('.composer-sheet .sheet-body')).toBeNull()
+      snapshot({ ...base, voiceDraftEpoch: 0, voicePrompt: 'listening' })
+      snapshot({ ...base, voiceDraftEpoch: 1 })
+      expect(host.querySelector('[aria-label="더하기 메뉴"]')).not.toBeNull()
+      expect(host.querySelector('.composer-sheet .sheet-body')).toBeNull()
+    })
+
+    it('composerSheetExplainsAnEmptyModelList', () => {
+      mount()
+      snapshot({ ...base, models: [] })
+      click('더하기 메뉴')
+      expect(host.querySelector('.composer-sheet')?.textContent).toContain('선택할 수 있는 답변 방식이 없어요')
+      expect(host.querySelector('.composer-sheet input[type="radio"]')).toBeNull()
     })
   })
 })

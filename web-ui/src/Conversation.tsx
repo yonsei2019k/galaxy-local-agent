@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useSt
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
 import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
-import { isLiveTaskPhase, isWorkingTaskPhase } from './composer'
+import { isLiveTaskPhase } from './composer'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { WorkCard } from './work/WorkCard'
@@ -220,11 +220,16 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const seenWorking = useRef(new Set<string>())
   const [ended, setEnded] = useState<{ text: string; over: string } | null>(null)
   useEffect(() => {
-    let text = ''
-    for (const task of snapshot?.ready ? snapshot.tasks : []) {
-      if (isWorkingTaskPhase(task.phase)) seenWorking.current.add(task.id)
-      else if (endedPhases.has(task.phase) && seenWorking.current.delete(task.id)) text = `${task.label || '작업'} ${workPresentation(task).title}`
+    const phrases: string[] = []
+    if (snapshot?.ready) {
+      const present = new Set(snapshot.tasks.map(task => task.id))
+      for (const id of seenWorking.current) if (!present.has(id)) seenWorking.current.delete(id)
+      for (const task of snapshot.tasks) {
+        if (isLiveTaskPhase(task.phase)) seenWorking.current.add(task.id)
+        else if (endedPhases.has(task.phase) && seenWorking.current.delete(task.id)) phrases.push(`${task.label || '작업'} ${workPresentation(task).title}`)
+      }
     }
+    const text = phrases.length > 1 ? `작업 ${phrases.length}개가 끝났어요: ${phrases.join(', ')}` : phrases[0] ?? ''
     if (text) setEnded({ text, over: announcement })
     else setEnded(current => current && current.over !== announcement ? null : current)
   }, [snapshot, announcement])

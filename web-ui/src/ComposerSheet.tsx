@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
-import './character/character.css'
+import './sheet.css'
 import './composer-sheet.css'
 import { Icon } from './Icon'
 import type { Snapshot } from './bridge'
@@ -36,14 +36,15 @@ export function ComposerSheet({ open, enabled, snapshot, activeLabel, onAttach, 
       <button type="button" className="sheet-action" disabled={!enabled} onClick={() => { onClose(); onAttach() }}>
         <Icon name="file" /><span>파일 첨부</span>
       </button>
-      {models.length > 0 && <fieldset className="model-choices" disabled={!enabled}>
+      <fieldset className="model-choices" disabled={!enabled || models.length === 0}>
         <legend>답변 방식</legend>
+        {models.length === 0 && <p className="active-model-note">선택할 수 있는 답변 방식이 없어요</p>}
         {models.map(model => <label key={model.id} className="model-choice">
           <input type="radio" name="answer-model" value={model.id} checked={model.id === snapshot?.modelId}
             onChange={() => onSelectModel(model.id)} />
           <span>{model.id === snapshot?.modelId ? selectedLabel : model.label}</span>
         </label>)}
-      </fieldset>}
+      </fieldset>
       {activeLabel && <p className="active-model-note">실행 중: {activeLabel}</p>}
       <button type="button" className="sheet-close" onClick={onClose}>닫기</button>
     </div>}
