@@ -1890,7 +1890,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
                 beforeLaunch={check(authority().permits(capture))},
                 officePersona=officePersona+if(request.browserAuthParentRunId!=null)
-                    " The owner completed the phone login. Continue the original request. Include read_app_browser_page in your plan and run it first to inspect the current authenticated page. Reuse the page instead of reopening the login URL. Avoid repeating any action that may already have happened."
+                    " The owner completed login on the phone. Continue the original request. Include ${com.user.localagent.integrations.AppWebAgent.get(context).confirmedReadTool()} in the plan and execute it first on the authenticated browser. Do not replay previous effects."
                     else "")
             lastProviderState=launch.getValue("state").jsonPrimitive.content
             val provider=withTimeout(330_000) {
@@ -3195,7 +3195,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val next=if(requiresReadback)"로그인한 뒤에는 같은 동작을 다시 하기 전에 이전 결과부터 확인해 주세요."
             else "로그인이 끝나면 이 채팅에서 이어갈 수 있어요."
         if(request.goalSegment!=null && outcome.result.effectNotApplied &&
-            outcome.call.name in setOf("read_app_browser_page","open_app_browser_page")) {
+            outcome.call.name in setOf("read_app_browser_page","open_app_browser_page","open_pc_browser_page")) {
             val binding=com.user.localagent.integrations.AppWebAgent.get(context).waitingAuthBinding(request.runId)
             if(binding!=null) {
                 val prepared=goalMutation.withLock {
@@ -3609,9 +3609,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
 
     private suspend fun enforceGoalToolFence(request:QueuedChatRequest,call:ToolCall) {
         if(request.browserAuthParentRunId!=null && requestSteps.none {
-            it.tool=="read_app_browser_page"&&it.evidence.state==VerificationState.VERIFIED
+            it.tool==com.user.localagent.integrations.AppWebAgent.get(context).confirmedReadTool()&&it.evidence.state==VerificationState.VERIFIED
         }) {
-            check(call.name=="read_app_browser_page"){"로그인 뒤 현재 휴대폰 브라우저를 먼저 확인해야 해요."}
+            check(call.name==com.user.localagent.integrations.AppWebAgent.get(context).confirmedReadTool()){"로그인 뒤 같은 브라우저에서 현재 페이지를 먼저 확인해야 해요."}
             check(withContext(Dispatchers.Main.immediate){
                 com.user.localagent.integrations.AppWebAgent.get(context).isConfirmedBrowserCurrent(request.runId)
             }){"확인한 로그인 화면이 바뀌었어요."}

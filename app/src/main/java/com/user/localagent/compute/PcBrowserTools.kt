@@ -52,8 +52,26 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val config=transport.available(waitForRestart=true)?:error("PC에 연결하지 못했습니다. 집 밖이면 휴대폰의 Tailscale을 켜주세요.")
             return transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
         }
-        fun pc(context:Context)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
-            pcRequest(context,operation,body)
+        fun pc(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null})=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+            val transport=PcTransport(context)
+            val config=transport.available(waitForRestart=true)?:throw PcUnavailable()
+            val result=transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
+            val url=body["url"]?.jsonPrimitive?.contentOrNull
+            val binding=work()
+            if(operation=="read" && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                com.user.localagent.integrations.AppWebAgent.get(context).expectsPcReadback(binding)
+            } && (result["loginRequired"]!=JsonPrimitive(false) ||
+                result["url"]?.jsonPrimitive?.contentOrNull?.startsWith(PairedWebsiteLogin.ORIGIN+"/")!=true))
+                return@BrowserAgentTools buildJsonObject { put("error","OWNER_LOGIN_PAGE_CHANGED") }
+            val offer=if(operation=="open" && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
+                url!=null && url.startsWith(PairedWebsiteLogin.ORIGIN+"/")) try {
+                PairedWebsiteLogin.prepare(context,config)
+            } catch(cancel:CancellationException){throw cancel}
+              catch(_:Exception){null}
+            else null
+            if(offer!=null && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate){
+                    com.user.localagent.integrations.AppWebAgent.get(context).offerPcLogin(binding,offer)
+                }) JsonObject(result+("nativeOwnerCard" to JsonPrimitive(true))) else result
         }
         fun app(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null})=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
             val web=com.user.localagent.integrations.AppWebAgent.get(context)
@@ -170,7 +188,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         }
         val target=recoveredTarget
         if(result["loginRequired"]==JsonPrimitive(true)&&!(operation=="read"&&target!=null))
-            return authenticationRequired(call,result["phoneBrowserVisible"]==JsonPrimitive(true))
+            return authenticationRequired(call,result["phoneBrowserVisible"]==JsonPrimitive(true),
+                pcSession=catalog==PcBrowserToolCatalog && result["nativeOwnerCard"]!=JsonPrimitive(true))
         val phoneError=result["error"]?.jsonPrimitive?.contentOrNull
         if(operation=="read"&&target!=null){
             if(!readablePage(target,result))

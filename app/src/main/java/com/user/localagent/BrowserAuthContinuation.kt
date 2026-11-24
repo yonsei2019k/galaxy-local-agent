@@ -11,11 +11,11 @@ internal object BrowserAuthContinuation {
 
     fun safeSteps(steps:List<HarnessStep>):Boolean {
         val auth=steps.lastOrNull() ?: return false
-        if(auth.tool !in setOf("open_app_browser_page","read_app_browser_page") ||
+        if(auth.tool !in setOf("open_app_browser_page","read_app_browser_page","open_pc_browser_page") ||
             auth.evidence.state!=VerificationState.FAILED || !auth.evidence.effectNotApplied ||
             auth.evidence.summary!=BrowserAgentTools.PHONE_AUTH_REQUIRED)return false
         return steps.dropLast(1).all { step ->
-            (ToolReadPolicy.isReadOnly(step.tool)||step.tool=="open_app_browser_page") &&
+            (ToolReadPolicy.isReadOnly(step.tool)||step.tool in setOf("open_app_browser_page","open_pc_browser_page")) &&
                 (step.evidence.state==VerificationState.VERIFIED || step.evidence.effectNotApplied)
         }
     }

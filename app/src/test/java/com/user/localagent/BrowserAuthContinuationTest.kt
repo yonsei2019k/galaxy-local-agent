@@ -24,4 +24,11 @@ class BrowserAuthContinuationTest {
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("read_webpage",VerificationState.UNVERIFIED),auth)))
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("open_app_browser_page",VerificationState.FAILED),auth).dropLast(1)))
     }
+
+    @Test fun onlyAnActualOwnerCardCanContinueAPairedOpen() {
+        val card=step("open_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        assertTrue(BrowserAuthContinuation.safeSteps(listOf(card)))
+        assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("open_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PC_AUTH_REQUIRED))))
+        assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("act_on_pc_browser_page",VerificationState.VERIFIED),card)))
+    }
 }

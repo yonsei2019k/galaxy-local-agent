@@ -128,9 +128,10 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Text("사이트 로그인",style=MaterialTheme.typography.titleLarge)
+                Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleLarge)
                 Text(login.host,style=MaterialTheme.typography.titleSmall)
-                Text("입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
+                Text(if(login.pairedPc)"입력한 내용은 연결한 내 PC를 거쳐 이 사이트에 제출돼요. 채팅에는 남지 않아요."
+                    else "입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
                 loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
                 OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
                     enabled=!submitting,label={Text("아이디")},
@@ -143,7 +144,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                     Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    TextButton(onClick={agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
+                    if(!login.pairedPc)TextButton(onClick={agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
                     TextButton(onClick={agent.cancelLoginCard(login.id)},enabled=!submitting){Text("취소")}
                 }
             }

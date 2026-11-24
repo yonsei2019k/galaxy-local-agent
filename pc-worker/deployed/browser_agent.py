@@ -228,6 +228,40 @@ MEDIA_JS = r"""(({key, seed}) => {
 
 # ---------------------------------------------------------------- session
 
+# Owner input can reach only this published same-origin HTTPS POST. The document and controls
+# captured for the phone card must still be identical when the owner submits.
+KAIRB_LOGIN_FORM = r"""(args => {
+    const origin = 'https://www.kairb.org';
+    if (window !== top || location.origin !== origin || !/^\/member\/(?:index\.php)?$/.test(location.pathname)) return false;
+    const forms = [...document.forms].filter(f => f.method === 'post' &&
+        f.action === origin + '/member/login_reg.php' && (!f.target || f.target === '_self'));
+    if (forms.length !== 1) return false;
+    const form = forms[0], id = form.elements.namedItem('id'), pw = form.elements.namedItem('passwd');
+    const buttons = [...form.querySelectorAll('input[type=submit],button[type=submit]')];
+    if (buttons.length !== 1 || ['formaction','formtarget','formmethod'].some(k => buttons[0].hasAttribute(k))) return false;
+    const visible = e => e instanceof HTMLInputElement && !e.disabled && !e.readOnly &&
+        e.getClientRects().length && getComputedStyle(e).visibility === 'visible';
+    if (!visible(id) || id.type !== 'text' || !visible(pw) || pw.type !== 'password') return false;
+    const key = '__ziphapOwnerForm' + args[0];
+    if (args.length === 1) {
+        Object.defineProperty(document, key, {value: [form,id,pw,buttons[0]], configurable: true});
+        return true;
+    }
+    const saved = document[key];
+    delete document[key];
+    if (!saved || saved[0] !== form || saved[1] !== id || saved[2] !== pw || saved[3] !== buttons[0]) return false;
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+    set.call(id,args[1]); set.call(pw,args[2]);
+    try { if (!form.reportValidity()) return false; HTMLFormElement.prototype.requestSubmit.call(form,buttons[0]); return true; }
+    finally { set.call(id,''); set.call(pw,''); }
+})"""
+
+KAIRB_SIGNED_IN = r"""(() => location.origin === 'https://www.kairb.org' &&
+    !document.querySelector('input[type=password]') &&
+    [...document.querySelectorAll('a')].some(a => a.getClientRects().length &&
+        (a.textContent.trim() === '로그아웃' || (a.origin === location.origin &&
+          /\/logout(?:_reg)?\.php$/i.test(a.pathname)))))()"""
+
 class BrowserAgent:
     def __init__(self, profile=None, chrome=None):
         self._isolated_profile = tempfile.TemporaryDirectory(prefix='ziphap-headless-', ignore_cleanup_errors=True) if profile is None else None
@@ -235,6 +269,59 @@ class BrowserAgent:
         self.chrome = chrome; self.lock = threading.Lock()
         self.process = None; self.page = None; self.snapshot = None; self.pending = None
         self.media_key = 'ziphap_' + secrets.token_hex(16)
+        self.owner_login = None
+        self.owner_login_attempts = []
+
+    def owner_login_form(self, request):
+        """Native paired-phone UI only. Bind a single, explicitly supported site's official form."""
+        if set(request) != {'origin'} or request['origin'] != 'https://www.kairb.org':
+            raise BrowserError('OWNER_LOGIN_SITE_UNSUPPORTED', 400)
+        with self.lock:
+            if self.page is None:
+                raise BrowserError('OWNER_LOGIN_PAGE_CHANGED', 409)
+            token = secrets.token_hex(32)
+            frame = self.page.call('Page.getFrameTree')['frameTree']['frame']['id']
+            world = self.page.call('Page.createIsolatedWorld', {'frameId': frame, 'worldName': 'ziphap-owner-input'})['executionContextId']
+            marker = secrets.token_hex(16)
+            if not self._owner_form(world, [marker]):
+                raise BrowserError('OWNER_LOGIN_FORM_UNAVAILABLE', 409)
+            self.owner_login = (token, time.monotonic() + 600, self.page, world, marker)
+            return {'challenge': token, 'origin': 'https://www.kairb.org'}
+
+    def _owner_form(self, world, args):
+        reply = self.page.call('Runtime.callFunctionOn', {'functionDeclaration': 'function(args){return ' + KAIRB_LOGIN_FORM + '(args)}',
+            'arguments': [{'value': args}], 'executionContextId': world, 'returnByValue': True}, timeout=6)
+        return 'exceptionDetails' not in reply and reply.get('result', {}).get('value') is True
+
+    def owner_login_submit(self, request):
+        if set(request) != {'challenge', 'account', 'password'}:
+            raise BrowserError('OWNER_LOGIN_FORMAT')
+        token, account, password = (request[key] for key in ('challenge', 'account', 'password'))
+        if (not isinstance(token, str) or not re.fullmatch('[0-9a-f]{64}', token) or
+                not isinstance(account, str) or not 1 <= len(account) <= 320 or
+                not isinstance(password, str) or not 1 <= len(password) <= 1024):
+            raise BrowserError('OWNER_LOGIN_FORMAT')
+        with self.lock:
+            pending = self.owner_login
+            if not pending or not hmac.compare_digest(token, pending[0]):
+                raise BrowserError('OWNER_LOGIN_EXPIRED', 409)
+            self.owner_login = None
+            now = time.monotonic()
+            if now >= pending[1] or self.page is not pending[2]:
+                raise BrowserError('OWNER_LOGIN_EXPIRED', 409)
+            self.owner_login_attempts = [at for at in self.owner_login_attempts if now - at < 300]
+            if len(self.owner_login_attempts) >= 3:
+                raise BrowserError('OWNER_LOGIN_WAIT', 429)
+            self.owner_login_attempts.append(now)
+            try:
+                if not self._owner_form(pending[3], [pending[4], account, password]):
+                    raise BrowserError('OWNER_LOGIN_FORM_CHANGED', 409)
+                self._settle()
+                # An actual signed-in marker is required. A disappearing form is insufficient.
+                confirmed = self.page.evaluate(KAIRB_SIGNED_IN) is True
+            except (BrowserError, OSError, ValueError):
+                raise BrowserError('OWNER_LOGIN_UNCONFIRMED', 409) from None
+            return {'signedIn': confirmed}
 
     def _chrome(self):
         for candidate in ([self.chrome] if self.chrome else []) + CHROME_CANDIDATES:
@@ -333,6 +420,7 @@ class BrowserAgent:
         if set(request) != {'url'} or not url_allowed(request['url']): raise BrowserError('URL_NOT_ALLOWED')
         with self.lock:
             self._ensure(); self.pending = None
+            self.owner_login = None
             self.snapshot = None
             navigation = self.page.call('Page.navigate', {'url': request['url']})
             if navigation.get('errorText'):
@@ -432,6 +520,7 @@ class BrowserAgent:
     def close(self, request):
         if request: raise BrowserError('CLOSE_SHAPE')
         with self.lock:
+            self.owner_login = None
             self.snapshot = None; self.pending = None
             if self.page: self.page.close(); self.page = None
             # Drop the control socket. There is no visible window or owner's browser session.

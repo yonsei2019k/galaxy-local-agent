@@ -186,6 +186,9 @@ class Handler(BaseHTTPRequestHandler):
    # Paired phone or loopback. Policy (public pages only, no sensitive typing, approval for irreversible clicks) lives in BrowserAgent.
    operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close,
      '/v1/browser/public-read':BROWSER.public_read}.get(path)
+   if path in ('/v1/browser/owner-login-form','/v1/browser/owner-login-submit'):
+    if self.client_address[0]=='127.0.0.1':self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
+    operation=BROWSER.owner_login_form if path.endswith('-form') else BROWSER.owner_login_submit
    if self.command!='POST' or operation is None:raise ValueError('BROWSER_ROUTE')
    self.connection.settimeout(90)
    request=self.body(8192)

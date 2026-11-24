@@ -62,7 +62,22 @@ class AppWebAgent private constructor(private val context:Context) {
     val showingCredentialPage:StateFlow<Boolean> get()=credentialScreen
     private var loginCompletion:CompletableDeferred<Boolean>?=null
     private var nextLoginId=0L
-    data class LoginCard(val id:Long,val host:String)
+    data class LoginCard(val id:Long,val host:String,val pairedPc:Boolean=false)
+    private var pendingPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
+    private var confirmedPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
+    internal fun offerPcLogin(binding:WorkBinding,login:com.user.localagent.compute.PairedWebsiteLogin):Boolean {
+        if(loginCard.value!=null || loginSubmitting || websiteLogin.value!=null || !login.current(context))return false
+        val id=++nextLoginId
+        browserWorkBinding.value=binding
+        confirmedPcLogin=null
+        lastConfirmedCard=null
+        cardOrigin=null
+        pendingPcLogin=login
+        expiredLoginBinding="$loginProcess:$id"
+        loginCard.value=LoginCard(id,"www.kairb.org",pairedPc=true)
+        loginStatus.value="연결한 PC의 전용 브라우저에서 KAIRB 로그인이 필요해요."
+        return true
+    }
     data class WebsiteLogin(val card:LoginCard,val url:String)
     data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
     data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,val binding:WorkBinding?=null)
@@ -148,8 +163,11 @@ class AppWebAgent private constructor(private val context:Context) {
         lastConfirmedCard?.let { "$loginProcess:$it"==binding }==true
 
     internal fun isConfirmedBrowserCurrent(runId:String):Boolean =
-        browserWorkBinding.value?.runId==runId && lastConfirmedOrigin!=null &&
-            secureOrigin(webView?.url)==lastConfirmedOrigin
+        browserWorkBinding.value?.runId==runId && (confirmedPcLogin?.current(context) ?:
+            (lastConfirmedOrigin!=null && secureOrigin(webView?.url)==lastConfirmedOrigin))
+
+    internal fun confirmedReadTool()=if(confirmedPcLogin!=null)"read_pc_browser_page" else "read_app_browser_page"
+    internal fun expectsPcReadback(binding:WorkBinding)=browserWorkBinding.value==binding && confirmedPcLogin!=null
 
     private suspend fun notifyGoalAuth(id:Long):Boolean {
         lastConfirmedCard=id
@@ -240,6 +258,7 @@ class AppWebAgent private constructor(private val context:Context) {
         websiteLogin.value=null
         loginCard.value=null
         cardOrigin=null
+        pendingPcLogin=null
         expiredLoginBinding=null
         loginStatus.value="로그인을 취소했어요. 현재 작업은 멈춰 있습니다."
         loginCompletion?.complete(false)
@@ -247,6 +266,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     /** Only the native, owner-operated secure card can call this method. */
     suspend fun submitLoginCard(id:Long,account:String,password:String):Boolean {
+        if(loginCard.value?.let{it.id==id&&it.pairedPc}==true)return submitPcLogin(id,account,password)
         val origin=cardOrigin?:return false
         val completion=loginCompletion
         if(!RuntimeGate.foreground.get()||loginCard.value?.id!=id||websiteLogin.value!=null||completion?.isCompleted==true||loginSubmitting||
@@ -273,6 +293,43 @@ class AppWebAgent private constructor(private val context:Context) {
             loginStatus.value="현재 로그인 양식에 제출하지 못했어요. 사이트에서 직접 로그인할 수 있어요."
             return false
         }finally{loginSubmitting=false}
+    }
+
+    private suspend fun submitPcLogin(id:Long,account:String,password:String):Boolean {
+        val pc=pendingPcLogin?:return false
+        val binding=browserWorkBinding.value?:return false
+        if(loginSubmitting || !RuntimeGate.foreground.get() || !pc.current(context) ||
+            account.isBlank() || account.length>320 || password.length !in 1..1024)return false
+        loginSubmitting=true
+        try {
+            val app=(context as com.user.localagent.LocalAgentApplication).container
+            val run=app.repository.chat.run(binding.runId)?:return false
+            val thread=app.repository.chat.thread(binding.threadId)?:return false
+            if(thread.archived || thread.activeBranchId!=binding.branchId || run.threadId!=binding.threadId ||
+                run.branchId!=binding.branchId || (run.status!="running" && !(run.status=="paused" &&
+                    run.errorCode in setOf("waiting_browser_auth","waiting_goal_condition","browser_auth_on_phone"))) ||
+                loginCard.value?.id!=id || !RuntimeGate.foreground.get())return false
+            loginStatus.value="전용 PC 브라우저의 사이트 로그인 상태를 확인하고 있어요."
+            if(!pc.submit(context,account,password)){
+                val fresh=pc.freshForm(context)
+                if(loginCard.value?.id==id) {
+                    pendingPcLogin=fresh
+                    loginStatus.value=if(fresh!=null)"아직 사이트 로그인 화면이에요. 입력 내용을 확인하고 다시 시도해 주세요."
+                        else "로그인 양식이 바뀌었어요. 취소한 뒤 사이트를 다시 열어 주세요."
+                }
+                return false
+            }
+            if(loginCard.value?.id!=id || browserWorkBinding.value!=binding)return false
+            confirmedPcLogin=pc
+            showWebsiteWork("www.kairb.org",waiting=true)
+            notifyGoalAuth(id)
+            loginStatus.value="PC 브라우저의 KAIRB 로그인을 확인했어요."
+            pendingPcLogin=null
+            loginCard.value=null
+            return true
+        }catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){loginStatus.value="PC 연결이나 로그인 결과를 확인하지 못했어요. 자동으로 다시 제출하지 않아요.";return false}
+        finally{loginSubmitting=false}
     }
 
     private suspend fun awaitLoginReadback(id:Long,origin:URI):Boolean = withTimeoutOrNull(14_000) {
@@ -670,6 +727,8 @@ class AppWebAgent private constructor(private val context:Context) {
     /** Keeps the original open tool alive while the owner uses the site's own login form. */
     private suspend fun afterOwnerLogin(requestedUrl:String?,initial:JsonObject):JsonObject {
         if(initial["loginRequired"]!=JsonPrimitive(true))return initial
+        if(pendingPcLogin!=null)return initial
+        confirmedPcLogin=null
         val requiredOrigin=secureOrigin(requestedUrl)?:return initial
         val loginOrigin=secureOrigin(view().url)?:return initial
         val completion=CompletableDeferred<Boolean>()
