@@ -139,4 +139,15 @@ class ConnectionContractsTest {
         assertEquals(1,result.messages.size);assertTrue(result.truncated)
         try{KakaoExportParser.parse("\u0000");fail()}catch(_:IllegalArgumentException){}
     }
+    @Test fun calendarRequestsKeepSecondsForExactMinuteTimestamps(){
+        val start="2026-11-25T00:00:00+09:00"
+        val end="2026-11-26T00:00:00+09:00"
+        val list=ConnectionRequests.build(call("list_google_calendar_events","start" to start,"end" to end))
+        val query=java.net.URI(list.first.url).query
+        assertTrue(query.contains("timeMin=$start&timeMax=$end"))
+        val create=ConnectionRequests.build(call("create_google_calendar_event","title" to "일정","start" to start,"end" to end))
+        val body=Json.parseToJsonElement(checkNotNull(create.first.body)).jsonObject
+        assertEquals(start,body.getValue("start").jsonObject.getValue("dateTime").jsonPrimitive.content)
+        assertEquals(end,body.getValue("end").jsonObject.getValue("dateTime").jsonPrimitive.content)
+    }
 }

@@ -6,6 +6,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Base64
 import kotlinx.serialization.json.*
 
@@ -87,9 +88,12 @@ object ConnectionRequests {
                 val raw=Base64.getUrlEncoder().withoutPadding().encodeToString(mime.toByteArray(StandardCharsets.UTF_8))
                 ApiPlan(service,true,ApiRequest("https://gmail.googleapis.com/gmail/v1/users/me/drafts","POST",obj("message" to buildJsonObject {put("raw",raw)})),"id",readback={ApiRequest("https://gmail.googleapis.com/gmail/v1/users/me/drafts/${key(it)}?format=raw")},verify={body->ResponseProof(runCatching {Base64.getUrlDecoder().decode(Json.parseToJsonElement(body).jsonObject.getValue("message").jsonObject.getValue("raw").jsonPrimitive.content).contentEquals(mime.toByteArray(StandardCharsets.UTF_8))}.getOrDefault(false),"메일 초안 원문 재조회·일치, 미발송")})}
             "list_google_calendar_events","create_google_calendar_event"->{val start=OffsetDateTime.parse(call.s("start"));val end=OffsetDateTime.parse(call.s("end"));require(end.isAfter(start));val calendar=key(call.s("calendarId","primary"));val base="https://www.googleapis.com/calendar/v3/calendars/$calendar/events"
-                if(!spec.writes)read("$base?singleEvents=true&maxResults=20&timeMin=${encode(start.toString())}&timeMax=${encode(end.toString())}")else {
+                // Google Calendar requires seconds even for exact-minute bounds.
+                val startTimestamp=start.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                val endTimestamp=end.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                if(!spec.writes)read("$base?singleEvents=true&maxResults=20&timeMin=${encode(startTimestamp)}&timeMax=${encode(endTimestamp)}")else {
                     val eventId=java.security.MessageDigest.getInstance("SHA-256").digest(call.id.toByteArray()).joinToString(""){"%02x".format(it)}
-                    ApiPlan(service,true,ApiRequest(base,"POST",buildJsonObject {put("id",eventId);put("summary",title);put("start",buildJsonObject {put("dateTime",start.toString())});put("end",buildJsonObject {put("dateTime",end.toString())})}.toString()),createdIdField="id",knownId=eventId,readback={ApiRequest("$base/${key(it)}")},verify={body->CalendarTargetIntegrity.readback(eventId,title,start,end,body)})}}
+                    ApiPlan(service,true,ApiRequest(base,"POST",buildJsonObject {put("id",eventId);put("summary",title);put("start",buildJsonObject {put("dateTime",startTimestamp)});put("end",buildJsonObject {put("dateTime",endTimestamp)})}.toString()),createdIdField="id",knownId=eventId,readback={ApiRequest("$base/${key(it)}")},verify={body->CalendarTargetIntegrity.readback(eventId,title,start,end,body)})}}
             "list_google_tasks"->read("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?maxResults=20&showCompleted=false")
             "create_google_task"->{val body=buildJsonObject {put("title",title);if(call.s("notes").isNotEmpty())put("notes",call.s("notes"));if(call.s("dueDate").isNotEmpty())put("due",LocalDate.parse(call.s("dueDate")).toString()+"T00:00:00.000Z")}.toString()
                 ApiPlan(service,true,ApiRequest("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks","POST",body),"id",readback={ApiRequest("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${key(it)}")},verify={titleProof(it,title,"id")})}
