@@ -1,5 +1,7 @@
 # Product requirements and current boundaries
 
+- 공공기관 업무는 정부24, 국세·지방세, 자동차검사, 교통 과태료·범칙금, 형사 벌과금부터 연결한다. 공식 조회·신청·발급·예약·납부·증빙 재조회 경로를 업무별로 검증한다. 본인 인증은 휴대폰에서 처리하고, 납부는 대상과 금액의 승인 및 결과 재확인을 따른다.
+
 - 국내 맛집·여행·쇼핑 및 예약·구매 요청은 분야에 맞는 네이버·쿠팡과 실행 가능한 공식 MCP/API 연결을 우선 사용한다. 동일 상품·서비스는 플랫폼별 필수 비용과 적용 가능한 할인을 포함한 실제 총액을 기본 비교하고, 구매·예약 가능한 확인 범위의 최저가와 기준 플랫폼 대비 예상 절약액을 대화에 표시한다. 관련 예약·구매 플랫폼과 업체 공식 직판을 분야별로 추가하며, 검색부터 동일 조건 가격 비교, 재고 확인, 예약·주문 준비, 인증, 승인된 결제, 예약번호·영수증 재조회까지 같은 작업에서 지원하는 것을 목표로 한다. 플랫폼별 실제로 검증된 단계는 화면에 표시한다. 실제 결제 후에는 영수증과 확인한 기준가를 대조한다. 자세한 기준은 [국내 거래 검색과 절약액 계획](smartphone-infrastructure-mobilerun.ko.md#국내-예약구매-기본-검색과-절약액-표시)을 따른다.
 
 - Ordinary conversation and agent work use the authorized cloud agent. A current cloud grant that includes personal data permits it in new request text and in the results of tools the current run is authorized to use. The previous grant keeps its original scope. Keep image work, local speech transcription, and the explicit local model available. Explicit local selection binds that request locally. Preserve captured queue permissions, project and branch access, and owner control over protected login, payment and system confirmation.
