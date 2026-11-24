@@ -438,7 +438,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private fun fail(code:String)=buildJsonObject{put("error",code)}
 
-    internal suspend fun saveObservedPdf(id:String,ref:String,verifyRun:suspend ()->Unit):String=mutex.withLock {
+    internal suspend fun saveObservedPdf(id:String,ref:String,progress:com.user.localagent.tools.PdfSaveProgress,verifyRun:suspend ()->Unit):String=mutex.withLock {
         val document=withContext(Dispatchers.Main.immediate) {
             checkNotNull(pdfDocument?.takeIf{it.snapshotId==id}){"PDF가 있던 페이지를 다시 확인해 주세요."}
         }
@@ -447,6 +447,8 @@ class AppWebAgent private constructor(private val context:Context) {
                 ?.s("ruleHref")?.takeIf{it in document.sessionDigests}?:error("현재 페이지에서 확인한 PDF 링크가 아니에요.")
         }
         suspend fun freshCookie():String {
+            val previousStage=progress.stage
+            progress.stage=com.user.localagent.tools.PdfSaveStage.AUTHORITY
             verifyRun()
             return withContext(Dispatchers.Main.immediate) {
                 fun current()=pdfDocument===document && webView===document.view && document.view.url==document.url &&
@@ -461,13 +463,13 @@ class AppWebAgent private constructor(private val context:Context) {
                 val cookie=checkNotNull(sessionCookie(document.view,target))
                 check(java.security.MessageDigest.isEqual(cookieDigest(cookie),document.sessionDigests.getValue(target))){"문서의 로그인 상태가 바뀌었어요."}
                 cookie
-            }
+            }.also { progress.stage=previousStage }
         }
         try {
             val session=com.user.localagent.web.BoundPdfGet(target,::freshCookie)
             withContext(Dispatchers.IO) {
                 com.user.localagent.tools.PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),target,
-                    com.user.localagent.web.PinnedPublicHttpsTransport(session),publish={commit->
+                    com.user.localagent.web.PinnedPublicHttpsTransport(session),progress=progress,publish={commit->
                         withContext(Dispatchers.Main.immediate) {
                             freshCookie()
                             currentCoroutineContext().ensureActive()

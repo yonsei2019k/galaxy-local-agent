@@ -57,6 +57,40 @@ class PublicPdfArtifactTest {
         assertTrue(dir.listFiles()!!.isEmpty())
     }
 
+    @Test fun failedDownloadAndStaleGrantGiveRetryableRedactedStageWithoutAnArtifact() = runBlocking {
+        val dir=tmp.newFolder()
+        suspend fun attempt(fetch:PublicWebTransport, publish:suspend (() -> Unit)->Unit) =
+            PdfSaveProgress().run {
+                execute("call") { PublicPdfArtifact.save(dir,url,fetch,this,publish) { 1 } }
+            }
+        val failed=attempt(PublicWebTransport { _,_-> error("private.url.invalid private-cookie") }) { it() }
+        val stale=attempt(transport()) { error("private.url.invalid private-cookie") }
+        for ((result,stage) in listOf(failed to "PDF_FETCH", stale to "PDF_AUTHORITY")) {
+            assertFalse(result.success)
+            assertTrue(result.effectNotApplied)
+            assertEquals(com.user.localagent.core.VerificationState.FAILED,result.verification)
+            assertEquals(stage,result.verificationSummary)
+            assertFalse(result.content.contains("private"))
+            assertTrue(dir.listFiles()!!.isEmpty())
+        }
+    }
+
+    @Test fun exceptionAfterActualPublicationNeverMakesAReplaySafe() = runBlocking {
+        val dir=tmp.newFolder()
+        val progress=PdfSaveProgress()
+        val result=progress.execute("call") {
+            PublicPdfArtifact.save(dir,url,transport(),progress,publish={ commit->
+                commit(); error("private.url.invalid private-cookie")
+            }) { 1 }
+        }
+        assertFalse(result.success)
+        assertFalse(result.effectNotApplied)
+        assertEquals(com.user.localagent.core.VerificationState.UNVERIFIED,result.verification)
+        assertEquals("PDF_READBACK",result.verificationSummary)
+        assertFalse(result.content.contains("private"))
+        assertArrayEquals(fixture,dir.listFiles()!!.single().readBytes())
+    }
+
     @Test fun collisionOrCorruptionIsNeverOverwritten() = runBlocking {
         val dir = tmp.newFolder()
         PublicPdfArtifact.save(dir,url,transport()) { 1 }

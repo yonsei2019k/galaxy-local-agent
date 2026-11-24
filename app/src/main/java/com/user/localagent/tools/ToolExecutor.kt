@@ -241,18 +241,24 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                     val data=checkNotNull(researchWeb){"웹 검색 연결이 필요합니다."}.invoke(call)
                     check(Json.parseToJsonElement(data).jsonObject["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."};data
                 }
-                "save_browser_pdf" -> {
-                    val id=call.s("snapshotId");val ref=call.s("ref")
-                    val web=com.user.localagent.integrations.AppWebAgent.get(context)
-                    web.saveObservedPdf(id,ref) {
-                        verifyGrant()
-                        check(connectionRunId!=null && connectionIsRunLive() && call.name in capturedAvailableTools)
-                        connectionVerifyAccess()
-                        appBrowser.requirePdfRef(id,ref)
-                        check(connectionIsRunLive())
+                "save_browser_pdf","save_public_pdf" -> {
+                    val progress=PdfSaveProgress()
+                    return@withContext progress.execute(call.id) {
+                        if(call.name=="save_public_pdf")
+                            PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),call.s("url"),progress=progress)
+                        else {
+                            val id=call.s("snapshotId");val ref=call.s("ref")
+                            val web=com.user.localagent.integrations.AppWebAgent.get(context)
+                            web.saveObservedPdf(id,ref,progress) {
+                                verifyGrant()
+                                check(connectionRunId!=null && connectionIsRunLive() && call.name in capturedAvailableTools)
+                                connectionVerifyAccess()
+                                appBrowser.requirePdfRef(id,ref)
+                                check(connectionIsRunLive())
+                            }
+                        }
                     }
                 }
-                "save_public_pdf" -> PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),call.s("url"))
                 "read_webpage" -> return@withContext publicWeb.readToolResult(call.id, call.s("url"))
                 "search_conversation_history"->{
                     val query=call.s("query");val page=repository.messagePage(limit=call.i("limit",10),query=query)

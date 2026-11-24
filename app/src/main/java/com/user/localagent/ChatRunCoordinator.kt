@@ -1951,7 +1951,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     ?.let { observation->runCatching {
                         Json.parseToJsonElement(observation.content).jsonObject["screenChanged"]?.jsonPrimitive?.booleanOrNull
                     }.getOrNull() }
-                val notice=when(screenChanged){
+                val browserProgress=if(resultState=="partial" && accepted!=null && authority().permits(capture) &&
+                    ExternalAgentPhoneCompletion.browserReadsMatch(capture,accepted,evidence,actual.values.toList(),checkNotNull(bridgeSessionId))){
+                    CloudAgentFinals.browserReadProgress(accepted.requiredTools,actual.values.toList(),requestSteps)
+                } else null
+                val notice=browserProgress?:when(screenChanged){
                     true->"화면이 바뀐 건 확인했어요. 요청한 결과가 나왔는지는 확인이 더 필요해요."
                     false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
                     null->if(actual.isNotEmpty()&&actual.values.all{it.withheldFromCloud && it.result.success})
@@ -1959,7 +1963,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     else if(links.isEmpty())"결과를 확인할 정보가 부족해서 여기서 멈췄어요."
                         else "일부 자료를 확인했어요. 아직 결론을 내리기에는 정보가 부족해요."
                 }
-                if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,notice,true)
+                if(browserProgress!=null && authority().permits(capture))
+                    publishActionFinal(request,requestAuthorizedTools,browserProgress,true,"partial_verified_browser_reads")
+                else if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,if(browserProgress==null)notice else "요청 권한이 바뀌어 작업을 멈췄어요.",true)
                 else publishActionFinal(request,requestAuthorizedTools,
                     "$notice\n\n여기까지 찾은 자료\n"+links.joinToString("\n"),
                     true,"partial_verified_sources")

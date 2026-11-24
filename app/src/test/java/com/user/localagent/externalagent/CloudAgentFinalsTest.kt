@@ -1,6 +1,7 @@
 package com.user.localagent.externalagent
 
-import kotlinx.serialization.json.put
+import com.user.localagent.core.*
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -45,6 +46,30 @@ class CloudAgentFinalsTest {
         assertEquals("- <https://example.org/official> · 본문을 읽었어요",links.first())
         assertEquals(1,links.count{it.contains("/official")})
         assertTrue(links.none{it.contains("/hidden")})
+    }
+
+    @Test fun partialBrowserReportUsesOnlyHostCountsAndRecordedSteps(){
+        fun observation(id:Int,name:String,body:String):PhoneAgentExecution {
+            val callId="10000000-0000-4000-8000-"+id.toString().padStart(12,'0')
+            val proposal=ExternalAgentProposal(callId,id,name,buildJsonObject{},"a".repeat(64),"binding",1)
+            return PhoneAgentExecution("10000000-0000-4000-8000-000000000009","binding",1,proposal,
+                ToolResult(callId,true,body,VerificationState.VERIFIED))
+        }
+        val screen=observation(2,"read_screen","private-screen")
+        fun progress(count:String,askedToSave:Boolean):String?{
+            val page=observation(1,"read_app_browser_page","""{"sameSessionPdfCount":$count,"text":"private-page"}""")
+            val reads=listOf(page,screen)
+            val required=reads.map{it.proposal.tool}.toSet() + if(askedToSave)setOf("save_browser_pdf") else emptySet()
+            val steps=reads.map{HarnessStep(it.proposal.tool,it.proposal.arguments,StepEvidence(it.proposal.tool,VerificationState.VERIFIED,""))}
+            assertNull(CloudAgentFinals.browserReadProgress(required,reads,steps.reversed()))
+            return CloudAgentFinals.browserReadProgress(required,reads,steps)
+        }
+        val saved=progress("2",true)!!
+        assertTrue(saved.contains("2개"));assertTrue(saved.contains("저장은 실행하지 않았어요"))
+        assertFalse(saved.contains("private"))
+        assertTrue(progress("0",true)!!.contains("마지막으로 읽은 화면"))
+        assertFalse(progress("1",false)!!.contains("PDF"))
+        assertNull(progress("\"1\"",true));assertNull(progress("121",true))
     }
 
     @Test fun plainAndPreviouslySavedAnswersDoNotShowTheRepeatedNotice(){

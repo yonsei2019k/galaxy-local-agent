@@ -1,5 +1,9 @@
 package com.user.localagent.externalagent
 
+import com.user.localagent.core.HarnessStep
+import com.user.localagent.core.VerificationState
+import kotlinx.serialization.json.*
+
 /** Owner-facing endings of a cloud phone-agent run that are decided without new authority. */
 object CloudAgentFinals {
     const val PREPARED_PAUSE="작성 화면을 열어뒀어요. 내용을 확인한 뒤 그 앱에서 보내거나 저장해 주세요. 발송이나 저장이 끝났는지는 아직 확인하지 못했어요."
@@ -21,6 +25,32 @@ object CloudAgentFinals {
             body = body.trimStart().removePrefix(LEGACY_TOOL_FREE_PREFIX).trimStart()
         }
         return body
+    }
+
+    internal val browserReadTools=setOf("read_app_browser_page","read_screen")
+
+    /** Render only counts from the phone's structured observation. Page prose may contain private or hostile text. */
+    internal fun browserReadProgress(required:Set<String>, actual:List<PhoneAgentExecution>, steps:List<HarnessStep>):String? {
+        if(steps.size!=actual.size || steps.zip(actual).any { (step,local)->
+                step.tool !in browserReadTools || step.tool !in required || step.tool!=local.proposal.tool ||
+                    step.arguments!=local.proposal.arguments || step.evidence.state!=VerificationState.VERIFIED ||
+                    step.evidence.effectNotApplied || local.withheldFromCloud || !local.result.success ||
+                    local.result.verification!=VerificationState.VERIFIED || local.result.effectNotApplied
+            })return null
+        val last=actual.lastOrNull { it.proposal.tool=="read_app_browser_page" } ?: return null
+        val count=runCatching {
+            val field=Json.parseToJsonElement(last.result.content).jsonObject["sameSessionPdfCount"] as? JsonPrimitive
+            field?.takeUnless { it.isString }?.intOrNull?.takeIf { it in 0..120 }
+        }.getOrNull() ?: return null
+        return buildString {
+            append("앱 브라우저에서 페이지를 읽었어요.")
+            if(actual.any { it.proposal.tool=="read_screen" })append(" 휴대폰 화면도 확인했어요.")
+            if("save_browser_pdf" in required){
+                if(count==0)append(" 마지막으로 읽은 화면에서는 바로 저장할 수 있는 PDF 링크를 찾지 못했어요.")
+                else append(" 마지막으로 읽은 화면에 바로 저장할 수 있는 PDF 링크가 ${count}개 있었어요.")
+                append(" 파일 저장은 실행하지 않았어요.")
+            }else append(" 요청하신 작업의 최종 결과는 아직 확인하지 못했어요.")
+        }
     }
 
     /** True when an executed tool changed or handed off something; then the host report is authoritative. */

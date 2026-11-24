@@ -9,7 +9,16 @@ import uniffi.ziphap_android.nativePhoneCompletionProven
 /** Joins broker metadata to actual local callbacks. Server phone results are never evidence. */
 object ExternalAgentPhoneCompletion {
     fun matches(capture:ExternalAgentCapture,plan:ExternalAgentPlan,evidence:JsonObject,actual:List<PhoneAgentExecution>,
-        expectedSessionId:String,publicPartial:Boolean=false):Boolean=runCatching {
+        expectedSessionId:String,publicPartial:Boolean=false):Boolean=
+        checkEvidence(capture,plan,evidence,actual,expectedSessionId,publicPartial,false)
+
+    /** This path can only produce a progress notice; it never proves task completion. */
+    fun browserReadsMatch(capture:ExternalAgentCapture,plan:ExternalAgentPlan,evidence:JsonObject,
+        actual:List<PhoneAgentExecution>,sessionId:String):Boolean=
+        checkEvidence(capture,plan,evidence,actual,sessionId,false,true)
+
+    private fun checkEvidence(capture:ExternalAgentCapture,plan:ExternalAgentPlan,evidence:JsonObject,actual:List<PhoneAgentExecution>,
+        expectedSessionId:String,publicPartial:Boolean,browserReadsOnly:Boolean):Boolean=runCatching {
         require(capture.requirePlan&&capture.pcWorkspaceProfile=="phone-only")
         fun text(key:String)=ExternalAgentContract.text(evidence,key)
         require(text("sessionId")==expectedSessionId&&ExternalAgentContract.long(evidence,"revision")>0)
@@ -20,7 +29,7 @@ object ExternalAgentPhoneCompletion {
         listOf("verifiedPcTools","pcCalls","unresolvedCalls").forEach{require(evidence.getValue(it).jsonArray.isEmpty())}
         // Only screen openers (map, web page, consumer-app search) may stay PREPARED; a pending send/save never completes here.
         val prepared=evidence.getValue("preparedCalls").jsonArray
-        require(if(publicPartial)prepared.isEmpty() else prepared.all{
+        require(if(publicPartial||browserReadsOnly)prepared.isEmpty() else prepared.all{
             ExternalAgentContract.text(it.jsonObject,"tool").let(com.user.localagent.core.PreparedHandoff::opensScreenOnly)})
         val accepted=ExternalAgentContract.plan(evidence.getValue("acceptedPlan").jsonObject,capture)
         require(accepted.state==AgentPlanState.ACCEPTED&&accepted.planDigest==plan.planDigest&&accepted.goal==plan.goal&&
@@ -44,6 +53,15 @@ object ExternalAgentPhoneCompletion {
             NativePhoneObservation(proposal.callId,proposal.sequence.toUInt(),proposal.tool,local.result.success,
                 NativePhoneVerification.valueOf(local.result.verification.name),local.result.effectNotApplied,local.withheldFromCloud)
         }
-        nativePhoneCompletionProven(plan.requiredTools.toList(),receipts,observations,publicPartial)
+        val required=if(browserReadsOnly){
+            val observed=actual.map { it.proposal.tool }.toSet()
+            require(plan.requiredTools.all { it in CloudAgentFinals.browserReadTools || it in setOf("open_app_browser_page","app_browser_action","save_browser_pdf","save_public_pdf") })
+            require("read_app_browser_page" in observed && plan.requiredTools.containsAll(observed))
+            require(actual.all { it.proposal.tool in CloudAgentFinals.browserReadTools &&
+                !it.withheldFromCloud && it.result.success && !it.result.effectNotApplied &&
+                it.result.verification==com.user.localagent.core.VerificationState.VERIFIED })
+            observed
+        } else plan.requiredTools
+        nativePhoneCompletionProven(required.toList(),receipts,observations,publicPartial)
     }.getOrDefault(false)
 }

@@ -477,6 +477,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
         listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
             .forEach{key->result[key]?.let{put(key,it)}}
+        if(catalog==AppBrowserToolCatalog && browser==where && rulePage(result) && result["elements"] is JsonArray){
+            val eligible=ruleElements(result).take(120).count{it["sessionPdf"]==JsonPrimitive(true)}
+            put("sameSessionPdfCount",eligible)
+        }
         put("browser",browser)
         put("text",result["text"]?.jsonPrimitive?.content.orEmpty().take(6000))
         put("elements",JsonArray(result["elements"]?.jsonArray.orEmpty().take(120).mapNotNull{item->runCatching{
