@@ -3,10 +3,12 @@ import './work.css'
 import { Icon } from '../Icon'
 import type { Task } from '../bridge'
 import { detailLine, workPresentation } from './workPresentation'
+import { useWorkDuration } from './workHistory'
 
 export function WorkCard({ task, onOpen }: { task: Task; onOpen(taskId: string): void }) {
   const presentation = workPresentation(task)
   const line = detailLine(task.detail ?? '')
+  const elapsed = useWorkDuration(task)
   const previous = useRef(task.phase)
   const [justFinished, setJustFinished] = useState(false)
   useEffect(() => {
@@ -21,6 +23,7 @@ export function WorkCard({ task, onOpen }: { task: Task; onOpen(taskId: string):
         <span className="work-title" dir="auto">{task.label || '작업'}</span>
         <span className="work-meta">
           <span className="work-state">{presentation.title}</span>
+          {elapsed && <span className="work-duration"> · {elapsed}</span>}
           {line && <span className="work-detail" dir="auto"> · {line}</span>}
         </span>
       </span>

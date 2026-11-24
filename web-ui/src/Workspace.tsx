@@ -107,13 +107,14 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOfficeProfile }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOfficeProfile, onOpenWork }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
   onManage(): void
   onRename(title: string): boolean
   onOfficeProfile?(): void
+  onOpenWork(): void
 }) {
   const currentThread = snapshot?.threads.find(thread => thread.selected)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
@@ -132,7 +133,7 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
         </>}
         <div className="topbar-heading">
           <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
-          <HeaderWorkLine snapshot={snapshot} />
+          <HeaderWorkLine snapshot={snapshot} onOpen={onOpenWork} />
         </div>
         {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={onOfficeProfile}>직원 정보</button>}

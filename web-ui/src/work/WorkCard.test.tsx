@@ -103,6 +103,18 @@ describe('WorkCard', () => {
 })
 
 describe('WorkSheet', () => {
+  it('renders verified timestamps in order and freezes a finished duration', () => {
+    const t=task({ phase: 'completed', startedAt: 1_000, finishedAt: 62_000, evidence: [
+      { id: 'verified', label: '진도 100% 확인', detail: '사이트에 기록됐어요', at: 60_000 },
+      { id: 'open', label: '강의실 입장을 눌렀어요', detail: '', at: 2_000 },
+    ] })
+    act(() => root.render(<WorkSheet task={t} enabled onClose={() => {}} onStopGoalWait={() => {}} />))
+    expect(host.querySelector('.work-state')?.textContent).toBe('응답 종료 · 1:01')
+    expect([...host.querySelectorAll('.work-timeline strong')].map(row => row.textContent))
+      .toEqual(['강의실 입장을 눌렀어요', '진도 100% 확인'])
+    expect(host.querySelector('.work-timeline time')?.getAttribute('datetime')).toBe('1970-01-01T00:00:02.000Z')
+  })
+
   it('sheetShowsStopOnlyWhenCancellable', () => {
     const stop = vi.fn()
     const waiting = task({ phase: 'waiting_goal', canCancel: true })
@@ -164,6 +176,8 @@ describe('Conversation work cards', () => {
     const card = host.querySelector('.message--user + #work-r1.work-card') as HTMLButtonElement
     expect(card).not.toBeNull()
     act(() => card.click())
+    expect(host.querySelector('.work-history-list')).not.toBeNull()
+    act(() => host.querySelector<HTMLButtonElement>('.work-history-row')!.click())
     expect([...host.querySelectorAll('.work-sheet .work-steps li')].map(item => item.textContent))
       .toEqual(['웹에서 찾아봤어요', '웹페이지를 읽었어요'])
     expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(true)
@@ -182,6 +196,7 @@ describe('Conversation work cards', () => {
     expect(card.textContent).toContain('한림에듀')
     expect(card.textContent).toContain('재개 대기')
     act(() => card.click())
+    act(() => host.querySelector<HTMLButtonElement>('.work-history-row')!.click())
     expect([...host.querySelectorAll('.work-sheet .work-steps li')].map(item => item.textContent))
       .toEqual(['접속 중', '웹페이지 읽기 오류', '강의실 확인 중'])
     act(() => ([...host.querySelectorAll('.work-sheet button')].find(item => item.textContent === '예약 중지') as HTMLButtonElement).click())
@@ -220,13 +235,14 @@ describe('Conversation work cards', () => {
     const withTask = { ...base, messages: [{ id: 'u1', role: 'user' as const, text: '내일' }], tasks: [waiting] }
     renderConversation(withTask)
     act(() => (host.querySelector('#work-g1') as HTMLButtonElement).click())
+    act(() => host.querySelector<HTMLButtonElement>('.work-history-row')!.click())
     expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(true)
     expect([...host.querySelectorAll('.work-sheet button')].some(item => item.textContent === '예약 중지')).toBe(true)
     renderConversation({ ...withTask, tasks: [] })
-    expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(false)
-    expect(host.querySelectorAll('.work-sheet button')).toHaveLength(0)
+    expect(host.querySelector('.work-history-list')?.textContent).toContain('이 대화에 표시할 작업이 없어요')
+    expect([...host.querySelectorAll('.work-sheet button')].some(item => item.textContent === '예약 중지')).toBe(false)
     renderConversation(withTask)
-    expect(host.querySelector('.work-sheet')?.hasAttribute('open')).toBe(false)
+    expect(host.querySelector('.work-history-list')).not.toBeNull()
   })
 
   it('assistantAnswerAfterACardedRequestStartsANewGroup', () => {

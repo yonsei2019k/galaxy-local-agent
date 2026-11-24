@@ -23,6 +23,7 @@ interface Evidence {
   id: string
   label: string
   detail: string
+  at?: number
 }
 
 export interface Task {
@@ -33,6 +34,8 @@ export interface Task {
   canCancel: boolean
   messageId?: string
   evidence?: Evidence[]
+  startedAt?: number
+  finishedAt?: number
 }
 
 interface Model {
@@ -194,13 +197,21 @@ function thread(value: unknown): value is Thread {
     (value.working === undefined || typeof value.working === 'boolean')
 }
 
+function taskTime(value: unknown): value is number {
+  return epoch(value) && value <= 8_640_000_000_000_000
+}
+
 function evidence(value: unknown): value is Evidence {
-  return record(value) && strings(value, 'id', 'label', 'detail')
+  return record(value) && strings(value, 'id', 'label', 'detail') &&
+    (value.at === undefined || taskTime(value.at))
 }
 
 function task(value: unknown): value is Task {
   return record(value) && strings(value, 'id', 'phase', 'label', 'detail') &&
-    typeof value.canCancel === 'boolean' && (value.messageId === undefined || typeof value.messageId === 'string') && (value.evidence === undefined || list(value.evidence, evidence))
+    typeof value.canCancel === 'boolean' && (value.messageId === undefined || typeof value.messageId === 'string') &&
+    (value.startedAt === undefined || taskTime(value.startedAt)) &&
+    (value.finishedAt === undefined || taskTime(value.finishedAt)) &&
+    (value.evidence === undefined || list(value.evidence, evidence))
 }
 
 function model(value: unknown): value is Model {

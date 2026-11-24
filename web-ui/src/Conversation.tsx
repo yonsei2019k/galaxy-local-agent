@@ -7,6 +7,7 @@ import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
+import { websiteWorkFor, workHistory } from './work/workHistory'
 import { taskPhase, workPresentation } from './work/workPresentation'
 
 export { taskPhase }
@@ -152,9 +153,8 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 }
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
-const heldPhases = new Set(['waiting_goal', 'approval', 'waiting_approval', 'paused', 'waiting_input'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -167,33 +167,33 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onOfficeCalendar(): void
   hasDraft: boolean
   onDraftExample(text: string): void
+  historyOpen?: boolean
+  onHistoryChange?(open: boolean): void
 }) {
   const view = useRef<HTMLElement>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [openWorkId, setOpenWorkId] = useState<string | null>(null)
+  const [localHistoryOpen, setLocalHistoryOpen] = useState(false)
+  const panelOpen = historyOpen ?? localHistoryOpen
+  const setHistoryOpen = onHistoryChange ?? setLocalHistoryOpen
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
   const website = snapshot?.websiteCard
   const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
-  const websiteTask = snapshot?.tasks.find(task => task.id === website?.runId)
   const empty = messages.length === 0 && tasks.length === 0 && !website
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
   const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
   const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
-  const websiteWork: Task | null = website && !website.inputHeight ? {
-    id: website.runId ?? `website-${website.id}`,
-    phase: websiteTask && heldPhases.has(websiteTask.phase) ? websiteTask.phase
-      : website.working ? 'running' : websiteTask && !isLiveTaskPhase(websiteTask.phase) ? websiteTask.phase : 'website',
-    label: website.title, detail: website.status, canCancel: websiteTask?.canCancel ?? false, evidence: websiteTask?.evidence,
-  } : null
+  const websiteWork = websiteWorkFor(snapshot)
+  const openWorkHistory = () => { setOpenWorkId(null); setHistoryOpen(true) }
   const websiteCard = website && (website.inputHeight ?
     <article className="task-card website-input-slot" data-native-website-slot={website.id}
       style={{height:website.inputHeight}} aria-label={website.title} /> :
     websiteWork && <section id="website-work" className="website-work-card" aria-label={website.title}>
-      <WorkCard task={websiteWork} onOpen={setOpenWorkId} />
+      <WorkCard task={websiteWork} onOpen={openWorkHistory} />
     </section>)
   const cardsByMessage = new Map<string, Task[]>()
   for (const task of tasks) {
@@ -207,7 +207,9 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const lastClarification = tasks.filter(task => task.phase === 'clarification_record').at(-1)
   const unplacedTasks = tasks.filter(task => !placed.has(task.id) && task.phase !== 'waiting_input' &&
     (task.phase !== 'clarification_record' || task === lastClarification))
-  const sheetTask = openWorkId === null ? null : websiteWork?.id === openWorkId ? websiteWork : tasks.find(task => task.id === openWorkId) ?? null
+  const history = panelOpen ? workHistory(snapshot) : undefined
+  const sheetTask = history && openWorkId !== null
+    ? [...history.active, ...history.recent].find(task => task.id === openWorkId) ?? null : null
   const announcement = website?.working || (website && !website.inputHeight)
     ? [website.title, website.status].filter(Boolean).join(': ')
     : activeTask ? [activeTask.label, activeTask.detail].filter(Boolean).join(': ') : ''
@@ -282,13 +284,13 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                   previousHasCards={index > 0 && (!!cardsByMessage.get(messages[index - 1].id)?.length || websiteAnchor === messages[index - 1].id)}
                   previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
                   enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
-                {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={setOpenWorkId} />)}
+                {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
                 {websiteAnchor === item.id && websiteCard}
               </Fragment>)}
               {!websiteAnchor && websiteCard}
             </div>
             {unplacedTasks.length > 0 && <section className="work-cards" aria-label="작업">
-              {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={setOpenWorkId} />)}
+              {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
             </section>}
             {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
@@ -297,8 +299,10 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           </div>
         )}
       </main>
-      <WorkSheet task={sheetTask} enabled={enabled} steps={sheetTask && sheetTask === websiteWork ? website?.steps : undefined}
-        onClose={() => setOpenWorkId(null)} onStopGoalWait={onStopGoalWait} />
+      <WorkSheet task={sheetTask} history={history} enabled={enabled}
+        steps={sheetTask && sheetTask.id === websiteWork?.id ? website?.steps : undefined}
+        onSelect={setOpenWorkId} onBack={() => setOpenWorkId(null)}
+        onClose={() => { setOpenWorkId(null); setHistoryOpen(false) }} onStopGoalWait={onStopGoalWait} />
       {scrolledUp && !empty && (
         <button type="button" className="icon-button scroll-latest" aria-label="최근 메시지로 이동" title="최근 메시지로 이동" onClick={scrollToEnd}>
           <Icon name="arrowDown" />

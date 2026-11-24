@@ -14,6 +14,7 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [connectionError, setConnectionError] = useState(false)
   const [officeProfileOpen, setOfficeProfileOpen] = useState(false)
+  const [workHistoryScope, setWorkHistoryScope] = useState<string | null>(null)
   const [collaborationScope, setCollaborationScope] = useState<string | null>(null)
   const observedOpenRequest = useRef(0)
   const sendAttempt = useRef<{ conversation: string; attachments: string; text: string; draftRevision: number; token: string } | null>(null)
@@ -92,6 +93,7 @@ export default function App() {
 
   useEffect(() => {
     setCollaborationScope(current => current === conversationKey ? current : null)
+    setWorkHistoryScope(current => current === conversationKey ? current : null)
   }, [conversationKey])
 
   const openRequest = snapshot?.collab?.openRequest
@@ -129,11 +131,14 @@ export default function App() {
       <div className="main-column" hidden={collaborationOpen}>
         <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
+          onOpenWork={() => setWorkHistoryScope(conversationKey)}
           onOfficeProfile={() => setOfficeProfileOpen(open => !open)} />
         {officeProfileOpen && snapshot?.officeSelected === true && <OfficeProfileForm key={`office-profile:${conversationKey}`} initial={snapshot.officeProfile ?? {}} enabled={enabled}
           onSave={entries => request({ action: 'saveOfficeProfile', payload: { entries } })}
           onClear={() => request({ action: 'clearOfficeProfile' })} onClose={() => setOfficeProfileOpen(false)} />}
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
+          historyOpen={workHistoryScope === conversationKey}
+          onHistoryChange={open => setWorkHistoryScope(open ? conversationKey : null)}
           onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
           onFiles={messageId => request({ action: 'messageFiles', payload: { messageId } })}
           onStopGoalWait={runId => request({ action: 'stopGoalWait', payload: { runId } })}

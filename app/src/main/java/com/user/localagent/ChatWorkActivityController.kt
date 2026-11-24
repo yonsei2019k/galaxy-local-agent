@@ -166,7 +166,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
             waitingForReply=run.status=="paused"&&run.errorCode=="cloud_clarification_read_only",waitingForGoal=run.status=="paused"&&run.errorCode=="waiting_goal_condition"&&
                 runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
-            userMessageId=run.userMessageId))
+            userMessageId=run.userMessageId,finishedAt=run.finishedAt))
     }
 }
 

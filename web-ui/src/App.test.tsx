@@ -49,6 +49,7 @@ function click(label: string) { act(() => { button(label).click() }) }
 
 function openWork(taskId: string) {
   act(() => { (host.querySelector(`#work-${taskId}`) as HTMLButtonElement).click() })
+  act(() => { host.querySelector<HTMLButtonElement>(`.work-history-row[data-work-id="${taskId}"]`)!.click() })
 }
 
 function input() {
@@ -656,7 +657,7 @@ describe('native conversation', () => {
 
     const message: Snapshot['messages'][number] = { id: 'u1', role: 'user', text: '자료를 정리해줘.' }
 
-    it('headerShowsSingleTaskLineAndScrolls', () => {
+    it('headerShowsTaskAndOpensRecentWorkList', () => {
       mount()
       snapshot({ ...running(), singleConversation: true, messages: [message],
         tasks: [{ id: 'run-a', messageId: 'u1', phase: 'running', label: '자료 정리', detail: '', canCancel: true }] })
@@ -665,10 +666,27 @@ describe('native conversation', () => {
       expect(line?.textContent).toBe('자료 정리 · 진행 중')
       expect(host.querySelector('.current-work')).toBeNull()
       act(() => { line?.click() })
-      expect(scrolled).toEqual([{ id: 'work-run-a', options: { block: 'nearest' } }])
+      expect(host.querySelector('.work-history-list')?.textContent).toContain('자료 정리')
+      expect(scrolled).toEqual([])
       snapshot({ ...base, singleConversation: true, messages: [message],
         tasks: [{ id: 'run-a', messageId: 'u1', phase: 'completed', label: '자료 정리', detail: '', canCancel: false }] })
-      expect(host.querySelector('.header-work')).toBeNull()
+      expect(host.querySelector('.header-work')?.textContent).toBe('최근 작업')
+    })
+
+    it('shows increasing elapsed time from the actual start and omits unknown times', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-11-24T12:00:30Z'))
+      mount()
+      snapshot({ ...running(), singleConversation: true, messages: [message], tasks: [
+        { id: 'run-a', phase: 'running', label: '온라인 교육', detail: '영상 재생 중', canCancel: true,
+          startedAt: new Date('2026-11-24T12:00:00Z').getTime() },
+        { id: 'older', phase: 'completed', label: '이전 작업', detail: '', canCancel: false },
+      ] })
+      expect(host.querySelector('.header-work')?.textContent).toContain('0:30')
+      expect(host.querySelector('#work-run-a .work-duration')?.textContent).toContain('0:30')
+      expect(host.querySelector('#work-older .work-duration')).toBeNull()
+      act(() => vi.advanceTimersByTime(1000))
+      expect(host.querySelector('.header-work')?.textContent).toContain('0:31')
     })
 
     it('headerShowsTaskCountForTwoLiveTasks', () => {
@@ -679,9 +697,10 @@ describe('native conversation', () => {
         { id: 'p1', messageId: 'u1', phase: 'paused', label: '멈춘 작업', detail: '', canCancel: true },
       ] })
       const line = host.querySelector<HTMLButtonElement>('.header-work')
-      expect(line?.textContent).toBe('작업 2개')
+      expect(line?.textContent).toBe('첫째 작업 · 진행 중 · 외 1개')
       act(() => { line?.click() })
-      expect(scrolled).toEqual([{ id: 'work-l1', options: { block: 'nearest' } }])
+      expect([...host.querySelectorAll('.work-history-row')].map(row => row.querySelector('.work-title')?.textContent))
+        .toEqual(['첫째 작업', '둘째 작업', '멈춘 작업'])
       snapshot({ ...base, singleConversation: true, messages: [message], tasks: [
         { id: 'w1', messageId: 'u1', phase: 'waiting_goal', label: '예약 작업', detail: '', canCancel: true }] })
       expect(host.querySelector('.header-work')?.textContent).toBe('예약 작업 · 재개 대기')
@@ -813,27 +832,28 @@ describe('native conversation', () => {
       expect(status()).toBe('앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.')
     })
 
-    it('headerScrollTargetPrefersActiveRunThenWebsiteThenFirst', () => {
+    it('workListPrefersActiveRunThenWebsiteThenFirst', () => {
       mount()
       const tasks = [
         { id: 'l1', messageId: 'u1', phase: 'running', label: '첫째 작업', detail: '', canCancel: true },
         { id: 'l2', messageId: 'u1', phase: 'running', label: '둘째 작업', detail: '', canCancel: true },
       ]
-      const press = () => { scrolled.length = 0; act(() => { host.querySelector<HTMLButtonElement>('.header-work')?.click() }) }
+      const press = () => act(() => { host.querySelector<HTMLButtonElement>('.header-work')?.click() })
+      const first = () => host.querySelector('.work-history-row .work-title')?.textContent
       snapshot({ ...running({ activeRunId: 'l2' }), singleConversation: true, messages: [message], tasks })
       press()
-      expect(scrolled.map(item => item.id)).toEqual(['work-l2'])
+      expect(first()).toBe('둘째 작업')
       const website = { id: 'w', runId: 'wr', messageId: 'u1', title: '한림에듀', status: '확인 중', steps: [], working: true }
       snapshot({ ...running({ activeRunId: 'l2' }), singleConversation: true, messages: [message], tasks, websiteCard: website })
-      expect(host.querySelector('.header-work')?.textContent).toBe('작업 3개')
+      expect(host.querySelector('.header-work')?.textContent).toBe('둘째 작업 · 진행 중 · 외 2개')
       press()
-      expect(scrolled.map(item => item.id)).toEqual(['work-l2'])
+      expect(first()).toBe('둘째 작업')
       snapshot({ ...running({ activeRunId: null }), singleConversation: true, messages: [message], tasks, websiteCard: website })
       press()
-      expect(scrolled.map(item => item.id)).toEqual(['website-work'])
+      expect(first()).toBe('한림에듀')
       snapshot({ ...running({ activeRunId: null }), singleConversation: true, messages: [message], tasks })
       press()
-      expect(scrolled.map(item => item.id)).toEqual(['work-l1'])
+      expect(first()).toBe('첫째 작업')
     })
 
     it('startingVoiceInputClosesTheComposerSheetForGood', () => {

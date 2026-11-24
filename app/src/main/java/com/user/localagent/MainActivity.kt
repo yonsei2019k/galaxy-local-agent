@@ -443,6 +443,14 @@ class MainActivity : ComponentActivity() {
                 var websiteSlot by remember(websiteSlotId,composerThreadId,currentBranchId){
                     mutableStateOf<com.user.localagent.ui.NativeWebsiteSlot?>(null)
                 }
+                val visibleMessages=messages.takeLast(160)
+                val visibleMessageIds=visibleMessages.mapTo(hashSetOf()){it.id}
+                val requestTitles=visibleMessages.asSequence().filter{it.role=="user"}.associate { message ->
+                    message.id to visibleActivityText(message.text.lineSequence().firstOrNull(String::isNotBlank).orEmpty().trim().take(100),100)
+                }
+                val activitiesByRun=roomActivities.values.filter{
+                    it.threadId==composerThreadId&&it.assistantMessageId in visibleMessageIds
+                }.associateBy{it.runId}
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
@@ -472,7 +480,7 @@ class MainActivity : ComponentActivity() {
                     put("modelId",chosenId);put("modelLabel",modelChoices.find{it.first==chosenId}?.second?:"선택한 모델")
                     put("activeRunId",runForRoom);put("actionEpoch",epoch);put("canSteer",runForRoom!=null&&!chat.officeTeamRun(runForRoom)&&!preparingAttachments&&attachments.isEmpty())
                     put("resultPreviews",resultPreviews)
-                    put("messages",buildJsonArray{messages.takeLast(160).forEach{message->add(buildJsonObject{
+                    put("messages",buildJsonArray{visibleMessages.forEach{message->add(buildJsonObject{
                         val author = officeAuthor(message.role).takeIf { composerThreadId == officeRoomId }
                         put("id",message.id);put("role",if (author == null) message.role else "assistant")
                         val text = if (message.role == "assistant" || author != null)
@@ -496,22 +504,29 @@ class MainActivity : ComponentActivity() {
                     put("models",buildJsonArray{modelChoices.forEach{(id,label)->add(buildJsonObject{put("id",id);put("label",label)})}})
                     put("attachments",buildJsonArray{attachments.forEach{add(buildJsonObject{put("id",it.id);put("name",it.name)})}})
                     put("tasks",buildJsonArray{
-                        queuedRequests.filter{q->q.threadId==composerThreadId&&activeExecutions.none{it.runId==q.runId}}.take(8).forEach{request->
+                        queuedRequests.filter{q->q.threadId==composerThreadId&&q.branchId==currentBranchId&&activeExecutions.none{it.runId==q.runId}}.take(8).forEach{request->
                             add(buildJsonObject{
-                                put("id",request.runId);put("phase","queued");put("messageId",request.userMessageId);put("label","차례를 기다리는 일");put("detail",request.text.lineSequence().first().take(120));put("canCancel",false)
+                                put("id",request.runId);put("phase","queued");put("messageId",request.userMessageId)
+                                put("label",requestTitles[request.userMessageId]?.ifBlank{"차례를 기다리는 일"}?:"차례를 기다리는 일")
+                                put("detail","");put("canCancel",false)
                             })
                         }
                         activeExecutions.filter{it.threadId==composerThreadId}.forEach{run->add(buildJsonObject{
                         val phase=when{run.waitingForApproval->"approval";run.waitingForResource!=null->"waiting_resource";else->"running"}
+                        val activity=activitiesByRun[run.runId]
                         put("id",run.runId);put("phase",phase);run.userMessageId?.let{put("messageId",it)}
-                        put("label",when(phase){"approval"->"확인이 필요한 일";"waiting_resource"->"사용 가능한 실행 환경 대기";else->"맡은 일 진행 중"});put("detail",run.status)
+                        put("label",run.userMessageId?.let(requestTitles::get)?.takeIf(String::isNotBlank)?:
+                            when(phase){"approval"->"확인이 필요한 일";"waiting_resource"->"사용 가능한 실행 환경 대기";else->"맡은 일 진행 중"})
+                        put("detail",run.status)
+                        activity?.startedAt?.takeIf{it>0}?.let{put("startedAt",it)}
                         put("canCancel",run.runId==runForRoom)
-                        put("evidence",buildJsonArray{publicActivityWindow(roomActivities.values.firstOrNull{it.runId==run.runId&&it.threadId==composerThreadId}?.events.orEmpty()).forEach{event->add(buildJsonObject{
+                        put("evidence",buildJsonArray{publicActivityWindow(activity?.events.orEmpty()).forEach{event->add(buildJsonObject{
                             put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
+                            event.at.takeIf{it>0}?.let{put("at",it)}
                         })}})
                     })}
-                        roomActivities.values.filter{it.threadId==composerThreadId&&it.assistantMessageId in messages.map{m->m.id}&&it.status !in setOf("queued","running","waiting_approval")&&activeExecutions.none{run->run.runId==it.runId}}
-                            .distinctBy{it.runId}.sortedBy{it.updatedAt}.takeLast(12).forEach{activity->add(buildJsonObject{
+                        activitiesByRun.values.filter{it.status !in setOf("queued","running","waiting_approval")&&activeExecutions.none{run->run.runId==it.runId}}
+                            .sortedBy{it.updatedAt}.takeLast(12).forEach{activity->add(buildJsonObject{
                                 val latestQuestion=activity.waitingForReply&&runForRoom==null&&messages.lastOrNull()?.id==activity.assistantMessageId
                                 val phase=when{
                                     latestQuestion->"waiting_input"
@@ -521,10 +536,14 @@ class MainActivity : ComponentActivity() {
                                 }
                                 put("id",activity.runId);put("phase",phase)
                                 activity.userMessageId?.let{put("messageId",it)}
-                                put("label",when(phase){"waiting_input"->"답변을 기다리고 있어요";"waiting_goal"->"조건이 되면 이어서 진행";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
+                                put("label",activity.userMessageId?.let(requestTitles::get)?.takeIf(String::isNotBlank)?:
+                                    when(phase){"waiting_input"->"답변을 기다리고 있어요";"waiting_goal"->"조건이 되면 이어서 진행";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
+                                activity.startedAt.takeIf{it>0}?.let{put("startedAt",it)}
+                                if(phase!="waiting_goal")activity.finishedAt?.takeIf{it>0}?.let{put("finishedAt",it)}
                                 put("detail",if(latestQuestion)"아래에 답해 주시면 이 대화에서 이어갈게요." else if(activity.waitingForGoal)visibleActivityText(activity.goalWaitDetail) else "");put("canCancel",activity.waitingForGoal)
                                 put("evidence",buildJsonArray{publicActivityWindow(activity.events).forEach{event->add(buildJsonObject{
                                     put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
+                                    event.at.takeIf{it>0}?.let{put("at",it)}
                                 })}})
                             })}
                     })
