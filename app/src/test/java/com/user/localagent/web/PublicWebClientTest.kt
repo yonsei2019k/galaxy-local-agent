@@ -2,6 +2,10 @@ package com.user.localagent.web
 
 import com.user.localagent.core.VerificationState
 import com.user.localagent.tools.readToolResult
+import com.user.localagent.tools.readGovernmentServicePage
+import com.user.localagent.core.ToolCall
+import com.user.localagent.core.connections.GovernmentService
+import com.user.localagent.core.connections.GovernmentServiceCatalog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
@@ -15,6 +19,37 @@ class PublicWebClientTest {
     private val timestamp="2030-01-01T00:00:00Z"
     private fun response(url:String,body:String,type:String="text/html")=PublicWebResponse(200,url,type,body.toByteArray())
     private fun client(transport:PublicWebTransport)=PublicWebClient(transport){Instant.parse(timestamp)}
+    @Test fun governmentProbeRequiresTheCorrectOfficialPublicPageAndNeverExportsItsBody() = runBlocking {
+        val url = GovernmentService.RESIDENCY.url
+        val call = ToolCall("gov-read", GovernmentServiceCatalog.GET, buildJsonObject {
+            put("service", GovernmentService.RESIDENCY.id)
+            put("inspect", true)
+        })
+        val page = "<title>주민등록표 등본(초본) 발급 | 정부24</title>" +
+            "<main>주민등록표 신청방법 인터넷 수수료 안내 <form>PRIVATE_FIXTURE</form></main>"
+        val success = client { requested, _ ->
+            assertEquals(url, requested)
+            response(url, page)
+        }.readGovernmentServicePage(call)
+        assertEquals(VerificationState.VERIFIED, success.verification)
+        assertTrue(success.content.contains("public_information_observed"))
+        assertTrue(success.content.contains(timestamp))
+        assertFalse(success.content.contains("PRIVATE_FIXTURE"))
+        val failed = listOf(
+            response(url.replace("www.gov.kr", "example.com"), page),
+            response(url.replace("13100000015", "13100000016"), page),
+            response(url + "&CappBizCD=13100000015", page),
+            response(url, "<title>주민등록표 발급</title><main>주민등록표 서비스 대기 중</main>"),
+            PublicWebResponse(403, url, "text/html", ByteArray(0)),
+        )
+        for (row in failed) {
+            val result = client { _, _ -> row }.readGovernmentServicePage(call)
+            assertTrue(result.effectNotApplied)
+            assertEquals(VerificationState.FAILED, result.verification)
+            assertTrue(result.content.contains("public_page_unverified"))
+        }
+    }
+
     @Test fun mixedPublicHelpExportsOnlyCompleteSafeBlocks()=runBlocking {
         val url="https://example.com/help"
         val web=client { _,_->response(url,"""<main><dl><dt>Receipt</dt><dd>Open the archive.</dd></dl>

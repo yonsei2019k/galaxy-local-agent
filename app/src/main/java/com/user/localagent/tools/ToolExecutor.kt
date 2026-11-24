@@ -269,7 +269,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                         }
                     }
                 }
-                GovernmentServiceCatalog.GET -> return@withContext GovernmentServiceCatalog.read(call)
+                GovernmentServiceCatalog.GET -> {
+                    if (!GovernmentServiceCatalog.inspectRequested(call)) return@withContext GovernmentServiceCatalog.read(call)
+                    verifyGrant()
+                    return@withContext publicWeb.readGovernmentServicePage(call)
+                }
                 "read_webpage" -> return@withContext publicWeb.readToolResult(call.id, call.s("url"))
                 "search_conversation_history"->{
                     val query=call.s("query");val page=repository.messagePage(limit=call.i("limit",10),query=query)
@@ -492,6 +496,32 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         require(MessengerInbox.allowed(context,target.packageName)){"이 메시지 앱의 알림 접근 동의가 꺼져 있습니다."}
         MessengerInbox.replyConfirmed(context,id,message)
         return "전송 요청을 보냈습니다. 수신 여부는 메신저에서 확인해야 합니다."
+    }
+}
+
+/** Only public page evidence. Identity and work completion are never inferred from navigation. */
+internal suspend fun PublicWebClient.readGovernmentServicePage(call: ToolCall): ToolResult {
+    val service = GovernmentServiceCatalog.target(call)
+    val registry = GovernmentServiceCatalog.read(call)
+    val known = Json.parseToJsonElement(registry.content).jsonObject
+    fun unavailable(code: String, detail: String) = ToolResult(call.id, false, JsonObject(known + mapOf(
+        "status" to JsonPrimitive("public_page_unverified"), "detail" to JsonPrimitive(detail)
+    )).toString(), VerificationState.FAILED, code, effectNotApplied = true)
+    if (service != com.user.localagent.core.connections.GovernmentService.RESIDENCY)
+        return unavailable("GOV_PUBLIC_INSPECTION_UNSUPPORTED", "이 기관은 공식 주소와 휴대폰 연결을 지원해요.")
+    return try {
+        val page = fetchPage(service.url)
+        val topics = GovernmentServiceCatalog.residencyObservation(page.url, page.title, page.text)
+            ?: return unavailable("GOV_PUBLIC_PAGE_MISMATCH", "공식 페이지에서 등·초본 발급 안내 본문을 확인하지 못했어요.")
+        val content = JsonObject(known + mapOf(
+            "status" to JsonPrimitive("public_information_observed"),
+            "observedAt" to JsonPrimitive(page.fetchedAt),
+            "observedTopics" to JsonArray(topics.map(::JsonPrimitive)),
+        ))
+        ToolResult(call.id, true, content.toString(), VerificationState.VERIFIED, "정부24 등·초본 공개 안내 본문 확인")
+    } catch (error: Exception) {
+        val reason = PublicPageReadReason.from(error)
+        unavailable((error as? PublicPageReadException)?.auditCode ?: reason.name, reason.userMessage)
     }
 }
 

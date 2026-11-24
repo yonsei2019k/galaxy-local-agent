@@ -6,6 +6,7 @@ import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ToolDefinition
 import com.user.localagent.core.ToolResult
 import com.user.localagent.core.VerificationState
+import java.net.URI
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -43,8 +44,9 @@ object GovernmentServiceCatalog {
 
     private val arguments = mapOf("service" to Argument("string", maxLength = 40, description = choices))
     val definitions = listOf(
-        ToolDefinition(GET, Risk.LOW, arguments,
-            "Return the fixed official Korean service link and next step. Does not read private records or verify submission or payment. " + choices),
+        ToolDefinition(GET, Risk.LOW, arguments + ("inspect" to Argument("boolean", required = false)),
+            "Return the fixed official Korean service link and next step. Set inspect=true to inspect the public residency certificate information page on the phone (resident_certificate only). " +
+            "This does not read private records or verify submission or payment. " + choices, timeoutMillis = 45_000),
         ToolDefinition(OPEN, Risk.LOW, arguments,
             "When the owner asks to open or continue on the phone, hand off the fixed official service page. " +
             "The owner completes authentication in the official service. Dispatch is not a successful lookup, reservation, submission or payment. " + choices),
@@ -53,10 +55,27 @@ object GovernmentServiceCatalog {
     fun target(call: ToolCall): GovernmentService {
         require(call.name == GET || call.name == OPEN)
         val serviceId = (call.arguments["service"] as? JsonPrimitive)?.takeIf { it.isString }?.content
-        require(serviceId != null && call.arguments.keys == setOf("service"))
+        val allowed = if (call.name == GET) setOf("service", "inspect") else setOf("service")
+        require(serviceId != null && call.arguments.keys.all { it in allowed })
+        require(call.arguments["inspect"] == null || call.arguments["inspect"] in setOf(JsonPrimitive(true), JsonPrimitive(false)))
         return requireNotNull(GovernmentService.entries.firstOrNull { it.id == serviceId }) {
             "지원 목록의 정부 서비스인지 확인해 주세요."
         }
+    }
+
+    fun inspectRequested(call: ToolCall): Boolean =
+        call.name == GET && call.arguments["inspect"] == JsonPrimitive(true)
+
+    fun residencyObservation(finalUrl: String, title: String, text: String): List<String>? {
+        val entry = URI(GovernmentService.RESIDENCY.url)
+        val observed = runCatching { URI(finalUrl) }.getOrNull() ?: return null
+        val matchingCodes = observed.rawQuery.orEmpty().split('&').filter { it.substringBefore('=') == "CappBizCD" }
+        if (!observed.scheme.equals("https", true) || !observed.host.equals(entry.host, true) ||
+            observed.rawUserInfo != null || observed.port !in setOf(-1, 443) ||
+            observed.rawPath != entry.rawPath || matchingCodes != listOf(entry.rawQuery)) return null
+        if ("주민등록표" !in title || "발급" !in title || "주민등록표" !in text) return null
+        val confirmedTopics = listOf("신청방법", "신청자격", "발급서류", "구비서류", "수수료").filter { it in text }
+        return confirmedTopics.takeIf { "신청방법" in it && "수수료" in it }
     }
 
     fun read(call: ToolCall): ToolResult {
