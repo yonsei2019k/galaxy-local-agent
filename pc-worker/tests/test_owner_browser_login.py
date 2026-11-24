@@ -48,9 +48,15 @@ class OwnerLogin(unittest.TestCase):
                 chrome = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{agent._port()}')
                 context = chrome.contexts[0]
                 def route(request):
-                    response = ('<script>alert("fixture response");</script><a href="/member/logout.php">Logout</a>'
-                        if request.request.method == 'POST' else
-                        '<form method="post" action="/member/login_reg.php"><input name="id"><input type="password" name="passwd"><input type="submit"></form>')
+                    path = request.request.url.removeprefix(origin)
+                    if request.request.method == 'POST':
+                        response = '<script>alert("fixture response");location.replace("/");</script>'
+                    elif path == '/':
+                        response = '<p>Landing page without logout control</p>'
+                    elif path == '/cme/cme_ing.php':
+                        response = '<h1>나의 교육수강</h1><button>수강하기</button>'
+                    else:
+                        response = '<form method="post" action="/member/login_reg.php"><input name="id"><input type="password" name="passwd"><input type="submit"></form>'
                     request.fulfill(content_type='text/html; charset=utf-8', body=response)
                 context.route('https://www.kairb.org/**', route)
                 # Let Playwright serve routed requests while the actual worker waits in CDP.

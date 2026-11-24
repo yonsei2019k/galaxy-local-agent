@@ -265,11 +265,18 @@ KAIRB_LOGIN_FORM = r"""(args => {
     finally { set.call(id,''); set.call(pw,''); }
 })"""
 
+KAIRB_COURSE_LIST = "https://www.kairb.org/cme/cme_ing.php"
 KAIRB_SIGNED_IN = r"""(() => location.origin === 'https://www.kairb.org' &&
     !document.querySelector('input[type=password]') &&
     [...document.querySelectorAll('a')].some(a => a.getClientRects().length &&
         (a.textContent.trim() === '로그아웃' || (a.origin === location.origin &&
           /\/logout(?:_reg)?\.php$/i.test(a.pathname)))))()"""
+KAIRB_ON_HOME = "location.origin === 'https://www.kairb.org' && location.pathname === '/'"
+KAIRB_ON_COURSES = r"""(document.readyState === 'complete' &&
+    location.origin + location.pathname === 'https://www.kairb.org/cme/cme_ing.php' &&
+    !document.querySelector('input[type=password]') &&
+    document.body.innerText.includes('나의 교육수강') &&
+    /수강하기|수강중|수강 내역|수강내역/.test(document.body.innerText))"""
 
 class BrowserAgent:
     def __init__(self, profile=None, chrome=None):
@@ -334,6 +341,11 @@ class BrowserAgent:
                     # Wait for its document to settle before the phone requests a new form.
                     self._settle()
                     confirmed = self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True
+                if not confirmed and self.page.evaluate(KAIRB_ON_HOME, timeout=4) is True:
+                    navigation = self.page.call('Page.navigate', {'url': KAIRB_COURSE_LIST}, timeout=5)
+                    if not navigation.get('errorText'):
+                        self._settle(timeout=5)
+                        confirmed = self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True
             except (BrowserError, OSError, ValueError) as failure:
                 if isinstance(failure, BrowserError) and failure.code == 'OWNER_LOGIN_FORM_CHANGED':
                     raise
