@@ -82,7 +82,9 @@ internal object CloudPublicSearchProjection {
     private fun safeUrl(row: JsonObject): String? {
         val url = safeField(row, "url", 2048) ?: return null
         val uri = runCatching { PublicWebSafety.requireHttps(url) }.getOrNull() ?: return null
-        return url.takeIf { uri.rawQuery == null && '#' !in it && '%' !in it }
+        return url.takeIf { '#' !in it && '%' !in it &&
+            (uri.rawQuery == null || PublicWebSafety.isPublicLodgingLocator(uri))
+        }
     }
 
     private fun safeField(row: JsonObject, key: String, limit: Int): String? {

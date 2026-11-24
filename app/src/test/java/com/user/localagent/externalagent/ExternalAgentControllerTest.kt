@@ -142,6 +142,40 @@ class ExternalAgentControllerTest {
             "https://example.com/routes", "https://example.com/%66ixture"))))
     }
 
+    @Test fun projectionPreservesOnlyKnownPublicLodgingQueryShapes() {
+        val calendar = "https://rev.yapen.co.kr/external/?ypIdx=70493"
+        val room = "https://nol.yanolja.com/stay/domestic/10054721?ratePlanId=664137&roomTypeId=606731"
+        val trip = "https://place-site.yanolja.com/places/10054348?rooms=1&checkinDate=2026-12-12&checkoutDate=2026-12-13&capacityAdult=2&capacityChild=0"
+        fun projected(url: String): ToolResult? {
+            val content = buildJsonObject {
+                put("success", true)
+                put("shopping", false)
+                put("privateSourcesRead", false)
+                put("untrustedSourceData", true)
+                put("items", buildJsonArray {
+                    add(buildJsonObject { put("url", url); put("title", "공개 숙소 선택") })
+                })
+            }
+            return CloudPublicSearchProjection.from("search_web",
+                ToolResult(callId, true, content.toString(), VerificationState.VERIFIED))
+        }
+        for (link in listOf(calendar, room, trip)) {
+            val data = Json.parseToJsonElement(checkNotNull(projected(link)).content).jsonObject
+            assertEquals(link, data.getValue("items").jsonArray.single().jsonObject.getValue("url").jsonPrimitive.content)
+        }
+        for (link in listOf(
+            "$calendar&session=anything",
+            "$calendar&ypIdx=1",
+            calendar.replace("70493", "%37%30%34%39%33"),
+            calendar.replace("rev.yapen.co.kr", "rev.yapen.co.kr.example.org"),
+            room.replace("606731", "606731#fragment"),
+            trip.replace("capacityChild=0", "capacityChild=99"),
+            trip.replace("2026-12-12", "2026-02-30"),
+            trip.replace("2026-12-13", "2026-12-01"),
+            trip.replace("/places/", "/login/"),
+        )) assertNull(link, projected(link))
+    }
+
     @Test fun aFullyWithheldPublicReadLeavesTheCloudSessionOpen() = runBlocking {
         val capture = capture(setOf("read_webpage"))
         val broker = Broker()

@@ -488,6 +488,44 @@ class PinnedPublicHttpsTransport(private val pdf:Boolean=false,private val image
 }
 
 object PublicWebSafety {
+
+    /** Known public lodging routes may carry catalog identifiers or a bounded trip selection. */
+    internal fun isPublicLodgingLocator(uri: URI): Boolean {
+        val query = uri.rawQuery ?: return false
+        if (query.length > 128 || uri.rawFragment != null || uri.rawUserInfo != null) return false
+        val fields = linkedMapOf<String, String>()
+        for (part in query.split('&')) {
+            val pair = part.split('=', limit = 2)
+            if (pair.size != 2 || fields.put(pair[0], pair[1]) != null) return false
+        }
+        val path = uri.rawPath
+        val id = Regex("[1-9][0-9]{0,11}")
+        return when (uri.host?.lowercase(Locale.ROOT)) {
+            "rev.yapen.co.kr" -> path == "/external/" && fields.keys == setOf("ypIdx") &&
+                id.matches(fields.getValue("ypIdx"))
+            "nol.yanolja.com" -> Regex("/stay/domestic/[1-9][0-9]{0,11}").matches(path) &&
+                fields.keys.all { it == "ratePlanId" || it == "roomTypeId" } &&
+                fields.containsKey("roomTypeId") && fields.values.all(id::matches)
+            "place-site.yanolja.com" -> Regex("/places/[1-9][0-9]{0,11}").matches(path) &&
+                isPublicStaySelection(fields)
+            else -> false
+        }
+    }
+
+    private fun isPublicStaySelection(fields: Map<String, String>): Boolean {
+        if (fields.keys != setOf("rooms", "checkinDate", "checkoutDate", "capacityAdult", "capacityChild")) return false
+        fun numeric(key: String): Int? = fields.getValue(key).takeIf { it.matches(Regex("[0-9]{1,2}")) }?.toInt()
+        val adults = numeric("capacityAdult") ?: return false
+        val minors = numeric("capacityChild") ?: return false
+        val rooms = numeric("rooms") ?: return false
+        if (adults !in 1..30 || adults + minors > 30 || rooms !in 1..adults) return false
+        fun day(key: String) = fields.getValue(key).takeIf { it.matches(Regex("20[0-9]{2}-[0-9]{2}-[0-9]{2}")) }
+            ?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+        val start = day("checkinDate") ?: return false
+        val end = day("checkoutDate") ?: return false
+        return end.isAfter(start) && !end.isAfter(start.plusDays(90))
+    }
+
     fun requireHttps(raw:String):URI=try { validateHttps(raw) }catch(_:Exception){throw UnsafePublicWebUrlException()}
     private fun validateHttps(raw:String):URI {
         require(raw.length in 1..4096&&raw.none {it.code<32||it.code==127||it=='\\'}){"잘못된 웹 주소"}
