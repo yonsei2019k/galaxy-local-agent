@@ -77,16 +77,50 @@ function measure() {
     minContrast = Math.min(minContrast, c);
     if (c < need) failures.push({ selector: sel(el), contrast: +c.toFixed(2), need });
   }
-  const vh = innerHeight;
-  const visibleItems = [...document.querySelectorAll('.message, .work-card, .task-card')].filter(el => {
+  // 가시 항목: 스크롤 컨테이너(main.conversation) 안에서 센다.
+  // 세는 규칙: 항목 높이의 50% 이상이 box 안에 보이거나, 보이는 높이가 120px 이상.
+  // 가장 바깥 카드만 센다(중첩 제외, .website-input-slot 제외, 숨은 요소 제외).
+  const CARD = '.message, .work-card, .task-card';
+  const main = document.querySelector('main.conversation');
+  if (!main) throw new Error('main.conversation missing');
+  const box = main.getBoundingClientRect();
+  const outer = [...document.querySelectorAll(CARD)].filter(el =>
+    !el.classList.contains('website-input-slot') && !el.parentElement?.closest(CARD) && visible(el));
+  const visibleItems = outer.filter(el => {
     const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < vh && r.right > 0 && r.left < innerWidth;
+    if (!(r.bottom > box.top && r.top < box.bottom)) return false;
+    const shown = Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top);
+    return shown >= 0.5 * r.height || shown >= 120;
   }).length;
+  const renderedMessages = outer.filter(el => el.classList.contains('message')).length;
+  const renderedCards = outer.length - renderedMessages;
+  // 가로 넘침: 문서와 .conversation 모두. 명시적 가로 스크롤 래퍼(overflow-x auto/scroll, 너비 안) 안쪽 후손은 허용.
+  const insideScroller = el => {
+    for (let e = el.parentElement; e && e !== main; e = e.parentElement) {
+      const o = getComputedStyle(e).overflowX;
+      if ((o === 'auto' || o === 'scroll') && e.getBoundingClientRect().right <= innerWidth + 1) return true;
+    }
+    return false;
+  };
+  const overflowing = [...main.querySelectorAll('*')]
+    .filter(el => visible(el) && el.getBoundingClientRect().right > innerWidth + 1 && !insideScroller(el)).map(sel).slice(0, 5);
   return {
-    visibleItems, overflowX: document.documentElement.scrollWidth > innerWidth,
+    visibleItems, renderedMessages, renderedCards, loading: !!document.querySelector('.loading'),
+    welcome: !!document.querySelector('.welcome'),
+    docScrollWidth: document.documentElement.scrollWidth, docOverflow: document.documentElement.scrollWidth > innerWidth,
+    convScrollWidth: main.scrollWidth, convClientWidth: main.clientWidth,
+    convOverflow: main.scrollWidth > main.clientWidth + 1, overflowing,
     minContrast: minContrast === Infinity ? null : +minContrast.toFixed(2), failures,
   };
 }
+
+// expect: 렌더되어야 하는 .message 수와 가장 바깥 카드 수. 첫 실행 결과를 스크린샷으로 확인해 정한 값.
+const expectations = {
+  empty: { messages: 0, cards: 0 }, chatShort: { messages: 2, cards: 0 }, chatLong: { messages: 20, cards: 0 },
+  taskRunning: { messages: 1, cards: 1 }, taskPaused: { messages: 1, cards: 1 }, taskWaitingGoal: { messages: 1, cards: 1 },
+  taskFailed: { messages: 1, cards: 1 }, taskCompleted: { messages: 2, cards: 1 }, unanchoredTasks: { messages: 1, cards: 3 },
+  twoLiveTasks: { messages: 1, cards: 2 }, websiteCard: { messages: 1, cards: 2 }, files: { messages: 2, cards: 0 },
+};
 
 for (const [name, snapshot] of Object.entries(fixtures)) {
   for (const [width, height] of widths) {
@@ -96,12 +130,31 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
         await page.addInitScript(() => { window.ziphapNative = { postMessage() {} }; });
         await page.goto(base);
         await page.waitForSelector('#root > *');
-        await page.evaluate(([event, detail]) => window.dispatchEvent(new CustomEvent(event, { detail })), [SNAPSHOT_EVENT, snapshot]);
-        await page.waitForTimeout(400);
+        const want = expectations[name];
+        assert.ok(want, `expectation missing for ${name}`);
+        // 앱이 듣기 시작할 때까지 50ms마다 스냅숏을 다시 보낸다(최대 5초).
+        await page.waitForFunction(([event, detail, wantMessages]) => {
+          window.dispatchEvent(new CustomEvent(event, { detail }));
+          return !document.querySelector('.loading') && document.querySelectorAll('.message').length === wantMessages;
+        }, [SNAPSHOT_EVENT, snapshot, want.messages], { polling: 50, timeout: 5000 });
+        await page.waitForFunction(cards => document.querySelectorAll('.task-card, .work-card').length >= cards, want.cards, { timeout: 5000 });
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        });
         await page.screenshot({ path: path.join(out, `${name}-${width}.png`) });
         const m = await page.evaluate(measure);
-        metrics.push({ fixture: name, width, visibleItems: m.visibleItems, overflowX: m.overflowX, minContrast: m.minContrast, contrastFailures: m.failures });
-        assert.equal(m.overflowX, false, 'horizontal overflow');
+        metrics.push({
+          fixture: name, width, visibleItems: m.visibleItems, overflowX: m.docOverflow || m.convOverflow,
+          docScrollWidth: m.docScrollWidth, convScrollWidth: m.convScrollWidth, convClientWidth: m.convClientWidth,
+          renderedMessages: m.renderedMessages, renderedCards: m.renderedCards, minContrast: m.minContrast, contrastFailures: m.failures,
+        });
+        assert.equal(m.loading, false, 'still loading');
+        assert.equal(m.renderedMessages, want.messages, 'rendered .message count');
+        assert.equal(m.renderedCards, want.cards, 'rendered outermost card count');
+        if (name === 'empty') assert.equal(m.welcome, true, 'welcome rendered');
+        assert.equal(m.docOverflow, false, 'document horizontal overflow');
+        assert.deepEqual(m.convOverflow ? m.overflowing : [], [], '.conversation horizontal overflow (outside explicit scroll wrappers)');
         const unexpected = m.failures.filter(f => !KNOWN_CONTRAST_BASELINE.has(`${name}|${f.selector}`));
         assert.deepEqual(unexpected, [], 'contrast below threshold');
       } finally { await page.close(); }
