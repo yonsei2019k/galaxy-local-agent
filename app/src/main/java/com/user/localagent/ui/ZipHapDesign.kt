@@ -1,6 +1,5 @@
 package com.user.localagent.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -34,37 +33,52 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.user.localagent.runtime.R
 
 /**
- * "Sunlit Porcelain": bright white surfaces with vivid point colors (owner direction 2026-11-19: no black UI).
+ * "Sunlit Porcelain" 2.0 (design language 2.0, 2026-11-25): a pale grey page with white rounded cards grouped by
+ * spacing, no dark lines (owner direction 2026-11-19: no black UI). Values come from the generated [ZipHapTokens].
  * Text-safe shades are used for text (WCAG AA >= 4.5:1 on white); the soft tints are backgrounds only.
  * Cobalt = the one primary action, Coral = needs the owner, Mint = done/connected, Sun = waiting, Lilac = creative/collab.
+ *
+ * Member names stay source-compatible for existing screens; the legacy names map onto the 2.0 values.
  */
 object ZipHapColors {
-    val Background = Color(0xFFF7F8FC)
-    val Surface = Color(0xFFFFFFFF)
-    val Elevated = Color(0xFFEEF2FF)        // cobalt-tinted container (user bubble, selected rows)
-    val SurfaceSoft = Color(0xFFF0F2F8)
-    val TextPrimary = Color(0xFF171B33)
-    val TextSecondary = Color(0xFF5E6480)
-    val Outline = Color(0xFF868CA4)          // control borders, >= 3:1
-    val OutlineSoft = Color(0xFFE3E6EF)      // card borders and dividers
+    val Background = ZipHapTokens.Bg                 // page #F3F4F8
+    val Surface = ZipHapTokens.Surface               // cards, sheets, dialogs
+    val Elevated = Color(0xFFEEF2FF)                 // cobalt-tinted container (user bubble, selected rows)
+    val SurfaceSoft = ZipHapTokens.SurfaceSunken     // filled inputs, secondary buttons, tags
+    val TextPrimary = ZipHapTokens.Text
+    val TextSecondary = ZipHapTokens.TextSub         // 6.13:1 white, 5.58:1 page, 5.52:1 sunken
+    /** Input/focus outlines where one is unavoidable: 3.33:1 white, 3.03:1 page, 3.00:1 sunken (>= 3:1). */
+    val Outline = Color(0xFF868CA4)
+    /** Legacy "card border and divider" name; now the faint inset hairline #EEF0F4. */
+    val OutlineSoft = ZipHapTokens.Divider
 
-    val Cobalt = Color(0xFF3355F0)
-    val CobaltSoft = Color(0xFFE6EBFF)
+    // 2.0 additions.
+    val SurfaceSunken = ZipHapTokens.SurfaceSunken
+    val Divider = ZipHapTokens.Divider
+    /** Disabled text and decorative glyphs only (3.47 to 3.86:1); never information the user must read. */
+    val TextFaint = ZipHapTokens.TextFaint
+    /** Placeholder text: 4.68:1 on sunken #F1F3F7, 5.19:1 on white (AA); token text-faint fails AA there. */
+    val Placeholder = Color(0xFF666C84)
+
+    val Cobalt = ZipHapTokens.Cobalt
+    val CobaltSoft = ZipHapTokens.CobaltSoft
     val OnCobalt = Color(0xFFFFFFFF)
-    val Coral = Color(0xFFC9401F)
-    val CoralSoft = Color(0xFFFFE9E2)
-    val Mint = Color(0xFF0B7F5D)             // text-safe; also status dots
-    val MintSoft = Color(0xFFDDF7EE)
-    val Sun = Color(0xFFFFB020)              // fill only, with TextPrimary on it
-    val SunText = Color(0xFF8A5A00)
-    val SunSoft = Color(0xFFFFF3D6)
-    val Lilac = Color(0xFF7C4DEB)
-    val LilacSoft = Color(0xFFF0E9FF)
+    val Coral = ZipHapTokens.Coral
+    val CoralSoft = ZipHapTokens.CoralSoft
+    val Mint = ZipHapTokens.Mint                     // text-safe; also status dots
+    val MintSoft = ZipHapTokens.MintSoft
+    val Sun = ZipHapTokens.Sun                       // fill only, with TextPrimary on it
+    val SunText = ZipHapTokens.SunText
+    val SunSoft = ZipHapTokens.SunSoft
+    val Lilac = ZipHapTokens.Lilac
+    val LilacSoft = ZipHapTokens.LilacSoft
     val Error = Color(0xFFC62828)
     val ErrorSoft = Color(0xFFFDE7E7)
 
@@ -75,6 +89,11 @@ object ZipHapColors {
     val Periwinkle = Cobalt
 }
 
+/*
+ * Surface roles: white for anything that floats or groups (cards, sheets, dialogs, menus where Material allows),
+ * sunken #F1F3F7 for filled controls (filled TextField, Switch track, tags). Material reads surfaceContainerHighest
+ * for filled TextField/Card, surfaceContainerHigh for AlertDialog and surfaceContainerLow for ModalBottomSheet.
+ */
 private val ZipHapScheme = lightColorScheme(
     primary = ZipHapColors.Cobalt,
     onPrimary = ZipHapColors.OnCobalt,
@@ -92,56 +111,87 @@ private val ZipHapScheme = lightColorScheme(
     onBackground = ZipHapColors.TextPrimary,
     surface = ZipHapColors.Surface,
     onSurface = ZipHapColors.TextPrimary,
-    surfaceVariant = ZipHapColors.SurfaceSoft,
+    surfaceVariant = ZipHapColors.SurfaceSunken,
     onSurfaceVariant = ZipHapColors.TextSecondary,
     surfaceTint = ZipHapColors.Cobalt,
+    surfaceBright = Color.White,
+    surfaceDim = Color(0xFFE6E8EF),
     surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFFBFBFE),
-    surfaceContainer = ZipHapColors.SurfaceSoft,
-    surfaceContainerHigh = Color(0xFFEAEDF5),
-    surfaceContainerHighest = Color(0xFFE3E6EF),
+    surfaceContainerLow = Color.White,
+    surfaceContainer = ZipHapColors.SurfaceSunken,
+    surfaceContainerHigh = Color.White,
+    surfaceContainerHighest = ZipHapColors.SurfaceSunken,
     inverseSurface = ZipHapColors.TextPrimary,
     inverseOnSurface = Color.White,
     inversePrimary = Color(0xFFB9C6FF),
     outline = ZipHapColors.Outline,
-    outlineVariant = ZipHapColors.OutlineSoft,
+    outlineVariant = ZipHapColors.Divider,
+    scrim = ZipHapColors.TextPrimary,
     error = ZipHapColors.Error,
     onError = Color.White,
     errorContainer = ZipHapColors.ErrorSoft,
     onErrorContainer = Color(0xFF8C1D18),
 )
-/** Official Pretendard v1.3.9 static OTFs, bundled under SIL OFL 1.1; no runtime font network. */
-private val ZipHapFontFamily = FontFamily(
-    Font(R.font.pretendard_regular, weight = FontWeight.Normal),
-    Font(R.font.pretendard_semibold, weight = FontWeight.SemiBold),
-)
+/**
+ * The only place font families are chosen. `ui` is body text and controls; `display` is the large playful accent
+ * (집순이 name, greeting, empty-state titles). Both are the bundled Pretendard v1.3.9 OTFs (SIL OFL 1.1, no runtime
+ * font network) until D4 swaps them for SUIT Variable and Jua by editing only this holder.
+ * Pretendard ships 400 and 600 only: a 500 request renders the 400 file and 700 renders the 600 file.
+ */
+object ZipFonts {
+    val ui: FontFamily = FontFamily(
+        Font(R.font.pretendard_regular, weight = FontWeight.Normal),
+        Font(R.font.pretendard_semibold, weight = FontWeight.SemiBold),
+    )
+    val display: FontFamily = ui
+}
 
-private val ZipHapTypography = Typography().let { base ->
+private fun zipStyle(size: Float, weight: Int, lineHeight: Float, tight: Boolean, family: FontFamily = ZipFonts.ui) =
+    TextStyle(
+        fontFamily = family,
+        fontWeight = FontWeight(weight),
+        fontSize = size.sp,
+        lineHeight = lineHeight.sp,
+        letterSpacing = if (tight) ZipHapTokens.LsTight.em else 0.sp,
+    )
+
+private fun headingLine(size: Float) = size * ZipHapTokens.LhTight
+
+/**
+ * Token type scale: hero 28, screen title 24/700 (headlineSmall), title 20/700 (titleLarge), subtitle 17/700
+ * (titleMedium), body 15/400 line 24 (bodyLarge; bodyMedium is the same size with a denser 22 line for UI copy),
+ * small 13 (bodySmall), caption 12/500 (labelSmall). labelLarge 15/700 is the button label and labelMedium 13/700
+ * the section title. Headings use the tight letter spacing; Korean body text keeps 0.
+ */
+private val ZipHapTypography = run {
+    val bold = ZipHapTokens.FwBold
+    val medium = ZipHapTokens.FwMedium
+    val regular = ZipHapTokens.FwRegular
     Typography(
-        displayLarge = base.displayLarge.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        displayMedium = base.displayMedium.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        displaySmall = base.displaySmall.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        headlineLarge = base.headlineLarge.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        headlineMedium = base.headlineMedium.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        headlineSmall = base.headlineSmall.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        titleLarge = base.titleLarge.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        titleMedium = base.titleMedium.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        titleSmall = base.titleSmall.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        bodyLarge = base.bodyLarge.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.Normal, lineHeight = 25.sp, letterSpacing = 0.sp),
-        bodyMedium = base.bodyMedium.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.Normal, lineHeight = 22.sp, letterSpacing = 0.sp),
-        bodySmall = base.bodySmall.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.Normal, lineHeight = 18.sp, letterSpacing = 0.sp),
-        labelLarge = base.labelLarge.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        labelMedium = base.labelMedium.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
-        labelSmall = base.labelSmall.copy(fontFamily = ZipHapFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+        displayLarge = zipStyle(40f, bold, 48f, tight = true, family = ZipFonts.display),
+        displayMedium = zipStyle(34f, bold, 42f, tight = true, family = ZipFonts.display),
+        displaySmall = zipStyle(28f, bold, headingLine(28f), tight = true, family = ZipFonts.display),
+        headlineLarge = zipStyle(28f, bold, headingLine(28f), tight = true),
+        headlineMedium = zipStyle(26f, bold, headingLine(26f), tight = true),
+        headlineSmall = zipStyle(24f, bold, headingLine(24f), tight = true),
+        titleLarge = zipStyle(20f, bold, headingLine(20f), tight = true),
+        titleMedium = zipStyle(17f, bold, 23f, tight = true),
+        titleSmall = zipStyle(15f, bold, 21f, tight = false),
+        bodyLarge = zipStyle(15f, regular, 15f * ZipHapTokens.LhBody, tight = false),
+        bodyMedium = zipStyle(15f, regular, 22f, tight = false),
+        bodySmall = zipStyle(13f, regular, 19f, tight = false),
+        labelLarge = zipStyle(15f, bold, 20f, tight = false),
+        labelMedium = zipStyle(13f, bold, 18f, tight = false),
+        labelSmall = zipStyle(12f, medium, 16f, tight = false),
     )
 }
 
 private val ZipHapShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(26.dp),
+    small = RoundedCornerShape(ZipHapTokens.RadiusChip),
+    medium = RoundedCornerShape(ZipHapTokens.RadiusControl),
+    large = RoundedCornerShape(ZipHapTokens.RadiusCard),
+    extraLarge = RoundedCornerShape(ZipHapTokens.RadiusSheet),
 )
 
 /** Fixed brand theme with readable bundled Korean and Latin typography. */
@@ -176,18 +226,18 @@ fun ZipHapHeader(
         }
     }
 }
-/** Spacious surface for grouped content; callers provide the inner layout. */
+/** Spacious white card for grouped content (2.0: soft card shadow, no border); callers provide the inner layout. */
 @Composable
 fun ZipHapCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    val shape = MaterialTheme.shapes.large
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        modifier = modifier.fillMaxWidth().zipShadow(ZipHapTokens.ShadowCard, shape),
+        shape = shape,
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
