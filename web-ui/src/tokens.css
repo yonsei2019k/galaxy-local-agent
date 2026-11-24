@@ -1,0 +1,41 @@
+/* Generated from design/tokens.json by scripts/gen-design-tokens.py. Do not edit. */
+:root {
+  --color-bg: #F7F8FC;
+  --color-surface: #FFFFFF;
+  --color-text: #171B33;
+  --color-muted: #5E6480;
+  --color-line: #E3E6EF;
+  --color-cobalt: #3355F0;
+  --color-cobalt-text: #2E4BE0;
+  --color-cobalt-soft: #E6EBFF;
+  --color-coral: #C9401F;
+  --color-coral-text: #C2401F;
+  --color-coral-soft: #FFE9E2;
+  --color-mint: #0B7F5D;
+  --color-mint-text: #0B7A5B;
+  --color-mint-soft: #DDF7EE;
+  --color-sun: #FFB020;
+  --color-sun-text: #8A5A00;
+  --color-sun-soft: #FFF3D6;
+  --color-lilac: #7C4DEB;
+  --color-lilac-text: #6D3FE0;
+  --color-lilac-soft: #F0E9FF;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --fs-caption: 12px;
+  --fs-small: 13px;
+  --fs-body: 15px;
+  --fs-subtitle: 17px;
+  --fs-title: 20px;
+  --fs-screen: 24px;
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-sheet: 24px;
+  --radius-pill: 999px;
+}

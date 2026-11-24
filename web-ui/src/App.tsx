@@ -16,7 +16,6 @@ export default function App() {
   const [officeProfileOpen, setOfficeProfileOpen] = useState(false)
   const [collaborationScope, setCollaborationScope] = useState<string | null>(null)
   const observedOpenRequest = useRef(0)
-  const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
   const sendAttempt = useRef<{ conversation: string; attachments: string; text: string; draftRevision: number; token: string } | null>(null)
 
   useEffect(() => {
@@ -57,14 +56,10 @@ export default function App() {
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 940px)')
-    const dark = window.matchMedia('(prefers-color-scheme: dark)')
     function closeOnDesktop(event: MediaQueryListEvent) { if (event.matches) setMobileOpen(false) }
-    function updateSystemTheme(event: MediaQueryListEvent) { setSystemDark(event.matches) }
     desktop.addEventListener('change', closeOnDesktop)
-    dark.addEventListener('change', updateSystemTheme)
     return () => {
       desktop.removeEventListener('change', closeOnDesktop)
-      dark.removeEventListener('change', updateSystemTheme)
     }
   }, [])
 
@@ -117,7 +112,6 @@ export default function App() {
 
   const status = !connected ? 'Android 앱에서 대화를 열어 주세요.' : connectionError
     ? '앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.' : snapshot?.status ?? ''
-  const theme = snapshot?.theme === 'dark' || (snapshot?.theme !== 'light' && systemDark) ? 'dark' : 'light'
   const sidebarProps: Parameters<typeof Sidebar>[0] = {
     snapshot,
     enabled,
@@ -129,7 +123,7 @@ export default function App() {
   const openMenu = () => setMobileOpen(true)
 
   return (
-    <div className="workspace" data-theme={theme}>
+    <div className="workspace">
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
       <div className="main-column" hidden={collaborationOpen}>

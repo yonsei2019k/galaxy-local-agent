@@ -1,6 +1,12 @@
 # ZipHap.Agent design system
 
-## Direction
+## Current theme and token source (2026-11-24)
+
+The current theme is "Sunlit Porcelain": one bright light theme (page #F7F8FC, cards #FFFFFF, text #171B33) with cobalt, coral, mint, sun and lilac role colors. The navy palette below is the historical native palette and is superseded; see `docs/ziphap-design-system.ko.md` for the role-color table.
+
+Design tokens (colors, spacing, font sizes, radii) have one source: `design/tokens.json`. Run `python scripts/gen-design-tokens.py` to regenerate `web-ui/src/tokens.css` (CSS variables such as `--color-cobalt`, `--space-1`, `--fs-body`, `--radius-card`) and `app/src/main/java/com/user/localagent/ui/ZipHapTokens.kt`; `--check` fails when the committed outputs are stale. Do not edit the generated files by hand. `styles.css` keeps its older alias variables pointing at the new tokens; Compose screens still use `ZipHapColors` until they adopt `ZipHapTokens`.
+
+## Direction (historical)
 
 ZipHap.Agent is a calm, private, on-device assistant. The interface uses a deep navy foundation, mint for the primary action and active state, and periwinkle for supporting highlights. Keep screens quiet and readable; show the next useful action without dashboard clutter.
 
