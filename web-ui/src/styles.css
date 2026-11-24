@@ -343,6 +343,10 @@ svg { width: 20px; height: 20px; flex: none; }
 .message--system, .message--tool { color: var(--color-muted); }
 .message--system .message-text, .message--tool .message-text { font-size: var(--fs-small); line-height: 1.4; color: var(--color-muted); }
 .message-actions { display: flex; gap: 3px; margin: 2px 0 0 -4px; }
+.answer-menu { position: relative; }
+.answer-menu-list { position: absolute; z-index: 5; top: 100%; left: 0; display: grid; min-width: 140px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow); }
+.answer-menu-list button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: transparent; color: var(--color-text); font: inherit; font-size: var(--fs-body); text-align: start; cursor: pointer; }
+.answer-menu-list button:hover, .answer-menu-list button:focus-visible { background: var(--color-cobalt-soft); }
 .message--user .message-actions { justify-content: flex-end; margin: 0 -5px -5px 0; }
 
 /* Task cards: state is carried by tile shape + label + color, never by color alone ---------------- */

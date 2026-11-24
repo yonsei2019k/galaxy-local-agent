@@ -85,11 +85,47 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   )
 }
 
-function Message({ message, previous, previews, enabled, onFiles, onMessageMenu }: {
+function AnswerMenu({ messageId, enabled, onCopy, onMessageMenu }: {
+  messageId: string
+  enabled: boolean
+  onCopy(messageId: string): void
+  onMessageMenu(messageId: string): void
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const first = useRef<HTMLButtonElement>(null)
+  const menuId = useId()
+  const close = useCallback((restore: boolean) => {
+    setOpen(false)
+    if (restore) trigger.current?.focus()
+  }, [])
+  useLayoutEffect(() => { if (open) first.current?.focus() }, [open])
+  useLayoutEffect(() => {
+    if (!open) return
+    const outside = (event: Event) => { if (!root.current?.contains(event.target as Node)) close(false) }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [open, close])
+  return (
+    <div className="answer-menu" ref={root} onKeyDown={event => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(true) } }}>
+      <button type="button" ref={trigger} className="icon-button icon-button--compact" disabled={!enabled}
+        aria-label="답변 메뉴" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen(value => !value)}>···</button>
+      {open && <div className="answer-menu-list" role="menu" id={menuId} aria-label="답변 동작">
+        <button type="button" role="menuitem" ref={first} onClick={() => { close(true); onCopy(messageId) }}>복사</button>
+        <button type="button" role="menuitem" onClick={() => { close(true); onMessageMenu(messageId) }}>더 보기</button>
+      </div>}
+    </div>
+  )
+}
+
+function Message({ message, previous, previews, enabled, onCopy, onFiles, onMessageMenu }: {
   message: ConversationMessage
   previous?: ConversationMessage
   previews: ResultPreview[]
   enabled: boolean
+  onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
 }) {
@@ -111,8 +147,10 @@ function Message({ message, previous, previews, enabled, onFiles, onMessageMenu 
       </div> : <div className="message-text" dir="auto">{message.text}</div>}
       {(assistant || user) && (
         <div className="message-actions">
-          <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
-            aria-label={assistant ? '답변 메뉴' : '메시지 메뉴'} onClick={() => onMessageMenu(message.id)}>···</button>
+          {assistant
+            ? <AnswerMenu messageId={message.id} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />
+            : <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
+              aria-label="메시지 메뉴" onClick={() => onMessageMenu(message.id)}>···</button>}
         </div>
       )}
     </article>
@@ -161,10 +199,11 @@ function TaskCard({ task, stopWaiting }: { task: Task; stopWaiting?: (runId: str
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
+  onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
   onStopGoalWait(runId: string): void
@@ -281,7 +320,7 @@ export function Conversation({ snapshot, connected, enabled, onFiles, onMessageM
             <div className="messages" role="log" aria-label="메시지">
               {messages.map((item, index) => <Fragment key={item.id}>
                 <Message message={item} previous={messages[index - 1]} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
-                  enabled={enabled} onFiles={onFiles} onMessageMenu={onMessageMenu} />
+                  enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
                 {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
                 {websiteAnchor === item.id && websiteCard}
               </Fragment>)}

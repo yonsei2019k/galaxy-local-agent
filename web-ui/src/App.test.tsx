@@ -383,6 +383,7 @@ describe('native conversation', () => {
     expect(postIntent(base, { action: 'copy', payload: { messageId: 'answer-a' } })).toBe(false)
     expect(host.querySelector('.task-state')?.textContent).toBe('승인 필요')
     click('답변 메뉴')
+    click('더 보기')
     expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'answer-a' } })
   })
 
@@ -408,8 +409,37 @@ describe('native conversation', () => {
     snapshot({ ...base, messages: [{ id: 'a1', role: 'assistant', text: '답' }] })
     expect(host.querySelector('[aria-label="답변 복사"]')).toBeNull()
     expect(host.querySelectorAll('.message-actions button')).toHaveLength(1)
+  })
+
+  it('copiesThroughAnswerMenuPopover', () => {
+    mount()
+    snapshot({ ...base, messages: [{ id: 'a1', role: 'assistant', text: '답' }, { id: 'u1', role: 'user', text: '질문' }] })
+    const trigger = button('답변 메뉴')
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
     click('답변 메뉴')
-    expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'a1' } })
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement?.textContent).toBe('복사')
+    expect(host.querySelectorAll('[role="menuitem"]')).toHaveLength(2)
+    click('복사')
+    expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a', action: 'copy', payload: { messageId: 'a1' } })
+    expect(host.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+    click('메시지 메뉴')
+    expect(requests().at(-1)).toMatchObject({ action: 'messageMenu', payload: { messageId: 'u1' } })
+    expect(requests().filter(r => r.action === 'copy')).toHaveLength(1)
+  })
+
+  it('closesAnswerMenuOnEscapeAndOutsideTap', () => {
+    mount()
+    snapshot({ ...base, messages: [{ id: 'a1', role: 'assistant', text: '답' }] })
+    click('답변 메뉴')
+    act(() => { document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(host.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(button('답변 메뉴'))
+    click('답변 메뉴')
+    act(() => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })) })
+    expect(host.querySelector('[role="menu"]')).toBeNull()
   })
 
   it('keeps the first draft on a busy submission rejection and reuses its retry token', () => {
