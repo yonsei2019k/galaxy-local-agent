@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from design/icons.json and design/illustrations.json by scripts/gen-icons.py. Do not edit. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="@android:color/black" android:fillAlpha="0.24" android:pathData="M4.7 13.2 A8.5 8.5 0 1 0 21.7 13.2 A8.5 8.5 0 1 0 4.7 13.2 Z" />
+    <path android:strokeColor="@android:color/black" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M3.5 12 A8.5 8.5 0 1 0 20.5 12 A8.5 8.5 0 1 0 3.5 12 Z M8.4 12 A3.6 8.5 0 1 0 15.6 12 A3.6 8.5 0 1 0 8.4 12 Z M3.8 12 H20.2" />
+</vector>
