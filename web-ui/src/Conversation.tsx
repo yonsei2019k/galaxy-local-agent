@@ -136,7 +136,9 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 function TaskCard({ task, stopWaiting }: { task: Task; stopWaiting?: (runId: string) => void }) {
   const phase = taskPhase(task)
   const heading = useId()
-  const recent = task.evidence?.slice(-3) ?? []
+  const recent = [...new Map((task.evidence ?? [])
+    .filter(item => item.label && !/^(모델 추론|후속 조건 검증 기록|답변 구간 저장 확인)/.test(item.label))
+    .map(item => [item.label, item])).values()].slice(-3)
   return (
     <article id={`work-${task.id}`} className={`task-card task-card--${phase.tone}`} aria-labelledby={heading}>
       <div className="task-heading">
@@ -180,12 +182,13 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
-  const tasks = snapshot?.ready ? snapshot.tasks : []
+  const website = snapshot?.websiteCard
+  const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const pausedTasks = tasks.filter(task => task.phase === 'paused')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
   const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'waiting_input' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
-  const website = snapshot?.websiteCard
+  const websiteTask = snapshot?.tasks.find(task => task.id === website?.runId)
   const empty = messages.length === 0 && tasks.length === 0 && !website
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
@@ -194,11 +197,19 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const websiteCard = website && (website.inputHeight ?
     <article className="task-card website-input-slot" data-native-website-slot={website.id}
       style={{height:website.inputHeight}} aria-label={website.title} /> :
-    <article className={`task-card website-work-card${website.working ? ' task-card--active' : ''}`} aria-label={website.title}>
+    <article id="website-work" className={`task-card website-work-card${website.working ? ' task-card--active' : ''}`} aria-label={website.title}>
       <div className="task-heading"><span className="task-icon"><Icon name={website.working ? 'activity' : 'compass'} /></span><h2>{website.title}</h2></div>
       <p className="task-detail" role="status">{website.status}</p>
       {website.working && <div className="task-progress" role="progressbar" aria-label="웹 작업 진행 중"><span /></div>}
       {website.steps.filter(step => step !== website.status).slice(-2).map(step => <p className="task-detail" key={step}>{step}</p>)}
+      {websiteTask?.phase === 'waiting_goal' && websiteTask.canCancel && enabled &&
+        <button type="button" className="text-button" onClick={() => onStopGoalWait(websiteTask.id)}>예약 중지</button>}
+      {!!websiteTask?.evidence?.length && <details className="task-evidence">
+        <summary>확인한 내용 <Icon name="down" className="details-chevron" /></summary>
+        <ul>{websiteTask.evidence.filter(item => item.label || item.detail).map(item => <li key={item.id}>
+          <div className="evidence-label">{item.label}</div>{item.detail && <p>{item.detail}</p>}
+        </li>)}</ul>
+      </details>}
     </article>)
   const cardsByMessage = new Map<string, Task[]>()
   for (const task of tasks) {
@@ -243,9 +254,12 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   return (
     <div className="conversation-wrap">
-      {snapshot?.singleConversation && activeTask && <button type="button" className="current-work"
-        onClick={() => document.getElementById(`work-${activeTask.id}`)?.scrollIntoView?.({ block: 'nearest' })}>
-        <Icon name={taskPhase(activeTask).icon} /><span>{taskPhase(activeTask).title} · {activeTask.label}</span><Icon name="down" />
+      {snapshot?.singleConversation && (activeTask || website?.working || website?.inputHeight) && <button type="button" className="current-work"
+        onClick={() => (website?.inputHeight ? document.querySelector('[data-native-website-slot]') : website?.working ?
+          document.getElementById('website-work') : activeTask && document.getElementById(`work-${activeTask.id}`))?.scrollIntoView?.({ block: 'nearest' })}>
+        <Icon name={activeTask ? taskPhase(activeTask).icon : 'activity'} />
+        <span>{website?.working || website?.inputHeight ? website.title : activeTask && `${taskPhase(activeTask).title} · ${activeTask.label}`}</span>
+        <Icon name="down" />
       </button>}
       <main className="conversation" ref={view} aria-label="대화" tabIndex={0} onScroll={event => {
         const pane = event.currentTarget

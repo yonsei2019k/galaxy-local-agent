@@ -83,10 +83,10 @@ class AppWebAgent private constructor(private val context:Context) {
     internal fun recordPcWork(binding:WorkBinding,status:String,step:String,working:Boolean=true) {
         if(loginCard.value!=null && browserWorkBinding.value!=binding)return
         browserWorkBinding.value=binding
-        val prior=websiteWork.value?.takeIf { it.binding==binding }
+        val prior=websiteWorkFor(binding)?.takeIf { it.binding==binding }
         val steps=prior?.steps.orEmpty()
-        websiteWork.value=WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding,
-            prior?.anchorRunId?:binding.runId)
+        putWebsiteWork(WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding,
+            prior?.anchorRunId?:binding.runId))
     }
     data class WebsiteLogin(val card:LoginCard,val url:String)
     data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
@@ -94,8 +94,19 @@ class AppWebAgent private constructor(private val context:Context) {
         val binding:WorkBinding?=null,val anchorRunId:String?=binding?.runId)
     private val browserWorkBinding=MutableStateFlow<WorkBinding?>(null)
     val ownerWorkBinding:StateFlow<WorkBinding?> get()=browserWorkBinding
-    private val websiteWork=MutableStateFlow<WebsiteWork?>(null)
-    val ownerWebsiteWork:StateFlow<WebsiteWork?> get()=websiteWork
+    private val websiteWorks=MutableStateFlow<List<WebsiteWork>>(emptyList())
+    val ownerWebsiteWorks:StateFlow<List<WebsiteWork>> get()=websiteWorks
+    private fun websiteWorkFor(binding:WorkBinding?)=binding?.let { target ->
+        websiteWorks.value.lastOrNull { it.binding?.let { item ->
+            item.threadId==target.threadId&&item.branchId==target.branchId
+        }==true }
+    }
+    private fun putWebsiteWork(work:WebsiteWork) {
+        val binding=work.binding?:return
+        websiteWorks.value=(websiteWorks.value.filterNot {
+            it.binding?.let { item -> item.threadId==binding.threadId&&item.branchId==binding.branchId }==true
+        }+work).takeLast(16)
+    }
     private val websiteLogin=MutableStateFlow<WebsiteLogin?>(null)
     val ownerWebsiteLogin:StateFlow<WebsiteLogin?> get()=websiteLogin
     private val loginCard=MutableStateFlow<LoginCard?>(null)
@@ -213,18 +224,18 @@ class AppWebAgent private constructor(private val context:Context) {
         }
     }
 
-    fun dismissWebsiteWork(){websiteWork.value=null}
+    fun dismissWebsiteWork(){websiteWorks.value=websiteWorks.value.filterNot{it.binding==browserWorkBinding.value}}
 
     internal fun bindResumedWork(originalRunId:String,binding:WorkBinding) {
         if(browserWorkBinding.value?.runId!=originalRunId)return
         browserWorkBinding.value=binding
-        val prior=websiteWork.value?.takeIf{it.binding?.runId==originalRunId} ?: return
-        websiteWork.value=prior.copy(binding=binding,status="로그인 확인 후 원래 작업 이어가는 중",
-            steps=(prior.steps+"원래 요청 재개").takeLast(4),working=true)
+        val prior=websiteWorkFor(binding)?.takeIf{it.binding?.runId==originalRunId} ?: return
+        putWebsiteWork(prior.copy(binding=binding,status="로그인 확인 · 원래 작업 이어가는 중",
+            steps=(prior.steps+"원래 요청 재개").takeLast(4),working=true))
     }
 
     internal fun finishWork(runId:String,actualState:String,errorCode:String?) {
-        val prior=websiteWork.value?.takeIf{it.binding?.runId==runId} ?: return
+        val prior=websiteWorks.value.lastOrNull{it.binding?.runId==runId} ?: return
         val label=when {
             errorCode in setOf("waiting_browser_auth","waiting_goal_condition","browser_auth_on_phone") -> "재개 조건 확인 대기"
             actualState=="completed" -> "웹 작업 응답 완료"
@@ -233,13 +244,13 @@ class AppWebAgent private constructor(private val context:Context) {
             actualState=="cancelled"||actualState=="interrupted" -> "웹 작업 중지"
             else -> return
         }
-        websiteWork.value=prior.copy(status=label,working=false)
+        putWebsiteWork(prior.copy(status=label,working=false))
     }
 
     private fun showWebsiteWork(host:String,waiting:Boolean){
-        websiteWork.value=WebsiteWork(host,
+        putWebsiteWork(WebsiteWork(host,
             if(waiting)"로그인 확인 · 재개 상태 확인 중" else "이전 작업을 계속하고 있어요.",
-            listOf("사이트 로그인 화면에서 이동 확인"),working=!waiting,binding=browserWorkBinding.value)
+            listOf("사이트 로그인 확인"),working=!waiting,binding=browserWorkBinding.value))
     }
 
     suspend fun finishWebsiteLogin(id:Long):Boolean{
@@ -444,9 +455,11 @@ class AppWebAgent private constructor(private val context:Context) {
     private var loadingUrl:String?=null
 
     private fun upgradeHallymLoginRedirect(request:WebResourceRequest):Boolean {
-        if(!request.isForMainFrame||(websiteLogin.value==null&&!loginSubmitting))return false
-        val upgraded=hallymSecureLoginRedirect(request.url.toString(),request.method,cardOrigin?.host)?:return false
-        if(secureOrigin(upgraded)!=cardOrigin)return false
+        if(!request.isForMainFrame)return false
+        val trusted=if(websiteLogin.value!=null||loginSubmitting)cardOrigin
+            else if(agentActive.value)secureOrigin(webView?.url) else null
+        val upgraded=hallymSecureLoginRedirect(request.url.toString(),request.method,trusted?.host)?:return false
+        if(secureOrigin(upgraded)!=trusted)return false
         beginNavigation(upgraded)
         com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"HTTPS_GET_UPGRADED")
         return true
@@ -903,9 +916,19 @@ class AppWebAgent private constructor(private val context:Context) {
                 return@guarded fail(checkNotNull(refusal))
             if(result?.get("performed")!=JsonPrimitive(true))return@guarded fail("ACTION_OUTCOME_UNKNOWN")
             settle()
+            val navigationError=navigation.value.error
+            if(navigationError!=null){
+                com.user.localagent.FailureLog.record(context,"app_browser_navigation",null,navigationError)
+                return@guarded JsonObject(fail("ACTION_OUTCOME_UNKNOWN")+("navigationError" to JsonPrimitive(navigationError)))
+            }
             val page=afterOwnerLogin(sourceUrl,readPage())
             if(page["error"]!=null)return@guarded fail("ACTION_OUTCOME_UNKNOWN")
+            val after=snapshot?.second
+            val changed=sourceUrl!=view().url || after!=current.second || page["loginRequired"]==JsonPrimitive(true)
+            if(!changed&&action=="click")
+                com.user.localagent.FailureLog.record(context,"app_browser_navigation",null,"UNCHANGED_AFTER_CLICK")
             JsonObject(page+mapOf("performed" to buildJsonObject{put("action",action);put("ref",ref);put("control",target?.s("label"))},
+                "pageChanged" to JsonPrimitive(changed),
                 "evidence" to JsonPrimitive("동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.")))
         }catch(timeout:TimeoutCancellationException){
             fail("ACTION_OUTCOME_UNKNOWN")
@@ -937,30 +960,30 @@ class AppWebAgent private constructor(private val context:Context) {
             agentActive.value=true
             if(loginCard.value==null&&work!=null)browserWorkBinding.value=work
             val requestedHost=secureOrigin(targetUrl?:webView?.url)?.host
-            val statusBefore=websiteWork.value?.takeIf{it.host==requestedHost&&it.binding==work&&loginCard.value==null}
-            if(statusBefore!=null)websiteWork.value=statusBefore.copy(status=label,working=true)
+            val statusBefore=websiteWorkFor(work)?.takeIf{it.host==requestedHost&&it.binding==work}
+            if(work!=null&&requestedHost!=null&&loginCard.value==null)putWebsiteWork(
+                statusBefore?.copy(status=label,working=true)?:WebsiteWork(requestedHost,label,emptyList(),true,work))
             try{
                 if(loginCard.value!=null||loginSubmitting)buildJsonObject{
                     put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",false)
                 }else block().also { page ->
-                    websiteWork.value?.takeIf{it.host==secureOrigin(webView?.url)?.host&&it.host==requestedHost&&it.binding==work}?.let{work->
+                    websiteWorkFor(work)?.takeIf{it.host==requestedHost&&it.binding==work}?.let{work->
                         val performed=page["performed"] as? JsonObject
                         val target=performed?.s("control")?.trim()?.take(60).orEmpty()
                         val title=page.s("title").trim().take(60)
                         val outcome=when{
                             page["loginRequired"]==JsonPrimitive(true)->"사이트 인증 필요"
                             page["error"]!=null->"페이지 또는 화면 동작을 확인하지 못함"
+                            performed!=null&&page["pageChanged"]==JsonPrimitive(false)->"동작 뒤 화면이 그대로예요. 다음 방법을 확인 중"
                             performed!=null->if(target.isBlank())"화면 동작 뒤 페이지 확인" else "$target 항목 동작 뒤 페이지 확인"
                             page["snapshotId"]!=null->if(title.isBlank())"페이지 확인" else "$title 페이지 확인"
                             else->"페이지에서 현재 상태를 다시 확인해야 함"
                         }
-                        websiteWork.value=work.copy(status=outcome,steps=(work.steps+outcome).takeLast(4),working=false)
+                        val waiting=page["loginRequired"]==JsonPrimitive(true)||page["error"]!=null
+                        putWebsiteWork(work.copy(status=outcome,steps=(work.steps+outcome).distinct().takeLast(4),working=!waiting))
                     }
                 }
             }catch(timeout:TimeoutCancellationException){fail("PAGE_TIMEOUT")}finally{
-                websiteWork.value?.takeIf{it.working&&it.host==requestedHost&&it.binding==work}?.let{
-                    websiteWork.value=it.copy(status="이 단계의 결과를 확인하지 못했어요.",working=false)
-                }
                 agentActive.value=false
             }
         }

@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,6 +16,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.user.localagent.AppContainer
 import com.user.localagent.data.MessageCursor
@@ -56,6 +59,13 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
     val exportOwner="conversation-history"
     var exportToken by rememberSaveable{mutableStateOf(exports.activeToken(exportOwner))}
     val formatter=remember{DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss").withZone(ZoneId.of("Asia/Seoul"))}
+
+    fun submitSearch() {
+        if (busy) return
+        query = queryDraft.trim()
+        revision++
+        keyboard?.hide()
+    }
 
     fun finishExport(uri:android.net.Uri?,format:ConversationExportFormat){
         val token=exportToken;val extension=if(format==ConversationExportFormat.JSON)"json"else"txt"
@@ -108,30 +118,30 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
     }
     LazyColumn(Modifier.fillMaxSize().imePadding(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-            if(!searchOnly)Text("저장된 대화",style=MaterialTheme.typography.titleLarge)
-            if(!searchOnly)Text("집합에서 나눈 대화를 최신순으로 볼 수 있어요.",style=MaterialTheme.typography.bodySmall)
+            if(!searchOnly)ZipHapSectionTitle("저장된 대화")
             OutlinedTextField(value=queryDraft,onValueChange={if(it.length<=500)queryDraft=it},label={Text("대화 내용 검색")},
-                modifier=Modifier.fillMaxWidth().focusRequester(searchFocus),singleLine=true)
+                modifier=Modifier.fillMaxWidth().focusRequester(searchFocus),singleLine=true,shape=MaterialTheme.shapes.medium,
+                keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search), keyboardActions=KeyboardActions(onSearch={submitSearch()}))
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                Button(enabled=!busy,onClick={query=queryDraft.trim();revision++}){Text("검색")}
+                Button(enabled=!busy,onClick=::submitSearch){Text("검색")}
                 OutlinedButton(enabled=!busy,onClick={queryDraft="";query="";revision++}){Text("전체")}
             }
-            Text("일치하는 기록 ${total}개 · 현재 ${messages.size}개 표시",style=MaterialTheme.typography.labelMedium)
+            ZipHapStatusTag("기록 ${total}개 · ${messages.size}개 표시")
         }}}
-        if(!searchOnly)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-            Text("대화 내보내기",style=MaterialTheme.typography.titleMedium)
-            Text("현재 검색 범위의 대화 본문을 선택한 위치에 저장합니다. 최대 10,000개·20MiB이며 일부인 경우 파일에 표시됩니다. 개발자에게 검토할 기록만 직접 공유할 수 있고, GitHub에 자동 업로드하지 않습니다.",style=MaterialTheme.typography.bodySmall)
+        if(!searchOnly)item {SettingsDisclosure("대화 내보내기", "검색 범위의 기록을 파일로 저장해요.") {
+            Text("최대 10,000개·20MiB까지 선택한 위치에 저장해요. 일부만 저장되면 파일에 표시해요.",
+                style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 FilterChip(selected=exportFormat==ConversationExportFormat.JSON,onClick={exportFormat=ConversationExportFormat.JSON},label={Text("JSON")})
                 FilterChip(selected=exportFormat==ConversationExportFormat.TEXT,onClick={exportFormat=ConversationExportFormat.TEXT},label={Text("텍스트")})
             }
             OutlinedButton(enabled=!busy&&exportToken==null,onClick={prepareExport()}){Text("대화 파일 저장")}
-        }}}
+        }}
         if(busy)item{LinearProgressIndicator(modifier=Modifier.fillMaxWidth())}
         items(messages,key={it.id}) {message->
             var expanded by remember(message.id){mutableStateOf(false)}
             ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Text("${if(message.role=="user")"나" else "집순이"} · ${formatter.format(Instant.ofEpochMilli(message.createdAt))}",style=MaterialTheme.typography.labelMedium)
+                ZipHapStatusTag("${if(message.role=="user")"나" else "집순이"} · ${formatter.format(Instant.ofEpochMilli(message.createdAt))}")
                 SelectionContainer{Text(message.text,maxLines=if(expanded)Int.MAX_VALUE else 8,style=MaterialTheme.typography.bodyMedium)}
                 Row{
                     TextButton(onClick={expanded=!expanded}){Text(if(expanded)"접기" else "전체 보기")}
@@ -152,7 +162,9 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
             catch(_:Exception){onStatus("이전 기록을 불러오지 못했습니다.")}
             finally{busy=false}
         }}},modifier=Modifier.fillMaxWidth()){Text("이전 기록 더 보기")}}
-        if(!busy&&messages.isEmpty())item{Text("저장된 대화가 없거나 검색 결과가 없습니다.",style=MaterialTheme.typography.bodyMedium)}
+        if(!busy&&messages.isEmpty())item{
+            ZipHapCard {ZipHapSectionTitle(if(query.isBlank())"저장된 대화가 없어요." else "검색 결과가 없어요.")}
+        }
     }
     deleteTarget?.let {target->AlertDialog(onDismissRequest={deleteTarget=null},title={Text("이 대화 기록을 삭제할까요?")},text={Text("이 메시지와 연결된 기억을 삭제하고 대화 요약을 초기화합니다. 내보낸 파일은 별도로 관리해야 합니다.")},confirmButton={TextButton(onClick={scope.launch {
         busy=true

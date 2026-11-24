@@ -74,7 +74,7 @@ export interface Snapshot {
   composerEpoch?: number
   singleConversation?: boolean
   inlineLogin?: boolean
-  websiteCard?: { id: string; messageId?: string; title: string; status: string; steps: string[]; working: boolean; inputHeight?: number; keyboardOpen?: boolean }
+  websiteCard?: { id: string; messageId?: string; runId?: string; title: string; status: string; steps: string[]; working: boolean; inputHeight?: number; keyboardOpen?: boolean }
   browserLoginStatus?: string
   voicePrompt?: 'permission' | 'listening' | 'finishing'
   voiceDraftEpoch?: number
@@ -269,6 +269,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
   const card = value.websiteCard
   if (card !== undefined && (!record(card) || typeof card.id !== 'string' || card.id.length > 128 ||
     (card.messageId !== undefined && typeof card.messageId !== 'string') ||
+    (card.runId !== undefined && (typeof card.runId !== 'string' || card.runId.length > 128)) ||
     typeof card.title !== 'string' || typeof card.status !== 'string' || typeof card.working !== 'boolean' ||
     !Array.isArray(card.steps) || card.steps.length > 4 || card.steps.some(item => typeof item !== 'string') ||
     (card.keyboardOpen !== undefined && typeof card.keyboardOpen !== 'boolean') ||

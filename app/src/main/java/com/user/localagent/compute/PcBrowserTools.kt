@@ -230,7 +230,11 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         }
         remember(result)
         return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,
-            if(result["performed"]==null)"$where 페이지를 실제로 읽음" else "$where 동작 후 페이지를 다시 읽음 · 사이트의 최종 처리는 미보증")
+            when {
+                result["pageChanged"]==JsonPrimitive(false)->"$where 클릭 후 화면 전환 미확인"
+                result["performed"]==null->"$where 페이지를 실제로 읽음"
+                else->"$where 동작 후 페이지를 다시 읽음"
+            })
     }
 
     private suspend fun runNavigationRule(call:ToolCall,rule:BrowserNavigationRule,verifyAccess:suspend ()->Unit):ToolResult {
@@ -530,7 +534,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
+        listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","pageChanged","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
             .forEach{key->result[key]?.let{put(key,it)}}
         if(catalog==AppBrowserToolCatalog && browser==where && rulePage(result) && result["elements"] is JsonArray){
             val eligible=ruleElements(result).take(120).count{it["sessionPdf"]==JsonPrimitive(true)}

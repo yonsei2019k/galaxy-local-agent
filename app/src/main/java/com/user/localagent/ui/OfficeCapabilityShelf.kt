@@ -72,37 +72,36 @@ private fun ToolCapability.officeStatus()=when(availability){
     val consumerTools=ConsumerAppCatalog.appForTool
     val text=query.trim()
     fun matches(vararg fields:String)=text.isEmpty()||fields.any{it.contains(text,ignoreCase=true)}
-    Column(modifier.fillMaxWidth().imePadding(),verticalArrangement=Arrangement.spacedBy(8.dp)){
+    val showCalendar = matches("휴대폰 캘린더", "일정", "Android")
+    val showConnections = matches("앱과 컴퓨터 연결", "PC", "메일", "캘린더", "메신저", "Codex", "Claude")
+    val accounts = ConnectedService.entries.filter { matches(it.label, it.id) }
+    val phoneApps = ConsumerApp.entries.filter { matches(it.label, it.id) }
+    Column(modifier.fillMaxWidth().imePadding(),verticalArrangement=Arrangement.spacedBy(10.dp)){
+        OutlinedTextField(query,{query=it.take(100)},Modifier.fillMaxWidth(),
+            label={Text("이름이나 하고 싶은 일 검색")}, singleLine=true, shape = MaterialTheme.shapes.medium)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
             FilterChip(!connectionOnly,{connectionOnly=false},{Text("추천")})
             FilterChip(connectionOnly,{connectionOnly=true},{Text("앱과 연결")})
         }
-        OutlinedTextField(query,{query=it.take(100)},Modifier.fillMaxWidth(),
-            label={Text("이름이나 하고 싶은 일 검색")},singleLine=true)
-        if(failure)Text("지금 사용할 수 있는 기능을 확인하지 못했어요.",color=MaterialTheme.colorScheme.error)
+        if(failure)ZipHapStatusTag("기능 목록을 확인하지 못했어요.", MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer)
         else if(capabilities==null)LinearProgressIndicator(Modifier.fillMaxWidth())
-        if(draftPreserved)Text("입력 중인 메시지가 있어 그대로 두었어요.")
-        LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)){
+        if(draftPreserved)ZipHapStatusTag("입력 중인 메시지를 그대로 두었어요.")
+        LazyColumn(Modifier.weight(1f), verticalArrangement=Arrangement.spacedBy(10.dp), contentPadding=PaddingValues(bottom=16.dp)){
             if(connectionOnly){
-                if(matches("휴대폰 캘린더","일정","Android"))item{
-                    OutlinedCard(Modifier.fillMaxWidth()){
-                        Column(Modifier.padding(12.dp)){
-                            Text("휴대폰 캘린더",style=MaterialTheme.typography.titleMedium)
-                            Text(if(calendarReadGranted)"일정 읽기 허용됨"else"내 일정을 보려면 Android에서 읽기를 허용해 주세요.")
+                if(showCalendar)item{
+                    ZipHapCard {
+                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                            ZipHapSectionTitle("휴대폰 캘린더")
+                            if (calendarReadGranted) ZipHapStatusTag("일정 읽기 허용됨", ZipHapColors.Mint, ZipHapColors.MintSoft)
                             if(!calendarReadGranted)TextButton(onClick=onCalendarRead){Text("일정 읽기 허용")}
                         }
                     }
                 }
-                if(matches("앱과 컴퓨터 연결","PC","메일","캘린더","메신저","Codex","Claude"))item{
-                    OutlinedCard(onClick=onConnections,modifier=Modifier.fillMaxWidth()){
-                        Column(Modifier.padding(12.dp)){
-                            Text("앱과 컴퓨터 연결 관리",style=MaterialTheme.typography.titleMedium)
-                            Text(if(pc.paired)"등록한 컴퓨터가 있어요. 연결 상태와 사용할 계정을 확인할 수 있어요."
-                                else "연결할 계정, 내 컴퓨터, 메신저를 선택해요.")
-                        }
-                    }
+                if(showConnections)item{
+                    SettingsEntry("앱과 컴퓨터 연결",
+                        if(pc.paired)"등록한 컴퓨터와 사용할 계정을 확인해요." else "계정, 컴퓨터, 메신저를 연결해요.",onConnections)
                 }
-                items(ConnectedService.entries.filter{service->matches(service.label,service.id)},key={"account-"+it.id}){service->
+                items(accounts,key={"account-"+it.id}){service->
                     val all=accountTools.values.filter{it.service==service}.mapNotNull{byId[it.definition.name]}
                     val reads=all.filterNot{accountTools[it.id]?.writes==true}
                     val status=when{
@@ -110,37 +109,45 @@ private fun ToolCapability.officeStatus()=when(availability){
                         all.any{it.availability==CapabilityAvailability.REQUIRES_PERMISSION}->"계정 연결 필요"
                         else->"연결 상태 확인 필요"
                     }
-                    OutlinedCard(onClick=onConnections,modifier=Modifier.fillMaxWidth()){
-                        Column(Modifier.padding(12.dp)){Text(service.label);Text(status,style=MaterialTheme.typography.bodySmall)}
-                    }
+                    SettingsEntry(service.label,status,onConnections)
                 }
-                items(ConsumerApp.entries.filter{matches(it.label,it.id)},key={"phone-"+it.id}){item->
+                items(phoneApps,key={"phone-"+it.id}){item->
                     val all=consumerTools.filterValues{it==item}.keys.mapNotNull(byId::get)
                     val verified=all.any{it.availability==CapabilityAvailability.INSTALLED}
-                    OutlinedCard(Modifier.fillMaxWidth()){
-                        Column(Modifier.padding(12.dp)){
-                            Text(item.label)
-                            Text(if(verified)"사용 가능한 동작 있음"else"휴대폰 앱과 지원 동작 확인 필요",style=MaterialTheme.typography.bodySmall)
-                            all.forEach{Text(it.description,style=MaterialTheme.typography.bodySmall)}
+                    ZipHapCard {
+                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                            ZipHapSectionTitle(item.label)
+                            if(verified)ZipHapStatusTag("사용 가능한 동작 있음", ZipHapColors.Mint, ZipHapColors.MintSoft)
+                            else ZipHapStatusTag("휴대폰 앱과 지원 동작 확인 필요")
+                            all.forEach{Text(it.description,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                         }
                     }
+                }
+                if(!showCalendar && !showConnections && accounts.isEmpty() && phoneApps.isEmpty())item{
+                    ZipHapCard { ZipHapSectionTitle("검색 결과가 없어요.") }
                 }
             }else{
                 val rows=detected.filter{item->matches(examples[item.id]?.title.orEmpty(),item.title,item.description,item.limitation)}
                     .sortedBy{if(it.id in examples)0 else if(it.availability==CapabilityAvailability.NOT_IMPLEMENTED)2 else 1}
                 items(rows,key={it.id}){item->
                     val example=examples[item.id]
-                    OutlinedCard(Modifier.fillMaxWidth()){
-                        Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
-                            Text(example?.title?:item.title,style=MaterialTheme.typography.titleMedium)
-                            Text(item.officeStatus(),style=MaterialTheme.typography.labelMedium)
-                            Text(item.limitation,style=MaterialTheme.typography.bodySmall)
+                    ZipHapCard {
+                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                            ZipHapSectionTitle(example?.title?:item.title)
+                            when(item.availability){
+                                CapabilityAvailability.INSTALLED -> ZipHapStatusTag(item.officeStatus(), ZipHapColors.Mint, ZipHapColors.MintSoft)
+                                CapabilityAvailability.REQUIRES_PERMISSION, CapabilityAvailability.REQUIRES_MODEL ->
+                                    ZipHapStatusTag(item.officeStatus(), ZipHapColors.SunText, ZipHapColors.SunSoft)
+                                else -> ZipHapStatusTag(item.officeStatus())
+                            }
+                            if(item.limitation.isNotBlank())Text(item.limitation,style=MaterialTheme.typography.bodySmall,
+                                color=MaterialTheme.colorScheme.onSurfaceVariant)
                             if(item.id=="generate_image")TextButton(onClick=onImages){Text("이미지 작업실 열기")}
                             else if(example!=null)TextButton(onClick={draftPreserved=!onDraft(example.request)}){Text("채팅에 예시 넣기")}
                         }
                     }
                 }
-                if(rows.isEmpty()&&capabilities!=null)item{Text("검색 결과가 없어요.")}
+                if(rows.isEmpty()&&capabilities!=null)item{ZipHapCard { ZipHapSectionTitle("검색 결과가 없어요.") }}
             }
         }
     }

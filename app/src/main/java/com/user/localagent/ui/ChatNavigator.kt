@@ -354,6 +354,10 @@ private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelCh
 
 private fun toolDomainLabel(domain:String)=when(domain){"messages"->"문자·메신저";"calendar"->"일정·알림";"documents"->"문서";"projects"->"프로젝트 파일";"images"->"이미지";"notes"->"메모";"memory"->"개인 기억";"audio"->"녹음";"web"->"웹·쇼핑";else->"기본 도구"}
 internal fun toolLabel(name:String)=when(name){
+    "open_app_browser_page","open_pc_browser_page"->"사이트 열기"
+    "read_app_browser_page","read_pc_browser_page"->"사이트 화면 확인"
+    "app_browser_action","act_on_pc_browser_page"->"사이트 조작"
+    "wait_for_goal_condition"->"다음 확인 예약"
     "get_current_datetime"->"현재 날짜·시간";"list_project_files"->"프로젝트 파일 목록";"read_project_file"->"프로젝트 파일 읽기";"write_project_file"->"프로젝트 파일 저장"
     "create_document"->"문서 파일 만들기";"search_web"->"공개 웹 검색";"search_shopping"->"상품·가격 검색";"read_webpage"->"웹페이지 읽기";"generate_image"->"로컬 이미지 생성"
     "search_conversation_history"->"집합 대화 기록 조회";"list_imported_conversations"->"가져온 대화 목록";"search_conversation_imports"->"가져온 대화 검색";"get_sms_summary"->"문자 조회·요약";"analyze_sms"->"문자 내용 분석"

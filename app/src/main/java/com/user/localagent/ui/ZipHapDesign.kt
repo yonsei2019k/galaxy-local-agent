@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -134,12 +136,21 @@ private val ZipHapTypography = Typography().let { base ->
     )
 }
 
+private val ZipHapShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(26.dp),
+)
+
 /** Fixed brand theme with readable bundled Korean and Latin typography. */
 @Composable
 fun ZipHapTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = ZipHapScheme,
         typography = ZipHapTypography,
+        shapes = ZipHapShapes,
         content = content
     )
 }
@@ -152,14 +163,14 @@ fun ZipHapHeader(
     busy: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text("ZipHap.Agent", style = MaterialTheme.typography.labelMedium, color = ZipHapColors.Cobalt)
-        Text(title, style = MaterialTheme.typography.titleLarge, color = ZipHapColors.TextPrimary, fontWeight = FontWeight.SemiBold)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+        if (status.isNotBlank() || busy) Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
             if (busy) {
                 CircularProgressIndicator(Modifier.size(11.dp), color = ZipHapColors.Cobalt, strokeWidth = 1.5.dp)
-            } else {
-                Box(Modifier.size(7.dp).background(ZipHapColors.Mint, CircleShape))
             }
             Text(status, style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -173,14 +184,30 @@ fun ZipHapCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
-        Column(Modifier.padding(18.dp), content = { content() })
+        Column(Modifier.padding(16.dp), content = { content() })
+    }
+}
+
+@Composable
+internal fun ZipHapSectionTitle(title: String, modifier: Modifier = Modifier) {
+    Text(title, modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+}
+
+@Composable
+internal fun ZipHapStatusTag(
+    label: String,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    background: Color = MaterialTheme.colorScheme.surfaceContainer,
+) {
+    Surface(shape = CircleShape, color = background, contentColor = color) {
+        Text(label, Modifier.padding(horizontal = 9.dp, vertical = 3.dp), style = MaterialTheme.typography.labelMedium)
     }
 }
 

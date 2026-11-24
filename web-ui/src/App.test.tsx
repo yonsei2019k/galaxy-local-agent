@@ -126,6 +126,19 @@ describe('native conversation', () => {
     expect(input().value).toBe('기존 초안')
   })
 
+  it('uses the website card as the single live status and preserves details after pausing', () => {
+    mount()
+    const active = running({ singleConversation: true, messages: [{ id: 'u', role: 'user', text: '강의 이어듣기' }],
+      websiteCard: { id: 'run-a', runId: 'run-a', messageId: 'u', title: '한림에듀', status: '강의실 확인 중', steps: [], working: true } })
+    snapshot(active)
+    expect(host.querySelector('.current-work')?.textContent).toContain('한림에듀')
+    expect(host.querySelectorAll('main .task-card')).toHaveLength(1)
+    expect(host.querySelector('main [aria-label="웹 작업 진행 중"]')).not.toBeNull()
+    snapshot({ ...active, busy: false, activeRunId: null, websiteCard: { ...active.websiteCard!, working: false, status: '화면 전환 확인 필요' } })
+    expect(host.querySelector('main .website-work-card')?.textContent).toContain('화면 전환 확인 필요')
+    expect(host.querySelector('main [role="progressbar"]')).toBeNull()
+  })
+
   it('routes the single chat menu and mobile shortcuts to the existing capabilities', () => {
     mount()
     snapshot({ ...base, singleConversation: true })

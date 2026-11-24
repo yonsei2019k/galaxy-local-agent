@@ -10,11 +10,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -87,29 +90,48 @@ internal fun ContactsDirectory(modifier: Modifier = Modifier) {
                 Text("연락처 추가")
             }
         }
-        status?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        status?.let { ZipHapStatusTag(it, MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer) }
         if (!granted) {
-            Text("연락처를 연결하면 여기서 이름을 검색할 수 있어요.")
-            TextButton(onClick = { permission.launch(Manifest.permission.READ_CONTACTS) }) { Text("연락처 읽기 허용") }
+            ZipHapCard {
+                ZipHapSectionTitle("휴대폰 연락처 연결")
+                Text("읽기를 허용하면 이름을 검색할 수 있어요.", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { permission.launch(Manifest.permission.READ_CONTACTS) }) { Text("연락처 읽기 허용") }
+            }
         } else {
             OutlinedTextField(
                 value = query, onValueChange = { query = it.take(80) }, modifier = Modifier.fillMaxWidth(),
-                label = { Text("이름으로 검색") }, singleLine = true
+                label = { Text("이름으로 검색") }, singleLine = true, shape = MaterialTheme.shapes.medium
             )
             val result = contacts
             val rows = result?.getOrNull().orEmpty()
             when {
                 result == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-                result.isFailure -> Text("연락처 목록을 불러오지 못했어요.")
-                rows.isEmpty() -> Text(if (query.isBlank()) "저장된 연락처가 없어요." else "일치하는 이름이 없어요.")
-                else -> LazyColumn(Modifier.weight(1f)) {
-                    if (rows.size == 80) item { Text("80명까지 표시해요. 이름을 검색해 범위를 줄여 보세요.") }
+                result.isFailure -> ZipHapCard { ZipHapSectionTitle("연락처 목록을 불러오지 못했어요.") }
+                rows.isEmpty() -> ZipHapCard {
+                    ZipHapSectionTitle(if (query.isBlank()) "저장된 연락처가 없어요." else "일치하는 이름이 없어요.")
+                }
+                else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)) {
+                    if (rows.size == 80) item { ZipHapStatusTag("80명까지 표시해요. 이름으로 더 좁힐 수 있어요.") }
                     items(rows, key = { it.uri.toString() }) { contact ->
-                        TextButton(
+                        OutlinedCard(
                             onClick = { openSystemContact(Intent(Intent.ACTION_VIEW, contact.uri)) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text(contact.name, Modifier.fillMaxWidth()) }
-                        HorizontalDivider()
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                        ) {
+                            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
+                                    Box(Modifier.size(34.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+                                        Text(contact.name.take(Character.charCount(Character.codePointAt(contact.name, 0))),
+                                            style = MaterialTheme.typography.labelLarge)
+                                    }
+                                }
+                                Text(contact.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
                     }
                 }
             }

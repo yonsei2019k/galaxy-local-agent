@@ -324,7 +324,7 @@ class MainActivity : ComponentActivity() {
         val webAgent=remember {com.user.localagent.integrations.AppWebAgent.get(this)}
         val loginCard by webAgent.ownerLoginCard.collectAsState()
         val websiteLogin by webAgent.ownerWebsiteLogin.collectAsState()
-        val websiteWork by webAgent.ownerWebsiteWork.collectAsState()
+        val websiteWorks by webAgent.ownerWebsiteWorks.collectAsState()
         val websiteBinding by webAgent.ownerWorkBinding.collectAsState()
         var connectionsOpen by rememberSaveable {mutableStateOf(false)}
         var connectionStatus by remember {mutableStateOf<String?>(null)}
@@ -434,7 +434,7 @@ class MainActivity : ComponentActivity() {
                 val inWebsiteRoom=websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
                 val inlineSite=websiteLogin.takeIf{inWebsiteRoom&&!connectionsOpen}
                 val inlineCredentials=loginCard.takeIf{inWebsiteRoom&&!connectionsOpen}
-                val visibleWebsiteWork=websiteWork?.takeIf{work->
+                val visibleWebsiteWork=websiteWorks.lastOrNull{work->
                     work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
                 }
                 val websiteSlotId=inlineCredentials?.id?.toString()
@@ -451,6 +451,7 @@ class MainActivity : ComponentActivity() {
                     if(inlineCredentials!=null||visibleWebsiteWork!=null)put("websiteCard",buildJsonObject{
                         val workRun=visibleWebsiteWork?.anchorRunId?:websiteBinding?.runId
                         put("id",websiteSlotId?:workRun.orEmpty())
+                        visibleWebsiteWork?.binding?.runId?.let { put("runId",it) }
                         val anchor=activeExecutions.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
                             ?:roomActivities.values.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
                         anchor?.let { put("messageId",it) }
@@ -680,7 +681,7 @@ class MainActivity : ComponentActivity() {
                     val title=if(tab==4&&settingsPage==SettingsPage.HOME&&!manualSettings)"나의 집순이"
                         else if(tab==4)settingsPage.title
                         else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","보관함","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트","연락처","둘러보기","대화 검색")[tab]
-                    Text(title,style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
+                    ZipHapSectionTitle(title,Modifier.weight(1f))
                     if(tab==4 && !manualSettings) TextButton(onClick={showManual(SettingsLink.MANUAL)}){Text("수동 설정")}
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state

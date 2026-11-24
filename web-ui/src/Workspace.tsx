@@ -191,7 +191,8 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   const sendLabel = busy ? '다음에 보내기' : '보내기'
   const voiceStatus = voice === 'listening' ? '듣고 있어요. 다 말했으면 마이크를 다시 누르세요.'
     : voice === 'finishing' ? '음성을 글로 바꾸고 있어요.' : voice === 'permission' ? '마이크 권한을 확인하고 있어요.' : ''
-  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : status)
+  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' :
+    snapshot?.websiteCard?.runId && (busy || status === '작업 일시정지') ? '' : status)
 
   return (
     <footer className="composer-footer">
