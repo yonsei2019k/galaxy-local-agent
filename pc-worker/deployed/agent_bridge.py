@@ -36,6 +36,10 @@ OWNER_RECALL_READS = frozenset({
     "list_analysis_sources", "search_conversation_imports", "get_sms_summary",
     "list_messenger_notifications", "search_gmail_messages", "read_gmail_message",
 })
+BROWSER_READ = "read_app_browser_page"
+BROWSER_OPEN = "open_app_browser_page"
+BROWSER_ACTION = "app_browser_action"
+BROWSER_FOLLOWUP_CALLS = 3
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
 MAX_REJECTED_CALLS = 6
@@ -343,6 +347,7 @@ class _Session:
     require_plan: bool = False
     plan: dict | None = field(default=None, repr=False)
     browser_recovery_tools: frozenset[str] | None = None
+    browser_followup_from: int | None = None
     recall_recovery_tools: frozenset[str] | None = None
     read_recovery_tools: frozenset[str] | None = None
     finalize_reads_only: bool = False
@@ -606,7 +611,7 @@ class AgentBridge:
             plan = session.plan
             if not settled_only and before_plan and session.require_plan and session.profile == "phone-only" and plan is None and not session.calls:
                 return {"planAccepted": False, "acceptedTools": [], "failedReads": [], "observedReads": []}
-            browser_tools = {"open_app_browser_page", "read_app_browser_page"}
+            browser_tools = {BROWSER_OPEN, BROWSER_READ}
             if (session.require_plan and plan and plan["state"] == "ACCEPTED"
                     and set(plan["requiredTools"]) == browser_tools and session.active is None
                     and session.calls
@@ -627,6 +632,10 @@ class AgentBridge:
                     session.browser_recovery_tools = frozenset({"read_app_browser_page"})
                     return {"planAccepted": True, "acceptedTools": ["read_app_browser_page"],
                             "browserOpened": True, "failedReads": [], "observedReads": []}
+            if before_plan:
+                browser_followup = self._browser_followup(session)
+                if browser_followup is not None:
+                    return browser_followup
             reads = FAILED_READS_HAVE_NO_EFFECT | OWNER_RECALL_READS | {
                 "calculate", "date_calculate", "get_current_datetime", "search_notes", "read_note"}
             if (not session.require_plan or not plan or plan["state"] != "ACCEPTED"
@@ -708,6 +717,66 @@ class AgentBridge:
             if required <= reads:
                 session.read_recovery_tools = frozenset(remaining + alternates)
             return copy.deepcopy(context)
+
+    def _browser_followup(self, session):
+        """Look again after a settled browser task, without replaying its actions."""
+        plan = session.plan
+        if (session.profile != "phone-only" or not session.require_plan or not plan or
+                plan["state"] != "ACCEPTED" or BROWSER_READ not in plan["requiredTools"] or
+                session.active is not None or session.browser_recovery_tools is not None or
+                len(session.calls) >= MAX_CALLS or session.rejected_calls >= MAX_REJECTED_CALLS):
+            return None
+        last_browser = None
+        for call in session.calls.values():
+            if call.state != "COMPLETED" or call.source != "PHONE_EXECUTOR" or not call.result:
+                return None
+            result = call.result
+            if result["success"] and result["verification"] == "VERIFIED" and not result["effectNotApplied"]:
+                if call.tool in {BROWSER_OPEN, BROWSER_READ, BROWSER_ACTION}:
+                    last_browser = call
+            elif not (not result["success"] and result["verification"] == "FAILED" and result["effectNotApplied"]):
+                return None
+            elif call.tool in {BROWSER_OPEN, BROWSER_READ, BROWSER_ACTION}:
+                # An authentication handoff belongs to the phone owner and ends this provider pass.
+                if "PHONE_BROWSER_AUTH_REQUIRED" in result["content"]:
+                    return None
+        if last_browser is None:
+            return None
+        remaining = MAX_CALLS - len(session.calls)
+        allowed = [BROWSER_READ]
+        if BROWSER_ACTION in plan["requiredTools"] and remaining >= BROWSER_FOLLOWUP_CALLS:
+            allowed.append(BROWSER_ACTION)
+        context = {"planAccepted": True, "acceptedTools": allowed, "browserFollowup": True,
+                   "failedReads": [], "observedReads": []}
+        entry = {"tool": last_browser.tool, "arguments": {}, "result": last_browser.result["content"]}
+        if len(canonical(entry)) <= 15500:
+            context["observedReads"].append(entry)
+        session.browser_followup_from = len(session.calls)
+        session.browser_recovery_tools = frozenset(allowed)
+        return context
+
+    @staticmethod
+    def _check_browser_followup(session, tool, arguments):
+        start = session.browser_followup_from
+        if start is None:
+            return
+        recent = list(session.calls.values())[start:]
+        _require(len(recent) < BROWSER_FOLLOWUP_CALLS, "BROWSER_RECOVERY_READ_ONLY", 403)
+        if tool == BROWSER_READ:
+            return
+        _require(tool == BROWSER_ACTION and arguments.get("action") == "scroll" and
+                 not any(call.tool == BROWSER_ACTION for call in recent) and len(recent) == 1,
+                 "BROWSER_RECOVERY_READ_ONLY", 403)
+        previous = recent[0]
+        result = previous.result
+        _require(previous.tool == BROWSER_READ and result and result["success"] and
+                 result["verification"] == "VERIFIED" and not result["effectNotApplied"],
+                 "BROWSER_RECOVERY_READ_ONLY", 403)
+        try:
+            snapshot = parse_wire(result["content"]).get("snapshotId")
+        except BridgeError:
+            snapshot = None
+        _require(bool(snapshot) and snapshot == arguments.get("snapshotId"), "BROWSER_RECOVERY_READ_ONLY", 403)
 
     def task_evidence(self, owner, session_id, capability):
         """Phone-authenticated metadata/PC evidence only, not AgentReport completion.
@@ -807,6 +876,7 @@ class AgentBridge:
                         _require(not s.finalize_reads_only, "RECOVERY_FINAL_ANSWER_ONLY", 403)
                         if s.browser_recovery_tools is not None:
                             _require(tool in s.browser_recovery_tools, "BROWSER_RECOVERY_READ_ONLY", 403)
+                            self._check_browser_followup(s, tool, arguments)
                         if s.recall_recovery_tools is not None:
                             _require(tool in s.recall_recovery_tools, "RECALL_RECOVERY_READ_ONLY", 403)
                         _require(tool in s.tools, "TOOL_NOT_OFFERED", 403)

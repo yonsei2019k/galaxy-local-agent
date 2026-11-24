@@ -29,6 +29,22 @@ object CloudAgentFinals {
 
     internal val browserReadTools=setOf("read_app_browser_page","read_screen")
 
+    internal fun unfinishedNotice(actual:Collection<PhoneAgentExecution>):String {
+        val last=actual.lastOrNull { it.proposal.tool in setOf("open_app_browser_page","read_app_browser_page","app_browser_action") }
+        if(last!=null){
+            return when {
+                last.result.success && last.result.verification==VerificationState.VERIFIED ->
+                    "휴대폰 브라우저에서 마지막 페이지를 확인했어요. 사이트에 요청하신 작업의 완료 표시가 있는지는 확인하지 못했어요."
+                last.result.effectNotApplied ->
+                    "휴대폰 브라우저에서 마지막 페이지를 가져오지 못했어요. 이전에 확인한 단계는 작업 카드에서 볼 수 있어요."
+                else -> "브라우저의 마지막 동작이 사이트에 반영됐는지 확인하지 못했어요."
+            }
+        }
+        val verified=actual.count { it.result.success && it.result.verification==VerificationState.VERIFIED }
+        return if(verified>0)"확인한 결과 ${verified}건을 실행 기록에 남겼어요. 요청 전체가 완료됐다는 확인은 받지 못했어요."
+            else "이번 실행에서 실제 결과를 받지 못했어요."
+    }
+
     /** Render only counts from the phone's structured observation. Page prose may contain private or hostile text. */
     internal fun browserReadProgress(required:Set<String>, actual:List<PhoneAgentExecution>, steps:List<HarnessStep>):String? {
         if(steps.size!=actual.size || steps.zip(actual).any { (step,local)->

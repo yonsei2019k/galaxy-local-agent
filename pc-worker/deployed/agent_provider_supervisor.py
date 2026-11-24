@@ -286,6 +286,8 @@ class AgentProviderSupervisor:
                 if recovery is None:
                     break
                 kwargs.update(read_recovery=recovery, timeout=remaining)
+                if recovery.get("browserFollowup"):
+                    self._progress(child, {"stage": "verifying", "calls": total_calls})
                 _event("RECONSIDER_READ", total_calls, total_ms)
             with self.lock:
                 # Cancellation ACK and publication share this gate. Recheck the broker's

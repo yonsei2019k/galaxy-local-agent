@@ -2018,8 +2018,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
                     null->if(actual.isNotEmpty()&&actual.values.all{it.withheldFromCloud && it.result.success})
                         "휴대폰에서 자료를 읽었지만 개인 정보가 섞여 있어 답변에 쓸 수 있는 본문을 확보하지 못했어요."
-                    else if(links.isEmpty())"결과를 확인할 정보가 부족해서 여기서 멈췄어요."
-                        else "일부 자료를 확인했어요. 아직 결론을 내리기에는 정보가 부족해요."
+                    else if(links.isEmpty())CloudAgentFinals.unfinishedNotice(actual.values)
+                        else "아래 자료를 찾았어요. 이 자료에서 확인한 내용까지만 남겼어요."
                 }
                 if(browserProgress!=null && authority().permits(capture))
                     publishActionFinal(request,requestAuthorizedTools,browserProgress,true,"partial_verified_browser_reads")

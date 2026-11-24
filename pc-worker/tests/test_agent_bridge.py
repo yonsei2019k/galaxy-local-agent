@@ -596,6 +596,64 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.assertEqual(verified()["content"], synthesis["observedReads"][0]["result"])
         self.assertEqual(403, self.propose(read_tool)[1][0])
 
+    def test_partial_browser_action_finds_fresh_evidence_without_replaying_click(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        self.grant["pcWorkspaceProfile"] = "phone-only"
+        read, act = "read_app_browser_page", "app_browser_action"
+        self.grant["phoneTools"].append(clock_tool() | {"name": read})
+        self.grant["phoneTools"].append({"name": act, "description": "fixture browser action",
+            "inputSchema": {"type": "object", "properties": {
+                "action": {"type": "string"}, "snapshotId": {"type": "string"},
+            }, "required": ["action", "snapshotId"], "additionalProperties": False}})
+        self._register()
+        self.accept(self.plan([read, act]))
+
+        def settle(name, args, content):
+            call, response = self.propose(name, args)
+            self.assertEqual(202, response[0])
+            _, ack = self.claim(call)
+            self.post_result(call, ack, verified(json.dumps(content)))
+
+        settle(read, {}, {"snapshotId": "old"})
+        settle(act, {"action": "click", "snapshotId": "old"}, {"snapshotId": "after-click"})
+        recovery = self.broker.read_recovery_context(self.owner, self.sid, self.phone, before_plan=True)
+        self.assertTrue(recovery["browserFollowup"])
+        self.assertEqual([read, act], recovery["acceptedTools"])
+        self.assertEqual("after-click", json.loads(recovery["observedReads"][0]["result"])["snapshotId"])
+        scroll = {"action": "scroll", "snapshotId": "fresh"}
+        self.assertEqual(403, self.propose(act, scroll)[1][0])
+        settle(read, {}, {"snapshotId": "fresh"})
+        self.assertEqual(403, self.propose(act, scroll | {"action": "click"})[1][0])
+        self.assertEqual(403, self.propose(act, scroll | {"snapshotId": "old"})[1][0])
+        settle(act, scroll, {"snapshotId": "scrolled"})
+        settle(read, {}, {"snapshotId": "result"})
+        self.assertEqual(403, self.propose(read)[1][0])
+        self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone, before_plan=True))
+
+    def test_partial_browser_recovery_defers_auth_and_uncertain_results(self):
+        for failure in (
+                {"success": False, "verification": "FAILED", "effectNotApplied": True,
+                 "content": '{"error":"PHONE_BROWSER_AUTH_REQUIRED"}'},
+                {"success": False, "verification": "UNVERIFIED", "effectNotApplied": False,
+                 "content": "{}"}):
+            with self.subTest(failure=failure):
+                self.owner = uid()
+                self.grant["parentRunId"] = self.owner
+                self.grant["pcWorkspaceProfile"] = "phone-only"
+                read = "read_app_browser_page"
+                if not any(tool["name"] == read for tool in self.grant["phoneTools"]):
+                    self.grant["phoneTools"].append(clock_tool() | {"name": read})
+                self._register()
+                self.accept(self.plan([read]))
+                first, _ = self.propose(read)
+                _, ack = self.claim(first)
+                self.post_result(first, ack, verified('{"snapshotId":"old"}'))
+                last, _ = self.propose(read)
+                _, ack = self.claim(last)
+                self.post_result(last, ack, failure)
+                self.assertIsNone(self.broker.read_recovery_context(self.owner, self.sid, self.phone, before_plan=True))
+
     def test_recovery_context_requires_phone_accepted_reads_and_proven_absence_of_effect(self):
         context = lambda: self.broker.read_recovery_context(self.owner, self.sid, self.phone)
         self.assertIsNone(context())
