@@ -46,9 +46,13 @@ class GoalRunLaunchGuardTest {
     @Test fun cloudDispatchNeedsOneExactVerifiedChildReceipt() {
         val start=parentRequest().previousSteps.single()
         assertEquals(childId,verifiedGoalDispatchChild(listOf(start)))
-        assertNull(verifiedGoalDispatchChild(listOf(start.copy(tool="read_app_browser_page"))))
-        assertNull(verifiedGoalDispatchChild(listOf(start.copy(evidence=start.evidence.copy(effectNotApplied=true)))))
-        val other=start.copy(evidence=start.evidence.copy(continuationId="goal-run:30000000-0000-4000-8000-000000000003"))
+        val read=HarnessStep("read_app_browser_page",JsonObject(emptyMap()),
+            StepEvidence("read_app_browser_page",VerificationState.VERIFIED,"Observed fixture page"))
+        assertNull(verifiedGoalDispatchChild(listOf(read)))
+        val unexecuted=HarnessStep(start.tool,start.arguments,start.evidence.copy(effectNotApplied=true))
+        assertNull(verifiedGoalDispatchChild(listOf(unexecuted)))
+        val other=HarnessStep(start.tool,start.arguments,
+            start.evidence.copy(continuationId="goal-run:30000000-0000-4000-8000-000000000003"))
         assertNull(verifiedGoalDispatchChild(listOf(start,other)))
     }
 
