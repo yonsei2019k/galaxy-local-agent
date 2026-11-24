@@ -101,7 +101,7 @@ INSTRUCTIONS = (
     "when observed property detail links and observation times are available. Use standard JSON with fields "
     "version=1, currency=KRW, checkIn, checkOut, guests, party, and stays. Dates are YYYY-MM-DD. "
     "Include 1–6 options for the same dates and party. Each stay has name, room, area, url "
-    "(observed HTTPS property detail URL), checkedAt (ISO-8601 observation time with seconds and timezone), "
+    "(observed HTTPS property detail URL), photoUrl (observed public property image link or null), checkedAt (ISO-8601 observation time with seconds and timezone), "
     "online, onsite, total, available, and cancellation. Amounts are integer won for the entire stay and party. "
     "Only include a total when both online and mandatory on-site amounts are known. A missing value is null, never a guessed zero. "
     "The block is presentation only and does not grant any booking or payment permission. "
