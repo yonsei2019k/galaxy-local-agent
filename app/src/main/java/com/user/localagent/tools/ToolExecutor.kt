@@ -16,6 +16,7 @@ import com.user.localagent.scheduling.ReminderScheduler
 import com.user.localagent.automation.AssistantNotificationListener
 import com.user.localagent.integrations.MessengerInbox
 import com.user.localagent.web.PublicWebClient
+import com.user.localagent.core.connections.GovernmentServiceCatalog
 import com.user.localagent.web.PublicPageReadException
 import com.user.localagent.web.PublicPageReadReason
 import kotlinx.coroutines.CancellationException
@@ -172,6 +173,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             "prepare_sms"->Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",call.s("phoneNumber"),null)).putExtra("sms_body",call.s("message"))
             "prepare_email"->Intent(Intent.ACTION_SENDTO,Uri.parse("mailto:"+Uri.encode(call.s("to")))).putExtra(Intent.EXTRA_EMAIL,arrayOf(call.s("to"))).putExtra(Intent.EXTRA_SUBJECT,call.s("subject")).putExtra(Intent.EXTRA_TEXT,call.s("body"))
             "open_map"->Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q="+Uri.encode(call.s("query"))))
+            GovernmentServiceCatalog.OPEN -> Intent(Intent.ACTION_VIEW, Uri.parse(GovernmentServiceCatalog.target(call).url))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
             "open_url"->Intent(Intent.ACTION_VIEW,Uri.parse(call.s("url"))).addCategory(Intent.CATEGORY_BROWSABLE)
             "list_messenger_notifications","reply_messenger_notification"->null
             else->null
@@ -266,6 +269,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                         }
                     }
                 }
+                GovernmentServiceCatalog.GET -> return@withContext GovernmentServiceCatalog.read(call)
                 "read_webpage" -> return@withContext publicWeb.readToolResult(call.id, call.s("url"))
                 "search_conversation_history"->{
                     val query=call.s("query");val page=repository.messagePage(limit=call.i("limit",10),query=query)

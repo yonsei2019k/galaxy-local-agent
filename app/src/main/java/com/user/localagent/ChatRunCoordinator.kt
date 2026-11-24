@@ -3895,7 +3895,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(intent != null) {
             withContext(Dispatchers.Main) { externalIntentLauncher?.invoke(intent)?:context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.PREPARED,"Android 요청 전달 · 실제 화면·저장·발송 미확인"))
-            val prepared=ToolResult(call.id,true,"관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송 완료는 확인되지 않았습니다.",VerificationState.PREPARED,"Android Intent 전달 확인")
+            val handoffMessage = if (call.name == com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN) {
+                val service = com.user.localagent.core.connections.GovernmentServiceCatalog.target(call)
+                val name = service.label
+                "휴대폰에 $name 공식 페이지를 여는 요청을 전달했어요. ${service.nextStep} " +
+                    "조회·신청·예약·납부 결과는 아직 확인되지 않았어요."
+            } else "관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송 완료는 확인되지 않았습니다."
+            val prepared=ToolResult(call.id,true,handoffMessage,VerificationState.PREPARED,"Android Intent 전달 확인")
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,prepared)
             persistStepEvidence()
             val recorded=traceAttempt?.let{workTraceSession?.outcome(it,prepared)}==true

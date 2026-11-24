@@ -46,7 +46,7 @@ object ToolCapabilityCatalog {
                 ScreenControlToolCatalog.READ,ScreenControlToolCatalog.ACTION->"screen_control_access"
                 else->null
             }
-            val handler=consumer?.takeUnless {tool.name==com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL}?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url"->"browser";else->null}
+            val handler=consumer?.takeUnless {tool.name==com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL}?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN->"browser";else->null}
             val model=when(tool.name){"generate_image"->"image";"transcribe_recording"->"asr_file";in PrivateAnalysisToolCatalog.analysisNames->"text";else->null}
             val messenger=tool.name in setOf("list_messenger_notifications","reply_messenger_notification")
             val state=when {
@@ -62,7 +62,7 @@ object ToolCapabilityCatalog {
             ToolCapability(tool.name,tool.name,tool.description.ifBlank {"기기 내장 도구"},state,listOfNotNull(permission,handler?.let {"Android handler: $it"},model?.let {"Verified local model: $it"})+
                 (if(goalTool)listOf("현재 대화의 전체 접근 범위")else emptyList())+
                 (if(tool.name in GoalToolCatalog.mutationNames)listOf("사용자가 명시한 목표 관리 요청")else emptyList()),tool.risk!=Risk.LOW,
-                connection==null && !pcTool && consumer==null && tool.name !in EvidenceToolCatalog.names && tool.name !in setOf("search_web","search_shopping","read_webpage","open_url","open_map","prepare_sms","prepare_email","reply_messenger_notification"),
+                connection==null && !pcTool && consumer==null && tool.name !in EvidenceToolCatalog.names && tool.name !in setOf("search_web","search_shopping","read_webpage","open_url","open_map",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN,"prepare_sms","prepare_email","reply_messenger_notification"),
                 when(tool.name){
                     "read_kakao_screen"->"개별 요청에서 현재 화면만 제한적으로 읽습니다. 전체 대화방·과거 기록·요약 정확도는 별도 실기기 검증이 필요하며 전송·입력·삭제는 지원하지 않습니다."
                     GoalToolCatalog.GET->"이 대화에 저장된 목표와 완료 기준의 일부 페이지를 읽습니다. 목표가 없다는 조회나 지침 읽기는 실제 업무 완료 근거가 아닙니다."

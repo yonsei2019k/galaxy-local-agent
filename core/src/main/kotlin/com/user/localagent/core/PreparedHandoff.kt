@@ -8,7 +8,7 @@ package com.user.localagent.core
  *   is the tool's whole effect, so the run may continue, e.g. read the opened screen with screen control.
  */
 object PreparedHandoff {
-    val screenOpeners:Set<String> = com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")
+    val screenOpeners:Set<String> = com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN)
     fun opensScreenOnly(tool:String):Boolean=tool in screenOpeners
     /** A PREPARED step that must stop the run until the owner confirms in the other app. */
     fun pendingEffect(step:HarnessStep):Boolean=step.evidence.state==VerificationState.PREPARED&&!opensScreenOnly(step.tool)
