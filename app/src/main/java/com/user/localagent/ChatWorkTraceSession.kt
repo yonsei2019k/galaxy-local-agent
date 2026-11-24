@@ -60,6 +60,7 @@ internal class ChatWorkTraceSession private constructor(
     class Attempt internal constructor(val actual:ToolCall,val host:ToolCall) {
         internal var hashes:WorkTraceHashes?=null
         internal var started:WorkTraceRecord?=null
+        internal var outcomeAuditId: String? = null
     }
     fun attempt(call:ToolCall)=Attempt(call,call.copy(id=UUID.randomUUID().toString()))
 
@@ -123,6 +124,7 @@ internal class ChatWorkTraceSession private constructor(
             catch(_:Exception){unavailable()}
         }
         val recorded=receipt?:return false
+        attempt.outcomeAuditId=recorded.audit.id
         val common=WorkTraceDraft("tool.${attempt.host.id}.result",WorkTraceKind.TOOL,WorkTraceCode.TOOL_RESULT,
             toolName=attempt.host.name,invocationId=attempt.host.id,evidence=result.verification,auditId=recorded.audit.id,
             argsHash=hashes.argsHash,scopeHash=hashes.scopeHash)

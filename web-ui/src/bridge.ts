@@ -130,6 +130,7 @@ export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'pro
 
 type Intent =
   | { action: 'draft'; payload: { text: string } }
+  | { action: 'stopGoalWait'; payload: { runId: string } }
   | { action: 'copy' | 'messageFiles' | 'messageMenu'; payload: { messageId: string } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }

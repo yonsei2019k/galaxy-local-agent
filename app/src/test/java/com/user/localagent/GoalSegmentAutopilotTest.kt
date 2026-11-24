@@ -73,6 +73,26 @@ class GoalSegmentAutopilotTest {
         for(status in listOf("cancelled","interrupted","failed","running","queued","waiting_approval"))
             pause(GoalAutopilotPauseReason.STOPPED,decide(status=status))
     }
+    @Test fun timedWaitExcludesOnlyHostRecordedIdleTimeAndStillRequiresVerifiedCheckpoint() {
+        val parkedAt=started+3_000
+        val wokeAt=parkedAt+86_400_000
+        val wait=HarnessStep(GoalWaitToolCatalog.WAIT,buildJsonObject {
+            put("goalId","goal-a");put("expectedUpdatedAt","20")
+            put("condition",buildJsonObject {put("kind","at_time");put("atEpochMillis",wokeAt);put("needsPlayback",false)})
+        },StepEvidence(GoalWaitToolCatalog.WAIT,VerificationState.VERIFIED,"Wait recorded"))
+        val request=request(listOf(step(),wait))
+        val parked=row(request,errorCode="waiting_goal_condition")
+        fun decideParked(parent:ChatRunRecord,unknown:Boolean=false)=
+            goalSegmentDecision(parent,checkNotNull(request.goal),"scope",wokeAt,unknown)
+        pause(GoalAutopilotPauseReason.OWNER_HANDOFF,decideParked(parked))
+        val woken=parked.copy(contextJson=JsonObject(Json.parseToJsonElement(parked.contextJson).jsonObject+
+            ("hostGoalWake" to buildJsonObject {put("parkedAt",parkedAt);put("wokeAt",wokeAt)})).toString())
+        val next=decideParked(woken) as GoalSegmentDecision.Continue
+        assertEquals(3_000L,wokeAt-next.binding.startedAtMs)
+        assertEquals(2,next.binding.consumedToolCalls)
+        pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decideParked(woken,true))
+    }
+
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {
         val eighth=segment().copy(rootRunId="root-run",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
         pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(binding=eighth)))

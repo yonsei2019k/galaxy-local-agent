@@ -108,7 +108,7 @@ object ToolRegistry {
         def("delete_reminder",Risk.HIGH,"id" to text(max=100)),
         def("list_messenger_notifications",Risk.LOW,"packageName" to text(max=80),"limit" to Argument("integer",false)),
         def("reply_messenger_notification",Risk.HIGH,"id" to text(max=100),"message" to text(max=2000))
-    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ScreenControlToolCatalog.definitions+PcBrowserToolCatalog.definitions+AppBrowserToolCatalog.definitions+ProjectStorageToolCatalog.definitions+NoteReadPatchToolCatalog.definitions+LocalSubagentToolCatalog.definitions+ScheduledReadToolCatalog.definitions).let { entries ->
+    )+com.user.localagent.core.connections.ConnectionCatalog.definitions+com.user.localagent.core.connections.PcToolCatalog.definitions+com.user.localagent.core.connections.ConsumerAppCatalog.definitions+SkillToolCatalog.definitions+OfficeToolCatalog.definitions+EvidenceToolCatalog.definitions+PrivateAnalysisToolCatalog.definitions+RecordingToolCatalog.definitions+GoalToolCatalog.definitions+GoalProgressToolCatalog.definitions+GoalWaitToolCatalog.definitions+KakaoScreenToolCatalog.definitions+ScreenControlToolCatalog.definitions+PcBrowserToolCatalog.definitions+AppBrowserToolCatalog.definitions+ProjectStorageToolCatalog.definitions+NoteReadPatchToolCatalog.definitions+LocalSubagentToolCatalog.definitions+ScheduledReadToolCatalog.definitions).let { entries ->
         require(entries.map {it.name}.distinct().size==entries.size){"도구 이름이 중복됩니다."}
         entries.associateBy {it.name}
     }
@@ -140,7 +140,9 @@ object ToolRegistry {
                 "string" -> {require(value is JsonPrimitive && value.isString){"$key 문자열 필요"};require((value.content.isNotBlank() || (call.name=="search_notes" && key=="scope" && !spec.required && value.content.isEmpty()) || (call.name=="patch_note" && (key=="newText" || (key=="oldText"&&value.content.isNotEmpty()))) || (key=="query" && !spec.required && call.name in analysisReads) || (key=="query" && call.name=="search_contacts" && value.content.isEmpty()) || (key=="path"&&(call.name=="list_project_files"||call.name in ProjectStorageToolCatalog.names)) || (key=="negativePrompt"&&call.name=="generate_image")) && value.content.length<=spec.maxLength && '\u0000' !in value.content){"$key 길이 또는 내용 오류"}}
                 "integer" -> require(value is JsonPrimitive && !value.isString && (value.intOrNull!=null || (key=="seed"&&call.name=="generate_image"&&value.longOrNull!=null))){"$key 정수 필요"}
                 "boolean" -> require(value is JsonPrimitive&&!value.isString&&value.booleanOrNull!=null){"$key 참/거짓 값 필요"}
+                "object" -> require(value is JsonObject && value.toString().length<=spec.maxLength)
                 "array" -> when {
+                    call.name==GoalProgressToolCatalog.UPDATE && key=="ops" -> { GoalProgressToolCatalog.parseOps(call); Unit }
                     GoalToolCatalog.isArrayArgument(call.name,key)->GoalToolCatalog.validateArray(call.name,key,value)
                     OfficeToolCatalog.isIntervalArgument(call.name,key)->OfficeToolCatalog.validateIntervals(value)
                     else->require(value is JsonArray && value.size<=7 && value.all {it is JsonPrimitive && !it.isString && it.intOrNull in 1..7} && value.distinct().size==value.size){"days는 1~7의 중복 없는 배열이어야 합니다."}
@@ -180,6 +182,7 @@ object ToolRegistry {
         if(call.name=="prepare_sms") require(call.arguments.getValue("phoneNumber").jsonPrimitive.content.matches(Regex("[+0-9() -]{3,40}"))){"전화번호 형식 오류"}
         if(call.name=="prepare_email") require(call.arguments.getValue("to").jsonPrimitive.content.matches(Regex("[^\\s@,;]+@[^\\s@,;]+\\.[^\\s@,;]+"))){"받는 주소 형식 오류"}
         if(call.name in OfficeToolCatalog.names)OfficeToolCatalog.validate(call)
+        if(call.name==GoalWaitToolCatalog.WAIT) GoalWaitToolCatalog.parse(call)
         if(call.name in GoalToolCatalog.names)GoalToolCatalog.validate(call)
         if(call.name in LocalSubagentToolCatalog.names)LocalSubagentToolCatalog.validate(call)
         if(call.name in NoteReadPatchToolCatalog.names)NoteReadPatchToolCatalog.validate(call)
@@ -212,7 +215,9 @@ object ToolRegistry {
                         if(key=="contentQuoteId")put("pattern","^[a-f0-9]{64}$")
                         if(key=="recordingId"&&name in RecordingToolCatalog.names)put("pattern","^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
                         if(key=="limit"){put("minimum",1);put("maximum",limitMax(name))}
-                        if(spec.type=="array")put("items",buildJsonObject{put("type","integer")})
+                        if(spec.type=="array")put("items",buildJsonObject{
+                            put("type",if(name==GoalProgressToolCatalog.UPDATE && key=="ops")"object" else "integer")
+                        })
                     })}})
                     put("required",buildJsonArray {d.arguments.filterValues {it.required}.keys.forEach {add(it)}})
                     if(name=="patch_note")put("oneOf",buildJsonArray{

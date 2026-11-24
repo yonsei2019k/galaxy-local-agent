@@ -67,6 +67,7 @@ enum class GoalStatus {
     @SerialName("draft") DRAFT,
     @SerialName("active") ACTIVE,
     @SerialName("paused") PAUSED,
+    @SerialName("waiting") WAITING,
     @SerialName("complete") COMPLETE,
 }
 

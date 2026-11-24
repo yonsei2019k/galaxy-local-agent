@@ -102,7 +102,7 @@ private fun goalNoProgressCount(request:QueuedChatRequest,goal:GoalDefinition):I
     if(segment.noProgressSegments>=GoalSegmentBinding.MAX_NO_PROGRESS)return segment.noProgressSegments
     val oldCalls=request.goalLedger.map {goalCallDigest(it.step)}.toSet()
     val progress=request.previousSteps.any {it.evidence.state==VerificationState.VERIFIED&&!it.evidence.effectNotApplied&&
-        it.tool !in GoalToolCatalog.names&&it.tool !in SkillToolCatalog.names&&goalCallDigest(it) !in oldCalls}||
+        it.tool !in GoalToolCatalog.names&&it.tool !in GoalProgressToolCatalog.names&&it.tool!=GoalWaitToolCatalog.WAIT&&it.tool !in SkillToolCatalog.names&&goalCallDigest(it) !in oldCalls}||
         goal.criteria.any {now->now.status==GoalCriterionStatus.VERIFIED&&checkNotNull(request.goal).criteria.none {it.id==now.id&&it.status==now.status&&it.evidence==now.evidence}}
     return if(progress)0 else segment.noProgressSegments+1
 }
@@ -126,15 +126,29 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(ledger.any {goalUncertainFailure(it.step)})return pause(GoalAutopilotPauseReason.FAILED_STEP)
     if(ledger.any {PreparedHandoff.pendingEffect(it.step)})return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     if(parent.status !in setOf("completed","paused"))return pause(GoalAutopilotPauseReason.STOPPED)
-    if(parent.status=="paused"&&parent.errorCode!="reasoning_budget_exhausted")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
+    val clockShift = if (parent.status=="paused" && parent.errorCode=="waiting_goal_condition") {
+        val wake = Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] as? JsonObject
+            ?: return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
+        val parkedAt=wake["parkedAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+        val wokeAt=wake["wokeAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+        if(parkedAt !in segment.startedAtMs..wokeAt || wokeAt>nowMs ||
+            wokeAt-parkedAt>GoalWaitPolicy.MAX_DAYS*86_400_000L ||
+            request.previousSteps.lastOrNull()?.let { it.tool==GoalWaitToolCatalog.WAIT && it.evidence.state==VerificationState.VERIFIED }!=true)
+            return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+        wokeAt-parkedAt
+    } else {
+        if(parent.status=="paused"&&parent.errorCode!="reasoning_budget_exhausted")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
+        0L
+    }
     val readbackContext=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)
     val assessment=RequiredReadbackObligations.assess(request.readbackObligations,readbackContext,request.previousSteps,
         request.previousSteps.size,ToolRegistry.definitions.keys,1,1)
     if(assessment.pending.isNotEmpty()||assessment.blockers.isNotEmpty())return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
     if(goal.completionReady)return pause(GoalAutopilotPauseReason.CRITERIA_READY) // Host goal finalization remains separate.
     val noProgress=goalNoProgressCount(request,goal)
-    goalBudgetStop(segment,ledger.size,nowMs,noProgress,useNativeBudget)?.let{return pause(it)}
-    return GoalSegmentDecision.Continue(segment.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
+    val budget=segment.copy(startedAtMs=segment.startedAtMs+clockShift)
+    goalBudgetStop(budget,ledger.size,nowMs,noProgress,useNativeBudget)?.let{return pause(it)}
+    return GoalSegmentDecision.Continue(budget.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
         segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress),ledger)
 }
 

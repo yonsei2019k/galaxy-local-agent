@@ -488,13 +488,14 @@ class MainActivity : ComponentActivity() {
                                 val latestQuestion=activity.waitingForReply&&runForRoom==null&&messages.lastOrNull()?.id==activity.assistantMessageId
                                 val phase=when{
                                     latestQuestion->"waiting_input"
+                                    activity.waitingForGoal->"waiting_goal"
                                     activity.waitingForReply->"clarification_record"
                                     else->activity.status
                                 }
                                 put("id",activity.runId);put("phase",phase)
                                 activity.userMessageId?.let{put("messageId",it)}
-                                put("label",when(phase){"waiting_input"->"답변을 기다리고 있어요";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
-                                put("detail",if(latestQuestion)"아래에 답해 주시면 이 대화에서 이어갈게요."else"");put("canCancel",false)
+                                put("label",when(phase){"waiting_input"->"답변을 기다리고 있어요";"waiting_goal"->"예약 시각에 이어가기";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
+                                put("detail",if(latestQuestion)"아래에 답해 주시면 이 대화에서 이어갈게요." else if(activity.waitingForGoal)visibleActivityText(activity.goalWaitDetail) else "");put("canCancel",activity.waitingForGoal)
                                 put("evidence",buildJsonArray{publicActivityWindow(activity.events).forEach{event->add(buildJsonObject{
                                     put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
                                 })}})
@@ -527,6 +528,11 @@ class MainActivity : ComponentActivity() {
                                     if(officeOpen)dismissOfficeGuide()
                                 }
                                 composerEpoch++
+                            }
+                            "stopGoalWait"->{
+                                val runId=payload.getValue("runId").jsonPrimitive.content
+                                if(roomActivities.values.any { it.runId==runId&&it.threadId==composerThreadId&&it.waitingForGoal })
+                                    this@MainActivity.lifecycleScope.launch { chat.cancelParkedGoal(composerThreadId,runId,currentBranchId) }
                             }
                             "stop","steer"->{
                                 val id=payload.getValue("runId").jsonPrimitive.content

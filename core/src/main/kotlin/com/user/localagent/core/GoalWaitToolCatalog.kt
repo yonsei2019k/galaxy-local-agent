@@ -9,7 +9,7 @@ object GoalWaitToolCatalog {
         ToolDefinition(WAIT, Risk.LOW,
             mapOf("goalId" to Argument("string", true, 100), "expectedUpdatedAt" to Argument("string", true, 19),
                 "condition" to Argument("object", true, 2000)),
-            "Park this goal until a condition, then let the host wake it. condition.kind=media_end{pageUrl(https),playerSignature1..200,ledgerItemId1..100} | at_time{atEpochMillis>0,needsPlayback} | owner_auth{handoffId1..100}. Waiting adds no permissions and is not completion evidence."))
+            "Park an active persistent goal until a future time. Copy goalId and goalRevision from read_goal_progress (send goalRevision as expectedUpdatedAt). Use condition={kind:at_time,atEpochMillis:future epoch milliseconds,needsPlayback:false}. Waiting adds no permissions and is not completion evidence."))
 
     private val kinds = mapOf(
         "media_end" to setOf("kind", "pageUrl", "playerSignature", "ledgerItemId"),

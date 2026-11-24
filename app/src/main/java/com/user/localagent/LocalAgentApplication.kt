@@ -23,6 +23,10 @@ open class LocalAgentApplication : Application() {
             catch(_:Exception){ /* Dormant rows remain available to retry on next process start. */ }
         }
         com.user.localagent.analysis.AnalysisMemoryWorker.enqueue(this)
+        maintenance.launch {
+            try { container.goalWaits.restore() } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Exception) { FailureLog.record(this@LocalAgentApplication,"goal_wait_restore",error) }
+        }
         container.remoteTests.start(maintenance)
         maintenance.launch {runCatching {com.user.localagent.audio.AudioChunkDecoder.cleanupOrphanedSessions(this@LocalAgentApplication)}}
     }

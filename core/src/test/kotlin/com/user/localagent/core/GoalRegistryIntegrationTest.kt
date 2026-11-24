@@ -22,7 +22,7 @@ class GoalRegistryIntegrationTest {
         .getValue("parameters").jsonObject.getValue("properties").jsonObject
 
     @Test fun allSevenGoalToolsAreRegisteredExactlyOnceWithTheExistingTools(){
-        assertEquals(118,ToolRegistry.definitions.size)
+        assertEquals(121,ToolRegistry.definitions.size)
         assertEquals(7,GoalToolCatalog.names.size)
         assertTrue(ToolRegistry.definitions.keys.containsAll(GoalToolCatalog.names))
         assertEquals(Risk.HIGH,ToolRegistry.definitions.getValue(GoalToolCatalog.CLEAR).risk)

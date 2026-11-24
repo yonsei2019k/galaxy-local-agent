@@ -96,7 +96,7 @@ fun GoalEditorDialog(
             HorizontalDivider()
             Column{
                 TextButton(onClick={statusMenu=true},modifier=Modifier.testTag("goal_status")){Text("상태 · ${goalStatusLabel(edited.status)}")}
-                DropdownMenu(expanded=statusMenu,onDismissRequest={statusMenu=false}){GoalStatus.entries.forEach{status->
+                DropdownMenu(expanded=statusMenu,onDismissRequest={statusMenu=false}){GoalStatus.entries.filterNot { it==GoalStatus.WAITING }.forEach{status->
                     DropdownMenuItem(text={Text(goalStatusLabel(status))},enabled=status!=GoalStatus.COMPLETE||edited.completionReady,
                         onClick={edited=edited.copy(status=status);statusMenu=false})
                 }}
@@ -114,4 +114,4 @@ fun GoalEditorDialog(
         confirmButton={TextButton(onClick={deleting=false;if(stale)error="목표 상태가 바뀌었습니다. 최신 상태를 불러온 뒤 삭제해주세요." else if(onDeleteVersioned!=null)onDeleteVersioned(edited)else onDelete()}){Text("목표 삭제",color=ZipHapColors.Error)}},dismissButton={TextButton(onClick={deleting=false}){Text("취소")}})
 }
 
-private fun goalStatusLabel(status:GoalStatus)=when(status){GoalStatus.DRAFT->"작성 중";GoalStatus.ACTIVE->"추진 중";GoalStatus.PAUSED->"일시 정지";GoalStatus.COMPLETE->"완료 · 직접 선택"}
+private fun goalStatusLabel(status:GoalStatus)=when(status){GoalStatus.DRAFT->"작성 중";GoalStatus.ACTIVE->"추진 중";GoalStatus.PAUSED->"일시 정지";GoalStatus.WAITING->"재개 조건 대기";GoalStatus.COMPLETE->"완료 · 직접 선택"}

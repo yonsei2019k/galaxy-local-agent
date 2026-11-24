@@ -593,6 +593,30 @@
         "실제 처리한 범위·근거를 종합하며 요약 답변이 전체 상세 결과나 원문을 대체하지 않습니다.",
         "정확한 인용은 의미 해석의 타당성이나 누락 없음의 증거가 아니며 미해결 모순을 보존합니다."
       ]
+    },
+    {
+      "id": "elearning-completion",
+      "title": "온라인 교육",
+      "description": "맡긴 교육의 진도, 수료 요건과 이수증을 확인합니다.",
+      "category": "automation",
+      "version": "1",
+      "asset": "skills/elearning-completion/SKILL.md",
+      "sha256": "da2dffc2222295fdfe39853d3616b3590019dc66bda9a2df8196b90e30af4851",
+      "tools": [
+        "open_app_browser_page",
+        "read_app_browser_page",
+        "app_browser_action",
+        "save_browser_pdf",
+        "read_goal_progress",
+        "update_goal_progress",
+        "wait_for_goal_condition",
+        "prepare_email"
+      ],
+      "sourceUrls": [],
+      "limitations": [
+        "현재 자동 재개는 지정 시각 대기만 지원합니다.",
+        "직접 확인한 같은 사이트 PDF 링크만 저장할 수 있습니다."
+      ]
     }
   ]
 }

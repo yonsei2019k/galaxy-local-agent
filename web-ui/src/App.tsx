@@ -143,6 +143,7 @@ export default function App() {
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
           onCopy={messageId => request({ action: 'copy', payload: { messageId } })}
           onFiles={messageId => request({ action: 'messageFiles', payload: { messageId } })}
+          onStopGoalWait={runId => request({ action: 'stopGoalWait', payload: { runId } })}
           onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })}
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
           onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}

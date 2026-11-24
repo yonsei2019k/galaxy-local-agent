@@ -32,6 +32,8 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
     val engine = com.user.localagent.inference.AutomaticComputeEngine(context.applicationContext)
     val orchestration = LocalOrchestration(context.applicationContext,models,engine)
     val scheduler = ReminderScheduler(context.applicationContext)
+    internal val goalWaits by lazy { com.user.localagent.scheduling.GoalWaitWork(appContext) }
+    internal val goalProgress by lazy { com.user.localagent.automation.GoalProgressStore(com.user.localagent.connections.ConnectionStore(appContext)) }
     internal val scheduledReads by lazy {com.user.localagent.scheduling.ScheduledReadWork(appContext,this)}
     val conversationImports = ConversationImport(context.applicationContext,repository)
     val phoneRecords = PhoneRecords(context.applicationContext)

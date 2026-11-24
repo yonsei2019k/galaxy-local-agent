@@ -464,6 +464,16 @@ describe('native conversation', () => {
     expect(host.querySelector('.task-evidence summary')?.textContent).toContain('이전 작업 기록')
   })
 
+  it('cancels a timed goal from its own chat card without stopping another run', () => {
+    mount()
+    snapshot({ ...base, messages: [{ id: 'work-a', role: 'user', text: 'Continue tomorrow' }],
+      tasks: [{ id: 'wait-a', messageId: 'work-a', phase: 'waiting_goal', label: '예약 시각에 이어가기',
+        detail: '11월 25일 09:00 이후', canCancel: true }] })
+    expect(host.querySelector('.task-state')?.textContent).toBe('재개 대기')
+    click('예약 중지')
+    expect(requests().at(-1)).toMatchObject({ action: 'stopGoalWait', payload: { runId: 'wait-a' } })
+  })
+
   it('keeps a paused clarification visible and never targets a paused or completed historical run', () => {
     mount()
     const question = '탈퇴 확인 화면에서 어느 계정을 선택할까요?'

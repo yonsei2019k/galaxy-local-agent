@@ -12,6 +12,7 @@ const phasePresentation: Record<string, { title: string; tone: string; icon: Ico
   approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
   waiting_approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
   paused: { title: '일시 정지', tone: 'review', icon: 'pause' },
+  waiting_goal: { title: '재개 대기', tone: 'neutral', icon: 'clock' },
   waiting_input: { title: '답변 대기', tone: 'review', icon: 'chat' },
   clarification_record: { title: '질문 기록', tone: 'neutral', icon: 'chat' },
   failed: { title: '실패', tone: 'failed', icon: 'alert' },
@@ -130,7 +131,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
   </figure>
 }
 
-function TaskCard({ task }: { task: Task }) {
+function TaskCard({ task, stopWaiting }: { task: Task; stopWaiting?: (runId: string) => void }) {
   const phase = taskPhase(task)
   const heading = useId()
   const recent = task.evidence?.slice(-3) ?? []
@@ -141,6 +142,8 @@ function TaskCard({ task }: { task: Task }) {
         <div><p className="task-state">{phase.title}</p><h2 id={heading}>{task.label || '작업'}</h2></div>
       </div>
       {task.detail && <p className="task-detail" dir="auto">{task.detail}</p>}
+      {task.phase === 'waiting_goal' && task.canCancel && stopWaiting &&
+        <button type="button" className="text-button" onClick={() => stopWaiting(task.id)}>예약 중지</button>}
       {task.phase === 'running' && <div className="task-progress" role="progressbar" aria-label="작업 진행 중"><span /></div>}
       {recent.length > 0 && <ol className="task-step-line" aria-label="최근 확인된 작업 단계">
         {recent.map(item => <li key={item.id}>{item.label}</li>)}
@@ -157,13 +160,14 @@ function TaskCard({ task }: { task: Task }) {
   )
 }
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
   onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
+  onStopGoalWait(runId: string): void
   onNavigate(panel: Panel): void
   onDismissOfficeGuide(): void
   onOfficeCalendar(): void
@@ -239,17 +243,17 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             {floatingPrevious.length > 0 && <details className="task-evidence">
               <summary><Icon name="history" /> 이전 작업 기록 <Icon name="down" className="details-chevron" /></summary>
               <div className="tasks">
-                {floatingPrevious.map(item => <TaskCard key={item.id} task={item} />)}
+                {floatingPrevious.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
               </div>
             </details>}
             {floatingPaused.length > 0 && <section className="tasks" aria-label="일시 정지된 작업">
-              {floatingPaused.map(item => <TaskCard key={item.id} task={item} />)}
+              {floatingPaused.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
             </section>}
             <div className="messages" role="log" aria-label="메시지">
               {messages.map(item => <Fragment key={item.id}>
                 <Message message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
                   enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu} />
-                {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} />)}
+                {cardsByMessage.get(item.id)?.map(task => <TaskCard key={task.id} task={task} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
               </Fragment>)}
             </div>
             {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
@@ -257,7 +261,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
               calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
             {floatingLive.length > 0 && <section className="tasks" aria-label="현재 작업 상태">
-              {floatingLive.map(item => <TaskCard key={item.id} task={item} />)}
+              {floatingLive.map(item => <TaskCard key={item.id} task={item} stopWaiting={enabled ? onStopGoalWait : undefined} />)}
             </section>}
           </div>
         )}
