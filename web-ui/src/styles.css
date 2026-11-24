@@ -666,6 +666,14 @@ svg { width: 20px; height: 20px; flex: none; }
   font-size: 13px;
 }
 .current-work span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-needed {
+  max-width: var(--content-max, 46rem);
+  margin-inline: auto;
+  padding: 8px 12px;
+  border-inline-start: 2px solid var(--accent);
+  color: var(--muted);
+  font-size: 13px;
+}
 .current-work svg { width: 16px; height: 16px; flex: none; }
 .conversation-wrap:has(.current-work) { grid-template-rows: auto minmax(0, 1fr); }
 @media (min-width: 940px), (max-height: 480px) { .bottom-nav { display: none; } }

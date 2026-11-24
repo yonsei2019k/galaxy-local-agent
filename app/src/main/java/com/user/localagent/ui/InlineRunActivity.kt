@@ -48,6 +48,7 @@ data class UiRunActivity(
     val runId:String,val threadId:String,val assistantMessageId:String,val status:String,
     val mode:String="act",val startedAt:Long=0,val updatedAt:Long=0,val events:List<UiRunActivityEvent> = emptyList(),
     val totalEvents:Long=events.size.toLong(),val hasOlder:Boolean=false,val loadingOlder:Boolean=false,
+    val waitingForReply:Boolean=false,
 )
 internal data class UiWorkEvidenceCounts(val tools:Int,val verified:Int,val prepared:Int,val failed:Int)
 

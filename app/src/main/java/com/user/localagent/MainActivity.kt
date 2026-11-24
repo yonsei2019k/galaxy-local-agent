@@ -468,9 +468,15 @@ class MainActivity : ComponentActivity() {
                     })}
                         roomActivities.values.filter{it.threadId==composerThreadId&&it.assistantMessageId in messages.map{m->m.id}&&it.status !in setOf("queued","running","waiting_approval")&&activeExecutions.none{run->run.runId==it.runId}}
                             .distinctBy{it.runId}.sortedBy{it.updatedAt}.takeLast(12).forEach{activity->add(buildJsonObject{
-                                put("id",activity.runId);put("phase",activity.status)
-                                put("label",when(activity.status){"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
-                                put("detail","");put("canCancel",false)
+                                val latestQuestion=activity.waitingForReply&&runForRoom==null&&messages.lastOrNull()?.id==activity.assistantMessageId
+                                val phase=when{
+                                    latestQuestion->"waiting_input"
+                                    activity.waitingForReply->"clarification_record"
+                                    else->activity.status
+                                }
+                                put("id",activity.runId);put("phase",phase)
+                                put("label",when(phase){"waiting_input"->"답변을 기다리고 있어요";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
+                                put("detail",if(latestQuestion)"아래에 답해 주시면 이 대화에서 이어갈게요."else"");put("canCancel",false)
                                 put("evidence",buildJsonArray{publicActivityWindow(activity.events).forEach{event->add(buildJsonObject{
                                     put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
                                 })}})

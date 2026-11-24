@@ -423,6 +423,20 @@ describe('native conversation', () => {
     expect(button('다음에 보내기').disabled).toBe(false)
   })
 
+  it('keeps a read-only question next to the composer and archives its notice after the reply', () => {
+    mount()
+    const messages: Snapshot['messages'] = [{ id: 'question-a', role: 'assistant', text: 'Which city?' }]
+    const task = { id: 'ask-a', phase: 'waiting_input', label: '답변을 기다리고 있어요', detail: '아래에 답해 주시면 이 대화에서 이어갈게요.', canCancel: false }
+    snapshot({ ...base, messages, tasks: [task] })
+    expect(host.querySelector('.reply-needed')?.textContent).toBe(task.detail)
+    expect(host.querySelector('[aria-label="일시 정지된 작업"]')).toBeNull()
+    expect(input().disabled).toBe(false)
+    snapshot({ ...base, messages: [...messages, { id: 'reply-a', role: 'user', text: 'Busan' }],
+      tasks: [{ ...task, phase: 'clarification_record' }] })
+    expect(host.querySelector('.reply-needed')).toBeNull()
+    expect(host.querySelector('.task-evidence summary')?.textContent).toContain('이전 작업 기록')
+  })
+
   it('keeps a paused clarification visible and never targets a paused or completed historical run', () => {
     mount()
     const question = '탈퇴 확인 화면에서 어느 계정을 선택할까요?'

@@ -15,6 +15,13 @@ class ChatWorkActivityControllerTest {
     private fun project(run:ChatRunRecord,records:List<WorkTraceRecord>,total:Long=records.size.toLong(),loading:Set<String> = emptySet())=
         mapWorkActivities("thread-a",listOf(WorkActivityTarget("assistant-a",run.id)),mapOf(run.id to "assistant-a"),mapOf(run.id to run),mapOf(run.id to records),mapOf(run.id to total),loading)
 
+    @Test fun onlyTheScopedReadOnlyClarificationWaitsForAReply(){
+        val ask=run("paused").copy(errorCode="cloud_clarification_read_only")
+        assertTrue(project(ask,emptyList()).getValue("assistant-a").waitingForReply)
+        assertFalse(project(ask.copy(errorCode="execution_not_verified"),emptyList()).getValue("assistant-a").waitingForReply)
+        assertFalse(project(ask.copy(status="running"),emptyList()).getValue("assistant-a").waitingForReply)
+    }
+
     @Test fun canonicalAssistantAndActualRunScopeAreRequiredAndForeignTraceIsOmitted(){
         val actual=run()
         val legitimate=trace(actual,1,WorkTraceDraft("plan",WorkTraceKind.PLAN,WorkTraceCode.PLAN_READY,publicSummary="Synthetic permitted goal"))

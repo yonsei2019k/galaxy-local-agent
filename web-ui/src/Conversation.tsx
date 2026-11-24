@@ -12,6 +12,8 @@ const phasePresentation: Record<string, { title: string; tone: string; icon: Ico
   approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
   waiting_approval: { title: '승인 필요', tone: 'review', icon: 'shield' },
   paused: { title: '일시 정지', tone: 'review', icon: 'pause' },
+  waiting_input: { title: '답변 대기', tone: 'review', icon: 'chat' },
+  clarification_record: { title: '질문 기록', tone: 'neutral', icon: 'chat' },
   failed: { title: '실패', tone: 'failed', icon: 'alert' },
   completed: { title: '응답 종료', tone: 'complete', icon: 'check' },
   cancelled: { title: '중단됨', tone: 'neutral', icon: 'stop' },
@@ -169,7 +171,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
   const tasks = snapshot?.ready ? snapshot.tasks : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const pausedTasks = tasks.filter(task => task.phase === 'paused')
-  const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
+  const waitingInput = tasks.find(task => task.phase === 'waiting_input')
+  const previousTasks = tasks.filter(task => task.phase !== 'paused' && task.phase !== 'waiting_input' && task.phase !== 'queued' && !isLiveTaskPhase(task.phase))
   const empty = messages.length === 0 && tasks.length === 0
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
@@ -227,6 +230,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onMessageMe
             <div className="messages" role="log" aria-label="메시지">
               {messages.map(item => <Message key={item.id} message={item} previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />)}
             </div>
+            {waitingInput && !liveTasks.length && <div className="reply-needed" role="status">{waitingInput.detail || waitingInput.label}</div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
               calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
