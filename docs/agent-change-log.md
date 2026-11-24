@@ -2,7 +2,9 @@
 
 작업기의 `deviceToolBridge.activeProviders`와 휴대폰 작업이 모두 0건임을 확인했다. 기존 작업기 소스에서 공유 안내 한 곳만 교체하고 supervisor가 새 작업기 프로세스를 띄운 것을 확인했다. 새 프로세스에서 Codex·Claude가 설정돼 있다. 숙소와 메일·일정·연락처·파일 지침을 함께 적용했다.
 
-2079 실제 폰의 첫 Codex 일정 조회는 `remote_read_failed`와 함께 중단됐다. 초가 1인 조회 경계로 다시 실행한 결과 실제 `list_google_calendar_events` 읽기가 성공했고, 같은 앱이 시작·종료를 포함한 일정 카드 답변을 저장했다. 같은 2079에서 양쪽 조회 경계 시각을 정각으로 준 대조 시험은 다시 실패했다. 계정·일정 내용은 기록에서 생략했다. 앱이 API에 보낼 때 정각 또는 분 단위 시각의 00초를 유지하도록 요청 직렬화를 수정하고 목록 조회와 일정 저장 요청의 회귀 검사를 추가했다. [Google Calendar 조회 시각 규격](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
+2079 실제 폰의 첫 Codex 일정 조회는 `remote_read_failed`와 함께 중단됐다. 초가 1인 조회 경계로 다시 실행한 결과 실제 `list_google_calendar_events` 읽기가 성공했고, 같은 앱이 시작·종료를 포함한 일정 카드 답변을 저장했다. 같은 2079에서 양쪽 조회 경계 시각을 정각으로 준 대조 시험은 다시 실패했다. 계정·일정 내용은 기록에서 생략했다. 2079의 Codex Gmail 목록 조회도 성공했고 메일 카드 답변이 저장됐다. Claude는 휴대폰에서 해당 요청에 대한 클라우드 동의가 확인되지 않아 도구 호출 전 멈췄다. 앱이 API에 보낼 때 정각 또는 분 단위 시각의 00초를 유지하도록 요청 직렬화를 수정하고 목록 조회와 일정 저장 요청의 회귀 검사를 추가했다. [Google Calendar 조회 시각 규격](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
+
+기존 인증서로 서명한 2080(0.1.80-calendar-time-test)을 휴대폰에 설치하고 APK 해시가 일치함을 확인했다. 같은 정각 범위로 실제 Google Calendar 조회가 성공했고 57.099초에 일정 카드 응답을 저장했다. 목록 조회와 일정 등록 요청 직렬화의 JVM 회귀 검사를 통과했다. 실제 일정 변경 또는 외부 발송은 실행하지 않았다.
 
 ## 2026-11-24 — 메일·일정·연락처·파일 결과 카드
 
