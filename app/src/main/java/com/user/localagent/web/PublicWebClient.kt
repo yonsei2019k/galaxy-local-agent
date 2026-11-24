@@ -32,7 +32,7 @@ import javax.net.ssl.SSLSocketFactory
 data class WebSearchResult(val title:String,val url:String,val snippet:String,val source:String,val fetchedAt:String,val offer:WebOffer?=null,val merchant:String?=null)
 data class WebSearchReport(val query:String,val items:List<WebSearchResult>,val fetchedAt:String,val errors:List<String>,val partial:Boolean,val requestCount:Int=0)
 data class WebOffer(val price:String?,val currency:String?,val availability:String?,val shipping:String?,val validThrough:String?,val sourceUrl:String,val fetchedAt:String,val priceSource:String="JSON-LD")
-data class WebPage(val url:String,val title:String,val text:String,val offers:List<WebOffer>,val fetchedAt:String,val untrusted:Boolean=true)
+data class WebPage(val url:String,val title:String,val text:String,val offers:List<WebOffer>,val fetchedAt:String,val untrusted:Boolean=true,val publicExcerpt:String?=null)
 data class PublicWebResponse(val statusCode:Int,val finalUrl:String,val contentType:String,val body:ByteArray)
 fun interface PublicWebTransport {suspend fun get(url:String,maxBytes:Int):PublicWebResponse}
 class UnsafePublicWebUrlException:IllegalArgumentException("공개 HTTPS 주소만 허용됩니다.")
@@ -250,13 +250,30 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
         if (uniffi.ziphap_android.nativePublicPageInterstitial(title, pageText.take(2048))) {
             throw PublicPageReadException(PublicPageReadReason.ACCESS_CHALLENGE)
         }
+        var publicExcerpt:String?=null
         val text=if (type == "text/html" || type == "application/xhtml+xml") {
-            val bodyMarkup=html
-                .replace(Regex("(?is)<head(?=[\\s>])[^>]*>.*?</head\\s*>")," ")
-                .replace(Regex("(?is)<title(?=[\\s>])[^>]*>.*?</title\\s*>")," ")
-            plain(bodyMarkup,MAX_TEXT)
+            val document = org.jsoup.Jsoup.parse(html)
+            document.select("script, style, noscript, template, form, textarea, input, select, nav, footer, [hidden], [aria-hidden=true]").remove()
+            val content = document.selectFirst("main, [role=main], #content, #contents, .subContents")
+            val body = content?.takeIf { it.hasText() } ?: document.body()
+            val bodyText = body.text()
+            // Keep related labels and values together. A partial public read never exports a
+            // credential-bearing document, form values, attributes, or substrings of a rejected block.
+            if (bodyText.length <= MAX_TEXT && com.user.localagent.core.ConversationPrivacy.sensitiveText(bodyText) &&
+                com.user.localagent.core.CredentialRedaction.redact(bodyText).count == 0) {
+                val groups = "dl, ul, ol, table, p"
+                val excerpt = body.select(groups).asSequence()
+                    .filter { block -> block.parents().none { it.`is`(groups) } }
+                    .map { it.text() }.filter { it.length in 2..3000 }
+                    .filterNot(com.user.localagent.core.ConversationPrivacy::sensitiveText)
+                    .distinct().take(32).joinToString("\n").take(4000)
+                publicExcerpt = excerpt.takeIf { it.isNotBlank() &&
+                    !com.user.localagent.core.ConversationPrivacy.sensitiveText(it) &&
+                    com.user.localagent.core.CredentialRedaction.redact(it).count == 0 }
+            }
+            bodyText.take(MAX_TEXT)
         } else pageText
-        return WebPage(response.finalUrl, title, text, extractOffers(html, response.finalUrl, stamp), stamp)
+        return WebPage(response.finalUrl, title, text, extractOffers(html, response.finalUrl, stamp), stamp, publicExcerpt=publicExcerpt)
     }
 
     private fun parseRss(body:String,stamp:String):List<WebSearchResult> {

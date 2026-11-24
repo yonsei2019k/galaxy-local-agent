@@ -66,6 +66,7 @@ dependencies {
     api("com.google.android.gms:play-services-mlkit-text-recognition:19.0.2")
     api("com.google.android.gms:play-services-mlkit-text-recognition-korean:16.0.2")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
+    implementation("org.jsoup:jsoup:1.18.3")
     api("com.squareup.okhttp3:okhttp:5.3.2")
     testImplementation("junit:junit:4.13.2")
     testRuntimeOnly("net.java.dev.jna:jna:5.17.0@jar")

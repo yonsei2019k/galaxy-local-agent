@@ -15,6 +15,27 @@ class PublicWebClientTest {
     private val timestamp="2030-01-01T00:00:00Z"
     private fun response(url:String,body:String,type:String="text/html")=PublicWebResponse(200,url,type,body.toByteArray())
     private fun client(transport:PublicWebTransport)=PublicWebClient(transport){Instant.parse(timestamp)}
+    @Test fun mixedPublicHelpExportsOnlyCompleteSafeBlocks()=runBlocking {
+        val url="https://example.com/help"
+        val web=client { _,_->response(url,"""<main><dl><dt>Receipt</dt><dd>Open the archive.</dd></dl>
+            <form><p>FORM_VALUE</p></form><dl><dt>Contact</dt><dd>fixture@example.invalid</dd></dl></main>""") }
+        val result=web.readToolResult("read",url)
+        val safe=com.user.localagent.externalagent.CloudPublicSearchProjection.from("read_webpage",result)
+        assertNotNull(safe)
+        assertTrue(safe!!.content.contains("Open the archive."))
+        assertFalse(safe.content.contains("FORM_VALUE"))
+        assertFalse(safe.content.contains("Contact"))
+        assertFalse(safe.content.contains("@"))
+    }
+
+    @Test fun publicArticleRemainsReadableWhenSiteNavigationContainsAccountInformation()=runBlocking {
+        val url="https://example.com/guide"
+        val web=client { _,_->response(url,"""<div id="headerWrap">비밀번호 찾기</div>
+            <div class="subContents"><dl><dt>발급 조건</dt><dd>진도를 확인하세요.</dd></dl></div>
+            <div id="footerWrap">fixture@example.invalid</div>""") }
+        assertEquals("발급 조건 진도를 확인하세요.",web.fetchPage(url).text)
+    }
+
     @Test fun failedSearchProviderFallsBackToObservedYahooProductLink()=runBlocking {
         val web=client {url,_->if(url.contains("duckduckgo"))PublicWebResponse(202,url,"text/html","challenge".toByteArray())else response(url,"""
             <a href="https://www.coupang.com/vp/products/987"><div>쿠팡</div><h3>샤오미 공기청정기 4</h3></a><div><p>Public source snippet</p></div>

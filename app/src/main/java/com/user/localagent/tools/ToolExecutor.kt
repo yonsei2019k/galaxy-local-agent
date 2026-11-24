@@ -479,6 +479,7 @@ internal suspend fun PublicWebClient.readToolResult(id: String, url: String): To
             put("fetchedAt", page.fetchedAt)
             put("untrustedSourceData", true)
             put("text", page.text.take(4000))
+            page.publicExcerpt?.let { put("publicExcerpt", it) }
             put("truncated", page.text.length > 4000)
             if (page.offers.isNotEmpty()) {
                 put("offers", buildJsonArray {

@@ -10,8 +10,20 @@ import kotlinx.serialization.json.*
 /** The phone keeps the original search result. Only a safe subset of public source rows leaves it. */
 internal object CloudPublicSearchProjection {
     fun from(tool: String, result: ToolResult): ToolResult? {
-        if (tool != "search_web" || !result.success || result.verification != VerificationState.VERIFIED) return null
+        if (!result.success || result.effectNotApplied || result.verification != VerificationState.VERIFIED) return null
         val data = runCatching { Json.parseToJsonElement(result.content) }.getOrNull() as? JsonObject ?: return null
+        if (tool == "read_webpage") {
+            if (data["untrustedSourceData"] != JsonPrimitive(true)) return null
+            val url = safeUrl(data) ?: return null
+            val excerpt = safeField(data, "publicExcerpt", 4000) ?: return null
+            return result.copy(content = buildJsonObject {
+                put("url", url)
+                put("untrustedSourceData", true)
+                put("partial", true)
+                put("text", excerpt)
+            }.toString())
+        }
+        if (tool != "search_web") return null
         if (data["success"] != JsonPrimitive(true) || data["shopping"] != JsonPrimitive(false) ||
             data["privateSourcesRead"] != JsonPrimitive(false) || data["untrustedSourceData"] != JsonPrimitive(true)) return null
         val items = data["items"] as? JsonArray ?: return null

@@ -1585,6 +1585,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         "Use short, natural sentences such as ‘좋아요, 확인해 볼게요’ or ‘여기까지 찾았어요’ when they fit. " +
         "Skip repeated greetings, exaggerated enthusiasm, formal service-desk phrasing, and technical codes. " +
         "Lead with the result. If blocked, tell the owner what you checked and the one thing you need next. " +
+        "When an action fails, compare its expected effect to the last observation. Try a different permitted read to distinguish likely causes. " +
+        "After an uncertain click, inspect the current state before deciding what to do; never blindly repeat it. " +
         "Only ask for setup needed for the current task; " +
         "explain why in one short sentence. Infer the useful handoff from the user's goal and documented requirements. " +
         "If the next reversible step is clear, do it and observe the result. If the current route lacks a control, check the page structure, " +
@@ -1936,6 +1938,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         checkNotNull(bridgeSessionId),publicPartial=true)){
                     CloudPublicSearchProjection.partialSources(actual.values)
                 }else emptyList()
+                FailureLog.cloudStop(context,when {
+                    actual.isNotEmpty() && actual.values.all { it.withheldFromCloud } -> "FINAL_ALL_READS_WITHHELD"
+                    accepted == null -> "FINAL_MISSING_PLAN"
+                    resultState != "reported_done" -> "FINAL_PROVIDER_INCOMPLETE"
+                    else -> "FINAL_EVIDENCE_INCOMPLETE"
+                },controller.stopMetadata(),resultState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
                 val lastScreenAction=actual.values.lastOrNull { observation ->
                     observation.proposal.tool==com.user.localagent.core.ScreenControlToolCatalog.ACTION
                 }?.result
@@ -1946,7 +1954,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val notice=when(screenChanged){
                     true->"화면이 바뀐 건 확인했어요. 요청한 결과가 나왔는지는 확인이 더 필요해요."
                     false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
-                    null->if(links.isEmpty())"결과를 확인할 정보가 부족해서 여기서 멈췄어요."
+                    null->if(actual.isNotEmpty()&&actual.values.all{it.withheldFromCloud && it.result.success})
+                        "휴대폰에서 자료를 읽었지만 개인 정보가 섞여 있어 답변에 쓸 수 있는 본문을 확보하지 못했어요."
+                    else if(links.isEmpty())"결과를 확인할 정보가 부족해서 여기서 멈췄어요."
                         else "일부 자료를 확인했어요. 아직 결론을 내리기에는 정보가 부족해요."
                 }
                 if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,notice,true)
