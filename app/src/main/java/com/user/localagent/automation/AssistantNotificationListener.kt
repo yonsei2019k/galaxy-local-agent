@@ -40,8 +40,7 @@ class AssistantNotificationListener : NotificationListenerService() {
         val prefs = getSharedPreferences("notification-events", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("enabled", false)) return
         // Updated notifications must not inflate counts. In-memory keys aren't a private archive.
-        if (!seen.add(notification.key)) return
-        if (seen.size > 256) seen.clear()
+        if (!seen.record(notification.key)) return
         val now = System.currentTimeMillis()
         val day = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).toString()
         val oldDay = prefs.getString("day", null)
@@ -59,7 +58,7 @@ class AssistantNotificationListener : NotificationListenerService() {
         com.user.localagent.integrations.MessengerInbox.clearSession()
         super.onListenerDisconnected()
     }
-    private val seen = mutableSetOf<String>()
+    private val seen = RecentNotificationKeys()
     companion object {
         fun permissionIntent(context: Context) = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
             .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, ComponentName(context, AssistantNotificationListener::class.java).flattenToString())
@@ -72,5 +71,25 @@ class AssistantNotificationListener : NotificationListenerService() {
         fun count(context: Context) = context.getSharedPreferences("notification-events",Context.MODE_PRIVATE).let {
             if(it.getString("day",null)==java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).toString())it.getInt("count",0)else 0
         }
+    }
+}
+
+
+/** Bounded live notification keys. When full, retain the newest entry and other recent entries. */
+internal class RecentNotificationKeys(private val capacity:Int = 256) {
+    private val keys=LinkedHashSet<String>()
+
+    init {
+        require(capacity>0)
+    }
+
+    fun record(key:String):Boolean {
+        if(!keys.add(key))return false
+        if(keys.size>capacity)keys.remove(keys.first())
+        return true
+    }
+
+    fun remove(key:String) {
+        keys.remove(key)
     }
 }
