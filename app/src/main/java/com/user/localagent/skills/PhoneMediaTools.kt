@@ -67,10 +67,11 @@ class PhoneMediaTools(context:Context):Closeable {
     suspend fun inspectPdf(uri:Uri,includeText:Boolean=true):BuiltinSkills.PdfInspection =
         BuiltinSkills(app).inspectPdf(uri,includeText)
 
-    suspend fun speak(text:String,voiceName:String?=null):LocalSpeechResult = withTts {tts->
+    suspend fun speak(text:String,voiceName:String?=null,preferSamsung:Boolean=false,onStarted:()->Unit={}):LocalSpeechResult =
+        withTts(preferSamsung) {tts->
         validateSpeech(text)
         val voice=selectVoice(tts,voiceName)
-        awaitUtterance(tts){id->tts.speak(text,TextToSpeech.QUEUE_FLUSH,offlineParameters(),id)}
+        awaitUtterance(tts,onStarted){id->tts.speak(text,TextToSpeech.QUEUE_FLUSH,offlineParameters(),id)}
         LocalSpeechResult(voiceInfo(tts,voice))
     }
 
@@ -140,11 +141,17 @@ class PhoneMediaTools(context:Context):Closeable {
     fun destroy()=close()
 
     private fun onMain(block:()->Unit){if(Looper.myLooper()==Looper.getMainLooper())block()else mainHandler.post {block()}}
-    private suspend fun <T> withTts(block:suspend (TextToSpeech)->T):T = speechMutex.withLock {
+    private suspend fun <T> withTts(preferSamsung:Boolean=false,block:suspend (TextToSpeech)->T):T = speechMutex.withLock {
         coroutineScope {withContext(Dispatchers.Main.immediate){
             check(!closed.get()){"음성 도구가 종료되었습니다."}
             val initialized=CompletableDeferred<Int>()
-            val tts=TextToSpeech(app){status->initialized.complete(status)}
+            val samsung="com.samsung.SMT"
+            val engine=samsung.takeIf {
+                preferSamsung&&app.packageManager.queryIntentServices(
+                    Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE).setPackage(samsung),0
+                ).isNotEmpty()
+            }
+            val tts=TextToSpeech(app,{status->initialized.complete(status)},engine)
             activeTts=tts;activeSpeechJob=currentCoroutineContext()[Job]
             try {
                 check(withTimeout(15_000){initialized.await()}==TextToSpeech.SUCCESS){"로컬 음성 엔진을 시작하지 못했습니다."}
@@ -172,10 +179,10 @@ class PhoneMediaTools(context:Context):Closeable {
         putString(TextToSpeech.Engine.KEY_FEATURE_NETWORK_SYNTHESIS,"false")
     }
     private fun validateSpeech(text:String){require(text.isNotBlank()&&text.length<=TextToSpeech.getMaxSpeechInputLength()){"음성으로 읽을 텍스트가 비어 있거나 시스템 입력 한도를 넘었습니다."}}
-    private suspend fun awaitUtterance(tts:TextToSpeech,start:(String)->Int){
+    private suspend fun awaitUtterance(tts:TextToSpeech,onStarted:()->Unit={},start:(String)->Int){
         val id=UUID.randomUUID().toString();val done=CompletableDeferred<Unit>()
         tts.setOnUtteranceProgressListener(object:UtteranceProgressListener(){
-            override fun onStart(utteranceId:String?)=Unit
+            override fun onStart(utteranceId:String?){if(utteranceId==id)onMain {if(!done.isCompleted)onStarted()}}
             override fun onDone(utteranceId:String?){if(utteranceId==id)done.complete(Unit)}
             @Deprecated("Android legacy callback") override fun onError(utteranceId:String?){if(utteranceId==id)done.completeExceptionally(IllegalStateException("로컬 음성 합성에 실패했습니다."))}
             override fun onError(utteranceId:String?,errorCode:Int){if(utteranceId==id)done.completeExceptionally(IllegalStateException("로컬 음성 합성 오류: $errorCode"))}

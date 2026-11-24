@@ -111,7 +111,7 @@ class ChatConverters {
     @Query("SELECT * FROM chat_runs WHERE threadId=:threadId AND branchId=:branchId AND (id NOT LIKE 'scheduled-read-%' OR userMessageId IS NOT NULL) ORDER BY createdAt DESC,id DESC LIMIT 1")
     suspend fun latestBranchRun(threadId:String,branchId:String):ChatRunRecord?
     @Query("SELECT * FROM chat_runs WHERE status='scheduled' AND id LIKE 'scheduled-read-%' ORDER BY createdAt,id") suspend fun scheduledReads():List<ChatRunRecord>
-    @Query("SELECT * FROM chat_runs WHERE id=:id") fun observeScheduledRead(id:String):Flow<ChatRunRecord?>
+    @Query("SELECT * FROM chat_runs WHERE id=:id") fun observeRun(id:String):Flow<ChatRunRecord?>
     @Query("SELECT * FROM chat_runs WHERE status='queued' ORDER BY createdAt,id") suspend fun queuedRuns():List<ChatRunRecord>
     @Query("SELECT * FROM chat_runs WHERE status IN ('queued','paused','interrupted','cancelled','failed') ORDER BY createdAt,id") suspend fun queueCandidates():List<ChatRunRecord>
     @Query("SELECT * FROM (SELECT * FROM tool_runs WHERE name NOT IN ('work_trace_v1','work_receipt_v1') AND threadId=:threadId AND (:runId IS NULL OR runId=:runId) ORDER BY at DESC,id DESC LIMIT 1000) ORDER BY at,id") fun toolRunsForThread(threadId:String,runId:String?):Flow<List<ToolRunRecord>>
@@ -641,7 +641,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
 
     internal suspend fun awaitScheduledRead(id: String) {
-        dao.observeScheduledRead(id).first { row -> row == null || row.status !in setOf("queued", "running", "waiting_approval") }
+        dao.observeRun(id).first { row -> row == null || row.status !in setOf("queued", "running", "waiting_approval") }
     }
 
     internal suspend fun cancelScheduledRead(callerRunId: String, id: String): ChatRunRecord = database.withTransaction {
@@ -810,8 +810,10 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         text
     }
 
+    internal fun observeChatRun(id:String):Flow<ChatRunRecord?> = dao.observeRun(id)
+
     internal suspend fun awaitOfficeRun(id: String): ChatRunRecord? =
-        dao.observeScheduledRead(id).first { it == null || it.status !in setOf("queued", "running", "waiting_approval") }
+        dao.observeRun(id).first { it == null || it.status !in setOf("queued", "running", "waiting_approval") }
 
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)

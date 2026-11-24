@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -34,7 +34,7 @@ internal object ReactBridgePolicy {
         val allowed=when(action){
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
-            "copy","messageFiles","messageMenu"->setOf("messageId")
+            "copy","messageFiles","messageMenu","toggleAnswerSpeech"->setOf("messageId")
             "stayPhoto"->setOf("messageId","index")
             "chooseReply"->setOf("runId","index")
             "renameThread"->setOf("title")

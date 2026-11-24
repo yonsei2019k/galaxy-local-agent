@@ -178,7 +178,7 @@ const MAX_REQUEST_LENGTH = 12_000
 const MAX_STEER_LENGTH = 4_000
 
 export function Composer({ snapshot, enabled, draft, pending, connectionNote, onDraft, onSubmit, onAttach, onSelectModel, onStop, onRemoveAttachment,
-  onCancelPreparation, onOpenWaitingApproval, onVoice, onCancelVoice }: {
+  onCancelPreparation, onOpenWaitingApproval, onVoice, onCancelVoice, onOpenTalk }: {
   snapshot: Snapshot | null
   enabled: boolean
   draft: string
@@ -189,6 +189,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
   onSubmit(kind: 'send' | 'steer'): void
   onAttach(): void
   onSelectModel(id: string): void
+  onOpenTalk?(): void
   onVoice(): void
   onCancelVoice(): void
   onStop(): void
@@ -252,6 +253,9 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
                 aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={() => { setSheetOpen(false); onVoice() }}>
                 <Icon name="microphone" />
               </button>}
+              {!voiceBusy && onOpenTalk && <button type="button" className="icon-button voice-button"
+                disabled={!enabled || pending} aria-label="음성 대화" title="음성 대화"
+                onClick={() => { setSheetOpen(false); onOpenTalk() }}><Icon name="activity" /></button>}
               {(voice === 'listening' || voice === 'finishing') && <button type="button" className="icon-button"
                 aria-label="음성 입력 취소" title="음성 입력 취소" onClick={onCancelVoice}><Icon name="close" /></button>}
             </div>

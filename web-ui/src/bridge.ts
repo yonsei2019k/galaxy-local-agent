@@ -101,6 +101,9 @@ export interface Snapshot {
   approvalCard?: { id: string; messageId?: string }
   websiteCard?: { id: string; messageId?: string; runId?: string; title: string; status: string; steps: string[]; working: boolean; inputHeight?: number; keyboardOpen?: boolean }
   browserLoginStatus?: string
+  spokenMessageId?: string
+  voiceTalk?: { stage: 'idle' | 'permission' | 'listening' | 'finishing' | 'review' | 'thinking' | 'preparing' | 'speaking'
+    transcript: string; reply: string; blocked: boolean }
   voicePrompt?: 'permission' | 'listening' | 'finishing'
   voiceDraftEpoch?: number
   theme?: 'light' | 'dark' | 'system'
@@ -159,7 +162,7 @@ type Intent =
   | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
-  | { action: 'copy' | 'messageFiles' | 'messageMenu'; payload: { messageId: string } }
+  | { action: 'copy' | 'messageFiles' | 'messageMenu' | 'toggleAnswerSpeech'; payload: { messageId: string } }
   | { action: 'stayPhoto'; payload: { messageId: string; index: number } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }
@@ -171,6 +174,7 @@ type Intent =
   | { action: 'navigate'; payload: { panel: Panel } }
   | { action: 'saveOfficeProfile'; payload: { entries: OfficeEntries } }
   | { action: 'clearOfficeProfile' }
+  | { action: 'openVoiceTalk' | 'closeVoiceTalk' | 'listenVoiceTalk' | 'sendVoiceTalk' }
   | { action: 'startVoicePrompt' | 'finishVoicePrompt' | 'cancelVoicePrompt' }
   | { action: 'openOffice' | 'dismissOfficeGuide' | 'requestOfficeCalendar' | 'attach' | 'manageThreads' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
 
@@ -327,6 +331,12 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.browserLoginStatus !== undefined && (typeof value.browserLoginStatus !== 'string' || value.browserLoginStatus.length > 240)) return null
   if (value.composerEpoch !== undefined && !epoch(value.composerEpoch)) return null
   if (value.voiceDraftEpoch !== undefined && !epoch(value.voiceDraftEpoch)) return null
+  if (value.spokenMessageId !== undefined && (typeof value.spokenMessageId !== 'string' || value.spokenMessageId.length > 128)) return null
+  const talk = value.voiceTalk
+  if (talk !== undefined && (!record(talk) || typeof talk.stage !== 'string' ||
+    !['idle', 'permission', 'listening', 'finishing', 'review', 'thinking', 'preparing', 'speaking'].includes(talk.stage) ||
+    typeof talk.transcript !== 'string' || talk.transcript.length > 10000 ||
+    typeof talk.reply !== 'string' || talk.reply.length > 900 || typeof talk.blocked !== 'boolean')) return null
   if (value.voicePrompt !== undefined && value.voicePrompt !== 'permission' && value.voicePrompt !== 'listening' && value.voicePrompt !== 'finishing') return null
   if (value.theme !== undefined && value.theme !== 'light' && value.theme !== 'dark' && value.theme !== 'system') return null
   return { ...(value as unknown as Snapshot), collab: collaboration(value.collab) }
@@ -361,7 +371,7 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if ((intent.action === 'saveOfficeProfile' || intent.action === 'clearOfficeProfile' ||
     intent.action === 'dismissOfficeGuide' || intent.action === 'requestOfficeCalendar') && !scope?.officeSelected) return false
   if (intent.action === 'saveOfficeProfile' && !officeEntries(intent.payload.entries)) return false
-  if ((intent.action === 'copy' || intent.action === 'stayPhoto') && !scope?.messages.some(message => message.role === 'assistant' && message.id === intent.payload.messageId)) return false
+  if ((intent.action === 'copy' || intent.action === 'stayPhoto' || intent.action === 'toggleAnswerSpeech') && !scope?.messages.some(message => message.role === 'assistant' && message.id === intent.payload.messageId)) return false
   if (intent.action === 'stop' || intent.action === 'steer') {
     const target = runTarget(scope)
     if (!target || target.runId !== intent.payload.runId || target.actionEpoch !== intent.payload.actionEpoch) return false

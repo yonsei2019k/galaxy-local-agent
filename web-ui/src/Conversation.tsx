@@ -109,7 +109,7 @@ function dateLabel(message?: ConversationMessage) {
   return message?.sentAt === undefined ? null : conversationDate.format(message.sentAt)
 }
 
-function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu, onPrepareStay, onStayPhoto }: {
+function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu, onPrepareStay, onStayPhoto, onSpeak, speaking }: {
   message: ConversationMessage
   previous?: ConversationMessage
   previousHasCards: boolean
@@ -118,6 +118,8 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   onCopy(messageId: string): void
   onFiles(messageId: string): void
   onMessageMenu(messageId: string): void
+  onSpeak?: (messageId: string) => void
+  speaking?: boolean
   onPrepareStay?: (text: string) => void
   onStayPhoto?: (messageId: string, index: number) => boolean
 }) {
@@ -140,7 +142,12 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
       {(assistant || user) && (
         <div className="message-actions">
           {assistant
-            ? <AnswerMenu messageId={message.id} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />
+            ? <>
+                {onSpeak && <button type="button" className="icon-button icon-button--compact"
+                  aria-label={speaking ? '답변 읽기 중지' : '답변 읽어주기'}
+                  onClick={() => onSpeak(message.id)}><Icon name={speaking ? 'stop' : 'speaker'} /></button>}
+                <AnswerMenu messageId={message.id} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />
+              </>
             : <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
               aria-label="메시지 메뉴" onClick={() => onMessageMenu(message.id)}>···</button>}
         </div>
@@ -162,7 +169,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -176,6 +183,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   hasDraft: boolean
   onDraftExample(text: string): void
   onStayPhoto?: (messageId: string, index: number) => boolean
+  onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
@@ -313,6 +321,10 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                       !!cardsByMessage.get(messages[index - 1].id)?.length ||
                       websiteAnchor === messages[index - 1].id || approvalAnchor === messages[index - 1].id))}
                     previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
+                    speaking={snapshot?.spokenMessageId === item.id}
+                    onSpeak={enabled && !snapshot?.voiceTalk && !snapshot?.voicePrompt && !snapshot?.inlineLogin &&
+                      !snapshot?.websiteCard?.inputHeight && !snapshot?.approvalCard && snapshot?.voiceDraftEpoch !== undefined &&
+                      (!snapshot?.busy || snapshot?.spokenMessageId === item.id) ? onSpeak : undefined}
                     enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu}
                     onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} onStayPhoto={enabled ? onStayPhoto : undefined} />
                   {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}

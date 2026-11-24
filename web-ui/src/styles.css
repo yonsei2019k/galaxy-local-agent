@@ -583,3 +583,15 @@ svg { width: 20px; height: 20px; flex: none; }
 }
 .reply-options button span { margin-inline-start: 6px; color: var(--accent); font-size: var(--fs-small); }
 .reply-options button:disabled { opacity: .55; }
+
+.voice-talk {
+  width: min(calc(100% - 2 * var(--pad)), var(--content-width));
+  align-self: center; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--line);
+  border-radius: var(--radius-card); background: var(--surface);
+}
+.voice-talk-heading { display: flex; align-items: center; gap: 8px; }
+.voice-talk-heading > div { flex: 1; min-width: 0; }
+.voice-talk-heading [role="status"] { color: var(--muted); font-size: var(--fs-small); }
+.voice-caption { margin-block: 6px; max-height: min(8em, 23dvh); overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+.voice-talk-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.voice-talk .text-button { min-height: 44px; }

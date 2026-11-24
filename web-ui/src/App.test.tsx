@@ -554,6 +554,32 @@ describe('native conversation', () => {
     expect(host.querySelector('details.task-evidence')).toBeNull()
   })
 
+  it('keeps voice controls scoped to the chat and requires user confirmation to send a transcript', () => {
+    mount()
+    const room: Snapshot = { ...base, voiceDraftEpoch: 1,
+      messages: [{ id: 'answer-voice', role: 'assistant', text: '답변입니다.' }] }
+    snapshot(room)
+    click('답변 읽어주기')
+    expect(requests().at(-1)).toMatchObject({ action: 'toggleAnswerSpeech', payload: { messageId: 'answer-voice' } })
+    snapshot({ ...room, spokenMessageId: 'answer-voice' })
+    click('답변 읽기 중지')
+    click('음성 대화')
+    expect(requests().at(-1)).toMatchObject({ action: 'openVoiceTalk', payload: {} })
+    const review = { stage: 'review', blocked: false, transcript: '오늘 일정 알려줘', reply: '' } as const
+    snapshot({ ...room, voiceTalk: review })
+    expect(host.textContent).toContain(review.transcript)
+    expect(requests().some(item => item.action === 'sendVoiceTalk')).toBe(false)
+    click('이대로 보내기')
+    expect(requests().at(-1)).toMatchObject({ action: 'sendVoiceTalk', branchId: 'branch-a', payload: {} })
+    snapshot({ ...room, voiceTalk: { ...review, blocked: true } })
+    expect(button('이대로 보내기').disabled).toBe(true)
+    snapshot({ ...room, voiceTalk: { ...review, stage: 'speaking', transcript: '', reply: '읽는 답변' } })
+    click('읽기 멈추고 말하기')
+    expect(requests().at(-1)).toMatchObject({ action: 'listenVoiceTalk' })
+    click('끝내기')
+    expect(requests().at(-1)).toMatchObject({ action: 'closeVoiceTalk' })
+  })
+
   it('sends one answer to the current question and preserves a composed reply', () => {
     mount()
     const question: Snapshot = { ...base,

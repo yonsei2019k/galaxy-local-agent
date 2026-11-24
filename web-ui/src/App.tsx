@@ -6,6 +6,7 @@ import { Collaboration } from './Collaboration'
 import { BottomNavigation, Composer, Header, MobileSidebar, Sidebar } from './Workspace'
 import { OfficeProfileForm } from './OfficeProfile'
 
+import { VoiceTalk } from './VoiceTalk'
 import { NativeCharacterSetting } from './character/useCharacter'
 
 type Intent = Parameters<typeof postIntent>[1]
@@ -152,6 +153,7 @@ export default function App() {
           onFiles={messageId => request({ action: 'messageFiles', payload: { messageId } })}
           onStayPhoto={(messageId, index) => request({ action: 'stayPhoto', payload: { messageId, index } })}
           onStopGoalWait={runId => request({ action: 'stopGoalWait', payload: { runId } })}
+          onSpeak={messageId => request({ action: 'toggleAnswerSpeech', payload: { messageId } })}
           onMessageMenu={messageId => request({ action: 'messageMenu', payload: { messageId } })}
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
           onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}
@@ -162,7 +164,10 @@ export default function App() {
             if (!draft.trim() && !snapshot?.inlineLogin) editDraft(text)
           }} />
         {snapshot?.browserLoginStatus && <div className="browser-login-status" role="status">{snapshot.browserLoginStatus}</div>}
-        {snapshot?.inlineLogin !== true && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} connectionNote={connectionNote}
+        {snapshot?.voiceTalk && snapshot.inlineLogin !== true && <VoiceTalk talk={snapshot.voiceTalk}
+          onListen={() => request({ action: 'listenVoiceTalk' })} onSend={() => request({ action: 'sendVoiceTalk' })}
+          onClose={() => request({ action: 'closeVoiceTalk' })} />}
+        {snapshot?.inlineLogin !== true && !snapshot?.voiceTalk && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} connectionNote={connectionNote}
           onDraft={editDraft} onSubmit={action => {
             if (!snapshot?.ready || pending) return
             if (action === 'steer') {
@@ -185,7 +190,9 @@ export default function App() {
           onCancelPreparation={() => request({ action: 'cancelPreparation' })}
           onOpenWaitingApproval={() => request({ action: 'openWaitingApproval' })}
           onVoice={() => request({ action: snapshot?.voicePrompt === 'listening' ? 'finishVoicePrompt' : 'startVoicePrompt' })}
-          onCancelVoice={() => request({ action: 'cancelVoicePrompt' })} />}
+          onCancelVoice={() => request({ action: 'cancelVoicePrompt' })}
+          onOpenTalk={snapshot?.voiceDraftEpoch !== undefined && !snapshot?.websiteCard?.inputHeight && !snapshot?.approvalCard
+            ? () => request({ action: 'openVoiceTalk' }) : undefined} />}
         {snapshot?.singleConversation && !snapshot.inlineLogin &&
           <BottomNavigation enabled={enabled} onNavigate={panel => sidebarRequest({ action: 'navigate', payload: { panel } })} />}
       </div>

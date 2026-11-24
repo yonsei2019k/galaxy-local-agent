@@ -97,8 +97,106 @@ class MainActivity : ComponentActivity() {
 
     private fun cameraAttachmentUri(file:File)=FileProvider.getUriForFile(this,"$packageName.files",file)
     private val attachmentPreparing=MutableStateFlow(false)
-    private class VoicePrompt(val threadId:String,val branchId:String) {
+    private class VoiceTalk(val threadId:String,val branchId:String) {
+        var stage by mutableStateOf("idle")
+        var transcript by mutableStateOf("")
+        var reply by mutableStateOf("")
+    }
+
+    private class VoicePrompt(val threadId:String,val branchId:String,val talk:VoiceTalk?) {
         var stage by mutableStateOf("permission")
+    }
+
+    private var voiceTalk by mutableStateOf<VoiceTalk?>(null)
+    private var voiceTurn:Job?=null
+    private var replySpeech:Job?=null
+    private var spokenMessageId by mutableStateOf<String?>(null)
+
+    private fun currentVoiceRoom(threadId:String,branchId:String):Boolean =
+        lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)&&app.runs.selectionReady.value&&
+            app.runs.selectedThreadId.value==threadId&&app.runs.viewportState.value?.branchId==branchId
+
+    private fun stopReplySpeech(){
+        spokenMessageId=null
+        replySpeech?.cancel()
+        replySpeech=null
+    }
+
+    private fun closeVoiceTalk(){
+        voiceTalk=null
+        voiceTurn?.cancel()
+        voiceTurn=null
+        cancelVoicePrompt()
+        stopReplySpeech()
+    }
+
+    private fun voiceInputBlocked():Boolean {
+        val browser=com.user.localagent.integrations.AppWebAgent.get(this)
+        return approval.value!=null||browser.ownerLoginCard.value!=null||browser.ownerWebsiteLogin.value!=null
+    }
+
+    private fun sendVoiceTalk(talk:VoiceTalk){
+        val chat=app.runs
+        if(voiceTalk!==talk||talk.stage!="review"||!currentVoiceRoom(talk.threadId,talk.branchId)||
+            voiceInputBlocked()||chat.draft.value.isNotBlank()||app.chatAttachments.state.value.isNotEmpty()||
+            attachmentPreparing.value||chat.activeExecutions.value.any{it.threadId==talk.threadId})return
+        val runId=UUID.randomUUID().toString()
+        if(!chat.sendFromReact(talk.transcript,talk.threadId,talk.branchId,runId))return
+        talk.reply=""
+        talk.stage="thinking"
+        voiceTurn=lifecycleScope.launch {
+            try {
+                val store=app.repository.chat
+                val run=withTimeoutOrNull(12_000){store.observeChatRun(runId).filterNotNull().first()}
+                if(run==null){
+                    if(voiceTalk===talk){
+                        talk.stage="idle"
+                        talk.reply="전송 상태는 채팅에서 확인해 주세요."
+                    }
+                    return@launch
+                }
+                val ended=store.observeChatRun(runId).first {
+                    it==null||it.status !in setOf("queued","running","waiting_approval")
+                }
+                if(voiceTalk!==talk||!currentVoiceRoom(talk.threadId,talk.branchId))return@launch
+                if(ended==null||ended.threadId!=talk.threadId||ended.branchId!=talk.branchId)return@launch
+                val message=store.assistantForRun(ended.id)
+                val text=message?.let {ChatSpeechText.prepare(store.fullMessageText(it.id).take(32_000),900)}.orEmpty()
+                if(voiceTalk!==talk||!currentVoiceRoom(talk.threadId,talk.branchId))return@launch
+                talk.transcript=""
+                talk.reply=text.ifBlank { "작업 상태는 채팅에서 확인해 주세요." }
+                if(text.isNotBlank()&&!voiceInputBlocked()&&ended.status in setOf("completed","paused")){
+                    talk.stage="preparing"
+                    speakChatText(text){
+                        if(voiceTalk===talk&&talk.stage=="preparing")talk.stage="speaking"
+                    }
+                }
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){if(voiceTalk===talk)talk.reply="답변을 불러오지 못했어요. 채팅에서 확인해 주세요."}
+            finally {if(voiceTalk===talk&&talk.stage in setOf("thinking","preparing","speaking"))talk.stage="idle"}
+        }
+    }
+
+    private suspend fun speakChatText(text:String,onStarted:()->Unit={}){
+        try {
+            if(withTimeoutOrNull(120_000){app.phoneMedia.speak(text,preferSamsung=true,onStarted=onStarted)}==null)
+                status.value="답변 읽기 시간이 끝났어요."
+        }catch(_:TimeoutCancellationException){status.value="휴대폰의 한국어 음성을 시작하지 못했어요."}
+        catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){status.value="읽어주기를 시작하지 못했어요. 휴대폰의 한국어 음성 설정을 확인해 주세요."}
+    }
+
+    private fun toggleChatSpeech(message:ChatLine,threadId:String,branchId:String){
+        if(spokenMessageId==message.id){stopReplySpeech();return}
+        if(voiceTalk!=null||voicePrompt!=null||voiceInputBlocked()||!currentVoiceRoom(threadId,branchId))return
+        val text=ChatSpeechText.prepare(message.text,2600)
+        if(text.isBlank()){status.value="읽어줄 글이 없어요.";return}
+        stopReplySpeech()
+        spokenMessageId=message.id
+        replySpeech=lifecycleScope.launch {
+            try {speakChatText(text)}
+            finally {if(spokenMessageId==message.id)spokenMessageId=null}
+        }
     }
 
     private var voicePrompt by mutableStateOf<VoicePrompt?>(null)
@@ -111,15 +209,20 @@ class MainActivity : ComponentActivity() {
             if(granted) lifecycleScope.launch { lifecycle.withResumed { listenForPrompt(target) } }
             else {
                 voicePrompt=null
-                status.value="마이크를 허용하면 음성으로 입력할 수 있어요."
+                val notice="마이크를 허용하면 음성으로 입력할 수 있어요."
+                target.talk?.let{it.stage="idle";it.reply=notice}
+                status.value=notice
             }
         }
     }
 
-    private fun startVoicePrompt(threadId:String,branchId:String){
+    private fun startVoicePrompt(threadId:String,branchId:String,talk:VoiceTalk?=null){
         if(voicePrompt!=null||voicePermissionTarget!=null||!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))return
-        val target=VoicePrompt(threadId,branchId)
+        if(voiceInputBlocked())return
+        stopReplySpeech()
+        val target=VoicePrompt(threadId,branchId,talk)
         voicePrompt=target
+        talk?.stage="permission"
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED)
             listenForPrompt(target)
         else {
@@ -133,12 +236,24 @@ class MainActivity : ComponentActivity() {
         val chat=app.runs
         fun currentRoom()=chat.selectionReady.value&&chat.selectedThreadId.value==target.threadId&&
             chat.viewportState.value?.branchId==target.branchId
-        if(!currentRoom()){voicePrompt=null;return}
+        if(!currentRoom()||voiceInputBlocked()){
+            voicePrompt=null
+            target.talk?.stage="idle"
+            return
+        }
         target.stage="listening"
+        target.talk?.stage="listening"
         app.phoneMedia.startListening(onText={text->
             if(voicePrompt===target){
                 voicePrompt=null
                 if(currentRoom()&&lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)){
+                    if(target.talk!=null){
+                        if(voiceTalk===target.talk&&!voiceInputBlocked()){
+                            target.talk.transcript=text.trim()
+                            target.talk.stage="review"
+                        }
+                        return@startListening
+                    }
                     val draft=chat.draft.value
                     val separator=if(draft.isEmpty()||draft.last().isWhitespace())"" else " "
                     val combined=draft+separator+text.trim()
@@ -151,6 +266,7 @@ class MainActivity : ComponentActivity() {
         },onError={message->
             if(voicePrompt===target){
                 voicePrompt=null
+                target.talk?.let{it.stage="idle";it.reply=message}
                 if(currentRoom())status.value=message
             }
         })
@@ -159,6 +275,7 @@ class MainActivity : ComponentActivity() {
     private fun cancelVoicePrompt(){
         val target=voicePrompt?:return
         voicePrompt=null
+        target.talk?.stage="idle"
         if(target.stage!="permission")app.phoneMedia.cancelListening()
     }
 
@@ -253,10 +370,10 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
     }
     override fun onPause(){
-        if(voicePrompt?.stage!="permission")cancelVoicePrompt()
+        if(voicePrompt?.stage!="permission")closeVoiceTalk()
         super.onPause()
     }
-    override fun onStop(){cancelVoicePrompt();app.phoneMedia.cancelListening();RuntimeGate.foreground.set(false);app.scheduleIdleUnload();super.onStop()}
+    override fun onStop(){if(voicePrompt?.stage!="permission")closeVoiceTalk();app.phoneMedia.cancelListening();RuntimeGate.foreground.set(false);app.scheduleIdleUnload();super.onStop()}
     override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10);openCallReport(intent)}
 
     private fun openCallReport(intent:Intent) {
@@ -385,8 +502,7 @@ class MainActivity : ComponentActivity() {
         val currentBranchId=roomThreads.firstOrNull{it.id==selectedThreadId}?.activeBranchId.orEmpty()
         DisposableEffect(composerThreadId,currentBranchId,tab,chatScreenUnavailable,composerReady){
             onDispose {
-                val target=voicePrompt
-                if(target?.threadId==composerThreadId&&target.branchId==currentBranchId)cancelVoicePrompt()
+                closeVoiceTalk()
             }
         }
         var messageMenuId by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
@@ -394,6 +510,14 @@ class MainActivity : ComponentActivity() {
         var messageEdit by remember(composerThreadId,currentBranchId){mutableStateOf<String?>(null)}
         val answerStates by chat.answerStates.collectAsState()
         val pending by approval.collectAsState()
+        val voiceProtected=pending!=null||loginCard!=null||websiteLogin!=null||connectionsOpen
+        LaunchedEffect(voiceProtected){
+            if(voiceProtected){
+                stopReplySpeech()
+                cancelVoicePrompt()
+                if(voiceTalk?.stage in setOf("preparing","speaking"))voiceTurn?.cancel()
+            }
+        }
         val pendingActions by chat.pendingActions.collectAsState()
         var otherApprovalOpened by remember {mutableStateOf<String?>(null)}
         val messages by lines.collectAsState()
@@ -488,7 +612,15 @@ class MainActivity : ComponentActivity() {
                     }) }
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
                     put("voiceDraftEpoch",voiceDraftEpoch)
-                    voicePrompt?.takeIf{it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{put("voicePrompt",it.stage)}
+                    spokenMessageId?.let{put("spokenMessageId",it)}
+                    voiceTalk?.takeIf{it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{talk->
+                        put("voiceTalk",buildJsonObject {
+                            put("stage",talk.stage);put("transcript",talk.transcript);put("reply",talk.reply)
+                            put("blocked",voiceInputBlocked()||connectionsOpen||roomDraft.isNotBlank()||
+                                activeExecutions.any{it.threadId==composerThreadId}||attachments.isNotEmpty()||preparingAttachments)
+                        })
+                    }
+                    voicePrompt?.takeIf{it.talk==null&&it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{put("voicePrompt",it.stage)}
                     put("canCancelPreparation",preparingAttachments&&attachmentJobThreadId==composerThreadId||roomAuxiliary!=null)
                     put("otherApprovalPending",approvalThread!=null)
                     put("status",if(runForRoom!=null||activeExecutions.isEmpty())state else "다른 대화에서 작업 중")
@@ -586,7 +718,35 @@ class MainActivity : ComponentActivity() {
                                 character.save(characterSettings)
                             }
                             "draft"->chat.updateDraft(payload.getValue("text").jsonPrimitive.content,composerThreadId)
-                            "startVoicePrompt"->if(currentBranchId.isNotBlank())
+                            "toggleAnswerSpeech"->{
+                                val id=payload.getValue("messageId").jsonPrimitive.content
+                                visibleMessages.firstOrNull{it.id==id&&it.role=="assistant"&&it.text.isNotBlank()}
+                                    ?.takeIf{spokenMessageId==id||(!connectionsOpen&&activeExecutions.none{run->run.threadId==composerThreadId})}
+                                    ?.let{toggleChatSpeech(it,composerThreadId,currentBranchId)}
+                            }
+                            "openVoiceTalk"->if(voiceTalk==null&&voicePrompt==null&&!connectionsOpen&&
+                                !voiceInputBlocked()&&currentVoiceRoom(composerThreadId,currentBranchId)){
+                                stopReplySpeech()
+                                voiceTalk=VoiceTalk(composerThreadId,currentBranchId)
+                            }
+                            "closeVoiceTalk"->if(voiceTalk!=null)closeVoiceTalk()
+                            "listenVoiceTalk"->voiceTalk?.takeIf{!connectionsOpen&&it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{talk->
+                                when(talk.stage){
+                                    "listening"->{
+                                        talk.stage="finishing"
+                                        voicePrompt?.takeIf{it.talk===talk}?.stage="finishing"
+                                        app.phoneMedia.stopListening()
+                                    }
+                                    "idle","review","preparing","speaking"->if(!voiceInputBlocked()){
+                                        voiceTurn?.cancel()
+                                        talk.transcript=""
+                                        startVoicePrompt(composerThreadId,currentBranchId,talk)
+                                    }
+                                    else->Unit
+                                }
+                            }
+                            "sendVoiceTalk"->if(!connectionsOpen)voiceTalk?.let(::sendVoiceTalk)
+                            "startVoicePrompt"->if(currentBranchId.isNotBlank()&&voiceTalk==null&&!connectionsOpen)
                                 startVoicePrompt(composerThreadId,currentBranchId)
                             "finishVoicePrompt"->voicePrompt?.takeIf {
                                 it.threadId==composerThreadId&&it.branchId==currentBranchId&&it.stage=="listening"
