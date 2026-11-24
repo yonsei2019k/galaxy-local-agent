@@ -6,12 +6,16 @@ import android.view.Window
 import android.view.WindowManager
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
@@ -102,7 +106,8 @@ import kotlinx.coroutines.launch
 
 
 @Composable
-internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard,window:Window,modifier:Modifier=Modifier){
+internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard,window:Window,
+    modifier:Modifier=Modifier,keyboardOpen:Boolean=false){
     SecureBrowserWindow(window)
     val scope=rememberCoroutineScope()
     val keyboard=LocalSoftwareKeyboardController.current
@@ -110,6 +115,16 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     var account by remember {mutableStateOf("")}
     var password by remember {mutableStateOf("")}
     var submitting by remember {mutableStateOf(false)}
+    val accountTarget=remember {BringIntoViewRequester()}
+    val passwordTarget=remember {BringIntoViewRequester()}
+    var focusedField by remember {mutableIntStateOf(0)}
+    var cardHeight by remember {mutableIntStateOf(0)}
+    LaunchedEffect(keyboardOpen,focusedField,cardHeight){
+        if(keyboardOpen&&focusedField!=0){
+            withFrameNanos { }
+            if(focusedField==1)accountTarget.bringIntoView() else passwordTarget.bringIntoView()
+        }
+    }
     val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting
     fun submit(){
         if(!ready)return
@@ -125,7 +140,8 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             }
         }
     }
-    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+    Surface(modifier.onSizeChanged {cardHeight=it.height},shape=MaterialTheme.shapes.large,
+        color=MaterialTheme.colorScheme.surfaceContainerHigh){
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(8.dp)){
                 Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleLarge)
@@ -133,10 +149,12 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 Text(if(login.pairedPc)"입력한 내용은 연결한 내 PC를 거쳐 이 사이트에 제출돼요. 채팅에는 남지 않아요."
                     else "입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
                 loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
-                OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
+                OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
+                    .bringIntoViewRequester(accountTarget).onFocusChanged { if(it.isFocused)focusedField=1 },singleLine=true,
                     enabled=!submitting,label={Text("아이디")},
                     keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
-                OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth(),singleLine=true,
+                OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth()
+                    .bringIntoViewRequester(passwordTarget).onFocusChanged { if(it.isFocused)focusedField=2 },singleLine=true,
                     enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
                     keyboardActions=KeyboardActions(onGo={submit()}))
@@ -144,7 +162,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                     Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    if(!login.pairedPc)TextButton(onClick={agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
+                    if(!login.pairedPc)TextButton(onClick={keyboard?.hide();agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
                     TextButton(onClick={agent.cancelLoginCard(login.id)},enabled=!submitting){Text("취소")}
                 }
             }

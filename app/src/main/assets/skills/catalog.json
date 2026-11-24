@@ -599,9 +599,9 @@
       "title": "온라인 교육",
       "description": "맡긴 교육의 진도, 수료 요건과 이수증을 확인합니다.",
       "category": "automation",
-      "version": "4",
+      "version": "5",
       "asset": "skills/elearning-completion/SKILL.md",
-      "sha256": "01a04af638773de3935cb0672f48e79ec7310d46f4b91e458de16cf1dfa63d5d",
+      "sha256": "4468cb55fe8c254f9bec56208eb2785c61f1c253507e776c07823c4fabaf500f",
       "tools": [
         "open_app_browser_page",
         "read_app_browser_page",

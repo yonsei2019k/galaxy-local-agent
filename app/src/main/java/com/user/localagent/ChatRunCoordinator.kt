@@ -3465,7 +3465,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(parent.status!="paused"||parent.errorCode!="waiting_browser_auth")return@withLock true
             try {
                 if(record.observedEvent!=WakeEvent.OWNER_AUTH_DONE||System.currentTimeMillis()>=record.deadlineAt){
-                    app.repository.chat.writeRunAnswer(parent.id,"로그인 확인 시간이 끝났어요. 원래 요청은 대화에 남겨뒀어요.")
+                    status.value="로그인 확인 시간이 끝났어요. 원래 요청은 대화에 남겨뒀어요."
                     app.repository.chat.updateRun(parent.id,"paused",errorCode="browser_auth_resume_expired")
                     com.user.localagent.integrations.AppWebAgent.get(context).finishWork(parent.id,"paused","browser_auth_resume_expired")
                     return@withLock true

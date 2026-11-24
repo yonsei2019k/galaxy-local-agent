@@ -226,8 +226,10 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   }, [scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight])
 
   useLayoutEffect(() => {
-    if (website?.inputHeight) view.current?.querySelector('[data-native-website-slot]')?.scrollIntoView?.({ block: 'nearest' })
-  }, [website?.id, website?.inputHeight])
+    if (website?.inputHeight) view.current?.querySelector('[data-native-website-slot]')?.scrollIntoView?.({
+      block: website.keyboardOpen ? 'start' : 'nearest',
+    })
+  }, [website?.id, website?.inputHeight, website?.keyboardOpen])
 
   useLayoutEffect(() => {
     const pane = view.current

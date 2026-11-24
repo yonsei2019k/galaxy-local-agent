@@ -438,6 +438,8 @@ class MainActivity : ComponentActivity() {
                     work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
                 }
                 val websiteSlotId=inlineCredentials?.id?.toString()
+                val websiteKeyboardOpen=inlineCredentials!=null&&WindowInsets.ime.getBottom(
+                    androidx.compose.ui.platform.LocalDensity.current)>0
                 var websiteSlot by remember(websiteSlotId,composerThreadId,currentBranchId){
                     mutableStateOf<com.user.localagent.ui.NativeWebsiteSlot?>(null)
                 }
@@ -458,6 +460,7 @@ class MainActivity : ComponentActivity() {
                         put("working",visibleWebsiteWork?.working==true)
                         put("steps",JsonArray(visibleWebsiteWork?.steps.orEmpty().map(::JsonPrimitive)))
                         if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 400)
+                        if(websiteKeyboardOpen)put("keyboardOpen",true)
                     })
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
                     put("voiceDraftEpoch",voiceDraftEpoch)
@@ -634,9 +637,10 @@ class MainActivity : ComponentActivity() {
                     }
                 })}
                 if(inlineCredentials!=null)key(inlineCredentials.id){
-                    com.user.localagent.ui.NativeWebsiteOverlay(websiteSlot){
+                    com.user.localagent.ui.NativeWebsiteOverlay(websiteSlot,websiteKeyboardOpen){
                         if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
-                        else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,Modifier.fillMaxSize())
+                        else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,
+                            Modifier.fillMaxSize(),websiteKeyboardOpen)
                     }
                 }
                 }

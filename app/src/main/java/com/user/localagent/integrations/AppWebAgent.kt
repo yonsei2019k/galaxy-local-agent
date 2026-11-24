@@ -105,11 +105,16 @@ class AppWebAgent private constructor(private val context:Context) {
     private val loginDomKey="ziphapLogin"+token()
     private val loginScript by lazy {context.assets.open("app-web-login.js").bufferedReader().use{it.readText()}}
     private var cardOrigin:URI?=null
+    private var capturedLoginUrl:String?=null
     private var loginSubmitting=false
 
     fun switchToWebsiteLogin(id:Long){
-        val card=loginCard.value?.takeIf{it.id==id}?:return
-        val url=view().url?.takeIf{secureOrigin(it)==cardOrigin}?:return
+        val card=loginCard.value?.takeIf{it.id==id&&!it.pairedPc}?:return
+        val url=capturedLoginUrl?.takeIf{secureOrigin(it)==cardOrigin}
+        if(url==null){
+            loginStatus.value="원래 로그인 페이지를 찾지 못했어요. 이 요청에서 사이트를 새로 열어 주세요."
+            return
+        }
         websiteLogin.value=WebsiteLogin(card,url)
         presentation.value=null
         loginStatus.value="사이트 로그인 화면을 채팅 안에 열고 있어요."
@@ -139,8 +144,9 @@ class AppWebAgent private constructor(private val context:Context) {
         val request=websiteLogin.value?.takeIf{it.card.id==id}?:return false
         if(secureOrigin(request.url)!=cardOrigin)return false
         val browser=view()
-        val revision=beginNavigation(request.url)
-        val loaded=withTimeoutOrNull(20_000){navigation.first{!it.loading}}
+        val alreadyHere=browser.url==request.url&&!loading&&navigation.value.error==null
+        val revision=if(alreadyHere)navigationRevision else beginNavigation(request.url)
+        val loaded=if(alreadyHere)navigation.value else withTimeoutOrNull(20_000){navigation.first{!it.loading}}
         if(loaded==null&&revision==navigationRevision&&navigation.value.loading){
             navigationFailed("PAGE_TIMEOUT")
             browser.stopLoading()
@@ -156,9 +162,10 @@ class AppWebAgent private constructor(private val context:Context) {
             ready.await()
             true
         }==true
-        loginStatus.value=if(drawn)"사이트에서 직접 로그인한 뒤 확인 버튼을 눌러 주세요."
+        val readable=drawn||(!loading&&navigation.value.error==null&&loginFormPresent()==true)
+        loginStatus.value=if(readable)"사이트에서 직접 로그인한 뒤 확인 버튼을 눌러 주세요."
             else "사이트 화면의 표시를 확인하지 못했어요. 다시 열거나 입력창으로 돌아가세요."
-        return drawn
+        return readable
     }
 
     private val loginProcess = token()
@@ -254,6 +261,7 @@ class AppWebAgent private constructor(private val context:Context) {
             websiteLogin.value=null
             loginCard.value=null
             cardOrigin=null
+            capturedLoginUrl=null
             return true
         }finally{loginSubmitting=false}
     }
@@ -261,7 +269,7 @@ class AppWebAgent private constructor(private val context:Context) {
     internal suspend fun websiteLoginFormPresent(id:Long):Boolean? {
         if(websiteLogin.value?.card?.id!=id||navigation.value.error!=null||navigation.value.loading||
             loading||secureOrigin(view().url)!=cardOrigin)return null
-        return loginFormPresent()
+        return loginFormPresent()?.let { if(!it&&isHallymLoginPage(view().url))null else it }
     }
 
     fun cancelLoginCard(id:Long){
@@ -272,6 +280,7 @@ class AppWebAgent private constructor(private val context:Context) {
         websiteLogin.value=null
         loginCard.value=null
         cardOrigin=null
+        capturedLoginUrl=null
         pendingPcLogin=null
         expiredLoginBinding=null
         loginStatus.value="로그인을 취소했어요. 현재 작업은 멈춰 있습니다."
@@ -293,6 +302,12 @@ class AppWebAgent private constructor(private val context:Context) {
                 loginStatus.value="로그인 정보를 제출했어요. 다음 페이지를 확인하고 있어요."
                 if(!awaitLoginReadback(id,origin)){
                     loginStatus.value=loginReadbackStatus()
+                    // The previous binding is consumed by the submit. Prepare a fresh one on the same site for an owner retry.
+                    val sameForm=loginCard.value?.id==id && secureOrigin(view().url)==origin && !loading &&
+                        loginFormPresent()==true
+                    if(sameForm)loginDom("capture",id,origin)
+                    com.user.localagent.FailureLog.record(context,"browser_owner_login",null,
+                        navigation.value.error?:if(sameForm)"SITE_FORM_REMAINED" else "RESULT_NOT_CONFIRMED")
                     return false
                 }
                 val continued=loginCompletion?.complete(true)==true
@@ -300,11 +315,13 @@ class AppWebAgent private constructor(private val context:Context) {
                 val queued=notifyGoalAuth(id)
                 loginCard.value=null
                 cardOrigin=null
+                capturedLoginUrl=null
                 loginStatus.value=if(continued||queued)"로그인 확인 · 원래 요청을 이어갈 준비를 하고 있어요."
                     else "로그인 화면에서 이동했어요. 다음 작업을 알려 주세요."
                 return true
             }
             loginStatus.value="현재 로그인 양식에 제출하지 못했어요. 사이트에서 직접 로그인할 수 있어요."
+            com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"FORM_SUBMIT_NOT_CONFIRMED")
             return false
         }finally{loginSubmitting=false}
     }
@@ -350,7 +367,8 @@ class AppWebAgent private constructor(private val context:Context) {
         delay(400)
         while(loginCard.value?.id==id){
             if(navigation.value.error!=null || secureOrigin(view().url)!=origin)return@withTimeoutOrNull false
-            if(!loading && !navigation.value.loading && loginFormPresent()==false)return@withTimeoutOrNull true
+            if(!loading && !navigation.value.loading && !isHallymLoginPage(view().url) &&
+                loginFormPresent()==false)return@withTimeoutOrNull true
             delay(350)
         }
         false
@@ -361,9 +379,16 @@ class AppWebAgent private constructor(private val context:Context) {
             return "로그인 정보를 제출했지만 다음 페이지를 열지 못했어요. 작업은 일시정지됐어요."
         return when(loginFormPresent()){
             true->"아직 사이트 로그인 화면이에요. 로그인 상태를 확인해 주세요."
-            false->"로그인 화면에서 이동했어요. 이어서 할 일을 보내 주세요."
+            false->if(isHallymLoginPage(view().url))"한림에듀가 아직 로그인 처리를 마치지 않았어요. 사이트 화면에서 응답을 확인해 주세요."
+                else "로그인 화면에서 이동했어요. 이어서 할 일을 보내 주세요."
             else->"로그인 결과를 확인하지 못했어요. 작업은 일시정지됐어요."
         }
+    }
+
+    private fun isHallymLoginPage(url:String?):Boolean {
+        val target=url?.let {runCatching {URI(it)}.getOrNull()}?:return false
+        return target.host.equals("hallymedu.co.kr",ignoreCase=true)&&
+            target.path.orEmpty().startsWith("/new_home/My/login",ignoreCase=true)
     }
 
     private suspend fun loginFormPresent():Boolean? =
@@ -754,6 +779,7 @@ class AppWebAgent private constructor(private val context:Context) {
         try {
             if(requiredOrigin==loginOrigin&&loginDom("capture",id,loginOrigin)){
                 cardOrigin=loginOrigin
+                capturedLoginUrl=view().url?.takeIf{secureOrigin(it)==loginOrigin}
                 presentation.value=null
                 loginCard.value=LoginCard(id,loginOrigin.host)
                 loginStatus.value="사이트에 로그인하면 작업을 이어갈 수 있어요."
@@ -784,7 +810,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 }
             return page
         } finally {
-            if(!keepCard){websiteLogin.value=null;loginCard.value=null;cardOrigin=null}
+            if(!keepCard){websiteLogin.value=null;loginCard.value=null;cardOrigin=null;capturedLoginUrl=null}
             loginCompletion=null
             loginWait.value=null
         }

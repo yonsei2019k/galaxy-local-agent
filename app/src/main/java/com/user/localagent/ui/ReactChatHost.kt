@@ -26,15 +26,17 @@ internal data class NativeWebsiteSlot(val frame:Rect,val visible:Rect)
 
 /** Compose retains ownership of sensitive fields. The page supplies only their on-screen rectangle. */
 @Composable
-internal fun NativeWebsiteOverlay(slot:NativeWebsiteSlot?,content:@Composable ()->Unit) {
+internal fun NativeWebsiteOverlay(slot:NativeWebsiteSlot?,fitVisibleHeight:Boolean,content:@Composable ()->Unit) {
     Layout(content={
         Layout(content=content,modifier=Modifier.clipToBounds()){ children,_ ->
             val frame=slot?.frame ?: Rect.Zero
             val visible=slot?.visible ?: Rect.Zero
+            val height=if(fitVisibleHeight)visible.height else frame.height
+            val top=if(fitVisibleHeight)0 else (frame.top-visible.top).roundToInt()
             val card=children.single().measure(Constraints.fixed(frame.width.roundToInt().coerceIn(0,4000),
-                frame.height.roundToInt().coerceIn(0,4000)))
+                height.roundToInt().coerceIn(0,4000)))
             layout(visible.width.roundToInt().coerceIn(0,4000),visible.height.roundToInt().coerceIn(0,4000)) {
-                card.place((frame.left-visible.left).roundToInt(),(frame.top-visible.top).roundToInt())
+                card.place((frame.left-visible.left).roundToInt(),top)
             }
         }
     },measurePolicy={ children, available ->
