@@ -11,13 +11,15 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
-import java.nio.file.FileAlreadyExistsException
+import java.nio.file.StandardCopyOption
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.UUID
 
 /** Public, cookie-free retrieval. Only verified originals become visible in the artifact directory. */
 internal object PublicPdfArtifact {
+    private val publicationLock = Any()
+
     suspend fun save(directory: File, url: String,
         transport: PublicWebTransport = PinnedPublicHttpsTransport(pdf=true),
         publish: suspend (() -> Unit) -> Unit = { commit -> commit() },
@@ -48,16 +50,14 @@ internal object PublicPdfArtifact {
             }
             verify(temporary)
             currentCoroutineContext().ensureActive()
-            var exists = false
             publish {
-                try {
-                    Files.createLink(target.toPath(), temporary.toPath())
-                } catch (_: FileAlreadyExistsException) {
-                    exists = true
+                // The app's document tools run in one process. Publish on the same filesystem
+                // under a lock: Android can deny hard links even inside an app-owned directory.
+                synchronized(publicationLock) {
+                    if (!target.exists()) Files.move(temporary.toPath(),target.toPath(),StandardCopyOption.ATOMIC_MOVE)
                 }
             }
-            // A concurrent download can publish identical bytes. Check off the UI thread.
-            if (exists) verify(target)
+            verify(target)
             return buildJsonObject {
                 put("status","ok"); put("fileName",target.name); put("mimeType","application/pdf"); put("format","pdf")
                 put("bytes",bytes.size); put("pages",pages); put("sha256",digest.joinToString("") { "%02x".format(it) })
