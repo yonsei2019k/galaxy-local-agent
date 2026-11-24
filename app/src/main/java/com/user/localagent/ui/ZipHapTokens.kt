@@ -2,13 +2,21 @@
 package com.user.localagent.ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/** One layer of a drop shadow: vertical offset, blur radius and ARGB color (alpha baked in). */
+data class ZipShadow(val offsetY: Dp, val blur: Dp, val color: Color)
+
 object ZipHapTokens {
-    val Bg = Color(0xFFF7F8FC)
+    val Bg = Color(0xFFF3F4F8)
     val Surface = Color(0xFFFFFFFF)
+    val SurfaceSunken = Color(0xFFF1F3F7)
+    val Divider = Color(0xFFEEF0F4)
     val Text = Color(0xFF171B33)
+    val TextSub = Color(0xFF5B6178)
+    val TextFaint = Color(0xFF7B8199)
     val Muted = Color(0xFF5E6480)
     val Line = Color(0xFFE3E6EF)
     val Cobalt = Color(0xFF3355F0)
@@ -26,6 +34,11 @@ object ZipHapTokens {
     val Lilac = Color(0xFF7C4DEB)
     val LilacText = Color(0xFF6D3FE0)
     val LilacSoft = Color(0xFFF0E9FF)
+    val ShadowCard = listOf(ZipShadow(1.dp, 2.dp, Color(0x0A171B33)), ZipShadow(6.dp, 20.dp, Color(0x0D171B33)))
+    val ShadowSheet = listOf(ZipShadow(-8.dp, 32.dp, Color(0x1F171B33)))
+    val ShadowFloat = listOf(ZipShadow(4.dp, 14.dp, Color(0x29171B33)), ZipShadow(1.dp, 3.dp, Color(0x14171B33)))
+    const val FontUi = "'SUIT Variable', 'SUIT', 'Pretendard', system-ui, sans-serif"
+    const val FontDisplay = "'Jua', 'SUIT Variable', sans-serif"
     val Space1 = 4.dp
     val Space2 = 8.dp
     val Space3 = 12.dp
@@ -34,16 +47,31 @@ object ZipHapTokens {
     val Space6 = 24.dp
     val Space7 = 32.dp
     val Space8 = 40.dp
+    val SpaceSection = 24.dp
+    val Gutter = 16.dp
     val FsCaption = 12.sp
     val FsSmall = 13.sp
     val FsBody = 15.sp
     val FsSubtitle = 17.sp
     val FsTitle = 20.sp
     val FsScreen = 24.sp
-    val RadiusCard = 16.dp
-    val RadiusControl = 12.dp
-    val RadiusSheet = 24.dp
+    val FsHero = 28.sp
+    val RadiusCard = 20.dp
+    val RadiusControl = 16.dp
+    val RadiusChip = 12.dp
+    val RadiusSheet = 28.dp
     val RadiusPill = 999.dp
+    val RadiusTile = 12.dp
+    val ControlHeight = 52.dp
+    val RowMinHeight = 56.dp
+    val IconTile = 40.dp
+    val TouchMin = 44.dp
+    const val FwRegular = 400
+    const val FwMedium = 500
+    const val FwBold = 700
+    const val LhBody = 1.6f
+    const val LhTight = 1.3f
+    const val LsTight = -0.01f
     const val MotionFastMs = 120
     const val MotionBaseMs = 220
     const val MotionSlowMs = 360
