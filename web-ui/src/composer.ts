@@ -5,6 +5,11 @@ export function isLiveTaskPhase(phase: string) {
   return phase === 'running' || phase === 'waiting_resource' || phase === 'approval' || phase === 'waiting_approval'
 }
 
+/** Work the person is waiting on: running, queued, waiting for an approval, a resource or a timed goal. */
+export function isWorkingTaskPhase(phase: string) {
+  return isLiveTaskPhase(phase) || phase === 'queued' || phase === 'waiting_goal'
+}
+
 export function runControls(snapshot: Snapshot | null) {
   const target = runTarget(snapshot)
   const task = target && snapshot?.busy

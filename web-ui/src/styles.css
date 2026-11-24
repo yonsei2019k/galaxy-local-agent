@@ -166,30 +166,8 @@ svg { width: 20px; height: 20px; flex: none; }
 .rename-thread-form button { flex: none; white-space: nowrap; }
 .menu-button { color: var(--ink); margin-inline-end: -4px; }
 .topbar-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-subtitle); font-weight: 700; letter-spacing: -.02em; }
-
-.model-group { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; min-width: 0; max-width: 60%; }
-.model-control { position: relative; display: inline-grid; min-width: 0; }
-.model-control > svg { position: absolute; top: 50%; left: 12px; width: 16px; height: 16px; transform: translateY(-50%); color: var(--accent); pointer-events: none; }
-.model-control > .model-chevron { left: auto; right: 11px; width: 13px; color: var(--muted); }
-.model-control select {
-  appearance: none;
-  width: 100%;
-  min-width: 0;
-  min-height: var(--tap);
-  max-width: min(34vw, 250px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 6px 30px 6px 34px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface-soft);
-  font-size: 12.5px;
-  font-weight: 650;
-}
-.model-control select:not(:disabled):hover { border-color: var(--accent); }
-.active-model { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; /* kept at pre-token size */ }
-/* The dot is a tiny clasp bead: it only says which model is set, never that work is happening. */
-.active-model span { display: inline-block; width: 7px; height: 7px; margin-inline-end: 6px; border-radius: 50%; background: var(--accent); vertical-align: .06em; }
+.topbar-heading { display: flex; flex-direction: column; flex: 0 1 auto; min-width: 0; }
+.topbar-actions { display: flex; align-items: center; flex: none; }
 
 /* Sidebar ------------------------------------------------------------------------------------------- */
 .mobile-sidebar {
@@ -454,8 +432,6 @@ svg { width: 20px; height: 20px; flex: none; }
 }
 
 @media (max-width: 620px) {
-  .model-group { flex-wrap: wrap; justify-content: end; gap: 2px; }
-  .active-model { order: 2; max-width: 100%; }
   .composer-tools { flex-wrap: wrap; }
   .composer-tools > .composer-actions:last-child { margin-inline-start: auto; }
   .composer-actions { gap: 4px; }
@@ -522,7 +498,6 @@ svg { width: 20px; height: 20px; flex: none; }
 
 /* Top bar on white; the model dot says "set and ready" in mint. */
 .topbar { background: var(--surface); }
-.active-model span { background: var(--mint); }
 
 /* Collaboration: each party keeps its own bright color. */
 .collab-message--claude { border-color: var(--lilac-soft); }
@@ -545,11 +520,6 @@ svg { width: 20px; height: 20px; flex: none; }
 }
 .rename-thread:not(:disabled):hover { background: var(--accent-soft); color: var(--accent); }
 @media (max-width: 620px) {
-  .model-group { flex: 0 1 auto; max-width: 49%; }
-  .model-control select { max-width: min(32vw, 132px); padding: 4px 24px 4px 29px; font-size: 12px; }
-  .model-control > svg { left: 10px; width: 14px; height: 14px; }
-  .model-control > .model-chevron { right: 9px; width: 11px; }
-  .active-model { font-size: 10.5px; }
   .rename-thread { position: relative; width: 36px; padding: 0; font-size: 0; }
   .rename-thread::before { content: "✎"; font-size: 17px; line-height: 1; color: currentColor; }
   .rename-thread::after { content: ""; position: absolute; inset: -4px; }  /* 44px hit area */
@@ -596,24 +566,6 @@ svg { width: 20px; height: 20px; flex: none; }
 .bottom-nav button[aria-current="page"] { color: var(--cobalt-text); font-weight: 750; }
 .bottom-nav svg { box-sizing: content-box; width: 18px; height: 18px; padding: 3px 11px; border-radius: var(--radius-pill); }
 .bottom-nav button[aria-current="page"] svg { background: var(--accent-soft); }
-.current-work {
-  display: flex;
-  align-items: center;
-  align-self: start;
-  justify-self: stretch;
-  gap: 8px;
-  min-width: 0;
-  min-height: var(--tap);
-  padding-inline: var(--pad);
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: var(--canvas);
-  color: var(--cobalt-text);
-  font: inherit;
-  font-size: 13px;
-}
-.current-work span { flex: 1; overflow: hidden; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
-.current-work:hover { background: var(--accent-soft); }
 .reply-needed {
   max-width: var(--content-max, 46rem);
   margin-inline: auto;
@@ -622,6 +574,4 @@ svg { width: 20px; height: 20px; flex: none; }
   color: var(--muted);
   font-size: 13px;
 }
-.current-work svg { width: 16px; height: 16px; flex: none; }
-.conversation-wrap:has(.current-work) { grid-template-rows: auto minmax(0, 1fr); }
 @media (min-width: 940px), (max-height: 480px) { .bottom-nav { display: none; } }

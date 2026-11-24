@@ -136,7 +136,7 @@ describe('native conversation', () => {
     const active = running({ singleConversation: true, messages: [{ id: 'u', role: 'user', text: '강의 이어듣기' }],
       websiteCard: { id: 'run-a', runId: 'run-a', messageId: 'u', title: '한림에듀', status: '강의실 확인 중', steps: [], working: true } })
     snapshot(active)
-    expect(host.querySelector('.current-work')?.textContent).toContain('한림에듀')
+    expect(host.querySelector('.header-work')?.textContent).toContain('한림에듀')
     expect(host.querySelectorAll('main .work-card')).toHaveLength(1)
     expect(host.querySelector('main .website-work-card [role="progressbar"]')).not.toBeNull()
     snapshot({ ...active, busy: false, activeRunId: null, websiteCard: { ...active.websiteCard!, working: false, status: '화면 전환 확인 필요' } })
@@ -157,7 +157,7 @@ describe('native conversation', () => {
     act(() => { shortcut.click() })
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'settings' } })
     snapshot({ ...running(), singleConversation: true })
-    expect(host.querySelector('.current-work')?.textContent).toContain('테스트 작업')
+    expect(host.querySelector('.header-work')?.textContent).toContain('테스트 작업')
     snapshot({ ...base, singleConversation: true, inlineLogin: true })
     expect(host.querySelector('.bottom-nav')).toBeNull()
   })
@@ -301,7 +301,8 @@ describe('native conversation', () => {
     expect(input().value).toBe('B 전용 초안')
     click('설정')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'navigate', payload: { panel: 'settings' } })
-    click('첨부 추가')
+    click('더하기 메뉴')
+    click('파일 첨부')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'attach', payload: {} })
   })
 
@@ -639,6 +640,110 @@ describe('native conversation', () => {
     expect(pane.scrollTop).toBe(240)
     click('최근 메시지로 이동')
     expect(pane.scrollTop).toBe(1_402)
+  })
+
+  describe('header work line and composer sheet', () => {
+    const scrolled: Array<{ id: string; options: unknown }> = []
+    beforeEach(() => {
+      scrolled.length = 0
+      Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true,
+        value(this: Element, options?: unknown) { scrolled.push({ id: this.id, options }) } })
+    })
+    afterEach(() => { delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView })
+
+    const message: Snapshot['messages'][number] = { id: 'u1', role: 'user', text: '자료를 정리해줘.' }
+
+    it('headerShowsSingleTaskLineAndScrolls', () => {
+      mount()
+      snapshot({ ...running(), singleConversation: true, messages: [message],
+        tasks: [{ id: 'run-a', messageId: 'u1', phase: 'running', label: '자료 정리', detail: '', canCancel: true }] })
+      const line = host.querySelector<HTMLButtonElement>('.topbar .header-work')
+      expect(line?.tagName).toBe('BUTTON')
+      expect(line?.textContent).toBe('자료 정리 · 진행 중')
+      expect(host.querySelector('.current-work')).toBeNull()
+      act(() => { line?.click() })
+      expect(scrolled).toEqual([{ id: 'work-run-a', options: { block: 'nearest' } }])
+      snapshot({ ...base, singleConversation: true, messages: [message],
+        tasks: [{ id: 'run-a', messageId: 'u1', phase: 'completed', label: '자료 정리', detail: '', canCancel: false }] })
+      expect(host.querySelector('.header-work')).toBeNull()
+    })
+
+    it('headerShowsTaskCountForTwoLiveTasks', () => {
+      mount()
+      snapshot({ ...running(), singleConversation: true, messages: [message], tasks: [
+        { id: 'l1', messageId: 'u1', phase: 'running', label: '첫째 작업', detail: '', canCancel: true },
+        { id: 'l2', messageId: 'u1', phase: 'queued', label: '둘째 작업', detail: '', canCancel: true },
+        { id: 'p1', messageId: 'u1', phase: 'paused', label: '멈춘 작업', detail: '', canCancel: true },
+      ] })
+      const line = host.querySelector<HTMLButtonElement>('.header-work')
+      expect(line?.textContent).toBe('작업 2개')
+      act(() => { line?.click() })
+      expect(scrolled).toEqual([{ id: 'work-l1', options: { block: 'nearest' } }])
+      snapshot({ ...base, singleConversation: true, messages: [message], tasks: [
+        { id: 'w1', messageId: 'u1', phase: 'waiting_goal', label: '예약 작업', detail: '', canCancel: true }] })
+      expect(host.querySelector('.header-work')?.textContent).toBe('예약 작업 · 재개 대기')
+    })
+
+    it('modelChoiceMovedIntoComposerSheetAndSendsSelectModel', () => {
+      mount()
+      snapshot(running({ singleConversation: true, activeModelLabel: '테스트 모델' }))
+      expect(host.querySelector('.topbar select')).toBeNull()
+      expect(host.querySelector('[aria-label="다음 답변 방식"]')).toBeNull()
+      expect(host.querySelector('.topbar .active-model')).toBeNull()
+      expect(host.querySelector('.composer-sheet input[type="radio"]')).toBeNull()
+      click('더하기 메뉴')
+      const radios = [...host.querySelectorAll<HTMLInputElement>('.composer-sheet input[type="radio"]')]
+      expect(radios.map(radio => radio.closest('label')?.textContent)).toEqual(['자동 선택', '테스트 모델'])
+      expect(radios.map(radio => radio.checked)).toEqual([true, false])
+      expect(host.querySelector('.composer-sheet')?.textContent).toContain('실행 중: 테스트 모델')
+      act(() => { radios[1].click() })
+      expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-a', branchId: 'branch-a',
+        action: 'selectModel', payload: { id: 'local-test' } })
+      snapshot(running({ singleConversation: true, activeModelLabel: '테스트 모델', modelId: 'local-test', modelLabel: '테스트 모델' }))
+      expect([...host.querySelectorAll<HTMLInputElement>('.composer-sheet input[type="radio"]')].map(radio => radio.checked)).toEqual([false, true])
+      click('파일 첨부')
+      expect(requests().at(-1)).toMatchObject({ action: 'attach', payload: {} })
+    })
+
+    it('composerHidesGenericStatusButKeepsVoiceAndLengthNotes', () => {
+      mount()
+      snapshot({ ...base, status: '작업을 진행하고 있어요', voiceDraftEpoch: 0 })
+      const status = () => host.querySelector('.composer-status')?.textContent
+      expect(status()).toBe('')
+      snapshot({ ...base, status: '작업을 진행하고 있어요', voiceDraftEpoch: 0, voicePrompt: 'listening' })
+      expect(status()).toBe('듣고 있어요. 다 말했으면 마이크를 다시 누르세요.')
+      snapshot({ ...base, status: '작업을 진행하고 있어요', voiceDraftEpoch: 0 })
+      edit('가'.repeat(12_001))
+      expect(status()).toBe('12,000자를 넘는 요청은 파일로 첨부해 주세요.')
+      edit('짧은 글')
+      expect(status()).toBe('')
+      postMessage.mockImplementation(() => { throw new Error('bridge down') })
+      act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+      expect(status()).toBe('앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.')
+    })
+
+    it('composerShowsDisconnectedNoteWithoutNativeBridge', () => {
+      mount(false)
+      expect(host.querySelector('.composer-status')?.textContent).toBe('Android 앱에서 대화를 열어 주세요.')
+    })
+
+    it('announcesATaskEndingOnceInTheConversationLiveRegion', () => {
+      mount()
+      const region = () => host.querySelector('.conversation-wrap > .sr-only[role="status"]')?.textContent
+      const task = (phase: string, id = 'run-a', label = '자료 정리') => ({ id, phase, label, detail: '', canCancel: false })
+      snapshot({ ...base, tasks: [task('completed', 'old', '예전 작업')] })
+      expect(region()).toBe('')
+      snapshot({ ...running(), tasks: [task('running')] })
+      expect(region()).toBe('자료 정리')
+      snapshot({ ...base, tasks: [task('completed')] })
+      expect(region()).toBe('자료 정리 응답 종료')
+      snapshot({ ...base, tasks: [task('completed')], status: '다시 받은 같은 상태' })
+      expect(region()).toBe('자료 정리 응답 종료')
+      snapshot({ ...running({ activeRunId: 'run-b' }), tasks: [task('completed'), task('running', 'run-b', '다음 작업')] })
+      expect(region()).toBe('다음 작업')
+      snapshot({ ...base, tasks: [task('completed'), task('failed', 'run-b', '다음 작업')] })
+      expect(region()).toBe('다음 작업 실패')
+    })
   })
 })
 

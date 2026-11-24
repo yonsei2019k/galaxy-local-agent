@@ -110,8 +110,8 @@ export default function App() {
     }
   }
 
-  const status = !connected ? 'Android 앱에서 대화를 열어 주세요.' : connectionError
-    ? '앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.' : snapshot?.status ?? ''
+  const connectionNote = !connected ? 'Android 앱에서 대화를 열어 주세요.' : connectionError
+    ? '앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.' : ''
   const sidebarProps: Parameters<typeof Sidebar>[0] = {
     snapshot,
     enabled,
@@ -129,8 +129,7 @@ export default function App() {
       <div className="main-column" hidden={collaborationOpen}>
         <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
-          onOfficeProfile={() => setOfficeProfileOpen(open => !open)}
-          onSelectModel={id => request({ action: 'selectModel', payload: { id } })} />
+          onOfficeProfile={() => setOfficeProfileOpen(open => !open)} />
         {officeProfileOpen && snapshot?.officeSelected === true && <OfficeProfileForm key={`office-profile:${conversationKey}`} initial={snapshot.officeProfile ?? {}} enabled={enabled}
           onSave={entries => request({ action: 'saveOfficeProfile', payload: { entries } })}
           onClear={() => request({ action: 'clearOfficeProfile' })} onClose={() => setOfficeProfileOpen(false)} />}
@@ -146,7 +145,7 @@ export default function App() {
             if (!draft.trim() && !snapshot?.inlineLogin) editDraft(text)
           }} />
         {snapshot?.browserLoginStatus && <div className="browser-login-status" role="status">{snapshot.browserLoginStatus}</div>}
-        {snapshot?.inlineLogin !== true && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} status={status}
+        {snapshot?.inlineLogin !== true && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} connectionNote={connectionNote}
           onDraft={editDraft} onSubmit={action => {
             if (!snapshot?.ready || pending) return
             if (action === 'steer') {
@@ -161,7 +160,8 @@ export default function App() {
               if (!request({ action, payload: { text: draft, submitToken } })) return
             }
             dispatch({ type: 'submit', scope: snapshot, text: draft, kind: action })
-          }} onAttach={() => request({ action: 'attach' })} onStop={() => {
+          }} onAttach={() => request({ action: 'attach' })}
+          onSelectModel={id => request({ action: 'selectModel', payload: { id } })} onStop={() => {
             const target = runControls(snapshot).stop
             if (target) request({ action: 'stop', payload: target })
           }} onRemoveAttachment={id => request({ action: 'removeAttachment', payload: { id } })}

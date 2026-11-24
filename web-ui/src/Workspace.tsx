@@ -8,6 +8,8 @@ import { CharacterPicker } from './character/CharacterPicker'
 import { useCharacter } from './character/useCharacter'
 import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
+import { ComposerSheet } from './ComposerSheet'
+import { HeaderWorkLine } from './work/HeaderWorkLine'
 
 const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'capabilities', label: '할 수 있는 일', icon: 'activity' },
@@ -105,18 +107,14 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onRename, onOfficeProfile }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOfficeProfile }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
   onManage(): void
-  onSelectModel(id: string): void
   onRename(title: string): boolean
   onOfficeProfile?(): void
 }) {
-  const nextModel = snapshot?.models.find(model => model.id === snapshot.modelId)
-  const selectedLabel = snapshot?.modelLabel || nextModel?.label || '답변 방식'
-  const activeLabel = runControls(snapshot).active ? snapshot?.activeModelLabel : undefined
   const currentThread = snapshot?.threads.find(thread => thread.selected)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [character, setCharacter] = useCharacter()
@@ -132,7 +130,10 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
           </button>
           <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={() => setPickerOpen(false)} />
         </>}
-        <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
+        <div className="topbar-heading">
+          <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
+          <HeaderWorkLine snapshot={snapshot} />
+        </div>
         {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={onOfficeProfile}>직원 정보</button>}
         {snapshot?.singleConversation !== true && currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
@@ -148,18 +149,8 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
           <button type="button" onClick={() => setTitleDraft(null)}>취소</button>
         </form>}
       </div>
-      <div className="model-group">
+      <div className="topbar-actions">
         <button type="button" className="icon-button" aria-label="이 대화" title="이 대화" disabled={!enabled} onClick={onManage}><Icon name="chat" /></button>
-        {activeLabel && <span className="active-model" title={`실행 중인 모델 ${activeLabel}`}><span />{activeLabel}</span>}
-        <label className="model-control" title={`다음 답변 방식 ${selectedLabel}`}>
-          <Icon name="chip" />
-          <select value={nextModel?.id ?? ''} disabled={!enabled || !snapshot?.models.length}
-            aria-label="다음 답변 방식" onChange={event => onSelectModel(event.currentTarget.value)}>
-            {!nextModel && <option value="" disabled>{selectedLabel}</option>}
-            {snapshot?.models.map(model => <option key={model.id} value={model.id}>{model.id === nextModel?.id ? selectedLabel : model.label}</option>)}
-          </select>
-          <Icon className="model-chevron" name="down" />
-        </label>
       </div>
     </header>
   )
@@ -168,16 +159,18 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
 const MAX_REQUEST_LENGTH = 12_000
 const MAX_STEER_LENGTH = 4_000
 
-export function Composer({ snapshot, enabled, draft, pending, status, onDraft, onSubmit, onAttach, onStop, onRemoveAttachment,
+export function Composer({ snapshot, enabled, draft, pending, connectionNote, onDraft, onSubmit, onAttach, onSelectModel, onStop, onRemoveAttachment,
   onCancelPreparation, onOpenWaitingApproval, onVoice, onCancelVoice }: {
   snapshot: Snapshot | null
   enabled: boolean
   draft: string
   pending: boolean
-  status: string
+  /** Only a problem reaching the app; ordinary work status is shown by the header work line. */
+  connectionNote: string
   onDraft(text: string): void
   onSubmit(kind: 'send' | 'steer'): void
   onAttach(): void
+  onSelectModel(id: string): void
   onVoice(): void
   onCancelVoice(): void
   onStop(): void
@@ -186,6 +179,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   onOpenWaitingApproval(): void
 }) {
   const statusId = useId()
+  const [sheetOpen, setSheetOpen] = useState(false)
   const hasText = draft.trim().length > 0
   const attachments = snapshot?.ready ? snapshot.attachments ?? [] : []
   const controls = runControls(snapshot)
@@ -201,8 +195,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
   const sendLabel = busy ? '다음에 보내기' : '보내기'
   const voiceStatus = voice === 'listening' ? '듣고 있어요. 다 말했으면 마이크를 다시 누르세요.'
     : voice === 'finishing' ? '음성을 글로 바꾸고 있어요.' : voice === 'permission' ? '마이크 권한을 확인하고 있어요.' : ''
-  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' :
-    snapshot?.websiteCard?.runId && (busy || status === '작업 일시정지') ? '' : status)
+  const note = voiceStatus || (tooLong ? '12,000자를 넘는 요청은 파일로 첨부해 주세요.' : connectionNote)
 
   return (
     <footer className="composer-footer">
@@ -234,7 +227,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
           </div>
           <div className="composer-tools">
             <div className="composer-actions">
-              {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="첨부 추가" title="첨부 추가" onClick={onAttach}><Icon name="plus" /></button>}
+              {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="더하기 메뉴" title="더하기 메뉴" aria-haspopup="dialog" onClick={() => setSheetOpen(true)}><Icon name="plus" /></button>}
               {snapshot?.voiceDraftEpoch !== undefined && <button type="button" className="icon-button voice-button"
                 disabled={!enabled || pending || tooLong || voice === 'permission' || voice === 'finishing'}
                 aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={onVoice}>
@@ -256,6 +249,9 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
             </div>
           </div>
         </form>
+        <ComposerSheet open={sheetOpen && !voiceBusy} enabled={enabled} snapshot={snapshot}
+          activeLabel={controls.active ? snapshot?.activeModelLabel : undefined}
+          onAttach={onAttach} onSelectModel={onSelectModel} onClose={() => setSheetOpen(false)} />
       </div>
     </footer>
   )

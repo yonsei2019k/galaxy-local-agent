@@ -2,12 +2,12 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useSt
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
 import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
-import { isLiveTaskPhase } from './composer'
+import { isLiveTaskPhase, isWorkingTaskPhase } from './composer'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
-import { taskPhase } from './work/workPresentation'
+import { taskPhase, workPresentation } from './work/workPresentation'
 
 export { taskPhase }
 
@@ -151,6 +151,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
   </figure>
 }
 
+const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 const heldPhases = new Set(['waiting_goal', 'approval', 'waiting_approval', 'paused', 'waiting_input'])
 
 export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample }: {
@@ -215,6 +216,20 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   useEffect(() => { if (openWorkId !== null && !sheetTask) setOpenWorkId(null) }, [openWorkId, sheetTask])
 
+  // A task that was seen working and now ended is announced once, on top of the live announcement.
+  const seenWorking = useRef(new Set<string>())
+  const [ended, setEnded] = useState<{ text: string; over: string } | null>(null)
+  useEffect(() => {
+    let text = ''
+    for (const task of snapshot?.ready ? snapshot.tasks : []) {
+      if (isWorkingTaskPhase(task.phase)) seenWorking.current.add(task.id)
+      else if (endedPhases.has(task.phase) && seenWorking.current.delete(task.id)) text = `${task.label || '작업'} ${workPresentation(task).title}`
+    }
+    if (text) setEnded({ text, over: announcement })
+    else setEnded(current => current && current.over !== announcement ? null : current)
+  }, [snapshot, announcement])
+  const spoken = ended && ended.over === announcement ? ended.text : announcement
+
   const scrollToEnd = useCallback(() => {
     if (view.current) view.current.scrollTop = view.current.scrollHeight
     pinnedToEnd.current = true
@@ -243,14 +258,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   return (
     <div className="conversation-wrap">
-      <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
-      {snapshot?.singleConversation && (activeTask || website?.working || website?.inputHeight) && <button type="button" className="current-work"
-        onClick={() => (website?.inputHeight ? document.querySelector('[data-native-website-slot]') : website?.working ?
-          document.getElementById('website-work') : activeTask && document.getElementById(`work-${activeTask.id}`))?.scrollIntoView?.({ block: 'nearest' })}>
-        <Icon name={activeTask ? taskPhase(activeTask).icon : 'activity'} />
-        <span>{website?.working || website?.inputHeight ? website.title : activeTask && `${taskPhase(activeTask).title} · ${activeTask.label}`}</span>
-        <Icon name="down" />
-      </button>}
+      <div className="sr-only" role="status" aria-live="polite">{spoken}</div>
       <main className="conversation" ref={view} aria-label="대화" tabIndex={0} onScroll={event => {
         const pane = event.currentTarget
         if (!pane.clientHeight) return
