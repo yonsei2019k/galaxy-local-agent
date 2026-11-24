@@ -25,11 +25,11 @@ object GoalToolCatalog {
         ToolDefinition(UPDATE,Risk.LOW,version+mapOf("outcome" to text(false),"criteria" to Argument("array",false),"removeCriterionIds" to Argument("array",false),"constraints" to Argument("array",false),"textEdits" to Argument("array",false)),
             "Edit the actual goal using copied goalId/expectedUpdatedAt. For partial changes use textEdits1..8: {field,criterionId? only criterion,constraintIndex? only constraint,oldText1..900,newText0..2000}. One edit per actual field identity; oldText must match uniquely in that field and occur in its actual model-delivered fragment. Preserve all other text. textEdits cannot mix outcome/criteria/constraints/removeCriterionIds. Whole-field replacements additionally require host proof of the actual complete field delivered to this model; previews are insufficient. criteria patches preserve omitted IDs; missing id adds a criterion. Changed work quiesces linked runs and resets proof/status, identical work preserves real evidence. No status/evidence/run links accepted."),
         ToolDefinition(START,Risk.LOW,version,
-            "Only on the owner's explicit goal-start request: queue exactly one bounded existing goal run through the host lifecycle. No periodic/autonomous execution or new external permissions. Queued work is not goal completion."),
+            "Only on an explicit owner request to start a goal: queue one bounded run through the host lifecycle. Once the host confirms it is queued, finish this dispatch. Carry out the actual work in the separate goal run. A queued run is not goal completion and grants no permissions."),
         ToolDefinition(PAUSE,Risk.LOW,version,
             "Only on an explicit pause request: quiesce this goal's linked runs, then save PAUSED. If stopping the caller must wait until its receipt is durable, report PREPARED/deferredCallerStop instead of claiming it already stopped."),
         ToolDefinition(RESUME,Risk.LOW,version,
-            "Only on an explicit request to resume a PAUSED goal: queue one bounded host goal run. Reuse only actual same-work host evidence. No periodic scheduling or additional tool permissions."),
+            "Only on an explicit owner request to resume a paused goal: queue one bounded run using actual same-work evidence. Once the host confirms it is queued, finish this dispatch. Resume the actual work in the separate goal run. Grants no new permission."),
         ToolDefinition(CLEAR,Risk.HIGH,version,
             "Only on the owner's explicit clear request: quiesce linked goal runs and CAS-delete this saved goal. Does not undo completed external actions or delete conversation history. A deferred caller stop is PREPARED, not a verified stop.")
     )

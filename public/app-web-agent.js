@@ -10,7 +10,12 @@ function (request) {
   const textOf = e => (e.getAttribute('aria-label') ||
     (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') ||
     e.innerText || (e.value && e.type !== 'password' && e.type !== 'hidden' && e.value) ||
-    e.placeholder || e.title || e.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    e.placeholder || e.title || e.alt ||
+    e.querySelector('img[alt]')?.getAttribute('alt') ||
+    e.querySelector('img[title]')?.getAttribute('title') ||
+    e.querySelector('svg > title')?.textContent ||
+    (e.matches('a,button,[role=button],[onclick]') && e.querySelector('img,svg') ? '이미지 버튼' : '')
+  ).replace(/\s+/g, ' ').trim().slice(0, 120);
   const visible = e => {
     const r = e.getBoundingClientRect();
     const view = e.ownerDocument.defaultView;

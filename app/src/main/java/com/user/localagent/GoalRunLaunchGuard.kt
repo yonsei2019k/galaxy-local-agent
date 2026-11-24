@@ -8,6 +8,14 @@ import kotlinx.serialization.json.*
 private val goalLaunchTools=setOf(GoalToolCatalog.START,GoalToolCatalog.RESUME)
 private val goalLaunchUuid=Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
 
+/** Only an exact phone-written start/resume receipt can close a cloud dispatch. */
+internal fun verifiedGoalDispatchChild(steps: List<HarnessStep>): String? =
+    steps.mapNotNull { step ->
+        step.evidence.continuationId?.takeIf { step.tool in goalLaunchTools &&
+            step.evidence.state==VerificationState.VERIFIED && !step.evidence.effectNotApplied &&
+            it.startsWith("goal-run:") }?.removePrefix("goal-run:")?.takeIf(goalLaunchUuid::matches)
+    }.distinct().singleOrNull()
+
 /** Immutable host continuation chain, stored only in the encrypted queue context. */
 data class GoalSegmentBinding(
     val goalId:String,val originalGoalVersion:Long,val workDigest:String,val scopeKey:String,

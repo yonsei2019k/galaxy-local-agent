@@ -43,6 +43,15 @@ class GoalRunLaunchGuardTest {
         rejected(row=null)
     }
 
+    @Test fun cloudDispatchNeedsOneExactVerifiedChildReceipt() {
+        val start=parentRequest().previousSteps.single()
+        assertEquals(childId,verifiedGoalDispatchChild(listOf(start)))
+        assertNull(verifiedGoalDispatchChild(listOf(start.copy(tool="read_app_browser_page"))))
+        assertNull(verifiedGoalDispatchChild(listOf(start.copy(evidence=start.evidence.copy(effectNotApplied=true)))))
+        val other=start.copy(evidence=start.evidence.copy(continuationId="goal-run:30000000-0000-4000-8000-000000000003"))
+        assertNull(verifiedGoalDispatchChild(listOf(start,other)))
+    }
+
     @Test fun liveCallerCancellationAlwaysRejectsAQueuedGoalChild() {rejected(cancelled=true)}
 
     @Test fun deletedPausedCompletedOrDifferentWorkGoalCannotStart() {

@@ -781,12 +781,13 @@ class AppWebAgent private constructor(private val context:Context) {
         snapshot=null
         blockedNavigation.value=null
         try {
-            val result=dom(buildJsonObject {
+            val request=buildJsonObject {
                 put("key",domKey);put("action",action);put("snapshotId",current.first)
                 put("ref",ref);put("text",text);put("direction",arguments.s("direction"))
                 put("needsApproval",needsApproval);put("approvedSnapshot",approvedSnapshot)
                 arguments["ruleHref"]?.let {put("ruleHref",it)}
-            })
+            }
+            val result=if(action=="click"&&secureOrigin(sourceUrl)!=null)dispatchObservedClick(request) else dom(request)
             val refusal=result?.s("error")
             if(refusal in setOf("SNAPSHOT_STALE","APPROVAL_MISMATCH","ELEMENT_UNAVAILABLE","ELEMENT_OBSCURED","OPTION_UNKNOWN"))
                 return@guarded fail(checkNotNull(refusal))
@@ -802,6 +803,21 @@ class AppWebAgent private constructor(private val context:Context) {
             throw cancel
         }catch(error:Exception){
             fail("ACTION_OUTCOME_UNKNOWN")
+        }
+    }
+
+    /** A validated tool click may start a player or follow its new-window link in this WebView. */
+    private suspend fun dispatchObservedClick(request:JsonObject):JsonObject? {
+        val settings=view().settings
+        val allowWindows=settings.javaScriptCanOpenWindowsAutomatically
+        val requireGesture=settings.mediaPlaybackRequiresUserGesture
+        try {
+            settings.javaScriptCanOpenWindowsAutomatically=true
+            settings.mediaPlaybackRequiresUserGesture=false
+            return dom(request)
+        } finally {
+            settings.javaScriptCanOpenWindowsAutomatically=allowWindows
+            settings.mediaPlaybackRequiresUserGesture=requireGesture
         }
     }
 

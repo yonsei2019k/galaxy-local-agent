@@ -1815,6 +1815,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 enforceGoalToolFence(request,call)
                 if(!authority().permits(capture)||call.name !in requestAuthorizedTools)
                     noEffect(call,"실행 권한이나 대상이 변경되어 도구를 시작하지 않았습니다.")
+                else if(request.goal==null&&verifiedGoalDispatchChild(requestSteps)!=null)
+                    noEffect(call,"목표 시작은 이미 확인했어요. 다음 작업은 예약한 목표 실행에서 진행해요.")
                 else if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
                     noEffect(call,"백그라운드 실행 유지가 종료되어 도구를 시작하지 않았습니다.")
                 else if(runCatching{nativeJournal.begin(nativeBinding(),call)}.isFailure)
@@ -1948,6 +1950,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     else "작업이 도중에 멈췄어요. 확인한 내용은 남겨뒀어요."
                 publishActionFinal(request,requestAuthorizedTools,message,true,why);return
             }
+            val dispatchedChild=verifiedGoalDispatchChild(requestSteps).takeIf {
+                request.goal==null&&plan!=null&&lastProviderState=="FINISHED"&&
+                    controller.phase==ExternalAgentController.Phase.ACTIVE
+            }
+            if(dispatchedChild!=null&&confirmCloudGoalDispatch(request,dispatchedChild,scope)){
+                check(authority().permits(capture))
+                controller.close();closed=true
+                persistNativeState(nativeJournal.sealCheckpoint())
+                answer("목표를 저장하고 실행을 예약했어요. 이어서 같은 대화에서 진행할게요.")
+                recordCloudReceipt(request.runId,checkNotNull(plan).planDigest,actual.size,report.getValue("elapsedMs"),nativeJournal.snapshot())
+                app.repository.chat.updateRun(request.runId,"completed")
+                workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
+                status.value="목표 실행 대기 중"
+                return
+            }
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
                 if(pauseForScreenSetup(request))return
@@ -1996,42 +2013,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val hostComplete=accepted!=null&&ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),checkNotNull(bridgeSessionId))&&
                 (if(accepted.requiredTools.isEmpty())requestSteps.isEmpty() else taskGoal?.let{checkedTaskFinish(request,it,requestAuthorizedTools) is HarnessDecision.Finish}==true)
             if(resultState!="reported_done"||!hostComplete){
-                val links=if(accepted!=null&&resultState in setOf("reported_done","partial")&&authority().permits(capture)&&
-                    ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.values.toList(),
-                        checkNotNull(bridgeSessionId),publicPartial=true)){
-                    CloudPublicSearchProjection.partialSources(actual.values)
-                }else emptyList()
-                FailureLog.cloudStop(context,when {
-                    actual.isNotEmpty() && actual.values.all { it.withheldFromCloud } -> "FINAL_ALL_READS_WITHHELD"
-                    accepted == null -> "FINAL_MISSING_PLAN"
-                    resultState != "reported_done" -> "FINAL_PROVIDER_INCOMPLETE"
-                    else -> "FINAL_EVIDENCE_INCOMPLETE"
-                },controller.stopMetadata(),resultState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
-                val lastScreenAction=actual.values.lastOrNull { observation ->
-                    observation.proposal.tool==com.user.localagent.core.ScreenControlToolCatalog.ACTION
-                }?.result
-                val screenChanged=lastScreenAction?.takeIf {it.success&&it.verification==VerificationState.VERIFIED}
-                    ?.let { observation->runCatching {
-                        Json.parseToJsonElement(observation.content).jsonObject["screenChanged"]?.jsonPrimitive?.booleanOrNull
-                    }.getOrNull() }
-                val browserProgress=if(resultState=="partial" && accepted!=null && authority().permits(capture) &&
-                    ExternalAgentPhoneCompletion.browserReadsMatch(capture,accepted,evidence,actual.values.toList(),checkNotNull(bridgeSessionId))){
-                    CloudAgentFinals.browserReadProgress(accepted.requiredTools,actual.values.toList(),requestSteps)
-                } else null
-                val notice=browserProgress?:when(screenChanged){
-                    true->"화면이 바뀐 건 확인했어요. 요청한 결과가 나왔는지는 확인이 더 필요해요."
-                    false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
-                    null->if(actual.isNotEmpty()&&actual.values.all{it.withheldFromCloud && it.result.success})
-                        "휴대폰에서 자료를 읽었지만 개인 정보가 섞여 있어 답변에 쓸 수 있는 본문을 확보하지 못했어요."
-                    else if(links.isEmpty())CloudAgentFinals.unfinishedNotice(actual.values)
-                        else "아래 자료를 찾았어요. 이 자료에서 확인한 내용까지만 남겼어요."
-                }
-                if(browserProgress!=null && authority().permits(capture))
-                    publishActionFinal(request,requestAuthorizedTools,browserProgress,true,"partial_verified_browser_reads")
-                else if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,if(browserProgress==null)notice else "요청 권한이 바뀌어 작업을 멈췄어요.",true)
-                else publishActionFinal(request,requestAuthorizedTools,
-                    "$notice\n\n여기까지 찾은 자료\n"+links.joinToString("\n"),
-                    true,"partial_verified_sources")
+                publishIncompleteCloudResult(request,resultState,accepted,evidence,actual.values,capture,
+                    checkNotNull(bridgeSessionId),controller.stopMetadata(),
+                    android.os.SystemClock.elapsedRealtime()-bridgeStarted){authority().permits(capture)}
                 return
             }
             check(authority().permits(capture))
@@ -2084,6 +2068,61 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
             }
         }
+    }
+
+    private suspend fun publishIncompleteCloudResult(request:QueuedChatRequest,resultState:String,
+        accepted:ExternalAgentPlan?,evidence:JsonObject,actual:Collection<PhoneAgentExecution>,capture:ExternalAgentCapture,
+        sessionId:String,stopMetadata:ExternalAgentController.StopMetadata,elapsedMs:Long,
+        authorityPermitted:suspend ()->Boolean) {
+        val links=if(accepted!=null&&resultState in setOf("reported_done","partial")&&authorityPermitted()&&
+            ExternalAgentPhoneCompletion.matches(capture,accepted,evidence,actual.toList(),
+                sessionId,publicPartial=true)){
+            CloudPublicSearchProjection.partialSources(actual)
+        }else emptyList()
+        FailureLog.cloudStop(context,when {
+            actual.isNotEmpty() && actual.all { it.withheldFromCloud } -> "FINAL_ALL_READS_WITHHELD"
+            accepted == null -> "FINAL_MISSING_PLAN"
+            resultState != "reported_done" -> "FINAL_PROVIDER_INCOMPLETE"
+            else -> "FINAL_EVIDENCE_INCOMPLETE"
+        },stopMetadata,resultState,elapsedMs)
+        val lastScreenAction=actual.lastOrNull { observation ->
+            observation.proposal.tool==com.user.localagent.core.ScreenControlToolCatalog.ACTION
+        }?.result
+        val screenChanged=lastScreenAction?.takeIf {it.success&&it.verification==VerificationState.VERIFIED}
+            ?.let { observation->runCatching {
+                Json.parseToJsonElement(observation.content).jsonObject["screenChanged"]?.jsonPrimitive?.booleanOrNull
+            }.getOrNull() }
+        val browserProgress=if(resultState=="partial" && accepted!=null && authorityPermitted() &&
+            ExternalAgentPhoneCompletion.browserReadsMatch(capture,accepted,evidence,actual.toList(),sessionId)){
+            CloudAgentFinals.browserReadProgress(accepted.requiredTools,actual.toList(),requestSteps)
+        } else null
+        val notice=browserProgress?:when(screenChanged){
+            true->"화면이 바뀐 건 확인했어요. 요청한 결과가 나왔는지는 확인이 더 필요해요."
+            false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
+            null->if(actual.isNotEmpty()&&actual.all{it.withheldFromCloud && it.result.success})
+                "휴대폰에서 자료를 읽었지만 개인 정보가 섞여 있어 답변에 쓸 수 있는 본문을 확보하지 못했어요."
+            else if(links.isEmpty())CloudAgentFinals.unfinishedNotice(actual)
+                else "아래 자료를 찾았어요. 이 자료에서 확인한 내용까지만 남겼어요."
+        }
+        if(browserProgress!=null && authorityPermitted())
+            publishActionFinal(request,requestAuthorizedTools,browserProgress,true,"partial_verified_browser_reads")
+        else if(links.isEmpty())publishActionFinal(request,requestAuthorizedTools,if(browserProgress==null)notice else "요청 권한이 바뀌어 작업을 멈췄어요.",true)
+        else publishActionFinal(request,requestAuthorizedTools,
+            "$notice\n\n여기까지 찾은 자료\n"+links.joinToString("\n"),
+            true,"partial_verified_sources")
+    }
+
+    private suspend fun confirmCloudGoalDispatch(request:QueuedChatRequest,childId:String,
+        scope:com.user.localagent.data.ChatAccessScope):Boolean {
+        val parent=app.repository.chat.run(request.runId) ?: return false
+        val child=app.repository.chat.run(childId)?.takeIf{it.status=="queued"} ?: return false
+        if(goalNativeEffectsUnresolved(parent,scope.scopeKey,false))return false
+        val live=goals.loadGuarded(scope) ?: return false
+        return runCatching {
+            val queued=requireGoalRunBinding(live,child)
+            check(queued.parentGoalStartRunId==request.runId)
+            requireGoalLaunchBinding(queued,live,parent.copy(status="completed"),callerCancelled=false)
+        }.isSuccess
     }
 
     private suspend fun executeCloudPhoneRequestWithPrivateRead(request:QueuedChatRequest) {

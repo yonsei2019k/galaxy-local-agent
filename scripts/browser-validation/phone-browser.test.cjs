@@ -98,7 +98,8 @@ test('observes a real muted clip ending before opening the next lesson', async (
     await page.setContent(`
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <h1>Lesson 1</h1><video muted width="160" height="90" playsinline></video>
-      <button id="play">Start lesson</button><button id="next" disabled>Next lesson</button>
+      <button id="play"><img alt="Start lesson" width="40" height="20"></button>
+      <button id="next" disabled>Next lesson</button>
       <script>
         const video = document.querySelector('video');
         const next = document.querySelector('#next');
