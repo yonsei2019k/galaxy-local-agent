@@ -135,6 +135,7 @@ class _Socket:
 class _Page:
     def __init__(self, ws_url):
         self.ws = _Socket(ws_url); self.next_id = 0
+        self.owner_login_dialogs = None
 
     def call(self, method, params=None, timeout=30):
         self.next_id += 1; ident = self.next_id
@@ -143,6 +144,14 @@ class _Page:
         self.ws.sock.settimeout(timeout)
         while time.monotonic() < deadline:
             message = json.loads(self.ws.recv())
+            if message.get('method') == 'Page.javascriptDialogOpening' and self.owner_login_dialogs is not None:
+                event = message.get('params', {})
+                if (event.get('type') == 'alert' and event.get('url', '').partition('?')[0] in
+                        ('https://www.kairb.org/member/login_reg.php', 'https://www.kairb.org/member/')):
+                    self.owner_login_dialogs += 1
+                    self.next_id += 1
+                    self.ws.send(json.dumps({'id': self.next_id, 'method': 'Page.handleJavaScriptDialog',
+                                             'params': {'accept': True}}))
             if message.get('id') == ident:
                 if 'error' in message: raise BrowserError('DEVTOOLS_' + re.sub(r'\W+', '_', str(message['error'].get('message', 'ERROR')))[:40].upper(), 502)
                 return message.get('result', {})
@@ -313,14 +322,25 @@ class BrowserAgent:
             if len(self.owner_login_attempts) >= 3:
                 raise BrowserError('OWNER_LOGIN_WAIT', 429)
             self.owner_login_attempts.append(now)
+            self.page.owner_login_dialogs = 0
             try:
                 if not self._owner_form(pending[3], [pending[4], account, password]):
                     raise BrowserError('OWNER_LOGIN_FORM_CHANGED', 409)
                 self._settle()
                 # An actual signed-in marker is required. A disappearing form is insufficient.
                 confirmed = self.page.evaluate(KAIRB_SIGNED_IN) is True
-            except (BrowserError, OSError, ValueError):
-                raise BrowserError('OWNER_LOGIN_UNCONFIRMED', 409) from None
+                if not confirmed and self.page.owner_login_dialogs:
+                    # The site may show a login response in an alert and then run history.back().
+                    # Wait for its document to settle before the phone requests a new form.
+                    self._settle()
+                    confirmed = self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True
+            except (BrowserError, OSError, ValueError) as failure:
+                if isinstance(failure, BrowserError) and failure.code == 'OWNER_LOGIN_FORM_CHANGED':
+                    raise
+                code = 'OWNER_LOGIN_RESPONSE_TIMEOUT' if isinstance(failure, TimeoutError) else 'OWNER_LOGIN_READBACK_FAILED'
+                raise BrowserError(code, 409) from None
+            finally:
+                self.page.owner_login_dialogs = None
             return {'signedIn': confirmed}
 
     def _chrome(self):
