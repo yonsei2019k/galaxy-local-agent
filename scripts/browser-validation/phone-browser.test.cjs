@@ -56,3 +56,37 @@ test('phone browser asset checks actionability and refreshes stale references in
     await browser.close();
   }
 });
+
+test('copies an already issued, observed blob without opening or clicking it', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage(devices['Pixel 7']);
+    await page.route('https://fixture.example.test/issued', route => route.fulfill({
+      contentType: 'text/html',
+      body: `<a download="fixture.pdf">PDF fixture</a><script>
+        document.querySelector('a').href = URL.createObjectURL(new Blob(['%PDF-1.7 fixture'], {type:'application/pdf'}));
+      </script>`,
+    }));
+    await page.goto('https://fixture.example.test/issued');
+    const run = options => page.evaluate(`(${source})(${JSON.stringify({
+      key: 'ziphap-blob-fixture', snapshotId: 'blob-snapshot', approvedSnapshot: null, ...options,
+    })})`);
+    const observed = await run({action:'observe'});
+    const element = observed.elements.find(item => item.label === 'PDF fixture');
+    assert.ok(element.ruleHref.startsWith('blob:https://fixture.example.test/'));
+    const destination = {ref:element.ref, href:element.ruleHref, transferId:'capture'};
+    assert.deepEqual(await run({...destination, action:'startBlobPdf'}), {started:true});
+    let part;
+    for (let attempt=0; attempt<20; attempt++) {
+      part = await run({...destination, action:'readBlobPdf', offset:0});
+      if (!part.pending) break;
+      await new Promise(resolve => setTimeout(resolve,25));
+    }
+    assert.equal(Buffer.from(part.chunk,'base64').toString(),'%PDF-1.7 fixture');
+    await page.locator('a').evaluate(link => link.href='https://fixture.example.test/new.pdf');
+    assert.deepEqual(await run({...destination, action:'readBlobPdf', offset:0}), {error:'SNAPSHOT_STALE'});
+    assert.equal(page.url(),'https://fixture.example.test/issued');
+  } finally {
+    await browser.close();
+  }
+});
