@@ -34,6 +34,19 @@ object CloudAgentFinals {
             it.proposal.tool in com.user.localagent.core.AppBrowserToolCatalog.names }
         if(lastBrowser?.result?.verificationSummary==com.user.localagent.compute.BrowserAgentTools.PC_AUTH_REQUIRED)
             return "PC 브라우저에서 사이트가 별도 로그인을 요구했어요. 휴대폰에 로그인한 계정은 PC에 연결되지 않아 이 단계에서 멈췄어요."
+        val click=actual.lastOrNull{it.proposal.tool=="app_browser_action"&&
+            it.proposal.arguments["action"]==JsonPrimitive("click")}
+        val clickPage=click?.result?.takeIf{it.success&&it.verification==VerificationState.VERIFIED}
+            ?.let{runCatching {Json.parseToJsonElement(it.content).jsonObject}.getOrNull()}
+        if(clickPage?.get("pageChanged")==JsonPrimitive(false)){
+            val label=(clickPage["performed"] as? JsonObject)?.get("control")?.jsonPrimitive?.contentOrNull
+            val control=when(label?.filterNot(Char::isWhitespace)){
+                "강의실입장"->"‘강의실 입장’을 눌렀지만 강의 화면이 열리지 않았어요. 영상 재생은 시작되지 않았어요."
+                "학습시작하기","학습진행하기","이어듣기"->"학습 버튼을 눌렀지만 영상 화면으로 넘어가지 않았어요."
+                else->"버튼을 눌렀지만 다음 화면으로 바뀌지 않았어요."
+            }
+            return control
+        }
         val last=actual.lastOrNull { it.proposal.tool in setOf("open_app_browser_page","read_app_browser_page","app_browser_action") }
         if(last!=null){
             return when {

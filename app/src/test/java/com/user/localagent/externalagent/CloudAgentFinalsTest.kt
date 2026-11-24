@@ -6,6 +6,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CloudAgentFinalsTest {
+    @Test fun explainsTheObservedClassroomClickWithoutClaimingPlayback(){
+        val id="10000000-0000-4000-8000-000000000002"
+        val proposal=ExternalAgentProposal(id,1,"app_browser_action",buildJsonObject{put("action","click")},
+            "a".repeat(64),"binding",3)
+        val result=ToolResult(id,true,
+            """{"pageChanged":false,"performed":{"control":"강의실 입장"}}""",VerificationState.VERIFIED)
+        val text=CloudAgentFinals.unfinishedNotice(listOf(PhoneAgentExecution(id,"binding",3,proposal,result)))
+        assertTrue(text.contains("강의실 입장"))
+        assertTrue(text.contains("영상 재생"))
+    }
     @Test fun onlyAPlanlessCallFreeDoneReportIsAPlainAnswer(){
         assertTrue(CloudAgentFinals.isToolFreeAnswer("reported_done",false,0,0))
         assertFalse(CloudAgentFinals.isToolFreeAnswer("reported_done",true,0,0))
