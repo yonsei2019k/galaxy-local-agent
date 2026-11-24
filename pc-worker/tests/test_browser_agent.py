@@ -6,6 +6,26 @@ import browser_agent as b
 
 
 class Policy(unittest.TestCase):
+    def test_display_label_does_not_invalidate_the_observed_action_target(self):
+        agent = b.BrowserAgent(profile='unused')
+        agent._ensure = lambda: None
+        observed = {'url':'https://example.org/','title':'Fixture','text':'','truncated':False,'elements':[
+            {'ref':'e1','tag':'input','type':'text','editable':True,'name':'search_key','label':''},
+            {'ref':'e2','tag':'button','type':'submit','label':'Open'}]}
+        from copy import deepcopy
+        agent.page = type('Page', (), {'evaluate':lambda self, expression, **kwargs: deepcopy(observed)})()
+        agent._settle = lambda: None
+        clicks = []
+        agent._click = clicks.append
+        read = agent._read()
+        self.assertEqual(read['elements'][0]['label'], 'search_key')
+        agent.act({'snapshotId':read['snapshotId'],'action':'click','ref':'e2'})
+        self.assertEqual(clicks,['e2'])
+        observed['elements'][1]['label'] = 'Different destination'
+        with self.assertRaises(b.BrowserError):
+            agent.act({'snapshotId':read['snapshotId'],'action':'click','ref':'e2'})
+        self.assertEqual(clicks,['e2'])
+
     def test_only_public_web_pages(self):
         for good in ('https://www.letskorail.com/', 'http://example.com/a?b=1', 'https://map.naver.com:443/p'):
             self.assertTrue(b.url_allowed(good), good)

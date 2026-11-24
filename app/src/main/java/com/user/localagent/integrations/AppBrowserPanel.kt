@@ -236,12 +236,13 @@ internal fun InlineWebsiteWorkCard(agent:AppWebAgent,work:AppWebAgent.WebsiteWor
             verticalArrangement=Arrangement.spacedBy(4.dp)){
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,
                 verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
-                Text(work.host,style=MaterialTheme.typography.titleSmall,modifier=Modifier.weight(1f))
+                Text(if(work.host=="www.kairb.org")"KAIRB 온라인 교육" else work.host,
+                    style=MaterialTheme.typography.titleSmall,modifier=Modifier.weight(1f))
                 TextButton(onClick=agent::dismissWebsiteWork){Text("닫기")}
             }
             Text(work.status,style=MaterialTheme.typography.bodyMedium)
             if(work.working)LinearProgressIndicator(Modifier.fillMaxWidth())
-            work.steps.takeLast(3).forEach {step->
+            work.steps.filter {it!=work.status}.takeLast(2).forEach {step->
                 Text("• "+step,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

@@ -419,12 +419,13 @@ class BrowserAgent:
         ):
             self.snapshot = None
             return {'loginRequired': True, 'dataOnly': True}
+        # Compare renderer observations on both sides. Display-only labels must not change the fingerprint.
+        snapshot_id = signature(value['url'], elements)
         for e in elements:
             e['sensitive'] = sensitive_field(e) if e.get('editable') else False
             e['needsApproval'] = risky_control(e)
             if e.get('editable') and not e['sensitive'] and not e.get('label'): e['label'] = (e.get('placeholder') or e.get('name') or '')[:120]
             for key in ('name', 'id', 'autocomplete', 'placeholder'): e.pop(key, None)
-        snapshot_id = signature(value['url'], elements)
         self.snapshot = {'id': snapshot_id, 'url': value['url'], 'elements': {e['ref']: e for e in elements}}
         return {'snapshotId': snapshot_id, 'url': value['url'], 'title': value['title'], 'text': value['text'],
                 'elements': elements, 'truncated': value['truncated'], 'loginRequired': False, 'dataOnly': True,

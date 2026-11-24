@@ -58,6 +58,21 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val result=transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
             val url=body["url"]?.jsonPrimitive?.contentOrNull
             val binding=work()
+            val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
+            if(binding!=null && observedUrl?.startsWith(PairedWebsiteLogin.ORIGIN+"/")==true &&
+                result["loginRequired"]==JsonPrimitive(false) && result["blocked"]!=JsonPrimitive(true) &&
+                result["snapshotId"] is JsonPrimitive) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                val path=URI(observedUrl).path
+                val media=result["media"] as? JsonObject
+                val stage=when {
+                    media?.get("ended")==JsonPrimitive(true) -> "영상 종료 확인 · 사이트 진도 확인 필요"
+                    media?.get("status")==JsonPrimitive("observed") -> "강의 플레이어 확인"
+                    path=="/cme/cme_ing.php" -> "로그인 확인 · 수강 목록 확인"
+                    path=="/cme/cme_detail_view.php" -> "강의 상세 확인"
+                    else -> "사이트 페이지 확인"
+                }
+                com.user.localagent.integrations.AppWebAgent.get(context).recordPcWork(binding,stage,stage)
+            }
             if(operation=="read" && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 com.user.localagent.integrations.AppWebAgent.get(context).expectsPcReadback(binding)
             } && (result["loginRequired"]!=JsonPrimitive(false) ||

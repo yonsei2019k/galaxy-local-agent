@@ -76,7 +76,15 @@ class AppWebAgent private constructor(private val context:Context) {
         expiredLoginBinding="$loginProcess:$id"
         loginCard.value=LoginCard(id,"www.kairb.org",pairedPc=true)
         loginStatus.value="연결한 PC의 전용 브라우저에서 KAIRB 로그인이 필요해요."
+        recordPcWork(binding,"사이트 로그인 대기","전용 PC 브라우저 연결",working=false)
         return true
+    }
+
+    internal fun recordPcWork(binding:WorkBinding,status:String,step:String,working:Boolean=true) {
+        if(loginCard.value!=null && browserWorkBinding.value!=binding)return
+        browserWorkBinding.value=binding
+        val steps=websiteWork.value?.takeIf { it.binding==binding }?.steps.orEmpty()
+        websiteWork.value=WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding)
     }
     data class WebsiteLogin(val card:LoginCard,val url:String)
     data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
@@ -254,7 +262,10 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     fun cancelLoginCard(id:Long){
-        if(loginCard.value?.id!=id)return
+        val card=loginCard.value?.takeIf{it.id==id}?:return
+        if(card.pairedPc)browserWorkBinding.value?.let {
+            recordPcWork(it,"로그인 입력을 닫았어요. 요청은 채팅에 남아 있어요.","로그인 입력 닫힘",working=false)
+        }
         websiteLogin.value=null
         loginCard.value=null
         cardOrigin=null
