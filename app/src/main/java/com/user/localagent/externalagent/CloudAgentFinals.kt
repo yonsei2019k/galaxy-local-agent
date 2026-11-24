@@ -30,6 +30,10 @@ object CloudAgentFinals {
     internal val browserReadTools=setOf("read_app_browser_page","read_screen")
 
     internal fun unfinishedNotice(actual:Collection<PhoneAgentExecution>):String {
+        val lastBrowser=actual.lastOrNull { it.proposal.tool in com.user.localagent.core.PcBrowserToolCatalog.names ||
+            it.proposal.tool in com.user.localagent.core.AppBrowserToolCatalog.names }
+        if(lastBrowser?.result?.verificationSummary==com.user.localagent.compute.BrowserAgentTools.PC_AUTH_REQUIRED)
+            return "PC 브라우저에서 사이트가 별도 로그인을 요구했어요. 휴대폰에 로그인한 계정은 PC에 연결되지 않아 이 단계에서 멈췄어요."
         val last=actual.lastOrNull { it.proposal.tool in setOf("open_app_browser_page","read_app_browser_page","app_browser_action") }
         if(last!=null){
             return when {

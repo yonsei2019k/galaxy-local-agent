@@ -42,6 +42,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     companion object {
         private const val APP_APPROVED_SNAPSHOT="approvedAppSnapshot"
         internal const val PHONE_AUTH_REQUIRED="PHONE_BROWSER_AUTH_REQUIRED"
+        internal const val PC_AUTH_REQUIRED="PC_BROWSER_AUTH_REQUIRED"
         internal fun pcReadFallback(context:Context):BrowserBackend = {operation,body->
             check(operation=="open"&&BrowserAgentSettings.pc(context).enabled())
             pcRequest(context,"public-read",body)
@@ -388,7 +389,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             withTimeoutOrNull(40_000){pcFallback("open",buildJsonObject{put("url",url)})}
         }catch(cancel:CancellationException){throw cancel}
         catch(_:Exception){null}
-        if(recovered?.get("loginRequired")==JsonPrimitive(true))return authenticationRequired(call)
+        if(recovered?.get("loginRequired")==JsonPrimitive(true))return authenticationRequired(call,pcSession=true)
         if(recovered==null||!readablePage(url,recovered))return null
         recoveredTarget=url
         // Reobserve the bound URL. The PC result never supplies a handset action target.
@@ -406,18 +407,24 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         )
     }
 
-    private fun authenticationRequired(call:ToolCall,shown:Boolean=false):ToolResult {
+    private fun authenticationRequired(call:ToolCall,shown:Boolean=false,pcSession:Boolean=catalog==PcBrowserToolCatalog):ToolResult {
         last=null
         lastPage=null
         recoveredTarget=null
         val noChange=call.name!=catalog.action
+        val code=if(pcSession)PC_AUTH_REQUIRED else PHONE_AUTH_REQUIRED
         return ToolResult(call.id,false,buildJsonObject {
-            put("error",PHONE_AUTH_REQUIRED)
-            put("phoneBrowserVisible",shown)
-            initialOrigin?.let{put("phoneBrowserOrigin",it)}
-            put("hint","인증은 휴대폰의 집합 앱 브라우저에서 직접 진행해 주세요. 로그인이나 인증값을 채팅에 입력할 필요가 없습니다.")
+            put("error",code)
+            if(pcSession){
+                initialOrigin?.let{put("pcBrowserOrigin",it)}
+                put("hint","PC 브라우저가 별도 로그인을 요구해요. 사이트가 지원하는 휴대폰 승인 방법을 확인하세요. 휴대폰의 기존 로그인 상태는 PC로 전달되지 않아요.")
+            }else{
+                put("phoneBrowserVisible",shown)
+                initialOrigin?.let{put("phoneBrowserOrigin",it)}
+                put("hint","인증은 휴대폰의 집합 앱 브라우저에서 직접 진행해 주세요. 로그인이나 인증값을 채팅에 입력할 필요가 없습니다.")
+            }
         }.toString(),if(noChange)VerificationState.FAILED else VerificationState.UNVERIFIED,
-            PHONE_AUTH_REQUIRED,effectNotApplied=noChange)
+            code,effectNotApplied=noChange)
     }
 
     private fun origin(url:String):String? {

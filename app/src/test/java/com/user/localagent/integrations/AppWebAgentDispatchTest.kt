@@ -74,6 +74,8 @@ class AppWebAgentDispatchTest {
         assertTrue(tools.execute(open(url),pcFallback=fallback).success)
         val auth=tools.execute(read(),pcFallback={_,_->buildJsonObject{put("loginRequired",true)}})
         assertFalse(auth.success)
+        assertEquals(BrowserAgentTools.PC_AUTH_REQUIRED,auth.verificationSummary)
+        assertFalse(auth.content.contains("phoneBrowserOrigin"))
         assertTrue(auth.content.contains("https://example.com"))
         assertTrue(tools.execute(open(url),pcFallback=fallback).success)
         assertFalse(tools.execute(open("https://example.com/?state=opaque"),pcFallback=fallback).success)
