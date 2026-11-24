@@ -42,7 +42,6 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
   const staff = snapshot?.staffRooms
   const threads = staff ?? snapshot?.threads ?? []
   const single = snapshot?.singleConversation === true
-  const extraConversations = useId()
   return (
     <div className="sidebar-content">
       <div className="sidebar-brand">
@@ -84,10 +83,6 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
           </button>
         ))}
       </nav>
-      {single && <section className="extra-conversations" aria-labelledby={extraConversations}>
-        <h2 id={extraConversations}>추가 대화</h2>
-        <p>별도로 표시할 대화가 없어요.</p>
-      </section>}
     </div>
   )
 }
@@ -126,6 +121,7 @@ export function Header({ snapshot, enabled, onMenu, onManage, onSelectModel, onR
     <header className="topbar">
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
+        {snapshot?.singleConversation && <BrandMark className="topbar-brand" />}
         <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
         {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={onOfficeProfile}>직원 정보</button>}

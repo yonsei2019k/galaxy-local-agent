@@ -28,7 +28,7 @@ export function taskPhase(task: Task) {
 }
 
 export function BrandMark({ className }: { className?: string }) {
-  return <span className={`brand-mark ${className ?? ''}`}><Icon name="robot" /></span>
+  return <span className={`brand-mark ${className ?? ''}`} aria-hidden="true" />
 }
 
 const exampleRequests = [
@@ -102,12 +102,14 @@ function Message({ message, previews, enabled, onCopy, onFiles, onMessageMenu }:
     <article className={`message message--${message.role}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {assistant && <div className="message-label"><BrandMark className="brand-mark--small" /> {author}</div>}
       {!user && !assistant && <div className="message-label">작업 기록</div>}
-      {assistant ? <RichAnswer text={message.text} /> : <div className="message-text" dir="auto">{message.text}</div>}
-      {assistant && !!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
-        onClick={() => onFiles(message.id)}><Icon name="file" />
-        {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
-      </button>}
-      {assistant && previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}
+      {assistant ? <div className="assistant-bubble">
+        <RichAnswer text={message.text} />
+        {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
+          onClick={() => onFiles(message.id)}><Icon name="file" />
+          {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
+        </button>}
+        {previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}
+      </div> : <div className="message-text" dir="auto">{message.text}</div>}
       {(assistant || user) && (
         <div className="message-actions">
           {assistant && <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
@@ -192,8 +194,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const websiteCard = website && (website.inputHeight ?
     <article className="task-card website-input-slot" data-native-website-slot={website.id}
       style={{height:website.inputHeight}} aria-label={website.title} /> :
-    <article className="task-card task-card--active" aria-label={website.title}>
-      <div className="task-heading"><span className="task-icon"><Icon name="activity" /></span><h2>{website.title}</h2></div>
+    <article className={`task-card website-work-card${website.working ? ' task-card--active' : ''}`} aria-label={website.title}>
+      <div className="task-heading"><span className="task-icon"><Icon name={website.working ? 'activity' : 'compass'} /></span><h2>{website.title}</h2></div>
       <p className="task-detail" role="status">{website.status}</p>
       {website.working && <div className="task-progress" role="progressbar" aria-label="웹 작업 진행 중"><span /></div>}
       {website.steps.filter(step => step !== website.status).slice(-2).map(step => <p className="task-detail" key={step}>{step}</p>)}
