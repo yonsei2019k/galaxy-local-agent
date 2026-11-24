@@ -108,6 +108,8 @@ describe('native conversation', () => {
       .toEqual(['기본 채팅', '연락처', '둘러보기', '보관함', '나의 집순이'])
     click('연락처')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'contacts' } })
+    click('대화 검색')
+    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'historySearch' } })
     const shortcut = host.querySelector('.bottom-nav button:last-child') as HTMLButtonElement
     act(() => { shortcut.click() })
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'settings' } })
@@ -240,7 +242,7 @@ describe('native conversation', () => {
     expect(input().value).toBe('B 전용 초안')
     click('설정')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'navigate', payload: { panel: 'settings' } })
-    click('파일 첨부')
+    click('첨부 추가')
     expect(requests().at(-1)).toEqual({ version: 1, threadId: 'thread-b', branchId: 'branch-b', action: 'attach', payload: {} })
   })
 

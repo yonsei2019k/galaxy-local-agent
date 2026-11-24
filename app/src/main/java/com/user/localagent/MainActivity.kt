@@ -10,7 +10,9 @@ import androidx.core.view.WindowCompat
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.user.localagent.models.ChosenInference
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -55,6 +57,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
+import java.io.File
 import java.time.ZonedDateTime
 import java.time.ZoneId
 import java.util.UUID
@@ -62,6 +65,9 @@ import com.user.localagent.ui.*
 
 private val launchIntroClaimed = java.util.concurrent.atomic.AtomicBoolean(false)
 
+private const val CONTACTS_TAB = 11
+private const val DISCOVER_TAB = 12
+private const val HISTORY_SEARCH_TAB = 13
 private val Background = ZipHapColors.DeepNavy
 private val Panel = ZipHapColors.NavySurface
 private val Accent = ZipHapColors.Periwinkle
@@ -80,6 +86,13 @@ class MainActivity : ComponentActivity() {
     private var attachmentJob:Job?=null
     private var attachmentJobThreadId:String?=null
     private var attachmentScope:Triple<String,Long,String>?=null
+    private var cameraAttachmentName:String?=null
+
+    private fun cameraAttachmentFile(name:String?)=name?.takeIf {
+        it.matches(Regex("camera-[0-9]+[.]jpg"))
+    }?.let {File(File(cacheDir,"camera_attachments"),it)}
+
+    private fun cameraAttachmentUri(file:File)=FileProvider.getUriForFile(this,"$packageName.files",file)
     private val attachmentPreparing=MutableStateFlow(false)
     private class VoicePrompt(val threadId:String,val branchId:String) {
         var stage by mutableStateOf("permission")
@@ -160,9 +173,26 @@ class MainActivity : ComponentActivity() {
         status.value=permissionResultMessage(actual)
     }
     private val attachFiles=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()){uris->
+        prepareAttachmentUris(uris)
+    }
+    private val attachPhotos=registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)){uris->
+        prepareAttachmentUris(uris)
+    }
+    private val attachCamera=registerForActivityResult(ActivityResultContracts.TakePicture()){captured->
+        val file=cameraAttachmentFile(cameraAttachmentName)
+        cameraAttachmentName=null
+        val uri=if(captured&&file?.isFile==true) runCatching{cameraAttachmentUri(file)}.getOrNull() else null
+        if(captured&&uri==null)status.value="찍은 사진을 읽지 못했어요."
+        prepareAttachmentUris(listOfNotNull(uri),file)
+    }
+
+    private fun prepareAttachmentUris(uris:List<android.net.Uri>,temporaryFile:File?=null){
         val origin=attachmentScope
         attachmentScope=null
-        if(uris.isNotEmpty()&&!attachmentPreparing.value){attachmentJobThreadId=origin?.first;attachmentPreparing.value=true;attachmentJob=lifecycleScope.launch {
+        if(uris.isEmpty()||attachmentPreparing.value){temporaryFile?.delete();return}
+        attachmentJobThreadId=origin?.first
+        attachmentPreparing.value=true
+        attachmentJob=lifecycleScope.launch {
             try{
                 check(origin!=null){"첨부할 원래 대화를 확인하지 못했습니다. 해당 방에서 다시 선택해주세요."}
                 val room=app.repository.chat.thread(origin.first)
@@ -171,8 +201,11 @@ class MainActivity : ComponentActivity() {
             }
             catch(cancel:CancellationException){status.value="파일 첨부를 취소했어요.";throw cancel}
             catch(error:Exception){status.value=error.message?:"첨부 파일을 준비하지 못했습니다."}
-            finally{attachmentJob=null;attachmentJobThreadId=null;attachmentPreparing.value=false}
-        }}
+            finally{
+                temporaryFile?.delete()
+                attachmentJob=null;attachmentJobThreadId=null;attachmentPreparing.value=false
+            }
+        }
     }
     private val importModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri != null) lifecycleScope.launch {
@@ -186,6 +219,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
+        cameraAttachmentName=savedInstanceState?.getString("camera-attachment-name")
         savedInstanceState?.let {saved->saved.getString("attachment-thread-id")?.let {id->saved.getString("attachment-branch-id")?.let {branch->attachmentScope=Triple(id,saved.getLong("attachment-thread-revision"),branch)}}}
         if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10)
         launchIntroPending = savedInstanceState == null && intent.action == Intent.ACTION_MAIN &&
@@ -212,6 +246,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onSaveInstanceState(outState:Bundle){
         attachmentScope?.let {(id,revision,branch)->outState.putString("attachment-thread-id",id);outState.putLong("attachment-thread-revision",revision);outState.putString("attachment-branch-id",branch)}
+        cameraAttachmentName?.let{outState.putString("camera-attachment-name",it)}
         super.onSaveInstanceState(outState)
     }
     override fun onPause(){
@@ -303,6 +338,8 @@ class MainActivity : ComponentActivity() {
         val selectedThreadId by chat.selectedThreadId.collectAsState()
         // Freeze the value, not the delegated State getter, in callbacks retained by an old IME.
         val composerThreadId=selectedThreadId
+        var attachmentPickerThread by rememberSaveable{mutableStateOf<String?>(null)}
+        var attachmentPickerBranch by rememberSaveable{mutableStateOf<String?>(null)}
         var officeProfileEntries by remember{mutableStateOf<Map<String,com.user.localagent.core.office.OfficePrivateProfile.Entry>>(emptyMap())}
         var officeProfileRevision by remember{mutableIntStateOf(0)}
         val officeOpen=composerThreadId==ZipHapRoom.OFFICE.threadId
@@ -315,7 +352,6 @@ class MainActivity : ComponentActivity() {
                 officeGuideDismissed=true
             }
         }
-        var capabilityShelfOpen by rememberSaveable{mutableStateOf(false)}
         LaunchedEffect(officeOpen,officeProfileRevision){
             officeProfileEntries=if(officeOpen)withContext(Dispatchers.IO){runCatching{app.officeProfile.read()?.entries}.getOrNull()}.orEmpty() else emptyMap()
         }
@@ -497,17 +533,17 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
-                            "attach"->{val room=roomThreads.firstOrNull{it.id==composerThreadId};if(room!=null&&!attachmentPreparing.value){attachmentScope=Triple(room.id,room.revision,room.activeBranchId);attachFiles.launch(arrayOf("*/*"))}}
+                            "attach"->if(currentBranchId.isNotBlank()&&attachmentScope==null&&!attachmentPreparing.value){
+                                attachmentPickerThread=composerThreadId
+                                attachmentPickerBranch=currentBranchId
+                            }
                             "navigate"->{
                                 val panel=payload.getValue("panel").jsonPrimitive.content
                                 when(panel){
                                     "collab"->Unit
-                                    "contacts"->try {
-                                        startActivity(Intent(Intent.ACTION_VIEW,android.provider.ContactsContract.Contacts.CONTENT_URI))
-                                    } catch (_:android.content.ActivityNotFoundException) {
-                                        status.value="이 휴대폰에서 연락처 앱을 열 수 없어요."
-                                    }
-                                    "capabilities"->capabilityShelfOpen=true
+                                    "contacts"->openPanel(CONTACTS_TAB)
+                                    "capabilities"->openPanel(DISCOVER_TAB)
+                                    "historySearch"->openPanel(HISTORY_SEARCH_TAB)
                                     "connections"->{openPanel(0);connectionsOpen=true}
                                     "privacy"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.PRIVACY}
                                     else->openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})
@@ -578,7 +614,7 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick=::returnToParent){Text(if(returnsToSettings)"‹ 설정"else"‹ 대화")}
                     val title=if(tab==4&&settingsPage==SettingsPage.HOME&&!manualSettings)"나의 집순이"
                         else if(tab==4)settingsPage.title
-                        else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","보관함","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트")[tab]
+                        else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","보관함","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트","연락처","둘러보기","대화 검색")[tab]
                     Text(title,style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
                     if(tab==4 && !manualSettings) TextButton(onClick={showManual(SettingsLink.MANUAL)}){Text("수동 설정")}
                 }
@@ -594,17 +630,67 @@ class MainActivity : ComponentActivity() {
                         openPanel(0)
                         true
                     }
-                },modifier=Modifier.weight(1f));5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}}
-                if(tab==6 || tab==4&&!manualSettings){
+                },modifier=Modifier.weight(1f));5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}
+                    CONTACTS_TAB->ContactsDirectory(Modifier.weight(1f))
+                    HISTORY_SEARCH_TAB->Box(Modifier.weight(1f)){ConversationHistoryPanel(app,searchOnly=true){status.value=it}}
+                    DISCOVER_TAB->OfficeCapabilityShelf(app,
+                        onConnections={openPanel(0);connectionsOpen=true},
+                        onImages={openPanel(7)},
+                        calendarReadGranted=calendarGranted,onCalendarRead={
+                            if(!officeCalendarReadGranted.value)officeCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
+                        },
+                        onDraft={text->
+                            if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||chat.draft.value.isNotBlank())false
+                            else {chat.updateDraft(text,composerThreadId);openPanel(0);true}
+                        },modifier=Modifier.weight(1f))
+                }
+                if(tab in setOf(6,DISCOVER_TAB,CONTACTS_TAB) || tab==4&&!manualSettings){
                     HorizontalDivider()
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                         TextButton(onClick={openPanel(0)}){Text("기본 채팅")}
-                        TextButton(onClick={capabilityShelfOpen=true}){Text("둘러보기")}
+                        TextButton(enabled=tab!=DISCOVER_TAB,onClick={openPanel(DISCOVER_TAB)}){Text("둘러보기")}
                         TextButton(enabled=tab!=6,onClick={openPanel(6)}){Text("보관함")}
                         TextButton(enabled=tab!=4,onClick={openPanel(4)}){Text("나의 집순이")}
                     }
                 }
             }
+        }
+        if(attachmentPickerThread!=null){
+            fun closeAttachmentPicker(){
+                attachmentPickerThread=null;attachmentPickerBranch=null
+            }
+            fun chooseAttachment(launch:()->Unit){
+                val room=roomThreads.firstOrNull{it.id==attachmentPickerThread&&it.activeBranchId==attachmentPickerBranch}
+                closeAttachmentPicker()
+                if(room==null||!chat.selectionReady.value||chat.selectedThreadId.value!=room.id||
+                    attachmentScope!=null||attachmentPreparing.value){
+                    status.value="대화가 바뀌었어요. 첨부할 대화에서 다시 선택해 주세요."
+                    return
+                }
+                attachmentScope=Triple(room.id,room.revision,room.activeBranchId)
+                try{launch()}catch(_:Exception){
+                    cameraAttachmentFile(cameraAttachmentName)?.delete()
+                    cameraAttachmentName=null;attachmentScope=null
+                    status.value="이 휴대폰에서 선택한 첨부 방법을 열 수 없어요."
+                }
+            }
+            AlertDialog(onDismissRequest=::closeAttachmentPicker,title={Text("첨부 추가")},text={
+                Column{
+                    TextButton(onClick={chooseAttachment{
+                        val directory=File(cacheDir,"camera_attachments")
+                        check(directory.isDirectory||directory.mkdirs())
+                        val cutoff=System.currentTimeMillis()-24*60*60*1000L
+                        directory.listFiles().orEmpty().filter{it.isFile&&it.lastModified()<cutoff}.forEach{it.delete()}
+                        val file=File.createTempFile("camera-",".jpg",directory)
+                        cameraAttachmentName=file.name
+                        attachCamera.launch(cameraAttachmentUri(file))
+                    }}){Text("카메라")}
+                    TextButton(onClick={chooseAttachment{
+                        attachPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }}){Text("사진")}
+                    TextButton(onClick={chooseAttachment{attachFiles.launch(arrayOf("*/*"))}}){Text("파일")}
+                }
+            },confirmButton={TextButton(onClick=::closeAttachmentPicker){Text("취소")}})
         }
         if(chatManagerOpen) AlertDialog(onDismissRequest={chatManagerOpen=false},title={Text("대화 도구")},text={
             Column {
@@ -641,17 +727,6 @@ class MainActivity : ComponentActivity() {
             onDismiss={queueOpen=false},onEdit=chat::editQueued,onMove=chat::reorderQueued,onCancel=chat::cancelQueued,
             onManageGoal={threadId->if(threadId==composerThreadId){queueOpen=false;goalEditorThreadId=threadId}},
         )
-        if(capabilityShelfOpen)OfficeCapabilityShelf(app,onDismiss={capabilityShelfOpen=false},
-            onConnections={capabilityShelfOpen=false;openPanel(0);connectionsOpen=true},
-            onImages={capabilityShelfOpen=false;openPanel(7)},
-            calendarReadGranted=calendarGranted,onCalendarRead={
-                capabilityShelfOpen=false
-                if(!officeCalendarReadGranted.value)officeCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
-            },
-            onDraft={text->
-                if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||chat.draft.value.isNotBlank())false
-                else {chat.updateDraft(text,composerThreadId);capabilityShelfOpen=false;openPanel(0);true}
-            })
         if(skillLibraryOpen)SkillLibraryDialog(chat.bundledSkills,toolStatuses=skillCapabilities,onDismiss={skillLibraryOpen=false})
         goalEditorThreadId?.takeIf{it==selectedThreadId&&it.isNotBlank()}?.let {goalThread->
             GoalEditorDialog(goal=roomGoal?.takeIf{it.threadId==goalThread},threadId=goalThread,

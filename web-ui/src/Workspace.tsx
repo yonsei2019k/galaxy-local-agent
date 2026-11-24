@@ -48,7 +48,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
       <div className="sidebar-brand">
         <span className="wordmark"><BrandMark /> {single ? '집순이' : <>ZipHap<span>.Agent</span></>}</span>
         {single && <button type="button" className="icon-button sidebar-search" aria-label="대화 검색" disabled={!enabled}
-          onClick={() => onNavigate('history')}><Icon name="search" /></button>}
+          onClick={() => onNavigate('historySearch')}><Icon name="search" /></button>}
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
       </div>
       {!single && <><nav className="shared-rooms" aria-label="메인 채팅">
@@ -227,7 +227,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
           </div>
           <div className="composer-tools">
             <div className="composer-actions">
-              {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="파일 첨부" title="파일 첨부" onClick={onAttach}><Icon name="clip" /></button>}
+              {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="첨부 추가" title="첨부 추가" onClick={onAttach}><Icon name="plus" /></button>}
               {snapshot?.voiceDraftEpoch !== undefined && <button type="button" className="icon-button voice-button"
                 disabled={!enabled || pending || tooLong || voice === 'permission' || voice === 'finishing'}
                 aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={onVoice}>

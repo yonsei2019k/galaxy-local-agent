@@ -10,6 +10,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.user.localagent.AppContainer
@@ -19,6 +22,7 @@ import com.user.localagent.diagnostics.ConversationDiagnostics
 import com.user.localagent.diagnostics.ConversationExportFormat
 import com.user.localagent.diagnostics.ConversationExportMetadata
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -26,12 +30,21 @@ import java.time.format.DateTimeFormatter
 
 /** Local stored chat browser. An explicit save first freezes its query and complete file locally. */
 @Composable
-fun ConversationHistoryPanel(app:AppContainer,onStatus:(String)->Unit) {
+fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:(String)->Unit) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     val diagnostics=remember(app){ConversationDiagnostics(app.repository)}
     val messages=remember{mutableStateListOf<MessageRecord>()}
     var queryDraft by remember{mutableStateOf("")}
+    val searchFocus=remember{FocusRequester()}
+    val keyboard=LocalSoftwareKeyboardController.current
+    LaunchedEffect(searchOnly){
+        if(searchOnly){
+            delay(150)
+            searchFocus.requestFocus()
+            keyboard?.show()
+        }
+    }
     var query by remember{mutableStateOf("")}
     var revision by remember{mutableIntStateOf(0)}
     var total by remember{mutableLongStateOf(0)}
@@ -95,17 +108,18 @@ fun ConversationHistoryPanel(app:AppContainer,onStatus:(String)->Unit) {
     }
     LazyColumn(Modifier.fillMaxSize().imePadding(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-            Text("내 대화 기록",style=MaterialTheme.typography.titleLarge)
-            Text("ZipHap.Agent에 저장된 대화를 최신순으로 봅니다. 최근 200개보다 오래된 기록도 불러올 수 있습니다. 다른 앱의 대화나 입력 중인 초안은 포함하지 않습니다.",style=MaterialTheme.typography.bodySmall)
-            OutlinedTextField(value=queryDraft,onValueChange={if(it.length<=500)queryDraft=it},label={Text("대화 내용 검색")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+            if(!searchOnly)Text("저장된 대화",style=MaterialTheme.typography.titleLarge)
+            if(!searchOnly)Text("집합에서 나눈 대화를 최신순으로 볼 수 있어요.",style=MaterialTheme.typography.bodySmall)
+            OutlinedTextField(value=queryDraft,onValueChange={if(it.length<=500)queryDraft=it},label={Text("대화 내용 검색")},
+                modifier=Modifier.fillMaxWidth().focusRequester(searchFocus),singleLine=true)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 Button(enabled=!busy,onClick={query=queryDraft.trim();revision++}){Text("검색")}
                 OutlinedButton(enabled=!busy,onClick={queryDraft="";query="";revision++}){Text("전체")}
             }
             Text("일치하는 기록 ${total}개 · 현재 ${messages.size}개 표시",style=MaterialTheme.typography.labelMedium)
         }}}
-        item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-            Text("진단용 대화 내보내기",style=MaterialTheme.typography.titleMedium)
+        if(!searchOnly)item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+            Text("대화 내보내기",style=MaterialTheme.typography.titleMedium)
             Text("현재 검색 범위의 대화 본문을 선택한 위치에 저장합니다. 최대 10,000개·20MiB이며 일부인 경우 파일에 표시됩니다. 개발자에게 검토할 기록만 직접 공유할 수 있고, GitHub에 자동 업로드하지 않습니다.",style=MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                 FilterChip(selected=exportFormat==ConversationExportFormat.JSON,onClick={exportFormat=ConversationExportFormat.JSON},label={Text("JSON")})
@@ -117,7 +131,7 @@ fun ConversationHistoryPanel(app:AppContainer,onStatus:(String)->Unit) {
         items(messages,key={it.id}) {message->
             var expanded by remember(message.id){mutableStateOf(false)}
             ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Text("${if(message.role=="user")"나" else "ZipHap.Agent"} · ${formatter.format(Instant.ofEpochMilli(message.createdAt))}",style=MaterialTheme.typography.labelMedium)
+                Text("${if(message.role=="user")"나" else "집순이"} · ${formatter.format(Instant.ofEpochMilli(message.createdAt))}",style=MaterialTheme.typography.labelMedium)
                 SelectionContainer{Text(message.text,maxLines=if(expanded)Int.MAX_VALUE else 8,style=MaterialTheme.typography.bodyMedium)}
                 Row{
                     TextButton(onClick={expanded=!expanded}){Text(if(expanded)"접기" else "전체 보기")}
