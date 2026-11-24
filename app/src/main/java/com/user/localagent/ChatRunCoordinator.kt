@@ -1606,6 +1606,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         "If the next reversible step is clear, do it and observe the result. If the current route lacks a control, check the page structure, " +
         "public help, and permitted supported routes before asking. Ask when a real choice or owner action is needed. " +
         "An opened detail screen, playback signal, completed work, and a saved file are separate facts. " +
+        "For recurring obligations, first establish the requested period, course or requirement, and any applicable equivalency or validity rule. " +
+        "Resolve relative years using the local date when needed. Compare the actual completion period, not a print or reissue date. " +
+        "A historical certificate, a similarly named course, a registration, and current progress each prove different things. " +
+        "If annual renewal is required, inspect this period's assigned courses and progress before choosing the next step. " +
+        "If the period or course is ambiguous, inspect the record details before asking. Report older history separately and never deliver a different period's file as the requested proof. " +
         "If the requested outcome includes an already-issued document, look for the official file and verify a save before claiming delivery. " +
         "Do not speak as other assistants or claim a connection or completed action without evidence."
 
