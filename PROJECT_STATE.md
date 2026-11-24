@@ -1,5 +1,7 @@
 # ZipHap.Agent project state
 
+현재 인계와 우선순위는 [2026-11-25 집순이 남은 작업 계획](docs/jipsooni-remaining-work-2026-11-25.ko.md)에서 확인한다. 아래 내용은 당시 기준의 이력을 보존한다.
+
 Updated 2026-11-19. Canonical project: this independent Android repository. Do not modify Roblox or nurse-scheduler.
 
 ## Published v0.1.25 and paired PC mailbox update
