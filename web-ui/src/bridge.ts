@@ -272,7 +272,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
     typeof card.title !== 'string' || typeof card.status !== 'string' || typeof card.working !== 'boolean' ||
     !Array.isArray(card.steps) || card.steps.length > 4 || card.steps.some(item => typeof item !== 'string') ||
     (card.keyboardOpen !== undefined && typeof card.keyboardOpen !== 'boolean') ||
-    (card.inputHeight !== undefined && card.inputHeight !== 400 && card.inputHeight !== 430))) return null
+    (card.inputHeight !== undefined && card.inputHeight !== 308 && card.inputHeight !== 400 && card.inputHeight !== 430))) return null
   if (value.browserLoginStatus !== undefined && (typeof value.browserLoginStatus !== 'string' || value.browserLoginStatus.length > 240)) return null
   if (value.composerEpoch !== undefined && !epoch(value.composerEpoch)) return null
   if (value.voiceDraftEpoch !== undefined && !epoch(value.voiceDraftEpoch)) return null

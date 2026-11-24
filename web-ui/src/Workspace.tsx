@@ -198,7 +198,7 @@ export function Composer({ snapshot, enabled, draft, pending, status, onDraft, o
       <div className="composer-width">
         <div className="composer-status" id={statusId} role="status">{note}</div>
         {enabled && snapshot?.otherApprovalPending && <button type="button" className="text-button" onClick={onOpenWaitingApproval}>확인이 필요한 대화 열기</button>}
-        <form className="composer" aria-label="메시지 작성" onSubmit={event => {
+        <form className={`composer ${attachments.length || canStop || canSteer || voiceBusy || snapshot?.canCancelPreparation ? '' : 'composer--compact'}`} aria-label="메시지 작성" onSubmit={event => {
           event.preventDefault()
           if (sendReady) onSubmit('send')
         }}>

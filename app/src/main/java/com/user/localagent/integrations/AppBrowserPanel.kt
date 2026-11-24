@@ -142,12 +142,11 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     }
     Surface(modifier.onSizeChanged {cardHeight=it.height},shape=MaterialTheme.shapes.large,
         color=MaterialTheme.colorScheme.surfaceContainerHigh){
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleLarge)
-                Text(login.host,style=MaterialTheme.typography.titleSmall)
-                Text(if(login.pairedPc)"입력한 내용은 연결한 내 PC를 거쳐 이 사이트에 제출돼요. 채팅에는 남지 않아요."
-                    else "입력 내용은 이 사이트 로그인에만 사용해요.",style=MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal=12.dp,vertical=8.dp),
+                verticalArrangement=Arrangement.spacedBy(3.dp)){
+                Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
+                Text(login.host,style=MaterialTheme.typography.bodySmall)
+                if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
                 loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
                 OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
                     .bringIntoViewRequester(accountTarget).onFocusChanged { if(it.isFocused)focusedField=1 },singleLine=true,

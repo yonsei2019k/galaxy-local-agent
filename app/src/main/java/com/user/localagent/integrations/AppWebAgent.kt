@@ -443,6 +443,15 @@ class AppWebAgent private constructor(private val context:Context) {
     private var navigationRevision=0L
     private var loadingUrl:String?=null
 
+    private fun upgradeHallymLoginRedirect(request:WebResourceRequest):Boolean {
+        if(!request.isForMainFrame||(websiteLogin.value==null&&!loginSubmitting))return false
+        val upgraded=hallymSecureLoginRedirect(request.url.toString(),request.method,cardOrigin?.host)?:return false
+        if(secureOrigin(upgraded)!=cardOrigin)return false
+        beginNavigation(upgraded)
+        com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"HTTPS_GET_UPGRADED")
+        return true
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun view():WebView=webView?:WebView(context).also{web->
         web.settings.javaScriptEnabled=true
@@ -454,6 +463,7 @@ class AppWebAgent private constructor(private val context:Context) {
         CookieManager.getInstance().setAcceptCookie(true)
         web.webViewClient=object:WebViewClient(){
             override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean {
+                if(upgradeHallymLoginRedirect(request))return true
                 val url=request.url.toString()
                 if(request.isForMainFrame&&websiteLogin.value!=null&&secureOrigin(url)!=cardOrigin){
                     navigationFailed(if(url.startsWith("http:",true))"HTTPS_REQUIRED" else "NAVIGATION_BLOCKED")
@@ -477,6 +487,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 if(navigation.value.loading)navigation.value=NavigationStatus()
             }
             override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
+                if("ERR_CLEARTEXT_NOT_PERMITTED" in error.description&&upgradeHallymLoginRedirect(request))return
                 if(request.isForMainFrame&&request.url.toString()==loadingUrl)
                     navigationFailed(when{
                         "ERR_CLEARTEXT_NOT_PERMITTED" in error.description->"HTTPS_REQUIRED"

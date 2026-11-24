@@ -459,7 +459,7 @@ class MainActivity : ComponentActivity() {
                         put("status",visibleWebsiteWork?.status.orEmpty())
                         put("working",visibleWebsiteWork?.working==true)
                         put("steps",JsonArray(visibleWebsiteWork?.steps.orEmpty().map(::JsonPrimitive)))
-                        if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 400)
+                        if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 308)
                         if(websiteKeyboardOpen)put("keyboardOpen",true)
                     })
                     put("draft",roomDraft);put("composerEpoch",composerEpoch);put("busy",runForRoom!=null)
