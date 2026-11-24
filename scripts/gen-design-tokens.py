@@ -5,6 +5,7 @@ Usage: python scripts/gen-design-tokens.py [--check]
 --check exits 1 when the committed outputs differ from what the source would generate.
 """
 import json
+import math
 import pathlib
 import re
 import sys
@@ -51,6 +52,17 @@ def generate(tokens):
                 raise ValueError(f"{group} {name!r} must be a non-negative integer, got {value!r}")
             css.append(f"  --{group}-{name}: {value}{unit_css};")
             kt.append(f"    val {pascal(group, name)} = {value}.{unit_kt}")
+    for name, ms in tokens.get("motion", {}).items():
+        if not NAME.fullmatch(name) or type(ms) is not int or ms < 0:
+            raise ValueError(f"invalid motion duration: {name!r}")
+        css.append(f"  --motion-{name}: {ms}ms;")
+        kt.append(f"    const val {pascal('motion', name, 'ms')} = {ms}")
+    for name, points in tokens.get("ease", {}).items():
+        if (not NAME.fullmatch(name) or not isinstance(points, list) or len(points) != 4
+                or any(type(p) not in (float, int) or not math.isfinite(p) for p in points)
+                or not (0 <= points[0] <= 1 and 0 <= points[2] <= 1)):
+            raise ValueError(f"invalid easing curve: {name!r}")
+        css.append(f"  --ease-{name}: cubic-bezier({', '.join(map(str, points))});")
     css.append("}")
     kt.append("}")
     return "\n".join(css) + "\n", "\n".join(kt) + "\n"

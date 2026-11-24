@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef } from 'react'
 import '../sheet.css'
 import './work.css'
-import { Icon } from '../Icon'
+import { Character } from '../character/Character'
+import { useCharacter } from '../character/useCharacter'
 import type { Task } from '../bridge'
 import { friendlyStep, taskSteps, verbatimSteps, workPresentation } from './workPresentation'
 
@@ -14,6 +15,7 @@ export function WorkSheet({ task, enabled, steps, onClose, onStopGoalWait }: {
   onStopGoalWait(runId: string): void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const [character] = useCharacter()
   const open = task !== null
   useLayoutEffect(() => {
     const element = dialog.current
@@ -31,11 +33,11 @@ export function WorkSheet({ task, enabled, steps, onClose, onStopGoalWait }: {
   const presentation = task && workPresentation(task)
   const stepList = task ? (steps ? verbatimSteps(steps) : taskSteps(task)) : []
   const evidence = (task?.evidence ?? []).filter(item => item.detail)
-  return <dialog ref={dialog} className="sheet work-sheet" aria-label={task ? `${task.label || '작업'} 상세` : '작업 상세'}
+  return <dialog ref={dialog} className="sheet sheet--motion work-sheet" aria-label={task ? `${task.label || '작업'} 상세` : '작업 상세'}
     onClose={onClose} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     {task && presentation && <div className="sheet-body">
       <header className={`work-sheet-head work-card--${presentation.tone}`}>
-        <span className="work-icon"><Icon name={presentation.icon} /></span>
+        <Character choice={character} state={presentation.characterState} size={64} decorative />
         <div className="work-text">
           <h2 className="work-sheet-title" dir="auto">{task.label || '작업'}</h2>
           <p className="work-state">{presentation.title}</p>

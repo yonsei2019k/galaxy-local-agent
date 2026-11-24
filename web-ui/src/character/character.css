@@ -2,7 +2,8 @@
 .character-button { display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; cursor: pointer; }
 .character-button:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 
-.character-preview { display: grid; place-items: center; padding: var(--space-3) 0; border-radius: var(--radius-card); background: var(--color-bg); }
+.character-preview { display: grid; place-items: center; padding: var(--space-3) 0; border: 0; border-radius: var(--radius-card); background: var(--color-bg); cursor: pointer; }
+.character-preview:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 .choice-row { display: flex; gap: var(--space-2); }
 .choice-row--wrap { flex-wrap: wrap; }
 .choice { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-width: 44px; min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--fs-body); cursor: pointer; }

@@ -1,0 +1,48 @@
+@media (prefers-reduced-motion: no-preference) {
+  .sheet--motion[open] { animation: sheet-enter var(--motion-base) var(--ease-out); }
+  .sheet--motion[open]::backdrop { animation: sheet-dim var(--motion-base) var(--ease-out); }
+  .work-card { animation: card-enter var(--motion-base) var(--ease-out); }
+  .work-icon--just-finished { animation: complete-pop var(--motion-slow) var(--ease-spring); }
+  .messages > .message:last-child { animation: message-enter var(--motion-fast) var(--ease-out); }
+  .work-progress span { animation: progress-sweep 1.6s linear infinite; }
+
+  .character[data-animated="true"] :is([data-layer="figure"], [data-layer="eyes"], .character-ears--wiggle,
+      [data-layer="left-hand"], [data-layer="right-hand"], [data-layer="blanket"], [data-layer="speech-bubble"],
+      [data-layer="zz"], [data-layer="steam"], [data-layer="wave"], [data-layer="exclamation"]) {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .character[data-animated="true"] [data-layer="figure"] { animation: character-breathe 3.2s ease-in-out infinite; }
+  .character[data-animated="true"] [data-layer="eyes"] { animation: character-blink 4.6s ease-in-out infinite; }
+  .character--full-motion[data-animated="true"] .character-ears--wiggle { animation: ears-wiggle .5s var(--ease-out); }
+  .character--full-motion.character--state-work[data-animated="true"] :is([data-layer="left-hand"], [data-layer="right-hand"]) {
+    animation: character-type .4s ease-in-out infinite alternate;
+  }
+  .character--full-motion.character--state-work[data-animated="true"] [data-layer="right-hand"] { animation-delay: -.4s; }
+  .character--full-motion.character--state-wait[data-animated="true"] :is([data-layer="blanket"], [data-layer="speech-bubble"]) {
+    animation: character-doze 3.2s ease-in-out infinite;
+  }
+  .character--full-motion.character--state-wait[data-animated="true"] [data-layer="speech-bubble"] { --doze-rise: -1px; }
+  .character--full-motion.character--state-wait[data-animated="true"] [data-layer="zz"] { animation: character-float 2.4s ease-out infinite; }
+  .character--full-motion.character--state-done[data-animated="true"] { animation: character-hop var(--motion-slow) var(--ease-out); }
+  .character--full-motion.character--state-done[data-animated="true"] [data-layer="steam"] { animation: character-float 2s ease-out infinite; }
+  .character--full-motion.character--state-alert[data-animated="true"] [data-layer="wave"] { animation: character-wave .6s ease-in-out 2; }
+  .character--full-motion.character--state-alert[data-animated="true"] [data-layer="exclamation"] { animation: character-notice .6s ease-in-out 2; }
+  .character[data-paused="true"], .character[data-paused="true"] * { animation-play-state: paused !important; }
+}
+
+@keyframes sheet-enter { from { transform: translateY(100%); } }
+@keyframes sheet-dim { from { opacity: 0; } }
+@keyframes card-enter { from { opacity: 0; transform: translateY(8px); } }
+@keyframes message-enter { from { opacity: 0; transform: translateY(6px); } }
+@keyframes complete-pop { 50% { transform: scale(1.15); } }
+@keyframes progress-sweep { from { transform: translateX(-110%); opacity: .35; } to { transform: translateX(360%); opacity: 1; } }
+@keyframes character-breathe { 50% { transform: scale(1.02); } }
+@keyframes character-blink { 0%, 94%, 98%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+@keyframes ears-wiggle { 25%, 75% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+@keyframes character-type { to { transform: translateY(-2px); } }
+@keyframes character-doze { 50% { transform: translateY(var(--doze-rise, -2px)); } }
+@keyframes character-float { from { transform: translateY(2px); opacity: .65; } to { transform: translateY(-9px); opacity: 0; } }
+@keyframes character-hop { 50% { transform: translateY(-6px); } }
+@keyframes character-wave { 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } }
+@keyframes character-notice { 50% { transform: scale(1.12); } }

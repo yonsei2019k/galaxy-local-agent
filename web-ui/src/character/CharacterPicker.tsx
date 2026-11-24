@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import './character.css'
 import '../sheet.css'
 import { Character } from './Character'
@@ -13,6 +13,7 @@ export function CharacterPicker({ open, value, onChange, onClose }: {
   onClose(): void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const [wiggle, setWiggle] = useState(0)
   useLayoutEffect(() => {
     const element = dialog.current
     if (!element) return
@@ -26,10 +27,12 @@ export function CharacterPicker({ open, value, onChange, onClose }: {
     }
   }, [open])
 
-  return <dialog ref={dialog} className="sheet character-sheet" aria-label="집순이 모습 바꾸기"
+  return <dialog ref={dialog} className="sheet sheet--motion character-sheet" aria-label="집순이 모습 바꾸기"
     onClose={onClose} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     {open && <div className="sheet-body">
-      <div className="character-preview"><Character choice={value} size={160} /></div>
+      <button type="button" className="character-preview" aria-label="집순이 귀 흔들기" onClick={() => setWiggle(value => value + 1)}>
+        <Character choice={value} size={160} wiggle={wiggle} decorative />
+      </button>
       <section aria-label="모양">
         <h2>모양</h2>
         <div className="choice-row">

@@ -11,8 +11,9 @@ const fixtures = require('./chat-fixtures.cjs');
 const customDist = !!process.env.CHAT_VISUAL_DIST;
 const dist = path.resolve(process.env.CHAT_VISUAL_DIST || path.join(__dirname, '../../web-ui/dist'));
 const out = path.join(__dirname, 'out');
-const shotDir = customDist ? path.join(out, 'custom-dist') : out;
-const metricsFile = process.env.CHAT_VISUAL_METRICS || 'metrics.json';
+const reducedMotion = process.env.CHAT_VISUAL_REDUCED_MOTION === '1' ? 'reduce' : 'no-preference';
+const shotDir = path.join(out, customDist ? 'custom-dist' : '', reducedMotion === 'reduce' ? 'reduced-motion' : '');
+const metricsFile = process.env.CHAT_VISUAL_METRICS || (reducedMotion === 'reduce' ? 'metrics.reduced-motion.json' : customDist ? 'metrics.custom-dist.json' : 'metrics.json');
 const widths = [[360, 800], [393, 852], [412, 915]];
 const SNAPSHOT_EVENT = 'ziphap:snapshot'; // web-ui/src/bridge.ts
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
@@ -36,7 +37,8 @@ before(async () => {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}/`;
-  browser = await chromium.launch({ headless: true });
+  const channel = process.env.CHAT_VISUAL_CHANNEL;
+  browser = await chromium.launch({ headless: true, ...(channel ? { channel } : {}) });
 });
 
 after(async () => {
@@ -133,7 +135,7 @@ const expectations = {
 for (const [name, snapshot] of Object.entries(fixtures)) {
   for (const [width, height] of widths) {
     test(`${name} @${width}`, async () => {
-      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion });
       try {
         await page.addInitScript(() => { window.ziphapNative = { postMessage() {} }; });
         await page.goto(base);

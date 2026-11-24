@@ -30,7 +30,7 @@ export function ComposerSheet({ open, enabled, snapshot, activeLabel, onAttach, 
 
   const models = snapshot?.models ?? []
   const selectedLabel = snapshot?.modelLabel || models.find(model => model.id === snapshot?.modelId)?.label || '답변 방식'
-  return <dialog ref={dialog} className="sheet composer-sheet" aria-label="더하기 메뉴"
+  return <dialog ref={dialog} className="sheet sheet--motion composer-sheet" aria-label="더하기 메뉴"
     onClose={onClose} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     {open && <div className="sheet-body">
       <button type="button" className="sheet-action" disabled={!enabled} onClick={() => { onClose(); onAttach() }}>

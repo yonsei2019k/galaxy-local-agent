@@ -38,10 +38,6 @@
 .work-chevron { color: var(--color-muted); font-size: 22px; line-height: 1; }
 .work-progress { position: absolute; inset: auto var(--space-3) 0 var(--space-3); height: 3px; border-radius: var(--radius-pill); background: var(--color-cobalt-soft); overflow: hidden; }
 .work-progress span { display: block; width: 28%; height: 100%; background: var(--color-cobalt); border-radius: var(--radius-pill); }
-@media (prefers-reduced-motion: no-preference) {
-  .work-progress span { animation: work-progress-slide 1.65s ease-in-out infinite alternate; }
-}
-@keyframes work-progress-slide { to { transform: translateX(255%); } }
 
 .work-cards { display: grid; gap: var(--space-2); min-width: 0; margin-top: var(--space-4); }
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import './work.css'
 import { Icon } from '../Icon'
 import type { Task } from '../bridge'
@@ -6,10 +7,16 @@ import { detailLine, workPresentation } from './workPresentation'
 export function WorkCard({ task, onOpen }: { task: Task; onOpen(taskId: string): void }) {
   const presentation = workPresentation(task)
   const line = detailLine(task.detail ?? '')
+  const previous = useRef(task.phase)
+  const [justFinished, setJustFinished] = useState(false)
+  useEffect(() => {
+    setJustFinished(previous.current !== 'completed' && task.phase === 'completed')
+    previous.current = task.phase
+  }, [task.phase])
   return (
     <button type="button" id={`work-${task.id}`} className={`work-card work-card--${presentation.tone}`}
       onClick={() => onOpen(task.id)}>
-      <span className="work-icon"><Icon name={presentation.icon} /></span>
+      <span className={`work-icon${justFinished ? ' work-icon--just-finished' : ''}`}><Icon name={presentation.icon} /></span>
       <span className="work-text">
         <span className="work-title" dir="auto">{task.label || '작업'}</span>
         <span className="work-meta">

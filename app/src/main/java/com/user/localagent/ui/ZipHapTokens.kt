@@ -44,4 +44,7 @@ object ZipHapTokens {
     val RadiusControl = 12.dp
     val RadiusSheet = 24.dp
     val RadiusPill = 999.dp
+    const val MotionFastMs = 120
+    const val MotionBaseMs = 220
+    const val MotionSlowMs = 360
 }
