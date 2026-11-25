@@ -6,7 +6,21 @@ import java.net.URI
 object CommerceListingLinks {
     private data class Route(val app: String, val path: Regex, val fields: Set<String>)
     private val stayFields = setOf("checkIn", "checkOut", "checkInDate", "checkOutDate", "adultCount", "childCount", "roomTypeId", "ratePlanId")
+    /** Exact service homes have no merchant, order or reservation selection to lose. */
+    private val serviceHomes = mapOf(
+        "https://www.baemin.com" to "com.sampleapp",
+        "https://www.yogiyo.co.kr" to "com.fineapp.yogiyo",
+        "https://www.kakaomobility.com/kakaot/index.html" to "com.kakao.taxi",
+        "https://app.catchtable.co.kr" to "co.kr.catchtable.android.catchtable_app",
+        "https://www.tabling.co.kr" to "com.mealant.tabling",
+        "https://map.naver.com" to "com.nhn.android.nmap"
+    )
+    fun homePackage(link: String): String? = serviceHomes[link.removeSuffix("/")]
+
     private val routes = mapOf(
+        "map.naver.com" to Route("com.nhn.android.nmap", Regex("/p/entry/place/[0-9]+/?"), emptySet()),
+        "app.catchtable.co.kr" to Route("co.kr.catchtable.android.catchtable_app", Regex("/ct/shop/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}/?"), emptySet()),
+        "www.tabling.co.kr" to Route("com.mealant.tabling", Regex("/place/[a-fA-F0-9]{24}/?"), emptySet()),
         "www.coupang.com" to Route("com.coupang.mobile", Regex("/vp/products/[0-9]{1,30}"), setOf("itemId", "vendorItemId")),
         "booking.naver.com" to Route("com.nhn.android.nmap", Regex("/booking/(3|5|6|10|12|13|16|17)/bizes/[0-9]+(/items/[0-9]+)?/?"), emptySet()),
         "www.yeogi.com" to Route("kr.goodchoice.abouthere", Regex("/domestic-accommodations/[0-9]+/?"), stayFields),

@@ -11,7 +11,11 @@ import com.user.localagent.core.connections.CommerceListingLinks
 object CommerceListingIntent {
     fun prepare(context: Context, uri: Uri): Intent {
         val fallback = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
-        val merchant = CommerceListingLinks.packageFor(uri.toString()) ?: return fallback
+        val link = uri.toString()
+        CommerceListingLinks.homePackage(link)?.let { app ->
+            return context.packageManager.getLaunchIntentForPackage(app) ?: fallback
+        }
+        val merchant = CommerceListingLinks.packageFor(link) ?: return fallback
         val state = try {
             context.getSystemService(DomainVerificationManager::class.java)?.getDomainVerificationUserState(merchant)
         } catch (_: PackageManager.NameNotFoundException) {

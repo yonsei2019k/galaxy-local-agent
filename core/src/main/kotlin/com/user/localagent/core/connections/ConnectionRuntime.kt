@@ -66,6 +66,7 @@ class ConnectionRuntime(private val host:ConnectionHost) {
                 val candidate=cached?.takeIf {host.now()-it.at in 0..30_000 && plan.first.method=="GET"}
                 val request=if(candidate!=null)plan.first.copy(extraHeaders=plan.first.extraHeaders+("If-None-Match" to candidate.etag))else plan.first
                 val response=send(request)
+                if(host.access(plan.service)!=access)return@withLock fail("connection_changed")
                 if(response.status==304&&candidate!=null)return@withLock readOutcome(call,candidate.body,true)
                 if(response.status !in 200..299)return@withLock httpFailure(response.status,false)
                 if(call.name=="read_drive_text_file")require(response.contentType.startsWith("text/")||response.contentType.contains("json")){"not_a_text_file"}
@@ -125,6 +126,20 @@ class ConnectionRuntime(private val host:ConnectionHost) {
         val nextPage=if(parsed is JsonObject)listOf("nextPageToken","next_cursor","nextCursor","has_more","@odata.nextLink").any {parsed[it]?.let {v->v !is JsonNull && v.toString()!="false" && v.toString()!="\"\""}==true}else false
         val display=when(call.name){
             "read_gmail_message" -> if(parsed is JsonObject)gmailPreview(parsed).toString() else body
+            "search_notion_pages" -> {
+                val block=call.arguments["blockId"]?.jsonPrimitive?.content
+                val offset=call.arguments["offset"]?.jsonPrimitive?.content
+                when {
+                    block==null -> body
+                    offset==null -> NotionBlocks.children(parsed).toString()
+                    else -> NotionBlocks.single(parsed,block,offset).toString()
+                }
+            }
+            "list_youtube_playlists" -> {
+                val page=parsed as? JsonObject ?: return fail("youtube_response_invalid")
+                if(page["items"] !is JsonArray)return fail("youtube_response_invalid")
+                body
+            }
             "list_outlook_inbox","list_outlook_calendar" -> {
                 val rows=(parsed as? JsonObject)?.get("value") as? JsonArray ?: return fail("outlook_response_invalid")
                 val keys=if(call.name=="list_outlook_inbox")setOf("id","subject","from","receivedDateTime") else setOf("id","subject","start","end")
@@ -156,6 +171,10 @@ class ConnectionRuntime(private val host:ConnectionHost) {
         }
         val limited=display.length>12000
         val report=buildJsonObject {put("service",ConnectionCatalog.tools.getValue(call.name).service.id);put("untrustedSourceData",true);put("completeDataset",false);put("cached",cached);put("sourceRevalidated",true);put("observedAt",host.now());if(call.name!="list_github_repository_issues")put("hasMore",nextPage);put("truncated",limited)
+            if(call.name=="search_notion_pages")
+                (parsed as? JsonObject)?.get("next_cursor")?.jsonPrimitive?.contentOrNull?.let { put("cursor",it) }
+            if(call.name=="list_youtube_playlists")
+                (parsed as? JsonObject)?.get("nextPageToken")?.jsonPrimitive?.contentOrNull?.let { put("pageToken",it) }
             if(!limited && call.name!="read_drive_text_file" && runCatching {Json.parseToJsonElement(display)}.isSuccess)put("data",Json.parseToJsonElement(display))else put("preview",clip(display,12000))}
         return ConnectionOutcome(true,VerificationState.VERIFIED,report.toString(),"read_verified")
     }

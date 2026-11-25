@@ -96,6 +96,11 @@
         <package android:name="com.skt.tmap.ku" />
         <package android:name="com.netflix.mediaclient" />
         <package android:name="com.coupang.mobile" />
+        <package android:name="com.sampleapp" />
+        <package android:name="com.fineapp.yogiyo" />
+        <package android:name="com.kakao.taxi" />
+        <package android:name="co.kr.catchtable.android.catchtable_app" />
+        <package android:name="com.mealant.tabling" />
         <package android:name="com.nhn.android.nmap" />
         <package android:name="kr.goodchoice.abouthere" />
         <package android:name="com.cultsotry.yanolja.nativeapp" />

@@ -49,6 +49,7 @@ object ConnectionRequests {
         values.forEach {row->require(row is JsonArray && row.size in 1..30 && row.all {it is JsonPrimitive && it.isString && it.content.length<=1000})}
         return values
     }
+    private fun pageToken(token:String)=if(token.isEmpty())"" else "&pageToken="+encode(token)
     private fun normalizeRows(values:JsonArray):List<List<String>> = values.map {row->row.jsonArray.map {it.jsonPrimitive.content}.dropLastWhile {it.isEmpty()}}.dropLastWhile {it.isEmpty()}
     fun build(call:ToolCall):ApiPlan {
         val spec=ConnectionCatalog.tools[call.name]?:error("등록되지 않은 연결 도구")
@@ -104,7 +105,15 @@ object ConnectionRequests {
             "create_google_form"->{val questions=Json.parseToJsonElement(call.s("questionsJson")) as? JsonArray?:error("질문 배열 필요");require(questions.size in 1..10&&questions.all {it is JsonPrimitive&&it.isString&&it.content.isNotBlank()&&it.content.length<=300})
                 ApiPlan(service,true,ApiRequest("https://forms.googleapis.com/v1/forms","POST",obj("info" to buildJsonObject {put("title",title)})),"formId",populate={ApiRequest("https://forms.googleapis.com/v1/forms/${key(it)}:batchUpdate","POST",buildJsonObject {put("requests",buildJsonArray {questions.forEachIndexed {index,q->add(buildJsonObject {put("createItem",buildJsonObject {put("location",buildJsonObject {put("index",index)});put("item",buildJsonObject {put("title",q);put("questionItem",buildJsonObject {put("question",buildJsonObject {put("required",false);put("textQuestion",buildJsonObject {})})})})})})}})}.toString())},readback={ApiRequest("https://forms.googleapis.com/v1/forms/${key(it)}")},verify={body->ResponseProof(runCatching {val data=Json.parseToJsonElement(body).jsonObject;data.getValue("info").jsonObject["title"]?.jsonPrimitive?.content==title&&data.getValue("items").jsonArray.map {it.jsonObject.getValue("title").jsonPrimitive.content}==questions.map {it.jsonPrimitive.content}}.getOrDefault(false),"설문 제목·질문 순서 재조회")})}
             "search_youtube_videos"->read("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q="+encode(call.s("query")))
-            "list_youtube_playlists"->read("https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=20")
+            "list_youtube_playlists"->{
+                val playlist=call.s("playlistId");val token=pageToken(call.s("pageToken"))
+                if(playlist.isEmpty())read("https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=20"+token)
+                else {
+                    require(playlist.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+                    val fields=encode("nextPageToken,items(id,snippet(title,position,resourceId/videoId))")
+                    read("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=$playlist&maxResults=20&fields=$fields"+token)
+                }
+            }
             "list_telegram_bot_updates"->read("https://api.telegram.org/getUpdates") // token path is bound only by the host, never model arguments
             "list_outlook_inbox"->read("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?\$select=id,subject,from,receivedDateTime&\$orderby=receivedDateTime%20desc&\$top=20")
             "list_outlook_calendar"->{
@@ -125,7 +134,26 @@ object ConnectionRequests {
                 require(channel.matches(Regex("[CG][A-Z0-9]{1,31}"))){"Slack 채널 ID를 확인해주세요."}
                 read("https://slack.com/api/conversations.history?channel=$channel&limit=15")
             }
-            "search_notion_pages"->read("https://api.notion.com/v1/search","POST",buildJsonObject {put("query",call.s("query"));put("page_size",20)}.toString(),mapOf("Notion-Version" to "2026-03-11"))
+            "search_notion_pages"->{
+                val query=call.s("query");val blockId=call.s("blockId");val offset=call.s("offset");val cursor=call.s("cursor")
+                require(query.isNotEmpty() xor blockId.isNotEmpty()){"검색어 또는 하나의 페이지·블록 ID가 필요해요."}
+                if(query.isNotEmpty()){
+                    require(offset.isEmpty())
+                    read("https://api.notion.com/v1/search","POST",buildJsonObject {
+                        put("query",query);put("page_size",20)
+                        if(cursor.isNotEmpty())put("start_cursor",cursor)
+                    }.toString(),NotionBlocks.headers)
+                }else{
+                    val block=NotionBlocks.blockId(blockId)
+                    if(offset.isNotEmpty()){
+                        require(cursor.isEmpty());NotionBlocks.offset(offset)
+                        read("https://api.notion.com/v1/blocks/$block",headers=NotionBlocks.headers)
+                    }else{
+                        val start=if(cursor.isEmpty())"" else "&start_cursor="+encode(cursor)
+                        read("https://api.notion.com/v1/blocks/$block/children?page_size=8$start",headers=NotionBlocks.headers)
+                    }
+                }
+            }
             "list_todoist_tasks"->read("https://api.todoist.com/api/v1/tasks?limit=20")
             else->error("연결 구현이 없습니다.")
         }

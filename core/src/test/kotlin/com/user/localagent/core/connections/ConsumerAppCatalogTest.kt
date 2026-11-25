@@ -30,6 +30,28 @@ class ConsumerAppCatalogTest {
             "https://www.coupang.com/vp/products/12%2fcheckout"
         )) assertNull(link, CommerceListingLinks.packageFor(link))
     }
+    @Test fun serviceHomeLaunchPreservesMerchantAndOrderLinks() {
+        val homes = mapOf(
+            "https://www.baemin.com/" to "com.sampleapp",
+            "https://www.yogiyo.co.kr" to "com.fineapp.yogiyo",
+            "https://www.kakaomobility.com/kakaot/index.html" to "com.kakao.taxi",
+            "https://app.catchtable.co.kr/" to "co.kr.catchtable.android.catchtable_app",
+            "https://www.tabling.co.kr/" to "com.mealant.tabling",
+            "https://map.naver.com/" to "com.nhn.android.nmap"
+        )
+        homes.forEach { (link, app) ->
+            assertEquals(app, CommerceListingLinks.homePackage(link))
+            assertNull(CommerceListingLinks.homePackage(link + "?order=1"))
+        }
+        val restaurant = "https://app.catchtable.co.kr/ct/shop/legume.seoul"
+        val table = "https://www.tabling.co.kr/place/677cc51766de5f06987262ef"
+        assertEquals("com.nhn.android.nmap", CommerceListingLinks.packageFor("https://map.naver.com/p/entry/place/36161110"))
+        assertNull(CommerceListingLinks.homePackage(restaurant))
+        assertEquals("co.kr.catchtable.android.catchtable_app", CommerceListingLinks.packageFor(restaurant))
+        assertEquals("com.mealant.tabling", CommerceListingLinks.packageFor(table))
+        assertNull(CommerceListingLinks.packageFor(restaurant + "/confirm"))
+        assertNull(CommerceListingLinks.packageFor(table + "?order=1"))
+    }
     @Test fun purchaseComparisonRetainsExactSellerOption() {
         val tool = "open_coupang_product"
         val pair = call(tool, "id" to "123", "itemId" to "456", "vendorItemId" to "789")

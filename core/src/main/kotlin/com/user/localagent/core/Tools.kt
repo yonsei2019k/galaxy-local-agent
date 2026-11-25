@@ -37,7 +37,7 @@ object ToolRegistry {
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
         "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
         "open_map" to "Open the default map app searching for a place or address. Does not start turn-by-turn navigation by itself.",
-        "open_url" to "Open an https URL in the phone's browser. Opening is not reading; use read_webpage to read page content.",
+        "open_url" to "Open an HTTPS page on the phone. Prefer observed listing URLs to keep the selected shop, room or product. Official service homes can open their installed apps: map.naver.com, app.catchtable.co.kr, www.tabling.co.kr, www.baemin.com, www.yogiyo.co.kr, or www.kakaomobility.com/kakaot/index.html. Provide exactly one of url and service. For a known official service, use service ID: skt, kt, lguplus, insurance_lookup, koreanair, asiana, jejuair, jinair, trinityairways (구 티웨이), naver_mail, kakao_support. Ask which provider if unclear. Use read_webpage to read content. Opening does not verify an account, fare, reservation, order or ride.",
         "save_memory" to "Record an owner-stated fact, preference or correction for later chats with owner review. For a request to learn from past conversations, read permitted owner messages first and save only clearly stated facts. Storage is confirmed by readback.",
         "search_memories" to "Read approved saved facts and preferences before answering a question about the owner. Omit query for a bounded owner overview; use a short topic to search remembered facts and past local analysis findings. Analysis findings are unverified interpretations; confirm with read_analysis_evidence using the returned IDs when needed.",
         "delete_memory" to "Delete one remembered fact by id after the owner explicitly asks.",
@@ -98,7 +98,7 @@ object ToolRegistry {
         def("prepare_sms",Risk.MEDIUM,"phoneNumber" to text(max=40),"message" to text(max=4000)),
         def("prepare_email",Risk.MEDIUM,"to" to text(max=320),"subject" to text(max=300),"body" to text(max=12000)),
         def("open_map",Risk.LOW,"query" to text(max=500)),
-        def("open_url",Risk.LOW,"url" to text(max=2048)),
+        def("open_url",Risk.LOW,"url" to text(false,2048),"service" to text(false,40)),
         def("save_memory",Risk.MEDIUM,"content" to text(max=4000),"kind" to text(false,40,description="Classify one memory as fact, preference, or correction. Defaults to fact.")),
         def("search_memories",Risk.LOW,"query" to text(false,500),"limit" to Argument("integer",false)),
         def("delete_memory",Risk.HIGH,"id" to text(max=100)),
@@ -177,7 +177,13 @@ object ToolRegistry {
             require(call.arguments.getValue("packageName").jsonPrimitive.content in supportedMessengerPackages){"지원하지 않는 메시지 앱입니다."}
             call.arguments["limit"]?.let {require(it.jsonPrimitive.int in 1..5){"메시지 조회 개수는 1~5개여야 합니다."}}
         }
-        if(call.name in setOf("open_url","read_webpage","save_public_pdf")) {val uri=URI(call.arguments.getValue("url").jsonPrimitive.content);require(uri.scheme=="https" && !uri.host.isNullOrBlank() && uri.userInfo==null){"https 웹 주소만 허용합니다."}}
+        val opensKnownService = call.name == "open_url" && "service" in call.arguments
+        if (opensKnownService) com.user.localagent.core.connections.LifeServiceCatalog.url(call)
+        if (call.name in setOf("open_url", "read_webpage", "save_public_pdf") && !opensKnownService) {
+            val url = requireNotNull(call.arguments["url"]) { "열 주소 또는 공식 서비스를 선택해 주세요." }
+            val uri = URI(url.jsonPrimitive.content)
+            require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) { "https 웹 주소만 허용합니다." }
+        }
         if(call.name=="search_web"){
             val args=call.arguments
             val source=args["source"]?.jsonPrimitive?.content

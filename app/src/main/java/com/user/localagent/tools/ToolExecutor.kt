@@ -179,7 +179,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             "open_map"->Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q="+Uri.encode(call.s("query"))))
             GovernmentServiceCatalog.OPEN -> Intent(Intent.ACTION_VIEW, Uri.parse(GovernmentServiceCatalog.target(call).url))
                 .addCategory(Intent.CATEGORY_BROWSABLE)
-            "open_url"->com.user.localagent.connections.CommerceListingIntent.prepare(context,Uri.parse(call.s("url")))
+            "open_url" -> {
+                val url = if ("service" in call.arguments) com.user.localagent.core.connections.LifeServiceCatalog.url(call) else call.s("url")
+                com.user.localagent.connections.CommerceListingIntent.prepare(context, Uri.parse(url))
+            }
             "list_messenger_notifications","reply_messenger_notification"->null
             else->null
         }

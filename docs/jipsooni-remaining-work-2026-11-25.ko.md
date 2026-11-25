@@ -82,3 +82,16 @@
 | Outlook | Microsoft Graph의 받은편지함과 일정 조회를 휴대폰의 Microsoft 기기 코드 동의로 연결한다. | Entra 공개 클라이언트 등록과 배포 환경의 client ID 설정, 실제 사용자 로그인 및 권한 철회 검증. [Graph 메일 조회](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) |
 | 정부24·홈택스·위택스·자동차검사·이파인·형사사법포털 | 공식 기관 주소 진입과 정부24 4종의 공개 안내 확인. | 본인 자료 조회·발급·납부·영수증은 각각 인증과 실서비스 검증이 필요하다. [디지털서비스 개방 절차](https://openservice.go.kr/serviceProc) |
 | 철도·항공·렌터카·공연·생활예약 | KOPIS 공연 목록 조회 경로는 작업기 서비스키를 사용한다. 코레일 예매와 코레일·SRT 비회원 영수증은 공식 앱·웹 진입을 제공한다. | 시간표와 잔여 좌석, 예약 접수와 실제 발권을 분리한다. 교통 API 운영키·렌터카 제휴 자격·공연 예매처 권한을 확인한다. [TAGO 국내항공](https://www.data.go.kr/data/15098526/openapi.do) · [서울 공공예약 정보](https://data.seoul.go.kr/dataList/OA-2271/A/1/datasetView.do) |
+
+#### 피클 공개 앱 목록 기준 연결 상태
+
+피클 한국 Google Play는 네이버, 카카오톡, Gmail, Google 캘린더, 정부24, 쿠팡, 통신사, 배달, 보험, 항공사를 예시로 공개한다. 확인할 수 있는 범위를 아래에 매핑했다. 개별 상품의 지원 기능은 앱·계정에서 시험한다. [피클 공식 앱 등록 정보](https://play.google.com/store/apps/details?hl=ko&id=com.pickle.client)
+
+| 서비스 | 집합 경로 | 다음 검증 |
+| --- | --- | --- |
+| 네이버·카카오톡 | 네이버 지역·쇼핑 API와 지도·예약 링크, 휴대폰 네이버 메일 로그인 화면, 카카오 고객센터 및 기기 카카오톡 알림 연동 | 네이버 운영 키와 메일 계정 기능, 카카오톡 대상 대화·승인 범위 |
+| Gmail·Google 캘린더 | 연결 메뉴의 Google 계정 API | 집합 최신 배포에서 실제 계정 회귀 |
+| 정부24·보험 | 정부24 공개 민원 안내와 내보험찾아줌 공식 서비스 진입 | 본인 인증 후 실제 조회와 수신 결과 확인. [내보험찾아줌 공식 안내](https://cont.insure.or.kr/cont_web/information/information.do) |
+| 통신사 | SKT T world·KT 마이페이지·LG U+ 공식 화면 진입 | 계정별 청구서 조회, 납부 확인, 변경 승인. [방송통신이용자정보포털](https://wiseuser.go.kr/info.do?boardno=5&boardtypecode=5110&sorting=5) |
+| 항공·이동 | 대한항공·아시아나·제주항공·진에어·트리니티항공 공식 화면, 카카오 T 진입 | 동일 일정 운임·수하물 비교, 발권 승인 및 예약 정보 재조회. [국내 항공사 안내](https://www.easylaw.go.kr/CSP/CnpClsMainBtr.laf?ccfNo=2&cciNo=1&cnpClsNo=3&csmSeq=1662&popMenu=ov) · [트리니티항공](https://www.trinityairways.com/) |
+| 쿠팡·배달·식당 예약 | 쿠팡 상품과 쿠팡이츠, 배민·요기요, 캐치테이블·테이블링 공식 연결 | 실제 지점·메뉴·배달비·예약금과 처리 결과 확인 |

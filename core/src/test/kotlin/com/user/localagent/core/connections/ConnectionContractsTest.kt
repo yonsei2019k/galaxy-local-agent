@@ -50,6 +50,61 @@ class ConnectionContractsTest {
         assertEquals(setOf("ts","text"),result.getValue("data").jsonArray.single().jsonObject.keys)
     }
 
+    @Test fun notionNestedBodyCanBeReadWithoutLosingLongTextOrAccountScope()=runBlocking {
+        val host=Host()
+        val runtime=ConnectionRuntime(host)
+        val id="01234567-89ab-cdef-0123-456789abcdef"
+        val value="a".repeat(159)+"😀"+"b".repeat(1900)
+        val block=buildJsonObject {
+            put("object","block");put("id",id);put("type","paragraph");put("has_children",true)
+            put("paragraph",buildJsonObject {put("rich_text",buildJsonArray {add(buildJsonObject {put("plain_text",value)})})})
+        }
+        host.responses+=ApiResponse(200,buildJsonObject {
+            put("object","list");put("results",JsonArray(listOf(block)));put("has_more",true);put("next_cursor","a/b")
+        }.toString())
+        val root=call("search_notion_pages","blockId" to id.replace("-",""),"cursor" to "a/b")
+        fun data(response:ConnectionOutcome)=Json.parseToJsonElement(response.data).jsonObject
+        val page=data(runtime.execute(root))
+        assertTrue(host.sent.single().url.endsWith("/$id/children?page_size=8&start_cursor=a%2Fb"))
+        assertEquals("a/b",page.getValue("cursor").jsonPrimitive.content)
+        val preview=page.getValue("data").jsonArray.single().jsonObject
+        assertTrue(preview.getValue("hasChildren").jsonPrimitive.boolean)
+        var item=preview
+        val recovered=StringBuilder(item.getValue("text").jsonPrimitive.content)
+        while("nextOffset" in item) {
+            val offset=item.getValue("nextOffset").jsonPrimitive.content
+            host.responses+=ApiResponse(200,block.toString())
+            item=data(runtime.execute(call(root.name,"blockId" to id,"offset" to offset))).getValue("data").jsonObject
+            assertTrue(host.sent.last().url.endsWith("/blocks/$id"))
+            recovered.append(item.getValue("text").jsonPrimitive.content)
+        }
+        assertEquals(value,recovered.toString())
+        host.afterSend={host.identity=null}
+        host.responses+=ApiResponse(200,block.toString())
+        val revoked=runtime.execute(call(root.name,"blockId" to id,"offset" to "0"))
+        assertFalse(revoked.success)
+        assertFalse(revoked.data.contains(value.take(50)))
+    }
+
+    @Test fun notionInvalidScopesAndYouTubePaginationKeepOriginalReads()=runBlocking {
+        val notion="search_notion_pages"
+        for(fields in listOf(emptyArray<Pair<String,String>>(),arrayOf("blockId" to "../abc"),arrayOf("blockId" to "a".repeat(32),"query" to "project"),arrayOf("query" to "project","offset" to "3"))) {
+            assertThrows(IllegalArgumentException::class.java){ConnectionRequests.build(call(notion,*fields))}
+        }
+        assertEquals("POST",ConnectionRequests.build(call(notion,"query" to "project")).first.method)
+        val yt="list_youtube_playlists"
+        val h=Host()
+        val rt=ConnectionRuntime(h)
+        assertTrue(ConnectionRequests.build(call(yt)).first.url.contains("mine=true"))
+        assertThrows(IllegalArgumentException::class.java){ConnectionRequests.build(call(yt,"playlistId" to "foo&mine=true"))}
+        h.responses+=ApiResponse(200,"""{"items":[],"nextPageToken":"more"}""")
+        val result=rt.execute(call(yt,"playlistId" to "PL_example","pageToken" to "a/b=c"))
+        assertTrue(result.success)
+        assertTrue(result.data.contains(""""pageToken":"more""""))
+        assertTrue(h.sent.single().url.contains("/playlistItems?"))
+        assertTrue(h.sent.single().url.endsWith("pageToken=a%2Fb%3Dc"))
+    }
+
     @Test fun broaderGoogleGrantCoversItsReadScopeButNotOtherServices() {
         assertTrue(ConnectedService.DOCS.coveredBy(listOf("https://www.googleapis.com/auth/documents"),true))
         assertFalse(ConnectedService.GMAIL.coveredBy(listOf("https://www.googleapis.com/auth/documents"),false))
