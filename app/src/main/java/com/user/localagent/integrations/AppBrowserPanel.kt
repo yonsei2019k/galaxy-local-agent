@@ -1,6 +1,10 @@
 package com.user.localagent.integrations
 
+import android.app.Activity
+import android.app.KeyguardManager
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
@@ -16,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
@@ -33,11 +38,40 @@ import kotlinx.coroutines.launch
 @Composable fun AppBrowserPanel(context:Context){
     val settings=remember(context){BrowserAgentSettings.app(context)}
     var enabled by remember{mutableStateOf(settings.enabled())}
+    val browser=remember(context){AppWebAgent.get(context)}
+    val scope=rememberCoroutineScope()
+    var vaultOpen by remember{mutableStateOf(false)}
+    var savedSites by remember{mutableStateOf<List<java.net.URI>>(emptyList())}
+    var vaultStatus by remember{mutableStateOf<String?>(null)}
+    var accessHistory by remember{mutableStateOf<List<Pair<String,Long>>>(emptyList())}
+    fun loadVault(){scope.launch {
+        try {savedSites=browser.savedWebsiteOrigins();accessHistory=browser.websiteAccessHistory();vaultStatus=null}
+        catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+        catch(_:Exception){vaultStatus="저장한 로그인을 확인할 수 없어요."}
+    }}
     Column(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
         Text("앱 브라우저 에이전트",style=MaterialTheme.typography.titleMedium)
         Text("에이전트가 ZipHap 앱 안의 브라우저에서 웹페이지를 열고 읽고 누를 수 있습니다(예약·장바구니·조회). 사이트 로그인은 아래 '앱 브라우저 열기'에서 직접 해 두세요. 로그인 정보와 쿠키는 이 휴대폰에만 남습니다. 비밀번호·카드·인증번호 칸은 에이전트가 입력하지 않고, 결제·주문·예약 확정·전송 버튼과 검색칸 밖 입력은 승인해야 실행됩니다. 결제 앱으로 넘어가는 단계는 직접 진행하세요.",style=MaterialTheme.typography.bodySmall)
         Row{Text("앱 브라우저 에이전트 사용",Modifier.weight(1f));Switch(enabled,onCheckedChange={value->settings.setEnabled(value);enabled=settings.enabled()},modifier=Modifier.testTag("app_browser_agent"))}
-        OutlinedButton(onClick={AppWebAgent.get(context).showBrowser()}){Text("앱 브라우저 열기 · 로그인")}
+        OutlinedButton(onClick={browser.showBrowser()}){Text("앱 브라우저 열기 · 로그인")}
+        TextButton(onClick={vaultOpen=!vaultOpen;if(vaultOpen)loadVault()}){Text(if(vaultOpen)"저장한 로그인 닫기" else "저장한 로그인")}
+        if(vaultOpen){
+            if(savedSites.isEmpty()&&vaultStatus==null)Text("이 휴대폰에 저장한 로그인이 없어요.")
+            for(site in savedSites)Row(horizontalArrangement=Arrangement.SpaceBetween,modifier=Modifier.fillMaxWidth()){
+                Text(site.host,Modifier.weight(1f))
+                TextButton(onClick={scope.launch {
+                    try{browser.removeSavedWebsite(site);savedSites=browser.savedWebsiteOrigins();vaultStatus=null}
+                    catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+                    catch(_:Exception){vaultStatus="저장한 로그인을 지우지 못했어요."}
+                }}){Text("삭제")}
+            }
+            if(accessHistory.isNotEmpty()){
+                Text("최근 로그인 사용 시도",style=MaterialTheme.typography.titleSmall)
+                val format=java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT)
+                for((site,at) in accessHistory)Text("$site · ${format.format(java.util.Date(at))}",style=MaterialTheme.typography.bodySmall)
+            }
+            vaultStatus?.let{Text(it)}
+        }
     }
 }
 
@@ -64,7 +98,7 @@ import kotlinx.coroutines.launch
     }
     Dialog(onDismissRequest=agent::closeBrowser,properties=DialogProperties(
         usePlatformDefaultWidth=false,
-        securePolicy=if(credentialPage||paymentPage)SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit)){
+        securePolicy=SecureFlagPolicy.SecureOn)){
         Surface(Modifier.fillMaxSize()){
             Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
                 if(!paymentPage)Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
@@ -89,7 +123,7 @@ import kotlinx.coroutines.launch
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
                     if(!busy && !credentialPage && !paymentPage && ownerLogin==null && !navigation.loading && navigation.error==null)
-                        TextButton(onClick={ printError=!agent.openPrintPreview(context) }){Text("화면 PDF 저장")}
+                        TextButton(onClick={ scope.launch {printError=!agent.openPrintPreview(context)} }){Text("화면 PDF 저장")}
                     val loginId=ownerLogin
                     if(loginId!=null)Button(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
                     else if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
@@ -125,6 +159,27 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     var account by remember {mutableStateOf("")}
     var password by remember {mutableStateOf("")}
     var submitting by remember {mutableStateOf(false)}
+    var saveOnPhone by remember {mutableStateOf(false)}
+    var hasSaved by remember(login.id){mutableStateOf(false)}
+    var authPending by remember(login.id){mutableStateOf(false)}
+    val keyguard=LocalContext.current.getSystemService(KeyguardManager::class.java)
+    LaunchedEffect(login.id){hasSaved=agent.hasSavedWebsiteLogin(login.id)}
+    val ownerAuth=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+        val wasPending=authPending
+        authPending=false
+        if(wasPending&&result.resultCode==Activity.RESULT_OK){
+            submitting=true
+            account="";password=""
+            scope.launch {try{agent.submitSavedWebsiteLogin(login.id)}finally{submitting=false}}
+        }
+    }
+    @Suppress("DEPRECATION")
+    fun useSaved(){
+        val confirmation=keyguard?.createConfirmDeviceCredentialIntent("저장된 로그인 사용",login.host)?:return
+        authPending=true
+        keyboard?.hide()
+        try{ownerAuth.launch(confirmation)}catch(_:android.content.ActivityNotFoundException){authPending=false}
+    }
     val accountTarget=remember {BringIntoViewRequester()}
     val passwordTarget=remember {BringIntoViewRequester()}
     var focusedField by remember {mutableIntStateOf(0)}
@@ -135,17 +190,18 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             if(focusedField==1)accountTarget.bringIntoView() else passwordTarget.bringIntoView()
         }
     }
-    val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting
+    val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting&&!authPending
     fun submit(){
         if(!ready)return
         val enteredAccount=account
         val enteredPassword=password
+        val keep=saveOnPhone
         account=""
         password=""
         submitting=true
         keyboard?.hide()
         scope.launch {
-            if(!agent.submitLoginCard(login.id,enteredAccount,enteredPassword)){
+            if(!agent.submitLoginCard(login.id,enteredAccount,enteredPassword,keep)){
                 submitting=false
             }
         }
@@ -158,6 +214,9 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 Text(login.host,style=MaterialTheme.typography.bodySmall)
                 if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
                 loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+                if(hasSaved&&keyguard?.isDeviceSecure==true)OutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
+                    Text("저장된 로그인 사용")
+                }
                 OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
                     .bringIntoViewRequester(accountTarget).onFocusChanged { if(it.isFocused)focusedField=1 },singleLine=true,
                     enabled=!submitting,label={Text("아이디")},
@@ -167,6 +226,10 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                     enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
                     keyboardActions=KeyboardActions(onGo={submit()}))
+                if(!login.pairedPc&&keyguard?.isDeviceSecure==true)Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                    Checkbox(checked=saveOnPhone,onCheckedChange={saveOnPhone=it},enabled=!submitting&&!authPending)
+                    Text("이 휴대폰에 로그인 저장")
+                }
                 Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=ready){
                     Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
                 }

@@ -25,6 +25,39 @@ function (request) {
       r.bottom > 0 && r.top < view.innerHeight * 3;
   };
 
+
+  const containsPan = text => {
+    for (const hit of text.matchAll(/(?:^|[^\d])[0-9](?:[ -]?[0-9]){12,18}(?![ -]?[0-9])/g)) {
+      const digits = hit[0].replace(/\D/g, '');
+      if (digits.length < 13 || digits.length > 19 || new Set(digits).size < 2) continue;
+      let sum = 0;
+      for (let i = digits.length - 1; i >= 0; i--) {
+        let digit = Number(digits[i]);
+        if ((digits.length - 1 - i) % 2) digit = digit * 2 > 9 ? digit * 2 - 9 : digit * 2;
+        sum += digit;
+      }
+      if (sum % 10 === 0) return true;
+    }
+    return false;
+  };
+
+  const protectedKind = () => {
+    const controls = ownerDocument.querySelectorAll('input:not([type=hidden]),select,textarea');
+    if (controls.length > maxScanned) return 'unreadable';
+    let login = false;
+    for (const field of controls) {
+      if (!field.getClientRects().length) continue;
+      const name = [field.name, field.id, field.placeholder, field.getAttribute('aria-label'),
+        ...[...(field.labels || [])].map(label => label.innerText)].join(' ');
+      if (/(?:^|\s)cc-[a-z-]+(?:\s|$)/i.test(field.autocomplete || '') ||
+          /card[\s_.-]*(?:number|no|num|expiry|expiration|cvc|cvv|pin)|(?:^|\W)(?:cvv|cvc|csc)(?:$|\W)|카드[\s_-]*(?:번호|비밀번호)|카드.+유효기간/i.test(name) ||
+          containsPan(String(field.value || ''))) return 'payment';
+      if (field.type === 'password' || /(?:^|\s)(?:current-password|new-password|one-time-code)(?:\s|$)/i.test(field.autocomplete || '')) login = true;
+    }
+    if (containsPan(location.href) || containsPan(ownerDocument.body?.innerText || '')) return 'payment';
+    return login ? 'login' : null;
+  };
+
   // Check that a human pointer would reach this control in the current viewport.
   const receivesClick = node => {
     if (node.closest('[inert],[aria-disabled=true]')) return false;
@@ -119,6 +152,7 @@ function (request) {
   const sameControl = (a, b) => a.node === b.node && a.form === b.form && a.binding === b.binding &&
     a.options.length === b.options.length && a.options.every((node, i) => node === b.options[i]);
 
+  if (request.action === 'securityCheck') return {safe: protectedKind() === null};
   if (!Object.prototype.hasOwnProperty.call(ownerDocument, request.key)) {
     if (request.action !== 'observe') return fail('SNAPSHOT_STALE');
     let observed;
@@ -170,12 +204,16 @@ function (request) {
         rate: Number.isFinite(player.playbackRate) ? player.playbackRate : null};
     };
     const dispatch = input => {
+      const protectedPage = protectedKind();
+      if (protectedPage) {
+        observed = null;
+        blobPdf = null;
+        if (protectedPage === 'payment') return {paymentProtected: true};
+        if (protectedPage === 'login') return ['observe','observeBoundMedia','pauseBoundMedia'].includes(input.action)
+          ? {url: location.href, loginRequired: true} : fail('SNAPSHOT_STALE');
+        return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
+      }
       if (input.action === 'observe') {
-        // Detect an owner's password form before collecting any page text or field values.
-        if ([...ownerDocument.querySelectorAll('input[type=password],input[autocomplete=one-time-code]')].some(visible)) {
-          observed = null;
-          return {url: location.href, loginRequired: true};
-        }
         observed = {id: input.snapshotId, ...collect()};
         return {...observed.page, elements: observed.controls.map(observationControl),
           navigation: observed.navigation,
@@ -184,8 +222,6 @@ function (request) {
       }
       if (input.action === 'observeBoundMedia' || input.action === 'pauseBoundMedia') {
         if (document !== ownerDocument) return fail('SNAPSHOT_STALE');
-        if ([...ownerDocument.querySelectorAll('input[type=password],input[autocomplete=one-time-code]')].some(visible))
-          return {loginRequired: true, url: location.href};
         const pause = input.action === 'pauseBoundMedia' && location.href === input.pageUrl ? input.playerSignature : null;
         return {url: location.href, media: mediaEvidence(pause)};
       }

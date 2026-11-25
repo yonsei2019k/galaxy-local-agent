@@ -553,6 +553,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
         "PUBLIC_SEARCH_LOGIN_WALL"->"이 검색 페이지가 로그인 화면으로 이동했어요. 사용자에게 로그인을 요청하지 말고, 허용된 search_web(국내 장소는 naver_places) 또는 상품의 search_shopping과 다른 공개 출처로 이어가세요."
         "BROWSER_OWNER_BUSY"->"다른 작업의 인증 화면이 열려 있어요. 공개 검색 도구는 계속 사용할 수 있어요."
+        "PAYMENT_OWNER_REQUIRED"->"휴대폰의 공식 결제 화면에서 직접 진행해 주세요. 결제 결과는 아직 확인되지 않았어요."
+        "RECENT_CREDENTIAL_VISIBLE","PAGE_SECURITY_CHECK_INCOMPLETE"->"보호할 내용이 있을 수 있어 이 화면을 읽거나 내보내지 않았어요. 휴대폰에서 다음 화면을 직접 확인해 주세요."
         "PAGE_UNREACHABLE","HTTP_ERROR"->"사이트가 응답하지 않습니다. 주소나 연결을 확인하세요."
         "TLS_ERROR"->"사이트의 보안 연결을 확인하지 못했습니다."
         "PC_RECOVERY_UNAVAILABLE"->"현재 요청에서 같은 페이지의 새 조회 결과를 확인하지 못했습니다."

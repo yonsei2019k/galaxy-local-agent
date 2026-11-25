@@ -16,9 +16,10 @@ import kotlinx.serialization.json.*
 data class LocalConnection(val principal:String,val accountName:String?,val writeAllowed:Boolean,val generation:Long,val verifiedAt:Long=0)
 
 /** Separate Keystore envelope: no plaintext tokens/account names in preferences or model prompts. */
-class ConnectionStore(context:Context) {
-    private val prefs=context.applicationContext.getSharedPreferences("ziphap-connections-v1",Context.MODE_PRIVATE)
-    private val alias="ziphap.connections.aes.v1"
+class ConnectionStore internal constructor(context:Context, preferenceName:String, private val alias:String) {
+    constructor(context:Context):this(context,"ziphap-connections-v1","ziphap.connections.aes.v1")
+    private val prefs=context.applicationContext.getSharedPreferences(preferenceName,Context.MODE_PRIVATE)
+    internal fun contains(name:String):Boolean=prefs.contains(name)
     private fun key():SecretKey=synchronized(KEY_LOCK) {
         val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
         (store.getKey(alias,null) as? SecretKey)?:KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore").apply {

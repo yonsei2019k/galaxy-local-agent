@@ -19,6 +19,9 @@ function (request) {
     if (action.origin !== request.origin || action.username || action.password) return null;
 
     const controls = [...form.elements];
+    if (controls.some(field => /(?:^|\s)(?:cc-[a-z-]+|one-time-code)(?:\s|$)/i.test(field.autocomplete || '') ||
+        /card[\s_.-]*(?:number|no|num|pin|cvv|cvc)|카드[\s_-]*(?:번호|비밀번호)/i.test(
+          [field.name, field.id, field.placeholder].join(' ')))) return null;
     const identifiers = controls.filter(node => node instanceof HTMLInputElement &&
       ['text', 'email', 'tel'].includes(node.type) && node.name && visible(node));
     const submits = controls.filter(node => node.type === 'submit' && visible(node));

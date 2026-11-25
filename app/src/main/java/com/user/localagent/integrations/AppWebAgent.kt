@@ -147,6 +147,43 @@ class AppWebAgent private constructor(private val context:Context) {
     }
     private var capturedLoginUrl:String?=null
     private var loginSubmitting=false
+    private val websiteVault by lazy { WebsiteCredentialVault(context) }
+    private class LoginEcho(val origin:URI,val encodedPassword:String,val blockLength:Int)
+    private var loginEcho:LoginEcho?=null
+
+    private fun watchLoginEcho(origin:URI,password:String){
+        val echo=LoginEcho(origin,JsonPrimitive(password).toString().drop(1).dropLast(1),password.length)
+        loginEcho=echo
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({if(loginEcho===echo)loginEcho=null},120_000)
+    }
+
+    internal suspend fun websiteAccessHistory():List<Pair<String,Long>> = withContext(Dispatchers.IO){websiteVault.recentAccess()}
+
+    internal suspend fun savedWebsiteOrigins():List<URI> = withContext(Dispatchers.IO){websiteVault.sites()}
+    internal suspend fun removeSavedWebsite(origin:URI) = withContext(Dispatchers.IO){websiteVault.remove(origin)}
+    internal suspend fun hasSavedWebsiteLogin(id:Long):Boolean {
+        val origin=nativeLoginOrigin(id)?:return false
+        return withContext(Dispatchers.IO){runCatching{websiteVault.has(origin)}.getOrDefault(false)}
+    }
+
+    private fun nativeLoginOrigin(id:Long):URI? {
+        if(loginCard.value?.let{it.id==id&&!it.pairedPc&&!it.websiteOnly}!=true||websiteLogin.value!=null||loginFolded.value)return null
+        return cardOrigin?.takeIf{secureOrigin(webView?.url)==it}
+    }
+
+    internal suspend fun submitSavedWebsiteLogin(id:Long):Boolean {
+        if(!RuntimeGate.foreground.get()||loginSubmitting)return false
+        val origin=nativeLoginOrigin(id)?:return false
+        val binding=browserWorkBinding.value?:return false
+        val saved=try{withContext(Dispatchers.IO){websiteVault.readForOwner(origin)}}
+            catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){loginStatus.value="저장된 로그인을 열 수 없어요. 직접 입력해 주세요.";return false}
+        if(saved==null||nativeLoginOrigin(id)!=origin||browserWorkBinding.value!=binding){
+            loginStatus.value="로그인 화면이 바뀌었어요. 기존 자격 증명을 입력하지 않았어요."
+            return false
+        }
+        return submitLoginCard(id,saved.account,saved.password)
+    }
 
     fun switchToWebsiteLogin(id:Long){
         val card=loginCard.value?.takeIf{it.id==id&&!it.pairedPc}?:return
@@ -361,15 +398,16 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     /** Only the native, owner-operated secure card can call this method. */
-    suspend fun submitLoginCard(id:Long,account:String,password:String):Boolean {
+    suspend fun submitLoginCard(id:Long,account:String,password:String,saveOnPhone:Boolean=false):Boolean {
         if(loginCard.value?.let{it.id==id&&it.pairedPc}==true)return submitPcLogin(id,account,password)
-        val origin=cardOrigin?:return false
+        val origin=nativeLoginOrigin(id)?:return false
         val completion=loginCompletion
         if(!RuntimeGate.foreground.get()||loginCard.value?.id!=id||websiteLogin.value!=null||completion?.isCompleted==true||loginSubmitting||
             secureOrigin(view().url)!=origin||account.isBlank()||account.length>320||password.isEmpty()||password.length>1024)return false
         loginSubmitting=true
         loginStatus.value="사이트에 로그인 정보를 제출하는 중이에요."
         try {
+            watchLoginEcho(origin,password)
             val submitted=loginDom("submit",id,origin,account,password)
             if(submitted&&loginCard.value?.id==id){
                 loginStatus.value="로그인 정보를 제출했어요. 다음 페이지를 확인하고 있어요."
@@ -384,14 +422,23 @@ class AppWebAgent private constructor(private val context:Context) {
                     return false
                 }
                 persistWebsiteSession()
+                var saved=false
+                if(saveOnPhone)try {
+                    withContext(Dispatchers.IO){websiteVault.save(origin,account,password)}
+                    saved=true
+                }catch(cancel:CancellationException){throw cancel}
+                catch(_:Exception){com.user.localagent.FailureLog.record(context,"website_vault",null,"SAVE_FAILED")}
                 val continued=loginCompletion?.complete(true)==true
                 showWebsiteWork(origin.host,waiting=!continued)
                 val queued=notifyGoalAuth(id)
                 loginCard.value=null
                 cardOrigin=null
                 capturedLoginUrl=null
-                loginStatus.value=if(continued||queued)"로그인 확인 · 원래 요청을 이어갈 준비를 하고 있어요."
-                    else "로그인 화면에서 이동했어요. 다음 작업을 알려 주세요."
+                loginStatus.value=when {
+                    saveOnPhone&&!saved->"로그인은 확인했어요. 이 휴대폰에 저장하지 못했어요."
+                    continued||queued->"로그인 확인 · 원래 요청을 이어갈 준비를 하고 있어요."
+                    else->"로그인 화면에서 이동했어요. 다음 작업을 알려 주세요."
+                }
                 return true
             }
             loginStatus.value="현재 로그인 양식에 제출하지 못했어요. 사이트에서 직접 로그인할 수 있어요."
@@ -564,19 +611,21 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private fun paymentHandoff():JsonObject=buildJsonObject {
         if(presentation.value==null)showBrowser()
-        put("paymentOwnerRequired",true)
-        put("dataOnly",true)
-        put("message","휴대폰의 공식 결제 화면에서 직접 진행해 주세요. 결제 결과는 아직 확인되지 않았어요.")
+        put("error","PAYMENT_OWNER_REQUIRED")
     }
 
     fun showBrowser(address:String=""){presentation.value=address}
     /** Android's public print flow. The owner chooses Save as PDF and its destination. */
-    fun openPrintPreview(owner:Context):Boolean {
+    suspend fun openPrintPreview(owner:Context):Boolean {
         val activity=owner as? android.app.Activity ?: return false
         val page=webView ?: return false
         if(!RuntimeGate.foreground.get() || presentation.value==null || agentActive.value ||
             credentialScreen.value || OwnerPaymentAppPolicy.trustedCheckout(page.url) || loginCard.value!=null || websiteLogin.value!=null ||
-            loading || navigation.value.error!=null || secureOrigin(page.url)==null || !page.isShown)return false
+            loading || navigation.value.error!=null || secureOrigin(page.url)==null || !page.isShown ||
+            loginEcho?.origin==secureOrigin(page.url))return false
+        val currentUrl=page.url
+        val version=paymentDocumentRevision
+        if(!safeBrowserDocument()||version!=paymentDocumentRevision||page.url!=currentUrl||agentActive.value||presentation.value==null)return false
         return runCatching {
             val name="ZipHap 화면 사본"
             activity.getSystemService(android.print.PrintManager::class.java)
@@ -760,6 +809,12 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private suspend fun dom(request:JsonObject):JsonObject? = eval("($domScript)($request)") as? JsonObject
 
+    private suspend fun safeBrowserDocument()=try {
+        dom(buildJsonObject{put("key",domKey);put("action","securityCheck")})?.get("safe")==JsonPrimitive(true)
+    }catch(_:TimeoutCancellationException){false}
+     catch(cancel:CancellationException){throw cancel}
+     catch(_:Exception){false}
+
     private suspend fun readPage(observeMedia:Boolean=false):JsonObject {
         snapshot=null
         if(OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return paymentHandoff()
@@ -767,10 +822,20 @@ class AppWebAgent private constructor(private val context:Context) {
         val value=dom(buildJsonObject{put("key",domKey);put("action","observe");put("snapshotId",id)
             if(observeMedia)put("observeMedia",true)})
             ?:return fail("PAGE_UNREADABLE")
+        if(value["paymentProtected"]==JsonPrimitive(true)){
+            credentialScreen.value=true
+            return paymentHandoff()
+        }
+        if(value["error"]!=null)return fail(value.s("error"))
         val url=value.s("url")
         if(OwnerPaymentAppPolicy.trustedCheckout(url))return paymentHandoff()
         if(!WebAgentPolicy.urlAllowed(url)){snapshot=null;return buildJsonObject{put("url","");put("blocked",true);put("message","이 페이지는 브라우저 에이전트가 읽지 않습니다.")}}
         if(value["loginRequired"]==JsonPrimitive(true))return loginHandoff(url)
+        val echo=loginEcho?.takeIf{it.origin==secureOrigin(url)}
+        if(echo!=null&&(echo.blockLength<4||value.toString().contains(echo.encodedPassword))){
+            credentialScreen.value=true
+            return fail("RECENT_CREDENTIAL_VISIBLE")
+        }
         val raw=value["elements"]?.jsonArray.orEmpty().map{it.jsonObject}
         val parsed=raw.map{element(it)}
         if(parsed.any{it.editable&&WebAgentPolicy.sensitiveField(it)}){
@@ -814,7 +879,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 json["options"]?.let{put("options",it)}
             }
         }
-        pdfDocument=if(digests.isEmpty()&&blobs.isEmpty())null else PdfDocument(sourceView,url,id,digests,blobs)
+        pdfDocument=if(echo!=null||digests.isEmpty()&&blobs.isEmpty())null else PdfDocument(sourceView,url,id,digests,blobs)
         snapshot=id to elements.associateBy{it.s("ref")}
         return buildJsonObject{
             put("snapshotId",id);put("url",url);put("title",value.s("title"));put("text",value.s("text"))

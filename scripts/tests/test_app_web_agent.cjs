@@ -19,6 +19,8 @@ function fixture() {
     querySelectorAll(selector) {
       if (selector === 'video,audio') return this.nodes.filter(node => ['VIDEO','AUDIO'].includes(node.tagName));
       if (selector === 'iframe,frame') return this.nodes.filter(node => ['IFRAME','FRAME'].includes(node.tagName));
+      if (selector === 'input:not([type=hidden]),select,textarea') return this.nodes.filter(node =>
+        ['INPUT','SELECT','TEXTAREA'].includes(node.tagName) && node.type !== 'hidden');
       if (selector === 'input[type=password]' || selector === 'input[type=password],input[autocomplete=one-time-code]') return this.nodes.filter(node => node.tagName==='INPUT' && node.type==='password');
       return this.nodes.filter(node => !['IFRAME','FRAME'].includes(node.tagName));
     },
@@ -48,6 +50,7 @@ function fixture() {
     closest(tag) { return tag === 'form' ? this.enclosingForm ?? null : null; }
     matches(query) { return query.includes(':disabled') ? !!this.disabled : !this.noLongerControl; }
     getRootNode() { return this.isConnected ? this.ownerDocument : this; }
+    getClientRects() { return this.hidden ? [] : [this.getBoundingClientRect()]; }
     getBoundingClientRect() { return {width: 80, height: 25, left: 10, right: 90, top: 10, bottom: 35}; }
     contains(node) { return node === this; }
     scrollIntoView() { this.onScroll?.(); }
@@ -356,4 +359,28 @@ test('copies a same-origin observed PDF blob and rejects an unbound target', asy
   assert.equal(effects.length,0);
   assert.equal(invoke({...input, action:'clearBlobPdf'}).cleared,true);
   assert.equal(invoke({...input, action:'readBlobPdf', offset:0}).error,'SNAPSHOT_STALE');
+});
+
+test('protects payment fields before the browser can observe or reuse an action', () => {
+  const {context, effects, invoke, Input} = fixture();
+  assert.ok(invoke({action:'observe'}).elements);
+  const card = new Input('', 'INPUT');
+  card.autocomplete = 'section-checkout cc-number';
+  card.value = '4111111111111111';
+  context.document.nodes.push(card);
+  assert.deepEqual(JSON.parse(JSON.stringify(invoke({action:'observe'}))), {paymentProtected:true});
+  assert.deepEqual(JSON.parse(JSON.stringify(invoke({action:'click'}))), {paymentProtected:true});
+  assert.equal(invoke({action:'securityCheck'}).safe, false);
+  assert.equal(effects.length, 0);
+});
+
+test('blocks unmasked card text but allows masked receipts', () => {
+  const {context, invoke} = fixture();
+  assert.equal(invoke({action:'securityCheck'}).safe, true);
+  context.document.body.innerText = '카드 4111 1111 1111 1111';
+  assert.equal(invoke({action:'observe'}).paymentProtected, true);
+  assert.equal(invoke({action:'securityCheck'}).safe, false);
+  context.document.body.innerText = '카드 **** **** **** 1111';
+  assert.equal(invoke({action:'securityCheck'}).safe, true);
+  assert.ok(invoke({action:'observe'}).elements);
 });
