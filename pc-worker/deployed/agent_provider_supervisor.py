@@ -76,6 +76,7 @@ class _Child:
     context_digest: str = field(default="", repr=False)
     provider: str = "codex"
     office_persona: str | None = field(default=None, repr=False)
+    timeout_seconds: int = 300
 
 
 class AgentProviderSupervisor:
@@ -219,7 +220,7 @@ class AgentProviderSupervisor:
             tools = frozenset(item.get("name") for item in snapshot.get("tools", [])
                               if type(item) is dict and type(item.get("name")) is str)
             child = _Child(digest, owner, capability, tools, context_digest=context_digest, provider=provider,
-                           office_persona=office_persona)
+                           office_persona=office_persona, timeout_seconds=snapshot.get("providerTimeoutSeconds", 300))
             self.children[sid] = child
             threading.Thread(target=self._run, args=(child, owner, sid, capability, request, bootstrap, context, config, runner),
                              name="ziphap-cloud-child", daemon=True).start()
@@ -239,7 +240,9 @@ class AgentProviderSupervisor:
             def is_set(self):
                 return revoked()
         try:
-            kwargs = {"external_allowed": True, "cancelled": AuthorityCancellation(), "timeout": 300}
+            extended = child.timeout_seconds > 300
+            work_timeout = child.timeout_seconds - 60 if extended else child.timeout_seconds
+            kwargs = {"external_allowed": True, "cancelled": AuthorityCancellation(), "timeout": work_timeout}
             if self._supports_keyword(runner, "progress"):
                 kwargs["progress"] = lambda value: self._progress(child, value)
             if conversation_context is not None and self._supports_keyword(runner, "conversation_context", variadic=False):
@@ -256,14 +259,18 @@ class AgentProviderSupervisor:
                 except ProviderError as error:
                     # The runner has unwound its process tree. Only a terminal response failure
                     # with settled observations can earn the existing single recovery attempt.
-                    if (attempt or error.code not in {"PROVIDER_RUN_FAILED", "PROVIDER_FINAL_FORMAT"}
+                    timed_out = extended and error.code == "PROVIDER_TIMEOUT"
+                    if (attempt or (not timed_out and error.code not in {"PROVIDER_RUN_FAILED", "PROVIDER_FINAL_FORMAT"})
                             or not self._supports_keyword(runner, "read_recovery", variadic=False) or revoked()):
                         raise
-                    remaining = int(300 - (time.monotonic() - child.started))
+                    remaining = int(child.timeout_seconds - (time.monotonic() - child.started))
                     if remaining <= 0:
                         raise
                     recovery = self.bridge.read_recovery_context(owner, sid, capability, settled_only=True)
                     if recovery is None:
+                        raise
+                    if timed_out and not (recovery.get("readObservationsComplete") is True or
+                                          recovery.get("browserObservationComplete") is True):
                         raise
                     total_ms += round((time.monotonic() - started) * 1000)
                     kwargs.update(read_recovery=recovery, timeout=remaining)
@@ -273,13 +280,13 @@ class AgentProviderSupervisor:
                         type(result.answer) is not str or len(result.answer)>12000 or
                         type(result.question) is not str or len(result.question)>300 or
                         type(result.elapsed_ms) is not int or not 0<=result.elapsed_ms<=600000 or
-                        type(result.mcp_calls) is not int or not 0<=result.mcp_calls<=128):
+                        type(result.mcp_calls) is not int or not 0<=result.mcp_calls<=256):
                     raise ProviderError("PROVIDER_FINAL_FORMAT")
                 total_calls += result.mcp_calls
                 total_ms += result.elapsed_ms
                 if attempt or not self._supports_keyword(runner, "read_recovery", variadic=False) or revoked():
                     break
-                remaining = int(300 - (time.monotonic() - child.started))
+                remaining = int(child.timeout_seconds - (time.monotonic() - child.started))
                 if remaining <= 0:
                     break
                 recovery = self.bridge.read_recovery_context(owner, sid, capability, before_plan=result.state != "reported_done")

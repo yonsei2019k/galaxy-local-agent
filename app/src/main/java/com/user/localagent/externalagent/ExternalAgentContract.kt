@@ -15,6 +15,7 @@ class ExternalAgentCapture(
     val expiresAfterMs:Long=300_000,val pcWorkspaceProfile:String="qa",
     val requirePlan:Boolean=false,
     internal val allowCloudPersonalData:Boolean=false,
+    internal val maxToolCalls:Int=ExternalAgentContract.LEGACY_TOOL_CALLS,
 ) {
     val phoneTools:Set<String> = Collections.unmodifiableSet(phoneTools.toSet())
     private val settingsAssistant = this.phoneTools == setOf(SettingsProposal.TOOL) &&
@@ -22,6 +23,8 @@ class ExternalAgentCapture(
     val pcTools:Set<String> get()=if(pcWorkspaceProfile=="phone-only")emptySet()else ExternalAgentContract.PC_TOOLS
     init {
         require(!allowCloudPersonalData||allowExternalAgent)
+        require(maxToolCalls in 1..ExternalAgentContract.MAX_TOOL_CALLS &&
+            (maxToolCalls <= ExternalAgentContract.LEGACY_TOOL_CALLS || requirePlan))
         ExternalAgentContract.uuid(parentRunId)
         listOfNotNull(threadId,branchId,projectId,projectBinding).forEach { ExternalAgentContract.bounded(it,256) }
         require(authorityRevision>=0&&requestDigest.matches(Regex("[a-f0-9]{64}")))
@@ -73,7 +76,7 @@ class ExternalAgentProposal(
     val state:AgentPhoneCallState=AgentPhoneCallState.QUEUED,val claimRevision:Long?=null,
 ) {
     val arguments:JsonObject = Json.parseToJsonElement(arguments.toString()).jsonObject
-    init { ExternalAgentContract.uuid(callId);require(sequence in 1..18) }
+    init { ExternalAgentContract.uuid(callId);require(sequence in 1..ExternalAgentContract.MAX_TOOL_CALLS) }
     fun checkedCall(capture:ExternalAgentCapture):ToolCall {
         require(requestDigest==capture.requestDigest&&projectBinding==capture.projectBinding&&authorityRevision==capture.authorityRevision)
         require(tool in capture.phoneTools&&arguments.toString().toByteArray(Charsets.UTF_8).size<=32_768)
@@ -122,6 +125,8 @@ class ExternalAgentPlan(
 
 object ExternalAgentContract {
     const val MAX_PHONE_TOOLS=128
+    const val LEGACY_TOOL_CALLS=18
+    const val MAX_TOOL_CALLS=128
     const val MAX_TTL_MS=900_000L
     const val MAX_WIRE_BYTES=262_144
     const val MAX_RESULT_BYTES=131_072
@@ -170,7 +175,7 @@ object ExternalAgentContract {
     }
     internal fun proposal(value:JsonObject):ExternalAgentProposal {
         fields(value,setOf("callId","sequence","state","tool","arguments","requestDigest","projectBinding","authorityRevision"),setOf("claimRevision"))
-        val sequence=long(value,"sequence");require(sequence in 1..18)
+        val sequence=long(value,"sequence");require(sequence in 1..ExternalAgentContract.MAX_TOOL_CALLS)
         val state=AgentPhoneCallState.valueOf(text(value,"state"))
         val claimRevision=value["claimRevision"]?.let{long(value,"claimRevision")}
         require(if(state==AgentPhoneCallState.QUEUED)claimRevision==null else claimRevision!=null&&claimRevision>0)

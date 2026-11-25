@@ -155,7 +155,13 @@ Phone heartbeat does not renew TTL or authority, and cannot revive a dead sessio
 projectBinding,authorityRevision` plus optional `claimRevision`. Its state is
 `QUEUED|CLAIMED|UNKNOWN_EFFECT`. PC work is never a phone pending call. Sequences
 count both devices and may have gaps from the phone's view. A single call may be
-active; at most18 calls per immutable parent grant. No same-parent budget reset.
+active. The default is 18 calls per immutable parent grant. The authenticated
+phone can send `X-ZipHap-Tool-Budget` on session registration to set a lower
+remaining goal budget or request up to 128 calls for a plan-gated session.
+Legacy workers ignore the header and keep their default. No same-parent budget
+reset is allowed. Plan acceptance, permissions, and per-call checks still apply.
+The paired provider gets up to 10 minutes for an extended session, with the
+final minute reserved for reporting verified reads if the main run times out.
 
 Claim requires current session revision exact CAS. It increments revision and
 sets `claimRevision` to the new value. Result body's `revision` must equal this
@@ -193,7 +199,7 @@ result is sticky in v1; replacing it with a later different result is not suppor
 No uncertain write is replayed. Model output cannot provide a phone result.
 
 Personal arguments/results and capabilities are RAM-only, bounded by64 sessions
-and18 calls/session. Close drops argument/result bodies. No recovery/journal or
+and the immutable per-session call budget. Close drops argument/result bodies. No recovery/journal or
 metadata-only persistence is presented as completed execution. Restart loses all
 sessions and returns410 `SESSION_MISSING_OR_RESTART_REVOKED`; it never reconstructs
 an old session or automatically replays work. Parent tombstones/budgets are only

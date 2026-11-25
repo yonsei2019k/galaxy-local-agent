@@ -103,7 +103,7 @@ class ExternalAgentController(
     private fun accept(value:AgentSessionSnapshot):AgentSessionSnapshot {
         ExternalAgentContract.uuid(value.sessionId)
         val old=session
-        require(value.revision>=0&&value.lastSequence in 0..18&&value.expiresAtEpochMs>0)
+        require(value.revision>=0&&value.lastSequence in 0..capture.maxToolCalls&&value.expiresAtEpochMs>0)
         require(value.requiresPlan==capture.requirePlan)
         if(!value.requiresPlan)require(value.plan==null)
         value.plan?.checked(capture)
@@ -217,7 +217,7 @@ class ExternalAgentController(
             check(old.reported){"BRIDGE_UNRESOLVED_CALL"}
             return@withLock Pump.DUPLICATE_IGNORED
         }
-        require(proposal.sequence>highestPhoneSequence&&proposal.sequence<=snapshot.lastSequence&&entries.size<18){"BRIDGE_SEQUENCE"}
+        require(proposal.sequence>highestPhoneSequence&&proposal.sequence<=snapshot.lastSequence&&entries.size<capture.maxToolCalls){"BRIDGE_SEQUENCE"}
         fence()
         val entry=Entry(proposal,proposal.fingerprint())
         entries[proposal.callId]=entry;highestPhoneSequence=proposal.sequence

@@ -95,6 +95,33 @@ class ProviderSupervisorTests(unittest.TestCase):
         bridge.read_recovery_context.assert_called_once_with(OWNER, SID, "phone", settled_only=True)
         bridge.bootstrap_agent.assert_called_once()
 
+    def test_extended_budget_reserves_time_to_report_settled_reads_after_timeout(self):
+        attempts = []
+        def runner(config, bootstrap, request, *, read_recovery=None, timeout, **kwargs):
+            attempts.append((read_recovery, timeout))
+            if read_recovery is None:
+                raise ProviderError("PROVIDER_TIMEOUT")
+            return AgentReport("partial", "verified fixture", "", 2, 140)
+
+        for recovery, expected in (
+            ({"readObservationsComplete": True, "acceptedTools": []}, None),
+            ({"acceptedTools": ["search_web"], "observedReads": []}, "PROVIDER_TIMEOUT"),
+        ):
+            attempts.clear()
+            bridge, manager = self.fixture(runner)
+            bridge.authenticate_phone.return_value = {"revision": 1, "providerTimeoutSeconds": 600}
+            bridge.read_recovery_context.return_value = recovery
+            manager.launch(OWNER, SID, "phone", "fixture request")
+            finished = self.finished(manager)
+            self.assertEqual((None, 540), attempts[0])
+            self.assertEqual(expected, finished["errorCode"])
+            if expected is None:
+                self.assertEqual(140, finished["report"]["mcpCalls"])
+                self.assertEqual(recovery, attempts[1][0])
+                self.assertGreater(attempts[1][1], 0)
+            else:
+                self.assertEqual(1, len(attempts))
+
     def test_provider_terminal_error_with_unsettled_work_is_not_retried(self):
         def runner(config, bootstrap, request, *, read_recovery=None, **kwargs):
             self.assertIsNone(read_recovery)

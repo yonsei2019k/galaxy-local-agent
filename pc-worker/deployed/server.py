@@ -257,7 +257,14 @@ class Handler(BaseHTTPRequestHandler):
      self.reply(value)
     except BridgeError as error:self.reply({'error':error.code},error.status)
     return
-   status,value=AGENT_BRIDGE.dispatch_authenticated(self.command,path,owner,request,capability)
+   budget_options={}
+   if self.command=='POST' and path=='/v1/agent/sessions':
+    values=self.headers.get_all('X-ZipHap-Tool-Budget',[])
+    if values:
+     if len(values)!=1 or capability is not None or not re.fullmatch(r'[1-9][0-9]{0,2}',values[0]):
+      self.reply({'error':'TOOL_BUDGET_HEADER'},400);return
+     budget_options['max_calls']=int(values[0])
+   status,value=AGENT_BRIDGE.dispatch_authenticated(self.command,path,owner,request,capability,**budget_options)
    self.reply(value,status);return
   if self.command=='POST' and path=='/v1/images':self.reply(ENGINE.image(self.body(),owner),202);return
   match=re.fullmatch(r'/v1/images/([0-9a-f-]{36})(/png|/ack|/resume|/suspend|/reference)?',path)

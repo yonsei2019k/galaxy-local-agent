@@ -15,7 +15,7 @@ import unittest
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deployed"))
-from agent_bridge import (AgentBridge, BridgeError, MAX_CALLS, PHONE_LEASE_MS, RESTART_POLICY,
+from agent_bridge import (AgentBridge, BridgeError, MAX_CALLS, MAX_EXTENDED_CALLS, PHONE_LEASE_MS, RESTART_POLICY,
                           WorkspaceExecutor, canonical, parse_wire, result_digest)
 
 
@@ -382,8 +382,9 @@ class AgentBridgePlanTests(unittest.TestCase):
                       "requestDigest": hashlib.sha256(self.owner_text.encode("utf-8")).hexdigest(), "requirePlan": True}
         self._register()
 
-    def _register(self):
-        status, self.created = self.broker.dispatch_authenticated("POST", self.base, self.owner, self.grant)
+    def _register(self, max_calls=MAX_CALLS):
+        status, self.created = self.broker.dispatch_authenticated("POST", self.base, self.owner, self.grant,
+                                                                max_calls=max_calls)
         self.assertEqual(201, status)
         self.sid, self.phone = self.created["sessionId"], self.created["phoneCapability"]
         self.url = self.base + "/" + self.sid
@@ -753,6 +754,36 @@ class AgentBridgePlanTests(unittest.TestCase):
         self.assertTrue(context["observedReads"][-1]["result"].startswith(str(MAX_CALLS - 1)))
         status, rejection = self.propose("read_webpage")[1]
         self.assertEqual((403, "RECOVERY_FINAL_ANSWER_ONLY"), (status, rejection["error"]))
+
+    def test_planned_session_runs_through_extended_budget_and_preserves_receipts(self):
+        self.owner = uid()
+        self.grant["parentRunId"] = self.owner
+        self._register(MAX_EXTENDED_CALLS)
+        self.accept()
+        for sequence in range(1, MAX_EXTENDED_CALLS + 1):
+            proposed, (status, response) = self.propose()
+            self.assertEqual((202, sequence), (status, response["sequence"]))
+            _, ack = self.claim(proposed)
+            self.assertEqual(200, self.post_result(proposed, ack)[1][0])
+
+        status, rejection = self.propose()[1]
+        self.assertEqual((429, "CALL_BUDGET"), (status, rejection["error"]))
+        evidence = self.broker.task_evidence(self.owner, self.sid, self.phone)
+        self.assertEqual(list(range(1, MAX_EXTENDED_CALLS + 1)),
+                         [call["sequence"] for call in evidence["phoneCalls"]])
+        self.assertTrue(self.broker.read_recovery_context(
+            self.owner, self.sid, self.phone, before_plan=True)["readBudgetExhausted"])
+
+    def test_extended_budget_cannot_bypass_plan_or_maximum(self):
+        owner = uid()
+        grant = self.grant | {"parentRunId": owner}
+        for requires_plan, limit, expected in (
+            (False, MAX_EXTENDED_CALLS, "PLAN_REQUIRED_FOR_EXTENDED_BUDGET"),
+            (True, MAX_EXTENDED_CALLS + 1, "INTEGER_BOUND"),
+        ):
+            status, result = self.broker.dispatch_authenticated(
+                "POST", self.base, owner, grant | {"requirePlan": requires_plan}, max_calls=limit)
+            self.assertEqual((400, expected), (status, result["error"]))
 
     def test_write_scope_cannot_restart_a_provider_for_a_read(self):
         self.accept(self.plan(["get_current_datetime", "save_note"]))

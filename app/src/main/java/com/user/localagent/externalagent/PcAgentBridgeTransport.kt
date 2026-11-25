@@ -23,7 +23,9 @@ interface AgentBridgeTransport {
 }
 
 /** The existing pin, pairing token, no-redirect policy and fixed parent compute-owner are reused. */
-class PcAgentBridgeTransport(context:Context,private val parentRunId:String,private val beforeLaunchUpload:()->Unit={}):AgentBridgeTransport {
+class PcAgentBridgeTransport(context:Context,private val parentRunId:String,
+    private val beforeLaunchUpload:()->Unit={},private val maxToolCalls:Int=ExternalAgentContract.LEGACY_TOOL_CALLS,
+):AgentBridgeTransport {
     companion object {
         const val PHONE_CAPABILITY_HEADER="X-ZipHap-Phone-Capability"
         internal fun acceptsPath(path:String)=path.matches(Regex("/v1/agent/sessions(?:/[a-f0-9-]{36}(?:/(?:claim|result|cancel|close|plan-ack|launch|provider|provider-cancel|evidence|context-capabilities|persona-capabilities))?)?"))
@@ -54,6 +56,9 @@ class PcAgentBridgeTransport(context:Context,private val parentRunId:String,priv
         val connection=transport.open(config,path,method,timeout=10_000,computeOwner=parentRunId)
         try {
             connection.setRequestProperty("X-ZipHap-Provider-Progress","1")
+            // Older paired workers ignore this header and keep their original limit.
+            if(path=="/v1/agent/sessions"&&maxToolCalls!=ExternalAgentContract.LEGACY_TOOL_CALLS)
+                connection.setRequestProperty("X-ZipHap-Tool-Budget",maxToolCalls.toString())
             phoneCapability?.let { connection.setRequestProperty(PHONE_CAPABILITY_HEADER,it) }
             if(bytes!=null){
                 connection.doOutput=true;connection.setRequestProperty("Content-Type","application/json")

@@ -12,9 +12,9 @@ class PcExternalAgentProviderTest {
     private val owner="00000000-0000-4000-8000-000000000041"
     private val session="00000000-0000-4000-8000-000000000042"
     private val request="synthetic owner request"
-    private fun capture(requirePlan:Boolean=true)=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,
+    private fun capture(requirePlan:Boolean=true,maxToolCalls:Int=ExternalAgentContract.LEGACY_TOOL_CALLS)=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,
         ExternalAgentContract.sha(request),setOf("get_current_datetime","save_note","search_notes","read_note"),
-        allowExternalAgent=true,pcWorkspaceProfile="phone-only",requirePlan=requirePlan)
+        allowExternalAgent=true,pcWorkspaceProfile="phone-only",requirePlan=requirePlan,maxToolCalls=maxToolCalls)
     @Test fun contextNegotiationUsesAnAllowedSessionPathOnly(){
         assertTrue(PcAgentBridgeTransport.acceptsPath("/v1/agent/sessions/$session/context-capabilities"))
         for(path in listOf("/v1/images/$session","/v1/agent/sessions/$session/../context-capabilities",
@@ -25,6 +25,7 @@ class PcExternalAgentProviderTest {
     private inner class Wire(private val c:ExternalAgentCapture):AgentBridgeTransport {
         val capability="synthetic_phone_capability_000000000000000000041"
         var plan:JsonElement=JsonNull;var revision=1L;var malformedReport=false
+        var lastSequence=0
         var forgedPhoneResult=false
         var expectedContext:JsonObject?=null
         var supportsContext=true
@@ -44,7 +45,7 @@ class PcExternalAgentProviderTest {
         }
         fun snapshot(add:Map<String,JsonElement> = emptyMap()):String=buildJsonObject {
             put("sessionId",session);put("revision",revision);put("state","ACTIVE")
-            put("expiresAtEpochMs",100_000);put("lastSequence",0);put("allowExternalAgent",true)
+            put("expiresAtEpochMs",100_000);put("lastSequence",lastSequence);put("allowExternalAgent",true)
             put("tools",c.registration().getValue("phoneTools"));put("pendingCall",JsonNull)
             put("restartPolicy","RAM_ONLY_RESTART_REVOKES")
             if(c.requirePlan){put("requiresPlan",true);put("plan",plan)}
@@ -113,6 +114,19 @@ class PcExternalAgentProviderTest {
         assertEquals(0,accepted.lastSequence)
         assertTrue(wire.calls.drop(1).all{it.third==wire.capability})
         assertTrue(wire.calls.mapNotNull{it.second}.none{it.containsKey("phoneCapability")||it.containsKey("agentCapability")})
+    }
+
+    @Test fun callerAcceptsTheCapturedSequenceLimitAndRejectsAnythingAboveIt()=runBlocking {
+        for(limit in listOf(ExternalAgentContract.LEGACY_TOOL_CALLS,ExternalAgentContract.MAX_TOOL_CALLS)){
+            val c=capture(maxToolCalls=limit)
+            val wire=Wire(c)
+            val client=PcExternalAgentClient(c,wire)
+            client.register(c)
+            wire.lastSequence=limit
+            assertEquals(limit,client.poll().lastSequence)
+            wire.lastSequence=limit+1
+            assertTrue(runCatching { client.poll() }.exceptionOrNull() is IllegalArgumentException)
+        }
     }
 
     @Test fun launchRetriesOnlyExplicitBusyAndRechecksAuthority()=runBlocking {

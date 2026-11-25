@@ -17,7 +17,7 @@ object FailureLog {
         stop:com.user.localagent.externalagent.ExternalAgentController.StopMetadata,providerState:String,elapsedMs:Long) {
         append(context,"cloud_bridge_stop",null,code,
             " phase=${stop.phase.name} session=${stop.state?.name.orEmpty()} pending=${stop.pending?.name.orEmpty()}"+
-                " sequence=${stop.sequence.coerceIn(0,18)} provider=${token(providerState)} elapsedMs=${elapsedMs.coerceAtLeast(0)}"+
+                " sequence=${stop.sequence.coerceIn(0,com.user.localagent.externalagent.ExternalAgentContract.MAX_TOOL_CALLS)} provider=${token(providerState)} elapsedMs=${elapsedMs.coerceAtLeast(0)}"+
                 " tool=${token(stop.pendingTool)} verification=${token(stop.verification)} success=${stop.resultSuccess} effectNotApplied=${stop.effectNotApplied}")
     }
 

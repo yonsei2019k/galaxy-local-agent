@@ -25,7 +25,7 @@ class PcExternalAgentClient(
         root["resultAck"]?.let {
             val ack=it.jsonObject;ExternalAgentContract.fields(ack,setOf("callId","sequence","resultDigest"))
             ExternalAgentContract.uuid(ExternalAgentContract.text(ack,"callId"))
-            require(ExternalAgentContract.long(ack,"sequence") in 1..18&&
+            require(ExternalAgentContract.long(ack,"sequence") in 1..captured.maxToolCalls&&
                 ExternalAgentContract.text(ack,"resultDigest").matches(Regex("[a-f0-9]{64}")))
         } // Metadata only; poll/claim cannot create a phone execution receipt.
         val id=ExternalAgentContract.text(root,"sessionId");ExternalAgentContract.uuid(id)
@@ -47,7 +47,7 @@ class PcExternalAgentClient(
         pending?.checkedCall(captured)
         val revision=ExternalAgentContract.long(root,"revision");val sequence=ExternalAgentContract.long(root,"lastSequence")
         val expiry=ExternalAgentContract.long(root,"expiresAtEpochMs")
-        require(revision>=0&&sequence in 0..18&&expiry>0&&pending?.let{
+        require(revision>=0&&sequence in 0..captured.maxToolCalls&&expiry>0&&pending?.let{
             it.sequence<=sequence&&(it.claimRevision==null||it.claimRevision<=revision)
         }!=false)
         return AgentSessionSnapshot(id,revision,state,expiry,sequence.toInt(),pending,captured.requirePlan,plan)
@@ -223,17 +223,17 @@ class PcExternalAgentClient(
         val states=setOf("QUEUED","CLAIMED","RUNNING","COMPLETED","CANCELLED","UNKNOWN_EFFECT")
         fun metadata(row:JsonObject,tools:Set<String>) {
             ExternalAgentContract.uuid(ExternalAgentContract.text(row,"callId"))
-            require(ExternalAgentContract.long(row,"sequence") in 1..18&&ExternalAgentContract.text(row,"tool") in tools&&
+            require(ExternalAgentContract.long(row,"sequence") in 1..captured.maxToolCalls&&ExternalAgentContract.text(row,"tool") in tools&&
                 ExternalAgentContract.text(row,"state") in states)
         }
         for(key in listOf("phoneCalls","unresolvedCalls","preparedCalls")){
-            val rows=root.getValue(key).jsonArray;require(rows.size<=18)
+            val rows=root.getValue(key).jsonArray;require(rows.size<=captured.maxToolCalls)
             rows.forEach{
                 val row=it.jsonObject;ExternalAgentContract.fields(row,setOf("callId","sequence","tool","state"))
                 metadata(row,if(key=="phoneCalls")captured.phoneTools else captured.phoneTools+captured.pcTools)
             }
         }
-        val pc=root.getValue("pcCalls").jsonArray;require(pc.size<=18&&pc.size+root.getValue("phoneCalls").jsonArray.size<=18)
+        val pc=root.getValue("pcCalls").jsonArray;require(pc.size+root.getValue("phoneCalls").jsonArray.size<=captured.maxToolCalls)
         val all=pc.map{it.jsonObject}+root.getValue("phoneCalls").jsonArray.map{it.jsonObject}
         require(all.map{ExternalAgentContract.text(it,"callId")}.distinct().size==all.size&&
             all.map{ExternalAgentContract.long(it,"sequence")}.distinct().size==all.size)

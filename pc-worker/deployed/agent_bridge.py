@@ -42,6 +42,7 @@ BROWSER_ACTION = "app_browser_action"
 BROWSER_FOLLOWUP_CALLS = 3
 PRIVATE_PHONE_TOOLS = frozenset({'generate_image'})
 MAX_CALLS = 18
+MAX_EXTENDED_CALLS = 128
 MAX_REJECTED_CALLS = 6
 # Rejections caused by the model's call content (never values) count toward the pre-execution cap.
 _COUNTED_REJECTIONS = frozenset({"TOOL_NOT_OFFERED", "PRIVATE_IMAGE_WORKROOM", "PLAN_TOOL_NOT_SELECTED",
@@ -339,6 +340,7 @@ class _Session:
     deadline: int
     expires_at: int
     phone_seen: int
+    max_calls: int = MAX_CALLS
     confirmed: bool = False
     revision: int = 1
     state: str = "ACTIVE"
@@ -464,13 +466,15 @@ class AgentBridge:
             value["resultSource"] = c.source
         return value
 
-    def _create(self, owner, body):
+    def _create(self, owner, body, max_calls):
         _uuid(owner)
         _shape(body, ("version", "parentRunId", "projectBinding", "authorityRevision", "expiresAfterMs",
                       "phoneTools", "pcWorkspaceProfile", "requestDigest"), ("allowExternalAgent", "requirePlan"))
         _require(body.get("allowExternalAgent") is True, "EXTERNAL_AGENT_NOT_ALLOWED", 403)
         require_plan = body.get("requirePlan", False)
         _require(type(require_plan) is bool, "PLAN_REQUIRED_BOOLEAN")
+        max_calls = _integer(max_calls, 1, MAX_EXTENDED_CALLS)
+        _require(max_calls <= MAX_CALLS or require_plan, "PLAN_REQUIRED_FOR_EXTENDED_BUDGET")
         _require(type(body["version"]) is int and body["version"] == 1 and body["parentRunId"] == owner, "GRANT_BINDING")
         project = _text(body["projectBinding"], 256)
         authority = _integer(body["authorityRevision"], 0, 2**63 - 1)
@@ -502,10 +506,10 @@ class AgentBridge:
         phone, agent = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         s = _Session(str(uuid.uuid4()), owner, project, authority, digest, profile, catalog,
                      hashlib.sha256(phone.encode("ascii")).hexdigest(), agent, now + ttl,
-                     self._epoch() + ttl, now)
+                     self._epoch() + ttl, now, max_calls=max_calls)
         s.require_plan = require_plan
         self._sessions[s.session_id] = s
-        self._owners.add(owner)  # Never reset an 18-call budget under the same parent run.
+        self._owners.add(owner)  # Never reset the call budget under the same parent run.
         return self._snapshot(s) | {"phoneCapability": phone}
 
     def bootstrap_agent(self, owner, session_id, *, local_authenticated=False):
@@ -538,7 +542,11 @@ class AgentBridge:
                 _text(owner_request, 12000)
                 digest = hashlib.sha256(owner_request.encode("utf-8", "strict")).hexdigest()
                 _require(hmac.compare_digest(digest, s.request_digest), "OWNER_REQUEST_DIGEST", 403)
-            return self._snapshot(s)
+            snapshot = self._snapshot(s)
+            if owner_request is not None:
+                # Internal metadata for the provider launcher only, outside the v1 phone response.
+                snapshot["providerTimeoutSeconds"] = 600 if s.max_calls > MAX_CALLS else 300
+            return snapshot
 
     @staticmethod
     def _plan_text(value, maximum):
@@ -629,7 +637,7 @@ class AgentBridge:
                     if len(canonical(context)) <= 16384:
                         session.browser_recovery_tools = frozenset()
                         return context
-                if not settled_only and len(calls) < MAX_CALLS and all(call.tool == "open_app_browser_page" for call in calls):
+                if not settled_only and len(calls) < session.max_calls and all(call.tool == "open_app_browser_page" for call in calls):
                     session.browser_recovery_tools = frozenset({"read_app_browser_page"})
                     return {"planAccepted": True, "acceptedTools": ["read_app_browser_page"],
                             "browserOpened": True, "failedReads": [], "observedReads": []}
@@ -662,7 +670,7 @@ class AgentBridge:
                 else:
                     return None
             all_required_reads_verified = set(plan["requiredTools"]) <= verified_tools
-            out_of_calls = len(session.calls) >= MAX_CALLS or session.rejected_calls >= MAX_REJECTED_CALLS
+            out_of_calls = len(session.calls) >= session.max_calls or session.rejected_calls >= MAX_REJECTED_CALLS
             if (observed and (before_plan or settled_only)
                     and ((all_required_reads_verified and not failed) or
                          (out_of_calls and set(plan["requiredTools"]) <= reads))):
@@ -725,7 +733,7 @@ class AgentBridge:
         if (session.profile != "phone-only" or not session.require_plan or not plan or
                 plan["state"] != "ACCEPTED" or BROWSER_READ not in plan["requiredTools"] or
                 session.active is not None or session.browser_recovery_tools is not None or
-                len(session.calls) >= MAX_CALLS or session.rejected_calls >= MAX_REJECTED_CALLS):
+                len(session.calls) >= session.max_calls or session.rejected_calls >= MAX_REJECTED_CALLS):
             return None
         last_browser = None
         for call in session.calls.values():
@@ -743,7 +751,7 @@ class AgentBridge:
                     return None
         if last_browser is None:
             return None
-        remaining = MAX_CALLS - len(session.calls)
+        remaining = session.max_calls - len(session.calls)
         allowed = [BROWSER_READ]
         if BROWSER_ACTION in plan["requiredTools"] and remaining >= BROWSER_FOLLOWUP_CALLS:
             allowed.append(BROWSER_ACTION)
@@ -818,7 +826,7 @@ class AgentBridge:
             _bounded_json(value, MAX_WIRE_BYTES)  # Never silently clip evidence and call it complete.
             return value
 
-    def dispatch_authenticated(self, method, path, owner, request=None, capability=None):
+    def dispatch_authenticated(self, method, path, owner, request=None, capability=None, *, max_calls=MAX_CALLS):
         """Only call AFTER existing paired-token HTTPS Handler authentication.
 
         Returns (HTTP status, JSON object), with no variable exception details.
@@ -830,7 +838,7 @@ class AgentBridge:
             if method == "POST" and path == "/v1/agent/sessions":
                 _bounded_json(request, MAX_WIRE_BYTES)
                 with self._lock:
-                    return 201, self._create(owner, request)
+                    return 201, self._create(owner, request, max_calls)
             match = re.fullmatch(r"/v1/agent/sessions/([0-9a-f-]{36})(?:/(call|claim|result|cancel|close|plan|plan-ack)|/calls/([0-9a-f-]{36}))?", path)
             _require(match is not None, "ROUTE", 404)
             sid, operation, call_id = match.groups()
@@ -903,7 +911,7 @@ class AgentBridge:
                         if len(previous) >= 2 or any(c.result and c.result["success"]
                                                      and c.result["verification"] == "VERIFIED" for c in previous):
                             return 200, {"callId": cid, "state": "SKIPPED", "reason": "PUBLIC_READ_REPEAT"}
-                    _require(len(s.calls) < MAX_CALLS, "CALL_BUDGET", 429)
+                    _require(len(s.calls) < s.max_calls, "CALL_BUDGET", 429)
                     c = _Call(cid, len(s.calls) + 1, tool, copy.deepcopy(arguments), payload)
                     s.calls[cid], s.active = c, cid
                     s.revision += 1

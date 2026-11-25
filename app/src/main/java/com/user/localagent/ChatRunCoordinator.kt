@@ -1832,9 +1832,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val scope=app.repository.chat.accessScope(request.threadId)
         val binding=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scope.scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
         val allowCloudPersonalData=cloudPersonalDataAllowed(request)
+        val savedNative=app.repository.chat.run(request.runId)?.contextJson?.let{Json.parseToJsonElement(it).jsonObject["sharedEngineState"]}
+        val savedBudget=savedNative?.takeUnless{it is JsonNull}?.jsonObject?.get("budget")?.jsonPrimitive?.int
+        val toolBudget=minOf(savedBudget?:ExternalAgentContract.MAX_TOOL_CALLS,
+            GoalSegmentBinding.MAX_TOOL_CALLS-(request.goalSegment?.consumedToolCalls?:0))
+        val cloudDeadlineMs=if(toolBudget>ExternalAgentContract.LEGACY_TOOL_CALLS)630_000L else 330_000L
         val capture=ExternalAgentCapture(request.runId,request.threadId,request.branchId,request.projectId,binding,
-            request.externalAgentRevision,ExternalAgentContract.sha(request.text),tools,true,expiresAfterMs=360_000,
-            pcWorkspaceProfile="phone-only",requirePlan=true,allowCloudPersonalData=allowCloudPersonalData)
+            request.externalAgentRevision,ExternalAgentContract.sha(request.text),tools,true,expiresAfterMs=cloudDeadlineMs+30_000,
+            pcWorkspaceProfile="phone-only",requirePlan=true,allowCloudPersonalData=allowCloudPersonalData,
+            maxToolCalls=toolBudget)
         var plan:ExternalAgentPlan?=null
         var privatePlan=false
         var preparedSeen=false
@@ -1875,11 +1881,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             put("projectId",request.projectId);put("scopeId",binding)
             put("authorizationRevision",externalSettings.capture().revision)
         }.toString()
-        val savedNative=app.repository.chat.run(request.runId)?.contextJson?.let{Json.parseToJsonElement(it).jsonObject["sharedEngineState"]}
         val nativeJournal=com.user.localagent.engine.RustExecutionJournal(nativeBinding(),buildJsonObject{
             val provider=ExternalAgentSettings.provider(request.modelId)
             put("profileId","subscription-$provider");put("provider","${provider}_cli");put("modelId","provider-configured")
-            put("reasoning",JsonNull);put("maxToolCalls",minOf(18,GoalSegmentBinding.MAX_TOOL_CALLS-(request.goalSegment?.consumedToolCalls?:0)));put("deadlineMs",330000);put("cloudAuthorized",request.allowExternalAgent)
+            put("reasoning",JsonNull);put("maxToolCalls",capture.maxToolCalls);put("deadlineMs",cloudDeadlineMs);put("cloudAuthorized",request.allowExternalAgent)
         }.toString(),savedNative?.toString())
         nativeDeadlineAt=Json.parseToJsonElement(nativeJournal.checkpoint()).jsonObject.getValue("deadlineAtMs").jsonPrimitive.long
         suspend fun persistNativeState(checkpoint:String=nativeJournal.checkpoint()) {
@@ -1896,7 +1901,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         val client=PcExternalAgentClient(capture,PcAgentBridgeTransport(context,request.runId,beforeLaunchUpload={
             runBlocking { check(authority().permits(capture)){"클라우드 전송 권한이나 실행 대상이 변경되었습니다."} }
-        }),onRetry={operation,attempt->FailureLog.record(context,"cloud_bridge_retry",null,"${operation}_ATTEMPT_$attempt")})
+        },maxToolCalls=capture.maxToolCalls),onRetry={operation,attempt->FailureLog.record(context,"cloud_bridge_retry",null,"${operation}_ATTEMPT_$attempt")})
         val controller=ExternalAgentController(capture,client,::authority,
             execute={call->
                 enforceGoalToolFence(request,call)
@@ -1970,7 +1975,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             status.value="클라우드 모델이 요청을 해석하고 있습니다."
             val launch=launchPhoneProvider(request,client,publicResearch,allowCloudPersonalData){check(authority().permits(capture))}
             lastProviderState=launch.getValue("state").jsonPrimitive.content
-            val provider=withTimeout(330_000) {
+            val provider=withTimeout(cloudDeadlineMs) {
                 var lastStage:String?=null
                 while(true){
                     check(authority().permits(capture)){"클라우드 도구 권한이나 실행 대상이 변경되었습니다."}
@@ -2165,9 +2170,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 sessionId,publicPartial=true)){
             CloudPublicSearchProjection.partialSources(actual)
         }else emptyList()
+        val reachedToolLimit=resultState=="partial" && stopMetadata.sequence>=capture.maxToolCalls
         FailureLog.cloudStop(context,when {
             actual.isNotEmpty() && actual.all { it.withheldFromCloud } -> "FINAL_ALL_READS_WITHHELD"
             accepted == null -> "FINAL_MISSING_PLAN"
+            reachedToolLimit -> "FINAL_TOOL_BUDGET"
             resultState != "reported_done" -> "FINAL_PROVIDER_INCOMPLETE"
             else -> "FINAL_EVIDENCE_INCOMPLETE"
         },stopMetadata,resultState,elapsedMs)
@@ -2182,7 +2189,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             ExternalAgentPhoneCompletion.browserReadsMatch(capture,accepted,evidence,actual.toList(),sessionId)){
             CloudAgentFinals.browserReadProgress(accepted.requiredTools,actual.toList(),requestSteps)
         } else null
-        val notice=browserProgress?:when(screenChanged){
+        val budgetNotice="한 번에 할 수 있는 확인과 작업 ${capture.maxToolCalls}회에 도달했어요. 확인한 내용은 작업 내역에 남겼어요."
+        val notice=browserProgress?:if(reachedToolLimit)budgetNotice else when(screenChanged){
             true->"화면이 바뀐 건 확인했어요. 요청한 결과가 나왔는지는 확인이 더 필요해요."
             false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
             null->if(actual.isNotEmpty()&&actual.all{it.withheldFromCloud && it.result.success})
