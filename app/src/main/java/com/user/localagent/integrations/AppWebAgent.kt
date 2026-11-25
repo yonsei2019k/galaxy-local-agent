@@ -432,6 +432,9 @@ class AppWebAgent private constructor(private val context:Context) {
             listOf("사이트 로그인 확인"),working=!waiting,binding=browserWorkBinding.value))
     }
 
+    private val naverAccountMenuHint =
+        "로그인하셨다면 원래 사이트의 내 계정이나 프로필 메뉴를 열어 주세요. 로그아웃 버튼이 보이면 집순이가 확인하고 이어갈게요."
+
     suspend fun finishWebsiteLogin(id:Long):Boolean{
         val request=websiteLogin.value?.takeIf{it.card.id==id}?:return false
         if(loginSubmitting)return false
@@ -441,7 +444,7 @@ class AppWebAgent private constructor(private val context:Context) {
             if(websiteLogin.value!=request)return false
             if(websiteLoginFormPresent(id)!=false||(request.card.host!="nid.naver.com"&&websiteFormObservedId!=id)){
                 loginStatus.value=if(request.card.host=="nid.naver.com")
-                    "네이버 로그인을 아직 확인하지 못했어요. 인증을 마치고 원래 서비스 화면에서 로그인 상태를 확인해 주세요."
+                    naverAccountMenuHint
                     else "사이트 로그인이 확인되지 않았어요. 다시 시도하거나 입력창으로 돌아갈 수 있어요."
                 return false
             }
@@ -473,11 +476,12 @@ class AppWebAgent private constructor(private val context:Context) {
             if(observeNaverLoginGuide(id)!=null)return true
             val origin=secureOrigin(address)?:return null
             if(loginReturnOrigin!=null&&origin!=loginReturnOrigin)return null
-            val revision=navigationRevision
-            val confirmed=loginDom("authenticated",id,origin)
-            if(!confirmed||websiteLogin.value!=request||webView!==page||page.url!=address||
-                navigationRevision!=revision||loading||navigation.value.error!=null)return null
-            return false
+            val revision=paymentDocumentRevision
+            val state=naverAuthenticationState(id,origin)
+            if(websiteLogin.value!=request||webView!==page||page.url!=address||
+                paymentDocumentRevision!=revision||loading||navigation.value.error!=null)return null
+            if(state=="account_menu")loginStatus.value=naverAccountMenuHint
+            return if(state=="signed_in")false else null
         }
         return loginFormPresent()?.let {
             if(websiteLogin.value?.card?.id!=id)return null
@@ -664,16 +668,22 @@ class AppWebAgent private constructor(private val context:Context) {
         catch(cancel:CancellationException){throw cancel}
         catch(_:Exception){null}
 
-    private suspend fun loginDom(action:String,id:Long,origin:URI,account:String?=null,password:String?=null):Boolean {
+    private suspend fun loginDom(action:String,id:Long,origin:URI,account:String?=null,password:String?=null):Boolean =
+        evaluateLoginDom(action,id,origin,account,password)==JsonPrimitive(true)
+
+    private suspend fun naverAuthenticationState(id:Long,origin:URI):String? =
+        evaluateLoginDom("authenticationState",id,origin)?.contentOrNull
+
+    private suspend fun evaluateLoginDom(action:String,id:Long,origin:URI,account:String?=null,password:String?=null):JsonPrimitive? {
         val request=buildJsonObject{
             put("action",action);put("id",id);put("key",loginDomKey);put("origin",origin.toString())
             if(account!=null)put("account",account)
             if(password!=null)put("password",password)
         }
-        return try{eval("($loginScript)($request)",5_000)==JsonPrimitive(true)}
-        catch(_:TimeoutCancellationException){false}
+        return try{eval("($loginScript)($request)",5_000) as? JsonPrimitive}
+        catch(_:TimeoutCancellationException){null}
         catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){false}
+        catch(_:Exception){null}
     }
 
 
@@ -1228,8 +1238,8 @@ class AppWebAgent private constructor(private val context:Context) {
             val finalOrigin=secureOrigin(view().url)?:return initial
             if(!expected(finalOrigin)||navigation.value.error!=null||
                 navigation.value.loading){loginStatus.value=loginReadbackStatus();return initial}
-            if((naverHandoff||directNaver)&&!loginDom("authenticated",id,finalOrigin)){
-                loginStatus.value="네이버 로그인 결과를 아직 확인하지 못했어요."
+            if((naverHandoff||directNaver)&&naverAuthenticationState(id,finalOrigin)!="signed_in"){
+                loginStatus.value=naverAccountMenuHint
                 return initial
             }
             val page=readPage()

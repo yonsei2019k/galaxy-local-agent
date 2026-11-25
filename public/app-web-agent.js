@@ -47,12 +47,16 @@ function (request) {
     let login = false;
     for (const field of controls) {
       if (!field.getClientRects().length) continue;
+      const labelIds = (field.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0, 12);
       const name = [field.name, field.id, field.placeholder, field.getAttribute('aria-label'),
-        ...[...(field.labels || [])].map(label => label.innerText)].join(' ');
+        ...labelIds.map(id => doc.getElementById(id)?.textContent),
+        ...Array.from(field.labels || [], label => label.textContent || label.innerText)].join(' ');
       if (/(?:^|\s)cc-[a-z-]+(?:\s|$)/i.test(field.autocomplete || '') ||
           /card[\s_.-]*(?:number|no|num|expiry|expiration|cvc|cvv|pin)|(?:^|\W)(?:cvv|cvc|csc)(?:$|\W)|카드[\s_-]*(?:번호|비밀번호)|카드.+유효기간/i.test(name) ||
           containsPan(String(field.value || ''))) return 'payment';
-      if (field.type === 'password' || /(?:^|\s)(?:current-password|new-password|one-time-code)(?:\s|$)/i.test(field.autocomplete || '')) login = true;
+      if (field.type === 'password' ||
+          /(?:^|\s)(?:current-password|new-password|one-time-code)(?:\s|$)/i.test(field.autocomplete || '') ||
+          /\b(?:otp|mfa|2fa)[a-z0-9_-]*|(?:auth(?:entication)?|verification|one[ -]?time|security)[\s_.-]*code|인증[\s_.-]*(?:번호|코드)|보안[\s_.-]*코드|일회용[\s_.-]*(?:번호|코드)/i.test(name)) login = true;
     }
     const url = doc === ownerDocument ? location.href : doc.URL || '';
     if (containsPan(url) || containsPan(doc.body?.innerText || '')) return 'payment';

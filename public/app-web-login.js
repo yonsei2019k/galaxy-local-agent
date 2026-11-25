@@ -31,16 +31,29 @@ function (request) {
     return {form, account: identifiers[0], password, submit, action: action.href, page: location.href};
   }
 
-  if (request.action === 'authenticated') {
-    if (location.origin !== request.origin || doc.readyState !== 'complete') return false;
+  if (request.action === 'authenticationState') {
+    if (location.origin !== request.origin || doc.readyState !== 'complete') return 'unverified';
     const fields = [...doc.querySelectorAll('input')].filter(visible);
-    if (fields.some(field => field.type === 'password' ||
-        /password|one-time-code|otp|인증\s*(?:번호|코드)|verification\s*code/i.test(
-          [field.name, field.id, field.autocomplete, field.placeholder, field.getAttribute('aria-label'),
-            ...Array.from(field.labels || [], label => label.innerText)].join(' ')))) return false;
-    return [...doc.querySelectorAll('a[href],button,[role=button]')].some(node =>
-      visible(node) && /^(?:로그아웃|sign out|log out)$/i.test(
-        (node.getAttribute('aria-label') || node.innerText || '').trim()));
+    if (fields.some(field => {
+      const labelIds = (field.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0, 12);
+      const label = [field.name, field.id, field.autocomplete, field.placeholder, field.getAttribute('aria-label'),
+        ...labelIds.map(id => doc.getElementById(id)?.textContent),
+        ...Array.from(field.labels || [], text => text.textContent || text.innerText)].join(' ');
+      return field.type === 'password' ||
+        /password|\b(?:otp|mfa|2fa)[a-z0-9_-]*|(?:auth(?:entication)?|verification|one[ -]?time|security)[\s_.-]*code|인증[\s_.-]*(?:번호|코드)|보안[\s_.-]*코드|일회용[\s_.-]*(?:번호|코드)/i.test(label);
+    })) return 'unverified';
+    const controls = [...doc.querySelectorAll('a[href],button,[role=button],[role=menuitem]')];
+    const name = node => (node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim();
+    const isSignOut = node => /^(?:로그아웃|sign out|log out)$/i.test(name(node));
+    if (controls.some(node => visible(node) && !node.closest('[hidden],[aria-hidden=true]') && isSignOut(node))) return 'signed_in';
+    const accountMenu = controls.some(node => {
+      if (!visible(node)) return false;
+      if (/^(?:내 계정|계정 메뉴|프로필 메뉴|my account|account menu|profile menu)$/i.test(name(node))) return true;
+      if (node.getAttribute('aria-expanded') !== 'false') return false;
+      const menu = doc.getElementById(node.getAttribute('aria-controls') || '');
+      return menu && controls.some(control => isSignOut(control) && menu.contains(control));
+    });
+    return accountMenu ? 'account_menu' : 'unverified';
   }
 
   if (request.action === 'capture') {

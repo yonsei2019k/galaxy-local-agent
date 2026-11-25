@@ -51,23 +51,33 @@ test('NOL guidance follows the actual pages without exporting form values', asyn
   } finally {await browser.close()}
 })
 
-test('authentication requires a visible sign-out action on the bound origin', async()=>{
+test('account menu guides the owner without confirming login until sign-out is visible', async()=>{
   const browser=await chromium.launch({headless:true})
   try {
     const page=await browser.newPage()
     let fixture=''
     await page.route('https://nid.naver.com/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:fixture}))
-    async function check(html,origin='https://nid.naver.com'){
+    const state=(origin='https://nid.naver.com')=>
+      page.evaluate('('+loginScript+')('+JSON.stringify({action:'authenticationState',origin})+')')
+    async function check(html,origin){
       fixture=html
       await page.goto('https://nid.naver.com/nidlogin.login',{waitUntil:'load'})
-      return page.evaluate('('+loginScript+')('+JSON.stringify({action:'authenticated',origin})+')')
+      return state(origin)
     }
-    assert.equal(await check('<h1>2단계 인증</h1><button>알림 다시 보내기</button>'),false)
-    assert.equal(await check('<p>로그인을 완료하지 않았습니다.</p>'),false)
-    assert.equal(await check('<button hidden>로그아웃</button>'),false)
-    assert.equal(await check('<button>로그아웃</button><label for="mfa">인증번호</label><input id="mfa">'),false)
-    assert.equal(await check('<button>로그아웃</button>','https://www.naver.com'),false)
-    assert.equal(await check('<button>로그아웃</button>'),true)
+    assert.equal(await check('<h1>2단계 인증</h1><button>알림 다시 보내기</button>'),'unverified')
+    assert.equal(await check('<p>로그인을 완료하지 않았습니다.</p>'),'unverified')
+    assert.equal(await check('<button hidden>로그아웃</button>'),'unverified')
+    assert.equal(await check('<button>로그아웃</button><label for="mfa">인증번호</label><input id="mfa">'),'unverified')
+    assert.equal(await check('<button>로그아웃</button><span id="code">Security code</span><input aria-labelledby="code">'),'unverified')
+    assert.equal(await check('<button>로그아웃</button>','https://www.naver.com'),'unverified')
+    assert.equal(await check('<button>로그아웃</button>'),'signed_in')
+    assert.equal(await check('<button>계정 메뉴</button>'),'account_menu')
+    assert.equal(await check('<button aria-controls="account" aria-expanded="false">메뉴</button><nav id="account" hidden><button role="menuitem">로그아웃</button></nav>'),'account_menu')
+    await page.evaluate(()=>{
+      document.getElementById('account').hidden=false
+      document.querySelector('[aria-controls]').setAttribute('aria-expanded','true')
+    })
+    assert.equal(await state(),'signed_in')
   } finally {await browser.close()}
 })
 
@@ -86,6 +96,10 @@ test('printing refuses an opaque frame in Chromium', async()=>{
     }
     assert.equal((await check('<iframe srcdoc="<p>Ordinary document</p>"></iframe>')).safe,true)
     assert.equal((await check('<iframe srcdoc="<input autocomplete=cc-number>"></iframe>')).safe,false)
+    assert.equal((await check('<label for="code">인증 번호</label><input id="code" inputmode="numeric">')).safe,false)
+    assert.equal((await check('<span id="auth-name">인증코드</span><input aria-labelledby="auth-name">')).safe,false)
+    assert.equal((await check('<iframe srcdoc="<input name=otpNumber>"></iframe>')).safe,false)
+    assert.equal((await check('<label for="zip">우편번호</label><input id="zip" type="number">')).safe,true)
     assert.equal((await check('<iframe src="https://payment-frame.example/"></iframe>')).safe,false)
   } finally {await browser.close()}
 })
