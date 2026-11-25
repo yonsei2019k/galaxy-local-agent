@@ -30,7 +30,7 @@ object ConsumerAppCatalog {
         tool("open_netflix_title","Open one official Netflix title page using its numeric title ID. Does not bypass profile login or verify playback.","id" to text(max=20)),
         tool("open_coupang","Open the installed Coupang shopping app with its existing login. No cart, purchase, payment or private-order API."),
         tool("search_coupang","Open the official Coupang product search page. Falls back to the browser if the installed app does not handle the link. Displayed prices and stock still need actual page verification.","query" to text()),
-        tool("open_coupang_product","Open an official Coupang product page by numeric product ID. Does not add to cart or purchase anything.","id" to text(max=30)),
+        tool("open_coupang_product","Open a Coupang product page. Supply both itemId and vendorItemId when opening a compared seller option. Opening does not purchase anything.","id" to text(max=30),"itemId" to text(false,24),"vendorItemId" to text(false,24)),
         tool(CoupangReviewEvidence.OPEN_TOOL,"Open the private on-phone Coupang review workspace for the owner to inspect orders, compare reviewable purchase options and prepare a review. Opens an internal screen only. Authentication and publishing are performed by the owner."),
         tool("open_coupang_eats","Open the installed Coupang Eats app using its current login. Does not submit an order, pay, or expose the customer's private order history.")
     )
@@ -64,7 +64,17 @@ object ConsumerAppCatalog {
             "search_netflix"->"https://www.netflix.com/search?q="+encode(value("query"))
             "open_netflix_title"->"https://www.netflix.com/title/"+id(20)
             "search_coupang"->"https://www.coupang.com/np/search?q="+encode(value("query"))
-            "open_coupang_product"->"https://www.coupang.com/vp/products/"+id(30)
+            "open_coupang_product"->{
+                val product = id(30)
+                val identifiers = listOf("itemId", "vendorItemId")
+                if (identifiers.none { it in call.arguments }) "https://www.coupang.com/vp/products/$product"
+                else {
+                    require(identifiers.all { it in call.arguments }) { "Both Coupang option identifiers are required." }
+                    val option = CoupangReviewEvidence.Variant(product, value("itemId"), value("vendorItemId"))
+                    require(CoupangReviewEvidence.variant(option.url) == option) { "Invalid Coupang seller option." }
+                    option.url
+                }
+            }
             else->null
         }
         return ConsumerTarget(app,uri)

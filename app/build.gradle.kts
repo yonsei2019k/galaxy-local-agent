@@ -16,6 +16,13 @@ android {
         versionName = System.getenv("RELEASE_VERSION_NAME") ?: "0.1.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += "arm64-v8a" }
+        val outlookId = providers.environmentVariable("ZIPHAP_OUTLOOK_CLIENT_ID").orNull.orEmpty().trim()
+        val outlookTenant = providers.environmentVariable("ZIPHAP_OUTLOOK_TENANT").orNull.orEmpty().ifBlank { "common" }
+        val guid = Regex("[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+        require(outlookId.isEmpty() || guid.matches(outlookId)) { "Invalid Outlook public client ID" }
+        require(outlookTenant in setOf("common","consumers","organizations") || guid.matches(outlookTenant)) { "Invalid Outlook tenant" }
+        manifestPlaceholders["outlookClientId"] = outlookId.ifEmpty { "unconfigured" }
+        manifestPlaceholders["outlookTenant"] = outlookTenant
         manifestPlaceholders["ziphapUpdateUrl"] = "https://github.com/yonsei2019k/galaxy-local-agent/releases/latest/download/update.json"
     }
     // Verification APK retains the production package/data and release native flags.

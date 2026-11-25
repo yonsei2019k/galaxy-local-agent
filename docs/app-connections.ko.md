@@ -2,13 +2,13 @@
 
 2026-10-31 사용자의 앱 연결·빌드 우선 요청에 따라 추가했다. 소스와 APK 포함 여부, 실제 로그인·폰 동작은 별도의 증거다.
 
-## Outlook 메일·일정 연결 준비
+## Outlook 메일·일정
 
-2026-11-25 소스에서 Outlook 알림 수신 경로만 확인했다. 집합 Android의 Microsoft OAuth 로그인·Graph 조회와 계정별 연결 해제는 미구현 상태다.
+집합은 Microsoft 공개 클라이언트의 OAuth 기기 코드 방식으로 휴대폰에서 계정을 연결하고 Graph API로 메일 제목·발신자와 일정 제목·시각을 조회한다. 연결은 메일과 일정 각각 승인한다. 두 기능 모두 쓰기 권한을 요청하지 않는다.
 
-1. Entra에 집합의 공개 클라이언트를 등록하고 Android 플랫폼을 추가한다. 패키지는 `com.user.localagent`이며 배포 APK 서명 인증서의 서명 해시를 등록한다. 준비할 값은 Application (client) ID, 대상 계정 유형, 해당 조직 전용인 경우 Directory (tenant) ID, 포털이 생성한 정확한 리디렉션 URI다. 네이티브 앱은 클라이언트 시크릿이 필요 없다. [Android 앱 등록과 MSAL 설정](https://learn.microsoft.com/en-us/entra/identity-platform/tutorial-mobile-app-android-prepare-app)
-2. 앱 등록 후 MSAL의 휴대폰 대화형 로그인으로 소유자가 계정과 권한을 선택하도록 연결한다. 후속 실행은 같은 계정의 SDK 토큰 캐시를 사용하고 권한 철회·계정 변경은 새 승인을 요구한다. 조직의 사용자 동의 정책에 따라 관리자의 승인이 필요할 수 있다.
-3. 읽기 검증은 받은편지함의 `GET /v1.0/me/mailFolders/inbox/messages?$select=id,subject,receivedDateTime&$top=10`과 명시한 기간의 `GET /v1.0/me/calendar/calendarView?startDateTime={시작}&endDateTime={끝}&$select=id,subject,start,end`로 진행한다. 시작과 끝은 UTC 또는 오프셋 포함 시각으로 URL 인코딩한다. 기본 제목·시각에는 위임 권한 `Mail.ReadBasic`, `Calendars.ReadBasic`를 각각 적용한다. 본문 읽기는 별도의 `Mail.Read` 동의 범위다. [메일 조회](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) · [일정 조회](https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0)
+1. 배포자는 Microsoft Entra의 앱 등록에서 사용할 개인·조직 계정 유형을 선택하고 **Allow public client flows**를 활성화한다. 배포 환경 변수 또는 GitHub Actions의 Repository variables에 `ZIPHAP_OUTLOOK_CLIENT_ID`와 필요 시 `ZIPHAP_OUTLOOK_TENANT`를 지정해 빌드한다. tenant는 조직 디렉터리 UUID 또는 `common`(기본), `organizations`, `consumers` 중 하나다. 이 프로토콜에는 리디렉션 URI와 클라이언트 시크릿이 필요 없다. 앱 등록이 없는 빌드는 연결 메뉴에 이를 표시한다. [Microsoft 기기 코드 인증](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code)
+2. 집합의 앱 연결에서 Outlook 메일 또는 일정을 선택해 휴대폰에 표시된 단기 코드를 공식 Microsoft 로그인 화면에 입력한다. 비밀번호·MFA는 Microsoft가 처리한다. 등록과 조직 정책에 따라 관리자 동의가 필요할 수 있다. 로그인 계정은 Graph `/me`로 확인하고, 기기 내 암호화 저장소에서 해당 서비스의 토큰만 갱신한다. 로그인 취소·앱 연결 해제 후에는 그 연결 요청을 재사용할 수 없다.
+3. 받은편지함은 위임 `Mail.ReadBasic`으로 최근 20개의 헤더를, 일정은 `Calendars.ReadBasic`으로 요청 기간의 이벤트 첫 20개를 읽는다. 응답에 다음 페이지가 있으면 추가 결과가 있음을 표시한다. 계정 확인에 `User.Read`, 지속 연결에 `offline_access`를 요청한다. Android 설치본으로 권한 철회, 재연결, 실제 계정 결과의 대조가 남아 있다. [메일 조회](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) · [일정 조회](https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0)
 
 ## 앱 진입점
 

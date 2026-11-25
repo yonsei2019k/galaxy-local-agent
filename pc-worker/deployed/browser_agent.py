@@ -71,9 +71,18 @@ def safe_text(text):
     return not re.search(r'\d[\d -]{11,}\d', text)
 
 
-def signature(url, elements):
+def signature(url, elements, context=None):
     body = url + '\n' + '\n'.join(f"{e['ref']}|{e['tag']}|{e.get('type','')}|{e.get('label','')}" for e in elements)
+    if context is not None and any(risky_control(e) for e in elements):
+        destinations = [e.get('actionBinding') for e in elements if risky_control(e)]
+        body += '\n' + context + json.dumps(destinations, ensure_ascii=False)
     return hashlib.sha256(body.encode('utf-8')).hexdigest()[:32]
+
+
+def approval_context(page):
+    """Digest the visible review context without keeping its raw content in approval state."""
+    content = json.dumps([page.get('title', ''), page.get('text', '')], ensure_ascii=False)
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
 # ---------------------------------------------------------------- minimal DevTools websocket (stdlib)
@@ -183,6 +192,8 @@ SNAPSHOT_JS = r"""(() => {
       disabled: !!e.disabled, editable: e.isContentEditable || ['input','textarea','select'].includes(e.tagName.toLowerCase())};
     if (e.tagName === 'A') { try { item.host = new URL(e.href).host; } catch (_) {} }
     if (e.tagName === 'SELECT') item.options = Array.from(e.options).slice(0, 30).map(o => o.text.trim().slice(0, 60));
+    item.actionBinding = [e.href || '', e.formAction || '', e.formMethod || '',
+      e.form?.action || '', e.form?.method || ''];
     out.push(item);
   }
   const text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, MAX_TEXT);
@@ -453,12 +464,12 @@ class BrowserAgent:
             self.snapshot = None
             return {'loginRequired': True, 'dataOnly': True}
         # Compare renderer observations on both sides. Display-only labels must not change the fingerprint.
-        snapshot_id = signature(value['url'], elements)
+        snapshot_id = signature(value['url'], elements, approval_context(value))
         for e in elements:
             e['sensitive'] = sensitive_field(e) if e.get('editable') else False
             e['needsApproval'] = risky_control(e)
             if e.get('editable') and not e['sensitive'] and not e.get('label'): e['label'] = (e.get('placeholder') or e.get('name') or '')[:120]
-            for key in ('name', 'id', 'autocomplete', 'placeholder'): e.pop(key, None)
+            for key in ('name', 'id', 'autocomplete', 'placeholder', 'actionBinding'): e.pop(key, None)
         self.snapshot = {'id': snapshot_id, 'url': value['url'], 'elements': {e['ref']: e for e in elements}}
         return {'snapshotId': snapshot_id, 'url': value['url'], 'title': value['title'], 'text': value['text'],
                 'elements': elements, 'truncated': value['truncated'], 'loginRequired': False, 'dataOnly': True,
@@ -519,8 +530,9 @@ class BrowserAgent:
             if current is None or current['id'] != request['snapshotId']: raise BrowserError('SNAPSHOT_STALE', 409)
             # The page must still be the one the caller read.
             fresh = self.page.evaluate(SNAPSHOT_JS, timeout=20)
-            if not isinstance(fresh, dict) or signature(fresh.get('url', ''), fresh.get('elements', [])) != current['id']:
-                self.snapshot = None; raise BrowserError('SNAPSHOT_STALE', 409)
+            if not isinstance(fresh, dict) or signature(fresh.get('url', ''), fresh.get('elements', []), approval_context(fresh)) != current['id']:
+                self.snapshot = None; self.pending = None
+                raise BrowserError('SNAPSHOT_STALE', 409)
             element = None
             if action in ('click', 'type', 'select', 'press_enter'):
                 element = current['elements'].get(request.get('ref'))

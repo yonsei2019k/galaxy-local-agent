@@ -26,6 +26,32 @@ class Policy(unittest.TestCase):
             agent.act({'snapshotId':read['snapshotId'],'action':'click','ref':'e2'})
         self.assertEqual(clicks,['e2'])
 
+    def test_checkout_total_change_rejects_existing_approval_before_click(self):
+        agent = b.BrowserAgent(profile='unused')
+        agent._ensure = lambda: None
+        observed = {'url': 'https://example.org/checkout', 'title': '예약 확인',
+                    'text': '객실 A · 총액 90,000원', 'truncated': False,
+                    'elements': [{'ref': 'e1', 'tag': 'button', 'label': '결제하기'}]}
+        agent.page = type('Page', (), {'evaluate': lambda *_args, **_options: observed})()
+        clicks = []
+        agent._click = clicks.append
+        page = agent._read()
+        action = {'snapshotId': page['snapshotId'], 'action': 'click', 'ref': 'e1'}
+        approval = agent.act(action)
+        observed['text'] = '객실 A · 총액 110,000원'
+        with self.assertRaisesRegex(b.BrowserError, 'SNAPSHOT_STALE'):
+            agent.act(action | {'approvalId': approval['approvalId']})
+        self.assertEqual(clicks, [])
+        self.assertIsNone(agent.pending)
+
+        current = agent._read()
+        action = action | {'snapshotId': current['snapshotId']}
+        approval = agent.act(action)
+        observed['elements'][0]['actionBinding'] = ['/different-checkout']
+        with self.assertRaisesRegex(b.BrowserError, 'SNAPSHOT_STALE'):
+            agent.act(action | {'approvalId': approval['approvalId']})
+        self.assertEqual(clicks, [])
+
     def test_only_public_web_pages(self):
         for good in ('https://www.letskorail.com/', 'http://example.com/a?b=1', 'https://map.naver.com:443/p'):
             self.assertTrue(b.url_allowed(good), good)

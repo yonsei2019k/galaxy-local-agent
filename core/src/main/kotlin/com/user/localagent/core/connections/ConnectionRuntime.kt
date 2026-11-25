@@ -122,9 +122,18 @@ class ConnectionRuntime(private val host:ConnectionHost) {
     }
     private fun readOutcome(call:ToolCall,body:String,cached:Boolean):ConnectionOutcome {
         val parsed=runCatching {Json.parseToJsonElement(body)}.getOrNull()
-        val nextPage=if(parsed is JsonObject)listOf("nextPageToken","next_cursor","nextCursor","has_more").any {parsed[it]?.let {v->v !is JsonNull && v.toString()!="false" && v.toString()!="\"\""}==true}else false
+        val nextPage=if(parsed is JsonObject)listOf("nextPageToken","next_cursor","nextCursor","has_more","@odata.nextLink").any {parsed[it]?.let {v->v !is JsonNull && v.toString()!="false" && v.toString()!="\"\""}==true}else false
         val display=when(call.name){
             "read_gmail_message" -> if(parsed is JsonObject)gmailPreview(parsed).toString() else body
+            "list_outlook_inbox","list_outlook_calendar" -> {
+                val rows=(parsed as? JsonObject)?.get("value") as? JsonArray ?: return fail("outlook_response_invalid")
+                val keys=if(call.name=="list_outlook_inbox")setOf("id","subject","from","receivedDateTime") else setOf("id","subject","start","end")
+                JsonArray(rows.map { row ->
+                    val item=row as? JsonObject ?: return fail("outlook_response_invalid")
+                    if((item["id"] as? JsonPrimitive)?.contentOrNull.isNullOrBlank())return fail("outlook_response_invalid")
+                    JsonObject(item.filterKeys { it in keys })
+                }).toString()
+            }
             "list_github_repository_issues" -> {
                 val issues=parsed as? JsonArray ?: return fail("github_response_invalid")
                 val rows=issues.map { it as? JsonObject ?: return fail("github_response_invalid") }

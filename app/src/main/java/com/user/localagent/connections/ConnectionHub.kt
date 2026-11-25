@@ -19,12 +19,13 @@ class ConnectionHub private constructor(private val context:Context,
     private val calendarAuthorizedSender:(suspend(ConnectedService,ApiRequest,ConnectionAccess)->ApiResponse)?=null) {
     val store=ConnectionStore(context)
     val google by lazy {check(calendarAuthorizedSender==null){"isolated_calendar_has_no_google_auth"};GoogleConnectionAuth(context,store)}
+    internal val outlook by lazy {check(calendarAuthorizedSender==null);OutlookAuthorization(context,store)}
     val pc by lazy {check(calendarAuthorizedSender==null){"isolated_calendar_has_no_pc_client"};PcToolClient(context,store)}
     private val runtimes=java.util.concurrent.ConcurrentHashMap<ConnectedService,ConnectionRuntime>()
     fun clearCache(){runtimes.values.forEach {it.clearCache()}}
-    fun authorizedServiceIds(writeOnly:Boolean=false):Set<String> = ConnectedService.entries.filter {store.connection(it)?.let {value->!writeOnly||value.writeAllowed}==true}.map {it.id}.toSet()+if(!writeOnly&&pc.authorized())setOf("pc-tools")else emptySet()
-    fun verifiedServiceIds():Set<String> = ConnectedService.entries.filter {store.connection(it)?.verifiedAt?.let {at->at>0}==true}.map {it.id}.toSet()+if(pc.verified())setOf("pc-tools")else emptySet()
-    fun disconnect(service:ConnectedService){store.disconnect(service);clearCache()}
+    fun authorizedServiceIds(writeOnly:Boolean=false):Set<String> = ConnectedService.entries.filter {(!it.outlook||outlook.configured) && store.connection(it)?.let {value->!writeOnly||value.writeAllowed}==true}.map {it.id}.toSet()+if(!writeOnly&&pc.authorized())setOf("pc-tools")else emptySet()
+    fun verifiedServiceIds():Set<String> = ConnectedService.entries.filter {(!it.outlook||outlook.configured) && store.connection(it)?.verifiedAt?.let {at->at>0}==true}.map {it.id}.toSet()+if(pc.verified())setOf("pc-tools")else emptySet()
+    fun disconnect(service:ConnectedService){if(service.outlook)outlook.disconnect(service) else store.disconnect(service);clearCache()}
     private fun runtime(service:ConnectedService)=runtimes.getOrPut(service){ConnectionRuntime(object:ConnectionHost {
         override suspend fun access(service:ConnectedService):ConnectionAccess? {
             val value=store.connection(service)?:return null
@@ -42,12 +43,17 @@ class ConnectionHub private constructor(private val context:Context,
                 currentCoroutineContext().ensureActive()
                 return sender(service,request,expectedAccess).also {currentCoroutineContext().ensureActive()}
             }
-            val token=try {if(service.google)google.token(service,state.writeAllowed,expectedAccess)else store.read("token.${service.id}")?:return ApiResponse(401,"{}")}
+            val token=try {if(service.google)google.token(service,state.writeAllowed,expectedAccess) else if(service.outlook)outlook.token(service,expectedAccess){ microsoftAccountId(service,it) } else store.read("token.${service.id}")?:return ApiResponse(401,"{}")}
                 catch(cancel:CancellationException){throw cancel}catch(_:Exception){return ApiResponse(401,"{}")}
-            if(!service.google && tokenPrincipal(token)!=state.principal)return ApiResponse(401,"{}")
+            if(!service.google && !service.outlook && tokenPrincipal(token)!=state.principal)return ApiResponse(401,"{}")
             val current=store.connection(service)?:return ApiResponse(401,"{}")
             if(current.principal!=state.principal||current.generation!=state.generation||current.writeAllowed!=state.writeAllowed)return ApiResponse(401,"{}")
-            return transport(service,request,token)
+            val result=transport(service,request,token)
+            if(service.outlook){
+                val after=store.connection(service)?:return ApiResponse(401,"{}")
+                if(after.generation!=expectedAccess.generation || after.principal!=expectedAccess.principal)return ApiResponse(401,"{}")
+            }
+            return result
         }
         override fun mutation(key:String)=store.mutation(service,key)
         override fun saveMutation(key:String,record:MutationRecord)=store.saveMutation(service,key,record)
@@ -92,7 +98,7 @@ class ConnectionHub private constructor(private val context:Context,
     private fun tokenPrincipal(token:String)=MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).joinToString(""){"%02x".format(it)}
 
     suspend fun configureToken(service:ConnectedService,token:String,allowedChat:String?=null)=withContext(Dispatchers.IO) {
-        require(!service.google&&token.length in 20..500&&token.none {it.isWhitespace()||it=='\u0000'})
+        require(!service.google&&!service.outlook&&token.length in 20..500&&token.none {it.isWhitespace()||it=='\u0000'})
         if(service==ConnectedService.TELEGRAM){require(token.matches(Regex("[0-9]{5,20}:[A-Za-z0-9_-]{20,200}")));require(allowedChat?.matches(Regex("-?[0-9]{1,20}"))==true)}
         val request=when(service){
             ConnectedService.TELEGRAM->ApiRequest("https://api.telegram.org/getMe")
@@ -118,12 +124,21 @@ class ConnectionHub private constructor(private val context:Context,
         val verifiedAt=if(service in setOf(ConnectedService.SLACK,ConnectedService.GITHUB)) 0L else System.currentTimeMillis()
         store.connect(service,LocalConnection(principal,null,false,System.currentTimeMillis(),verifiedAt));clearCache()
     }
+    internal suspend fun microsoftAccountId(service:ConnectedService,token:String):String {
+        require(service.outlook)
+        val result=transport(service,ApiRequest("https://graph.microsoft.com/v1.0/me?\$select=id"),token)
+        check(result.status==200)
+        return Json.parseToJsonElement(result.body).jsonObject.getValue("id").jsonPrimitive.content.also {
+            require(it.isNotBlank() && it.length<=250)
+        }
+    }
     suspend fun transport(service:ConnectedService,request:ApiRequest,token:String,testingToken:Boolean=false):ApiResponse=withContext(Dispatchers.IO) {
         require(token.isNotBlank()&&token.none {it=='\r'||it=='\n'})
         if(service==ConnectedService.GMAIL&&request.method=="POST"&&request.url=="https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
             return@withContext GmailSendTransport.send(request,token)
         val url=if(service==ConnectedService.TELEGRAM){require(request.url in setOf("https://api.telegram.org/getUpdates","https://api.telegram.org/getMe"));URL("https://api.telegram.org/bot$token/"+request.url.substringAfterLast('/'))}else URL(request.url)
         // Keep each service credential on its own API origin, including connection probes.
+        require((url.host=="graph.microsoft.com") == service.outlook)
         require((url.host=="api.github.com") == (service==ConnectedService.GITHUB))
         require((url.host=="slack.com") == (service==ConnectedService.SLACK))
         val connection=url.openConnection() as HttpsURLConnection

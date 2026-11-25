@@ -1,4 +1,5 @@
 const templates = {
+  booking_review: { label: '예약 전 확인', fields: { seller: '예약처', dates: '일정', party: '인원', room: '객실', online: '온라인 결제', onsite: '현장 결제', total: '총액', cancellation: '취소 조건', paymentMethods: '결제 방법', checkedAt: '확인 시각' } },
   government: { label: '민원 안내', fields: { agency: '담당 기관', documents: '준비 서류', fee: '수수료', next: '다음 단계' } },
   performance: { label: '공연 일정', fields: { venue: '공연장', start: '시작일', end: '종료일', status: '공연 상태' } },
   place: { label: '장소', fields: { address: '주소', category: '업종', source: '출처' } },

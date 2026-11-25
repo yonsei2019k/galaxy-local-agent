@@ -13,6 +13,31 @@ class ConsumerAppCatalogTest {
         assertEquals(ConsumerAppCatalog.names,ConsumerAppCatalog.appForTool.keys)
         assertTrue(ConsumerAppCatalog.definitions.all {it.risk==Risk.LOW})
     }
+    @Test fun merchantHandoffUsesExactReadOnlyListings() {
+        val listings = mapOf(
+            "https://www.coupang.com/vp/products/12?itemId=34&vendorItemId=56" to "com.coupang.mobile",
+            "https://booking.naver.com/booking/3/bizes/123/items/45" to "com.nhn.android.nmap",
+            "https://www.yeogi.com/domestic-accommodations/4279" to "kr.goodchoice.abouthere",
+            "https://nol.yanolja.com/stay/domestic/3012159?ratePlanId=769347&roomTypeId=667376" to "com.cultsotry.yanolja.nativeapp"
+        )
+        listings.forEach { (link, app) -> assertEquals(app, CommerceListingLinks.packageFor(link)) }
+        for (link in listOf(
+            "https://www.yeogi.com.evil.example/domestic-accommodations/4279",
+            "https://user@www.yeogi.com/domestic-accommodations/4279",
+            "https://nol.yanolja.com/stay/domestic/123?roomTypeId=1&roomTypeId=2",
+            "https://nol.yanolja.com/stay/domestic/123?next=https://example.com",
+            "https://www.coupang.com/vp/products/12/checkout",
+            "https://www.coupang.com/vp/products/12%2fcheckout"
+        )) assertNull(link, CommerceListingLinks.packageFor(link))
+    }
+    @Test fun purchaseComparisonRetainsExactSellerOption() {
+        val tool = "open_coupang_product"
+        val pair = call(tool, "id" to "123", "itemId" to "456", "vendorItemId" to "789")
+        assertEquals("https://www.coupang.com/vp/products/123?itemId=456&vendorItemId=789", ConsumerAppCatalog.target(pair).uri)
+        assertEquals("https://www.coupang.com/vp/products/123", ConsumerAppCatalog.target(call(tool, "id" to "123")).uri)
+        assertTrue(runCatching { ConsumerAppCatalog.target(call(tool, "id" to "123","itemId" to "456")) }.isFailure)
+        assertTrue(runCatching { ConsumerAppCatalog.target(call(tool,"id" to "123","itemId" to "4&buy=1","vendorItemId" to "789")) }.isFailure)
+    }
     @Test fun launchOnlyUsesFourKnownPackages() {
         val targets=listOf("open_tmap","open_netflix","open_coupang","open_coupang_eats").map {ConsumerAppCatalog.target(call(it))}
         assertEquals(setOf(ConsumerApp.TMAP, ConsumerApp.NETFLIX, ConsumerApp.COUPANG, ConsumerApp.EATS), targets.map {it.app}.toSet())

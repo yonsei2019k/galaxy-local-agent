@@ -1114,7 +1114,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 catch(_:Exception){runCatching {recordAudit("knowledge_capture",false,"직접 대화의 기억 저장 검증 실패")}}
                 val disabledTools=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
                 val deviceExcluded=if(usesFreshPhoneText(request))emptySet()else com.user.localagent.core.LocalSubagentToolCatalog.names
-                val supportedTools=ToolRegistry.definitions.keys-disabledTools-deviceExcluded-goalControlsOutsideGoal(request)
+                val supportedTools=ToolRegistry.definitions.keys-disabledTools-deviceExcluded-GoalToolCatalog.unavailableForRun(request.goalSegment != null)
                 val offeredTools=AgentWorkModePolicy.filterTools(workMode,
                     request.scheduledReadTool?.let{supportedTools.intersect(setOf(it))}?:supportedTools)
                 requestTools?.bindAvailableTools(if(request.allowTools)offeredTools else emptySet())
@@ -1807,7 +1807,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val pcSettings=com.user.localagent.compute.PcComputeSettings.get(context)
         val disabled=request.projectId?.let{app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
         val catalog=if(publicResearch)ExternalAgentContract.PUBLIC_RESEARCH_PHONE_TOOLS else ExternalAgentContract.NORMAL_PHONE_TOOLS
-        val tools=AgentWorkModePolicy.filterTools(mode,catalog-disabled-goalControlsOutsideGoal(request))
+        val tools=AgentWorkModePolicy.filterTools(mode,catalog-disabled-GoalToolCatalog.unavailableForRun(request.goalSegment != null))
         check(tools.isNotEmpty()){"현재 프로젝트에서 사용할 클라우드 휴대폰 도구가 없습니다."}
         val scope=app.repository.chat.accessScope(request.threadId)
         val binding=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scope.scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
@@ -3432,10 +3432,6 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return true
     }
     /** Rechecked after approvals and directly before effects; history does not grant a new action. */
-    private fun goalControlsOutsideGoal(request: QueuedChatRequest): Set<String> =
-        if(request.goalSegment!=null)emptySet()
-        else com.user.localagent.core.GoalProgressToolCatalog.names+GoalWaitToolCatalog.WAIT
-
     private suspend fun executeGoalProgressOrWait(request: QueuedChatRequest, call: ToolCall): ToolResult =
         goalMutation.withLock {
             val capture = checkNotNull(request.goal) { "먼저 추진 중인 목표가 필요해요." }

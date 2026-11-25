@@ -20,7 +20,7 @@ data class ApiRequest(val url:String,val method:String="GET",val body:String?=nu
         require(extraHeaders.keys.all {it in setOf("Notion-Version","If-None-Match")})
         require(extraHeaders.values.none {it.any {c->c=='\r'||c=='\n'}})
     }
-    companion object {val hosts=setOf("www.googleapis.com","docs.googleapis.com","sheets.googleapis.com","slides.googleapis.com","gmail.googleapis.com","forms.googleapis.com","tasks.googleapis.com","people.googleapis.com","photospicker.googleapis.com","api.telegram.org","api.notion.com","api.todoist.com","api.github.com","slack.com")}
+    companion object {val hosts=setOf("www.googleapis.com","docs.googleapis.com","sheets.googleapis.com","slides.googleapis.com","gmail.googleapis.com","forms.googleapis.com","tasks.googleapis.com","people.googleapis.com","photospicker.googleapis.com","api.telegram.org","api.notion.com","api.todoist.com","api.github.com","slack.com","graph.microsoft.com")}
 }
 
 data class ResponseProof(val verified:Boolean,val summary:String)
@@ -106,6 +106,14 @@ object ConnectionRequests {
             "search_youtube_videos"->read("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q="+encode(call.s("query")))
             "list_youtube_playlists"->read("https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=20")
             "list_telegram_bot_updates"->read("https://api.telegram.org/getUpdates") // token path is bound only by the host, never model arguments
+            "list_outlook_inbox"->read("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?\$select=id,subject,from,receivedDateTime&\$orderby=receivedDateTime%20desc&\$top=20")
+            "list_outlook_calendar"->{
+                val start=OffsetDateTime.parse(call.s("start")); val end=OffsetDateTime.parse(call.s("end"))
+                require(end.isAfter(start)){"조회 종료 시각은 시작 시각 뒤여야 해요."}
+                val range="startDateTime="+encode(start.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))+
+                    "&endDateTime="+encode(end.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
+                read("https://graph.microsoft.com/v1.0/me/calendar/calendarView?$range&\$select=id,subject,start,end&\$top=20")
+            }
             "list_github_repository_issues"->{
                 val repository=call.s("repository")
                 require(repository.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) &&

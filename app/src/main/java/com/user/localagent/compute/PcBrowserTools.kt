@@ -100,6 +100,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     }
     private data class Element(val label:String,val tag:String,val type:String,val needsApproval:Boolean)
     private var last:Triple<String,String,Map<String,Element>>?=null // snapshotId, url, elements
+    private val reviewAmounts = Regex(
+        "(?:총\\s*결제\\s*금액|최종\\s*결제\\s*금액|결제\\s*예정\\s*금액|총\\s*금액|총액|현장\\s*(?:결제|요금)|예약금)[:：\\s]{0,12}(?:₩\\s*)?[0-9][0-9,]{0,14}\\s*원"
+    )
     private var lastPage:JsonObject?=null
     private var initialOrigin:String?=null
     private var recoveredTarget:String?=null
@@ -128,7 +131,12 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             append("\n동작: ").append(action)
             element?.let{append("\n대상: ").append(it.label.ifBlank{it.tag})}
             text?.let{append("\n입력: ").append(it)}
-            if(action=="click"&&element?.needsApproval==true)append("\n결제·주문·예약·전송처럼 되돌리기 어려운 동작일 수 있습니다.")
+            if(action=="click"&&element?.needsApproval==true) {
+                append("\n결제·주문·예약·전송처럼 되돌리기 어려운 동작일 수 있습니다.")
+                val pageText = lastPage?.takeIf { it.string("snapshotId") == snapshot?.first }?.string("text").orEmpty()
+                reviewAmounts.findAll(pageText).map { it.value.replace(Regex("\\s+"), " ") }
+                    .distinct().take(5).forEach { append('\n').append(it) }
+            }
         }
         return needs to review
     }

@@ -24,7 +24,7 @@ class ConnectionContractsTest {
         assertEquals(setOf("send_gmail_message"),ConnectionCatalog.tools.keys.filter {it.contains("send")}.toSet())
         assertFalse(ConnectionCatalog.tools.keys.any {it.contains("delete")})
         assertTrue(GmailSendContract.names.all {ConnectionCatalog.tools.getValue(it).writes&&ConnectionCatalog.tools.getValue(it).definition.risk==Risk.HIGH})
-        assertEquals(30,ConnectionCatalog.tools.size)
+        assertEquals(32,ConnectionCatalog.tools.size)
     }
     @Test fun workspaceReadsBindTargetsAndExcludeUnrequestedData()=runBlocking {
         assertTrue(ToolRegistry.definitions.keys.containsAll(listOf("list_github_repository_issues","read_slack_channel_history")))

@@ -133,8 +133,7 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                     if(request.isForMainFrame&&request.hasGesture()&&request.method=="GET"&&
                         url.scheme in setOf("https","http")&&!url.host.isNullOrBlank()&&
                         !url.encodedAuthority.orEmpty().contains('@')&&url.host!="appassets.androidplatform.net"){
-                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,url)
-                            .addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                        runCatching { context.startActivity(com.user.localagent.connections.CommerceListingIntent.prepare(context,url)
                             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                     }
                     return true

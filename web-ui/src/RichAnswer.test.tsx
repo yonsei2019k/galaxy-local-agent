@@ -71,6 +71,7 @@ test.each([
   ['contact', 'phone', '전화번호'],
   ['file', 'format', '형식'],
   ['government', 'agency', '담당 기관'],
+  ['booking_review', 'onsite', '현장 결제'],
   ['place', 'address', '주소'],
   ['product', 'listedPrice', '표시 가격'],
   ['performance', 'venue', '공연장'],

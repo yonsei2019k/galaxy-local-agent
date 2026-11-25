@@ -74,6 +74,9 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/briefing_widget_info" />
         </receiver>
+        <meta-data android:name="ziphap.outlook.client" android:value="${outlookClientId}" />
+        <meta-data android:name="ziphap.outlook.tenant" android:value="${outlookTenant}" />
+        <activity android:name=".connections.OutlookConnectActivity" android:exported="false" />
         <activity android:name=".connections.ConnectionsActivity" android:exported="false" />
         <activity android:name=".connections.CoupangReviewActivity" android:exported="false"
             android:process=":coupang_review" />
@@ -93,6 +96,9 @@
         <package android:name="com.skt.tmap.ku" />
         <package android:name="com.netflix.mediaclient" />
         <package android:name="com.coupang.mobile" />
+        <package android:name="com.nhn.android.nmap" />
+        <package android:name="kr.goodchoice.abouthere" />
+        <package android:name="com.cultsotry.yanolja.nativeapp" />
         <package android:name="com.coupang.mobile.eats" />
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <intent><action android:name="android.speech.RecognitionService" /></intent>

@@ -9,6 +9,8 @@ permissions:
 env:
   # Workflow run 27 publishes code 2049, above the installed local 2048 build.
   RELEASE_VERSION_OFFSET: 2022
+  ZIPHAP_OUTLOOK_CLIENT_ID: ${{ vars.ZIPHAP_OUTLOOK_CLIENT_ID }}
+  ZIPHAP_OUTLOOK_TENANT: ${{ vars.ZIPHAP_OUTLOOK_TENANT }}
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true

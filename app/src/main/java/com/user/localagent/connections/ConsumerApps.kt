@@ -22,6 +22,7 @@ class ConsumerApps(private val context:Context) {
         if(target.uri==null)return context.packageManager.getLaunchIntentForPackage(target.app.packageName)
             ?:error("${target.app.label} 앱이 설치되어 있는지 확인해주세요.")
         val uri=Uri.parse(target.uri)
+        if (call.name == "open_coupang_product") return CommerceListingIntent.prepare(context,uri)
         val intent=Intent(Intent.ACTION_VIEW,uri)
         if(uri.scheme=="https")intent.addCategory(Intent.CATEGORY_BROWSABLE)
         val specific=Intent(intent).setPackage(target.app.packageName)

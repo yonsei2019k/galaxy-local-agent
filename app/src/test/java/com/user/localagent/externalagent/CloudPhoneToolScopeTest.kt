@@ -13,13 +13,27 @@ class CloudPhoneToolScopeTest {
         // The on-device sub-agent reuses the local engine and is never offered to cloud runs.
         assertEquals(ToolRegistry.definitions.keys-LocalSubagentToolCatalog.names,tools)
         assertFalse(LocalSubagentToolCatalog.RUN_SUBAGENT in tools)
-        assertTrue(tools.size<=ExternalAgentContract.MAX_PHONE_TOOLS) // PC workspace slots are separate.
+        val outlook = setOf("list_outlook_inbox", "list_outlook_calendar")
+        val ownerOnly = setOf(GoalToolCatalog.CREATE, GoalToolCatalog.START, GoalToolCatalog.RESUME)
+        val progress = GoalProgressToolCatalog.names + GoalWaitToolCatalog.WAIT
+        for (segment in listOf(false, true)) {
+            val eligible = tools - GoalToolCatalog.unavailableForRun(segment)
+            assertTrue(eligible.containsAll(outlook))
+            assertEquals(if (segment) emptySet() else ownerOnly, eligible.intersect(ownerOnly))
+            assertEquals(if (segment) progress else emptySet(), eligible.intersect(progress))
+            for (mode in AgentWorkMode.entries) {
+                val offered = AgentWorkModePolicy.filterTools(mode, eligible)
+                // Older workers count two optional PC reads against the same limit.
+                assertTrue("$mode segment=$segment size=${offered.size}", offered.size + 2 <= ExternalAgentContract.MAX_PHONE_TOOLS)
+            }
+        }
         assertFalse(tools.any{it.startsWith("pc_")})
         assertTrue(tools.all{it.matches(Regex("[a-z][a-z0-9_]{0,63}"))})
     }
     @Test fun fullRegistrationFitsTheWireAndIsExportedForPcSchemaValidation(){
+        val goalTools = AgentWorkModePolicy.filterTools(AgentWorkMode.ACT, tools - GoalToolCatalog.unavailableForRun(true))
         val capture=ExternalAgentCapture("10000000-0000-4000-8000-000000000001","thread","branch","project","binding",3,
-            "a".repeat(64),tools,true,pcWorkspaceProfile="phone-only",requirePlan=true)
+            "a".repeat(64),goalTools,true,pcWorkspaceProfile="phone-only",requirePlan=true)
         val registration=capture.registration()
         val catalogBytes=registration.getValue("phoneTools").toString().toByteArray().size
         assertTrue("catalog $catalogBytes",catalogBytes<200_000) // agent_bridge.py catalog bound
