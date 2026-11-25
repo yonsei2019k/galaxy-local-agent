@@ -160,8 +160,10 @@ export default function App() {
           onOfficeCalendar={() => request({action:'requestOfficeCalendar'})}
           onChooseReply={(runId, index) => !pending && !draft.trim() &&
             request({ action: 'chooseReply', payload: { runId, index } })}
-          hasDraft={!!draft.trim() || snapshot?.inlineLogin === true} onDraftExample={text => {
-            if (!draft.trim() && !snapshot?.inlineLogin) editDraft(text)
+          hasDraft={!!draft.trim() || !enabled || !!pending || !!snapshot?.voiceTalk || snapshot?.inlineLogin === true} onDraftExample={(text, needsFile) => {
+            if (!enabled || pending || draft.trim() || snapshot?.inlineLogin || snapshot?.voiceTalk) return
+            editDraft(text)
+            if (needsFile && !snapshot?.attachments?.length) request({ action: 'attach' })
           }} />
         {snapshot?.browserLoginStatus && <div className="browser-login-status" role="status">{snapshot.browserLoginStatus}</div>}
         {snapshot?.voiceTalk && snapshot.inlineLogin !== true && <VoiceTalk talk={snapshot.voiceTalk}

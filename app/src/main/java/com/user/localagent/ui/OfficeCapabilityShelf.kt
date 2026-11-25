@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -54,8 +55,9 @@ private fun ToolCapability.officeStatus()=when(availability){
     val context=LocalContext.current
     val pc by remember(context){PcComputeSettings.get(context).state}.collectAsState()
     var capabilities by remember{mutableStateOf<List<ToolCapability>?>(null)}
-    var connectionOnly by remember{mutableStateOf(false)}
-    var query by remember{mutableStateOf("")}
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    var connectionOnly by rememberSaveable{mutableStateOf(false)}
+    var query by rememberSaveable{mutableStateOf("")}
     var failure by remember{mutableStateOf(false)}
     var draftPreserved by remember{mutableStateOf(false)}
     LaunchedEffect(app,lifecycle){
@@ -80,7 +82,8 @@ private fun ToolCapability.officeStatus()=when(availability){
         OutlinedTextField(query,{query=it.take(100)},Modifier.fillMaxWidth(),
             label={Text("이름이나 하고 싶은 일 검색")}, singleLine=true, shape = MaterialTheme.shapes.medium)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            FilterChip(!connectionOnly,{connectionOnly=false},{Text("추천")})
+            FilterChip(!connectionOnly && !showAll,{connectionOnly=false;showAll=false},{Text("추천")})
+            FilterChip(!connectionOnly && showAll,{connectionOnly=false;showAll=true},{Text("전체 기능")})
             FilterChip(connectionOnly,{connectionOnly=true},{Text("앱과 연결")})
         }
         if(failure)ZipHapStatusTag("기능 목록을 확인하지 못했어요.", MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer)
@@ -129,7 +132,9 @@ private fun ToolCapability.officeStatus()=when(availability){
             }else{
                 val rows=detected.filter{item->matches(examples[item.id]?.title.orEmpty(),item.title,item.description,item.limitation)}
                     .sortedBy{if(it.id in examples)0 else if(it.availability==CapabilityAvailability.NOT_IMPLEMENTED)2 else 1}
-                items(rows,key={it.id}){item->
+                val browsing = text.isEmpty() && !showAll
+                val visibleRows = if (browsing) rows.filter { it.id in examples && it.availability != CapabilityAvailability.NOT_IMPLEMENTED } else rows
+                items(visibleRows,key={it.id}){item->
                     val example=examples[item.id]
                     ZipHapCard {
                         Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
@@ -147,7 +152,9 @@ private fun ToolCapability.officeStatus()=when(availability){
                         }
                     }
                 }
-                if(rows.isEmpty()&&capabilities!=null)item{ZipHapCard { ZipHapSectionTitle("검색 결과가 없어요.") }}
+                if(visibleRows.isEmpty() && capabilities!=null)item {
+                    ZipHapCard { ZipHapSectionTitle(if(browsing) "전체 기능에서 할 일을 찾아보세요." else "검색 결과가 없어요.") }
+                }
             }
         }
     }

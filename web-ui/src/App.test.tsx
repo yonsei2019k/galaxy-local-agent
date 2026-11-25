@@ -368,6 +368,19 @@ describe('native conversation', () => {
     expect(postIntent(base, { action: 'requestOfficeCalendar' })).toBe(false)
   })
 
+  it('opens the attachment picker with an editable summary draft', () => {
+    mount()
+    snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true, messages: [], tasks: [] })
+    click('필요한 설정 보기')
+    click('해볼 일 고르기')
+    click('첨부한 자료 요약')
+    expect(requests().slice(-2)).toMatchObject([
+      { action: 'draft', payload: { text: '첨부한 자료에서 중요한 내용만 정리해줘.' } },
+      { action: 'attach' },
+    ])
+    expect(requests().map(item => item.action)).not.toContain('send')
+  })
+
   it('shows the one-time 집순이 introduction alongside existing conversation history', () => {
     mount()
     snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true,

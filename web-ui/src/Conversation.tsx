@@ -19,7 +19,7 @@ export function BrandMark({ className }: { className?: string }) {
 const exampleRequests = [
   { label: '오늘 일정 확인', text: '오늘 남은 일정을 시간순으로 알려줘.', needsCalendar: true },
   { label: '웹에서 정보 찾기', text: '이번 주말 서울 날씨를 찾아서 출처와 함께 알려줘.' },
-  { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.' },
+  { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', needsFile: true },
 ]
 
 function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
@@ -28,7 +28,7 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   compact?: boolean
   calendarGranted: boolean
   hasDraft: boolean
-  onDraftExample(text: string): void
+  onDraftExample(text: string, needsFile?: boolean): void
   onNavigate(panel: Panel): void
   onDismiss(): void
   onCalendar(): void
@@ -56,7 +56,7 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
           </>}
           {step === 2 && exampleRequests.map(example =>
             <button type="button" key={example.label} disabled={hasDraft} onClick={() => {
-              onDraftExample(example.text)
+              onDraftExample(example.text, example.needsFile)
               if (example.needsCalendar && !calendarGranted) onCalendar()
             }}>{example.label}</button>
           )}
@@ -181,7 +181,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onDismissOfficeGuide(): void
   onOfficeCalendar(): void
   hasDraft: boolean
-  onDraftExample(text: string): void
+  onDraftExample(text: string, needsFile?: boolean): void
   onStayPhoto?: (messageId: string, index: number) => boolean
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean

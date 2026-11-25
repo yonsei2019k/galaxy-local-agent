@@ -38,7 +38,7 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
     val scope=rememberCoroutineScope()
     val diagnostics=remember(app){ConversationDiagnostics(app.repository)}
     val messages=remember{mutableStateListOf<MessageRecord>()}
-    var queryDraft by remember{mutableStateOf("")}
+    var queryDraft by rememberSaveable{mutableStateOf("")}
     val searchFocus=remember{FocusRequester()}
     val keyboard=LocalSoftwareKeyboardController.current
     LaunchedEffect(searchOnly){
@@ -48,8 +48,10 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
             keyboard?.show()
         }
     }
-    var query by remember{mutableStateOf("")}
+    var query by rememberSaveable{mutableStateOf("")}
     var revision by remember{mutableIntStateOf(0)}
+    var pageLoaded by remember(query,revision) { mutableStateOf(false) }
+    var loadFailed by remember(query,revision) { mutableStateOf(false) }
     var total by remember{mutableLongStateOf(0)}
     var cursor by remember{mutableStateOf<MessageCursor?>(null)}
     var busy by remember{mutableStateOf(false)}
@@ -111,9 +113,13 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
         busy=true
         try {
             val page=app.repository.messagePage(limit=50,query=query)
-            messages.clear();messages.addAll(page.messages);cursor=page.nextCursor;total=app.repository.messageCount(query)
+            total=app.repository.messageCount(query)
+            messages.clear()
+            messages.addAll(page.messages)
+            cursor=page.nextCursor
+            pageLoaded=true
         }catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){onStatus("대화 기록을 불러오지 못했습니다.")}
+        catch(_:Exception){loadFailed=true}
         finally{busy=false}
     }
     LazyColumn(Modifier.fillMaxSize().imePadding(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
@@ -126,7 +132,7 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
                 Button(enabled=!busy,onClick=::submitSearch){Text("검색")}
                 OutlinedButton(enabled=!busy,onClick={queryDraft="";query="";revision++}){Text("전체")}
             }
-            ZipHapStatusTag("기록 ${total}개 · ${messages.size}개 표시")
+            if(pageLoaded)ZipHapStatusTag("기록 ${total}개 · ${messages.size}개 표시")
         }}}
         if(!searchOnly)item {SettingsDisclosure("대화 내보내기", "검색 범위의 기록을 파일로 저장해요.") {
             Text("최대 10,000개·20MiB까지 선택한 위치에 저장해요. 일부만 저장되면 파일에 표시해요.",
@@ -135,10 +141,18 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
                 FilterChip(selected=exportFormat==ConversationExportFormat.JSON,onClick={exportFormat=ConversationExportFormat.JSON},label={Text("JSON")})
                 FilterChip(selected=exportFormat==ConversationExportFormat.TEXT,onClick={exportFormat=ConversationExportFormat.TEXT},label={Text("텍스트")})
             }
-            OutlinedButton(enabled=!busy&&exportToken==null,onClick={prepareExport()}){Text("대화 파일 저장")}
+            OutlinedButton(enabled=pageLoaded&&!busy&&exportToken==null,onClick={prepareExport()}){Text("대화 파일 저장")}
         }}
         if(busy)item{LinearProgressIndicator(modifier=Modifier.fillMaxWidth())}
-        items(messages,key={it.id}) {message->
+        if(loadFailed)item {
+            Column {
+                Text("대화 기록을 불러오지 못했어요.")
+                TextButton(onClick={revision++}) { Text("다시 불러오기") }
+            }
+        } else if(pageLoaded && messages.isEmpty())item {
+            Text(if(query.isEmpty()) "아직 저장된 대화가 없어요." else "이 단어를 포함한 대화가 없어요.")
+        }
+        items(if(pageLoaded) messages else emptyList(),key={it.id}) {message->
             var expanded by remember(message.id){mutableStateOf(false)}
             ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
                 ZipHapStatusTag("${if(message.role=="user")"나" else "집순이"} · ${formatter.format(Instant.ofEpochMilli(message.createdAt))}")
@@ -149,7 +163,7 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
                 }
             }}
         }
-        if(cursor!=null)item{OutlinedButton(enabled=!busy,onClick={if(!busy){val next=cursor;busy=true;scope.launch {
+        if(pageLoaded && cursor!=null)item{OutlinedButton(enabled=!busy,onClick={if(!busy){val next=cursor;busy=true;scope.launch {
             try {
                 val page=app.repository.messagePage(next,limit=50,query=query)
                 val visibleIds=messages.mapTo(mutableSetOf()){it.id}

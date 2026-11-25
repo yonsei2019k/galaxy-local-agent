@@ -13,6 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -925,11 +927,16 @@ class MainActivity : ComponentActivity() {
                 }
                 if(tab in setOf(6,DISCOVER_TAB,CONTACTS_TAB) || tab==4&&!manualSettings){
                     HorizontalDivider()
-                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                        TextButton(onClick={openPanel(0)}){Text("기본 채팅")}
-                        TextButton(enabled=tab!=DISCOVER_TAB,onClick={openPanel(DISCOVER_TAB)}){Text("둘러보기")}
-                        TextButton(enabled=tab!=6,onClick={openPanel(6)}){Text("보관함")}
-                        TextButton(enabled=tab!=4,onClick={openPanel(4)}){Text("나의 집순이")}
+                    Row(Modifier.fillMaxWidth().selectableGroup()){
+                        listOf(0 to "기본 채팅", DISCOVER_TAB to "둘러보기", 6 to "보관함", 4 to "나의 집순이").forEach { (destination, label) ->
+                            val selected = tab == destination
+                            Tab(selected=selected, onClick={ if (!selected) openPanel(destination) },
+                                modifier=Modifier.weight(1f).heightIn(min=48.dp)) {
+                                Text(label, modifier=Modifier.padding(horizontal=2.dp, vertical=8.dp),
+                                    textAlign=TextAlign.Center, style=MaterialTheme.typography.labelMedium,
+                                    color=if(selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                 }
             }
