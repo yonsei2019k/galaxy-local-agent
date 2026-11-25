@@ -860,6 +860,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 }
+                val pausedLogin=activitiesByRun.values.firstOrNull {it.canOpenOwnerLogin && it.assistantMessageId==messages.lastOrNull()?.id}
+                if(pausedLogin!=null&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null){
+                    var loginNotice by remember(pausedLogin.runId){mutableStateOf<String?>(null)}
+                    OutlinedButton(onClick={lifecycleScope.launch {
+                        val opened=try {chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId)}
+                            catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+                            catch(_:Exception){false}
+                        loginNotice=if(opened)null else "이 작업의 로그인 화면을 열 수 없어요. 연결 상태와 대화를 확인해 주세요."
+                    }},modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp)){Text("사이트 로그인 열기")}
+                    loginNotice?.let{Text(it,Modifier.padding(horizontal=12.dp))}
+                }
                 if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
                         onClose={connectionsOpen=false},onStatus={connectionStatus=it},
