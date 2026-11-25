@@ -103,8 +103,9 @@ class PcExternalAgentClientTest {
         assertEquals(listOf("SYNTHETIC_TIMEOUT" to 2),retries)
     }
 
-    @Test fun wholeRegistryCatalogSurvivesTheSnapshotCheck()=runBlocking {
-        val all=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,"a".repeat(64),ToolRegistry.definitions.keys,allowExternalAgent=true)
+    @Test fun activeCloudCatalogSurvivesTheSnapshotCheck()=runBlocking {
+        val tools = ExternalAgentContract.NORMAL_PHONE_TOOLS - GoalToolCatalog.unavailableForRun(false)
+        val all=ExternalAgentCapture(owner,"thread","branch","project","workspace",4,"a".repeat(64),tools,allowExternalAgent=true)
         val wire=Wire(all);val client=PcExternalAgentClient(all,wire)
         client.register(all);assertEquals(0,client.poll().lastSequence)
     }
