@@ -109,6 +109,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     )
     private var lastPage:JsonObject?=null
     private var initialOrigin:String?=null
+    private var publicSearchPage=false
     private var recoveredTarget:String?=null
     private var ruleRecoveryBlocked=false
     private var ruleEffectUncertain=false
@@ -210,7 +211,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             lastPage=null
             mediaWatch=null
             recoveredTarget=null
-            initialOrigin=origin(body.getValue("url").jsonPrimitive.content)
+            val targetUrl=body.getValue("url").jsonPrimitive.content
+            initialOrigin=origin(targetUrl)
+            publicSearchPage=com.user.localagent.integrations.BrowserLoginRoutes.isPublicSearch(targetUrl)
         }
         var result=backend(operation,body)
         if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required"&&call.name==catalog.action){
@@ -235,6 +238,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required")return refused(call,"APPROVAL_MISMATCH")
         }
         val target=recoveredTarget
+        if(result["loginRequired"]==JsonPrimitive(true)&&publicSearchPage&&call.name!=catalog.action)
+            return refused(call,"PUBLIC_SEARCH_LOGIN_WALL")
         if(result["loginRequired"]==JsonPrimitive(true)&&!(operation=="read"&&target!=null))
             return authenticationRequired(call,result["phoneBrowserVisible"]==JsonPrimitive(true),
                 pcSession=catalog==PcBrowserToolCatalog && result["nativeOwnerCard"]!=JsonPrimitive(true))
@@ -546,6 +551,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "ELEMENT_OBSCURED"->"다른 화면 요소가 버튼을 가리고 있거나 버튼을 누를 수 없는 상태입니다. 페이지를 다시 읽고 팝업이나 가림 상태를 확인하세요."
         "ELEMENT_UNAVAILABLE","OPTION_UNKNOWN"->"그 요소를 사용할 수 없습니다. 다시 읽어 ref와 선택지를 확인하세요."
         "PAGE_TIMEOUT"->"페이지 응답이 늦습니다. 다시 읽어 보세요."
+        "PUBLIC_SEARCH_LOGIN_WALL"->"이 검색 페이지가 로그인 화면으로 이동했어요. 사용자에게 로그인을 요청하지 말고, 허용된 search_web(국내 장소는 naver_places) 또는 상품의 search_shopping과 다른 공개 출처로 이어가세요."
+        "BROWSER_OWNER_BUSY"->"다른 작업의 인증 화면이 열려 있어요. 공개 검색 도구는 계속 사용할 수 있어요."
         "PAGE_UNREACHABLE","HTTP_ERROR"->"사이트가 응답하지 않습니다. 주소나 연결을 확인하세요."
         "TLS_ERROR"->"사이트의 보안 연결을 확인하지 못했습니다."
         "PC_RECOVERY_UNAVAILABLE"->"현재 요청에서 같은 페이지의 새 조회 결과를 확인하지 못했습니다."

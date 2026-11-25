@@ -70,7 +70,7 @@ object AssistantPolicy {
                 appendLine("이번 요청에서 허용된 도구만 사용한다: ${allowed.joinToString(", ")}. 필요한 도구가 없으면 실행을 꾸며내지 말고 가능한 초안이나 안내를 제공한다.")
                 ToolUsePolicy.promptLines(allowed.toSet()).forEach(::appendLine)
                 appendLine("도구를 쓸 때는 아래 형식의 JSON 객체 하나만 출력하고 설명이나 코드펜스를 덧붙이지 않는다. 결과를 보고 다음 도구나 답을 고른다. 도구 결과를 받기 전에는 실행 완료를 말하지 않는다.")
-                if("search_web" in allowed||"search_shopping" in allowed)appendLine("실시간 웹·쇼핑 요청은 검색 도구로 실제 조회한다. API 키가 없다는 이유로 기능이 없다고 답하지 않는다. 결과에 실제로 있는 출처 URL과 조회 시각을 답에 명시하고, 확인하지 않은 가격·재고·최저가를 만들어내지 않는다.")
+                if("search_web" in allowed||"search_shopping" in allowed)appendLine("실시간 웹·쇼핑 요청은 공개 검색 도구로 먼저 실제 조회한다. 네이버의 공개 검색에서 로그인 화면이 나오면 다른 공개 경로를 조회한다. 예약·주문·계정 정보처럼 실제로 필요한 단계에만 로그인을 요청한다. API 키가 없다는 이유로 기능이 없다고 답하지 않는다. 결과에 실제로 있는 출처 URL과 조회 시각을 답에 명시하고, 확인하지 않은 가격·재고·최저가를 만들어내지 않는다.")
                 appendLine("{\"type\":\"tool_call\",\"tool\":\"도구이름\",\"arguments\":{}}")
                 appendLine(PUBLIC_TOOL_EXPLANATION)
                 if("search_memories" in allowed)

@@ -445,6 +445,7 @@ class MainActivity : ComponentActivity() {
         val webAgent=remember {com.user.localagent.integrations.AppWebAgent.get(this)}
         val loginCard by webAgent.ownerLoginCard.collectAsState()
         val websiteLogin by webAgent.ownerWebsiteLogin.collectAsState()
+        val websiteLoginFolded by webAgent.ownerLoginFolded.collectAsState()
         val websiteWorks by webAgent.ownerWebsiteWorks.collectAsState()
         val websiteBinding by webAgent.ownerWorkBinding.collectAsState()
         val bookingPayment by webAgent.ownerPaymentCard.collectAsState()
@@ -564,7 +565,7 @@ class MainActivity : ComponentActivity() {
                 val modelChoices=listOf("auto" to "자동",com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID to "Codex",com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID to "Claude",
                     com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION to com.user.localagent.core.ConversationPrivacy.LOCAL_LABEL)
                 val inWebsiteRoom=websiteBinding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
-                val inlineSite=websiteLogin.takeIf{inWebsiteRoom&&!connectionsOpen}
+                val inlineSite=websiteLogin.takeIf{inWebsiteRoom&&!connectionsOpen&&!websiteLoginFolded}
                 val inlineCredentials=loginCard.takeIf{inWebsiteRoom&&!connectionsOpen}
                 val visibleWebsiteWork=websiteWorks.lastOrNull{work->
                     work.binding?.let{it.threadId==composerThreadId&&it.branchId==currentBranchId}==true
@@ -606,7 +607,7 @@ class MainActivity : ComponentActivity() {
                         put("status",visibleWebsiteWork?.status.orEmpty())
                         put("working",visibleWebsiteWork?.working==true)
                         put("steps",JsonArray(visibleWebsiteWork?.steps.orEmpty().map(::JsonPrimitive)))
-                        if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 308)
+                        if(inlineCredentials!=null)put("inputHeight",when {websiteLoginFolded->108;inlineSite!=null->430;else->308})
                         if(websiteKeyboardOpen)put("keyboardOpen",true)
                     })
                     bookingPayment?.takeIf{!connectionsOpen&&it.binding.threadId==composerThreadId&&it.binding.branchId==currentBranchId}
@@ -860,7 +861,23 @@ class MainActivity : ComponentActivity() {
                 })}
                 if(inlineCredentials!=null)key(inlineCredentials.id){
                     com.user.localagent.ui.NativeChatOverlay(nativeSlot,websiteKeyboardOpen){
-                        if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
+                        if(websiteLoginFolded)Column(Modifier.fillMaxSize().padding(horizontal=12.dp),
+                            verticalArrangement=Arrangement.Center){
+                            Text("로그인 대기 · ${inlineCredentials.host}")
+                            Row {
+                                TextButton(onClick={lifecycleScope.launch {
+                                    val binding=websiteBinding
+                                    val saved=binding?.let{app.repository.chat.run(it.runId)}
+                                    if(saved?.errorCode=="browser_auth_resume_expired"){
+                                        val opened=try{chat.reopenOwnerLogin(binding.runId,composerThreadId,currentBranchId)}
+                                            catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+                                            catch(_:Exception){false}
+                                        if(!opened)status.value="이 작업을 이어갈 수 있는지 확인해 주세요."
+                                    }else webAgent.unfoldOwnerLogin(inlineCredentials.id)
+                                }}){Text("로그인 열기")}
+                                TextButton(onClick={webAgent.cancelLoginCard(inlineCredentials.id)}){Text("대기 그만두기")}
+                            }
+                        }else if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
                         else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,
                             Modifier.fillMaxSize(),websiteKeyboardOpen)
                     }
@@ -873,7 +890,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 }
-                val pausedLogin=activitiesByRun.values.firstOrNull {it.canOpenOwnerLogin && it.assistantMessageId==messages.lastOrNull()?.id}
+                val pausedLogin=activitiesByRun.values.filter{it.canOpenOwnerLogin}.maxByOrNull{it.startedAt}
                 if(pausedLogin!=null&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null){
                     var loginNotice by remember(pausedLogin.runId){mutableStateOf<String?>(null)}
                     OutlinedButton(onClick={lifecycleScope.launch {

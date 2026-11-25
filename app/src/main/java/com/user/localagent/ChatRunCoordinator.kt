@@ -3580,29 +3580,35 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(!currentRoom()||executionForRun(runId)!=null)return@withLock false
             val parent=app.repository.chat.run(runId)?:return@withLock false
             if(parent.threadId!=threadId||parent.branchId!=branchId||parent.status!="paused"||
-                parent.errorCode !in setOf("browser_auth_on_phone","waiting_browser_auth")||app.repository.chat.isRemoteTestThread(threadId))return@withLock false
+                parent.errorCode !in BrowserAuthContinuation.reopenablePauses||app.repository.chat.isRemoteTestThread(threadId))return@withLock false
             val original=QueuedChatRequest.fromJson(parent.contextJson)
             if(original.goal!=null||original.officeStage!=null||original.browserAuthParentRunId!=null||
                 original.attachments.isNotEmpty()||original.mode!="act")return@withLock false
-            val url=BrowserAuthContinuation.ownerLoginPage(original.previousSteps)?:return@withLock false
             verifyBrowserAuthSource(parent,original)
             val browser=com.user.localagent.integrations.AppWebAgent.get(context)
             val old=app.goalWaits.store.get(runId)
-            if(old!=null&&(!old.ordinaryBrowserAuth||old.observedEvent!=null))return@withLock false
+            val now=System.currentTimeMillis()
+            if(old!=null&&(!old.ordinaryBrowserAuth||old.observedEvent!=null&&old.deadlineAt>now))return@withLock false
             val other=browser.ownerWorkBinding.value
             if(other!=null && browser.ownerLoginCard.value!=null && app.repository.chat.isRemoteTestThread(other.threadId) &&
                 currentRoom())browser.dismissTestLogin(other.runId)
             if(!currentRoom())return@withLock false
-            val binding=browser.reopenOwnerLogin(com.user.localagent.integrations.AppWebAgent.WorkBinding(runId,threadId,branchId),url)?:return@withLock false
-            val now=System.currentTimeMillis()
+            val work=com.user.localagent.integrations.AppWebAgent.WorkBinding(runId,threadId,branchId)
+            val retained=browser.ownerLoginCard.value?.takeIf{browser.ownerWorkBinding.value==work}
+            val binding=if(retained!=null)browser.waitingAuthBinding(runId) else {
+                val url=BrowserAuthContinuation.ownerLoginPage(original.previousSteps)?:return@withLock false
+                browser.reopenOwnerLogin(work,url)
+            }
+            if(binding==null)return@withLock false
             val record=GoalWaitRecord(UUID.randomUUID().toString(),runId,threadId,branchId,runId,original.externalAgentRevision,
                 WaitCondition.OwnerAuth(binding),now,now,now+30*60_000,dayKey=java.time.LocalDate.now(ZoneId.systemDefault()).toString(),ordinaryBrowserAuth=true)
             if(!app.goalWaits.store.replace(record,old)){
-                browser.ownerLoginCard.value?.let{browser.cancelLoginCard(it.id)}
+                if(retained==null)browser.ownerLoginCard.value?.let{browser.cancelLoginCard(it.id)}
                 return@withLock false
             }
             app.repository.chat.updateRun(runId,"paused",errorCode="waiting_browser_auth")
             app.goalWaits.arm(record)
+            retained?.let{browser.unfoldOwnerLogin(it.id)}
             if(browser.authAlreadyConfirmed(binding))app.goalWaits.confirmAuth(binding)
             true
         }
@@ -3619,7 +3625,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if(record.observedEvent!=WakeEvent.OWNER_AUTH_DONE||System.currentTimeMillis()>=record.deadlineAt){
                     status.value="로그인 확인 시간이 끝났어요. 원래 요청은 대화에 남겨뒀어요."
                     app.repository.chat.updateRun(parent.id,"paused",errorCode="browser_auth_resume_expired")
-                    com.user.localagent.integrations.AppWebAgent.get(context).finishWork(parent.id,"paused","browser_auth_resume_expired")
+                    val browser=com.user.localagent.integrations.AppWebAgent.get(context)
+                    browser.ownerLoginCard.value?.takeIf{browser.ownerWorkBinding.value?.runId==parent.id}
+                        ?.let{browser.foldOwnerLogin(it.id)}
+                    browser.finishWork(parent.id,"paused","browser_auth_resume_expired")
                     return@withLock true
                 }
                 val original=QueuedChatRequest.fromJson(parent.contextJson)

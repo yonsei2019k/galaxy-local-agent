@@ -9,6 +9,7 @@ import java.net.URI
 import kotlinx.serialization.json.JsonPrimitive
 
 internal object BrowserAuthContinuation {
+    val reopenablePauses=setOf("browser_auth_on_phone","waiting_browser_auth","browser_auth_resume_expired")
     fun childId(parent:String):String = UUID.nameUUIDFromBytes("ziphap-browser-auth:$parent".toByteArray(Charsets.UTF_8)).toString()
 
     fun ownerLoginPage(steps:List<HarnessStep>):String? {

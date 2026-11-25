@@ -118,6 +118,7 @@ import kotlinx.coroutines.launch
 internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard,window:Window,
     modifier:Modifier=Modifier,keyboardOpen:Boolean=false){
     SecureBrowserWindow(window)
+    androidx.activity.compose.BackHandler(enabled=true){agent.foldOwnerLogin(login.id)}
     val scope=rememberCoroutineScope()
     val keyboard=LocalSoftwareKeyboardController.current
     val loginStatus by agent.ownerLoginStatus.collectAsState()
@@ -171,7 +172,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                     if(!login.pairedPc)TextButton(onClick={keyboard?.hide();agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
-                    TextButton(onClick={agent.cancelLoginCard(login.id)},enabled=!submitting){Text("취소")}
+                    TextButton(onClick={keyboard?.hide();agent.foldOwnerLogin(login.id)},enabled=!submitting){Text("나중에")}
                 }
             }
     }
@@ -190,7 +191,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
     var returned by remember {mutableStateOf(false)}
     LaunchedEffect(request.card.id,reload){
         visible=false
-        visible=agent.loadWebsiteLogin(request.card.id)
+        visible=agent.loadWebsiteLogin(request.card.id,retry=reload!=0)
         if(!visible)return@LaunchedEffect
         var sawLoginForm=false
         var readbacks=0
@@ -215,7 +216,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
         returned=true
         scope.launch {agent.returnToLoginCard(request.card.id)}
     }
-    androidx.activity.compose.BackHandler {goBack()}
+    androidx.activity.compose.BackHandler {agent.foldOwnerLogin(request.card.id)}
     Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
         Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text(request.card.host,style=MaterialTheme.typography.titleSmall)
@@ -233,7 +234,8 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
                     modifier=Modifier.fillMaxSize(),onRelease={agent.detach()})
             }
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                TextButton(onClick={goBack()},enabled=!returned){Text("입력창으로")}
+                TextButton(onClick={agent.foldOwnerLogin(request.card.id)},enabled=!checking&&!returned){Text("나중에")}
+                if(!request.card.websiteOnly)TextButton(onClick={goBack()},enabled=!checking&&!returned){Text("입력창")}
                 TextButton(onClick={reload++},enabled=!navigation.loading&&!checking&&!returned){Text("다시 열기")}
                 TextButton(onClick={
                     checking=true

@@ -22,6 +22,7 @@ import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,8 +46,17 @@ class SecureBrowserLoginCardCanary {
                     val card=withTimeout(30_000){web.ownerLoginCard.filterNotNull().first()}
                     assertEquals(BrowserAgentTools.PHONE_AUTH_REQUIRED,withTimeout(5_000){result.await()}.verificationSummary)
                     withContext(Dispatchers.Main){
-                        assertEquals(card,web.ownerLoginCard.value)
-                        assertNotNull(web.waitingAuthBinding(binding.runId))
+                        val originalAuth=web.waitingAuthBinding(binding.runId)
+                        assertNotNull(originalAuth)
+                        repeat(3){
+                            web.foldOwnerLogin(card.id)
+                            assertTrue(web.ownerLoginFolded.value)
+                            assertEquals(card,web.ownerLoginCard.value)
+                            assertEquals(originalAuth,web.waitingAuthBinding(binding.runId))
+                            web.unfoldOwnerLogin(card.id)
+                            assertFalse(web.ownerLoginFolded.value)
+                            assertEquals(card,web.ownerLoginCard.value)
+                        }
                     }
                 } finally {
                     withContext(Dispatchers.Main){

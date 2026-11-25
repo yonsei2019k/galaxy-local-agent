@@ -35,13 +35,22 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
     var status by remember {mutableStateOf("")}
     var token by remember(service){mutableStateOf("")}
     var telegramChat by remember(service){mutableStateOf("")}
+    var naverAccount by remember(service){mutableStateOf("")}
+    var knownConnection by remember(service){mutableStateOf<LocalConnection?>(null)}
+    var replaceConnection by remember(service){mutableStateOf(false)}
+    val naverMail=service==ConnectedService.NAVER_MAIL
     fun publish(message:String){status=message;onStatus(message)}
     fun run(progress:String,action:suspend ()->String){
         if(busy)return
         busy=true
         publish(progress)
         scope.launch {
-            try{publish(action())}
+            try{
+                val message=action()
+                knownConnection=withContext(Dispatchers.IO){hub.store.connection(service)}
+                if(knownConnection!=null)replaceConnection=false
+                publish(message)
+            }
             catch(cancel:CancellationException){throw cancel}
             catch(_:Exception){publish("연결하지 못했어요. 계정 또는 연결 정보를 확인해 주세요.")}
             finally{busy=false}
@@ -50,6 +59,7 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
     LaunchedEffect(service){
         status="연결 상태를 확인하고 있어요."
         val state=withContext(Dispatchers.IO){runCatching{hub.store.connection(service)}.getOrNull()}
+        knownConnection=state
         status=when {
             state==null->"연결 전"
             state.verifiedAt==0L->"계정 권한이 연결됐어요. 자료 조회는 확인 전이에요."
@@ -110,12 +120,35 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
             }
             Text(status,style=MaterialTheme.typography.bodyMedium)
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-            if(service.google){
+            if(knownConnection!=null&&!replaceConnection){
+                Text("저장된 계정을 다음 작업에도 사용해요.",style=MaterialTheme.typography.bodyMedium)
+                if(service.google&&knownConnection?.writeAllowed==false&&ConnectionCatalog.tools.values.any{it.service==service&&it.writes})
+                    OutlinedButton(onClick={authorize(true)},enabled=available){Text("작성 권한 추가")}
+                TextButton(onClick={replaceConnection=true},enabled=available){Text("연결 다시 설정")}
+            }else if(service.google){
                 Button(onClick={authorize(false)},enabled=available){Text("계정 연결 · 읽기")}
                 if(ConnectionCatalog.tools.values.any{it.service==service&&it.writes})
                     OutlinedButton(onClick={authorize(true)},enabled=available){Text("계정 연결 · 읽기와 작성")}
             }else if(service.outlook){
                 key(service){OutlookConnectCard(hub,service){publish("Microsoft 권한이 연결됐어요. 채팅에서 자료 조회를 요청해 주세요.")}}
+            }else if(naverMail){
+                Text("메일을 읽을 때만 연결해요. 네이버 검색은 연결 없이 쓸 수 있어요.")
+                OutlinedTextField(naverAccount,{if(it.length<=74)naverAccount=it},Modifier.fillMaxWidth(),singleLine=true,
+                    enabled=available,label={Text("네이버 메일 아이디")},
+                    keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,keyboardType=KeyboardType.Email))
+                OutlinedTextField(token,{if(it.length<=128)token=it},Modifier.fillMaxWidth(),singleLine=true,
+                    enabled=available,label={Text("네이버 앱 비밀번호")},visualTransformation=PasswordVisualTransformation(),
+                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password))
+                Button(enabled=available&&naverAccount.isNotBlank()&&token.isNotBlank(),onClick={
+                    val account=naverAccount.trim()
+                    val secret=token
+                    token=""
+                    run("네이버 메일 연결을 확인하고 있어요."){
+                        hub.privateReads.connectNaver(account,secret)
+                        hub.clearCache()
+                        "네이버 메일을 연결했어요. 다음에도 이 연결을 사용할게요."
+                    }
+                }){Text("네이버 메일 연결")}
             }else{
                 if(service==ConnectedService.GITHUB)Text("조회할 저장소에 이슈 읽기 권한을 준 GitHub 토큰을 입력해 주세요.")
                 if(service==ConnectedService.SLACK)Text("채널 기록 읽기 권한이 있는 Slack 토큰을 입력해 주세요. 봇을 쓰면 먼저 그 채널에 초대해 주세요.")

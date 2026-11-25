@@ -62,7 +62,7 @@ class AppWebAgent private constructor(private val context:Context) {
     val showingCredentialPage:StateFlow<Boolean> get()=credentialScreen
     private var loginCompletion:CompletableDeferred<Boolean>?=null
     private var nextLoginId=0L
-    data class LoginCard(val id:Long,val host:String,val pairedPc:Boolean=false)
+    data class LoginCard(val id:Long,val host:String,val pairedPc:Boolean=false,val websiteOnly:Boolean=false)
     private var pendingPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     private var confirmedPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     internal fun offerPcLogin(binding:WorkBinding,login:com.user.localagent.compute.PairedWebsiteLogin):Boolean {
@@ -74,6 +74,8 @@ class AppWebAgent private constructor(private val context:Context) {
         cardOrigin=null
         pendingPcLogin=login
         expiredLoginBinding="$loginProcess:$id"
+        loginFolded.value=false
+        loginReturnOrigin=null
         loginCard.value=LoginCard(id,"www.kairb.org",pairedPc=true)
         loginStatus.value="연결한 PC의 전용 브라우저에서 KAIRB 로그인이 필요해요."
         recordPcWork(binding,"사이트 로그인 대기","전용 PC 브라우저 연결",working=false)
@@ -115,7 +117,34 @@ class AppWebAgent private constructor(private val context:Context) {
     val ownerLoginStatus:StateFlow<String?> get()=loginStatus
     private val loginDomKey="ziphapLogin"+token()
     private val loginScript by lazy {context.assets.open("app-web-login.js").bufferedReader().use{it.readText()}}
+    private val loginFolded=MutableStateFlow(false)
+    val ownerLoginFolded:StateFlow<Boolean> get()=loginFolded
+    private var loginReturnOrigin:URI?=null
+    private var websiteDisplayedId:Long?=null
+    private var websiteFormObservedId:Long?=null
     private var cardOrigin:URI?=null
+
+    fun foldOwnerLogin(id:Long){
+        if(loginCard.value?.id!=id||loginSubmitting)return
+        loginFolded.value=true
+        loginCompletion?.complete(false)
+        loginStatus.value="로그인 화면을 접었어요. 여기서 다시 열 수 있어요."
+    }
+
+    fun unfoldOwnerLogin(id:Long){
+        if(loginCard.value?.id!=id||loginSubmitting)return
+        loginFolded.value=false
+        loginStatus.value="로그인하면 이 자리에서 계속할 수 있어요."
+    }
+
+    private suspend fun persistWebsiteSession(){
+        val cookies=CookieManager.getInstance()
+        withContext(Dispatchers.IO){
+            runCatching{cookies.flush()}.onFailure{
+                com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"COOKIE_FLUSH_FAILED")
+            }
+        }
+    }
     private var capturedLoginUrl:String?=null
     private var loginSubmitting=false
 
@@ -138,10 +167,12 @@ class AppWebAgent private constructor(private val context:Context) {
         confirmedPcLogin=null
         lastConfirmedCard=null
         lastConfirmedOrigin=null
-        val card=LoginCard(++nextLoginId,origin.host)
+        val card=LoginCard(++nextLoginId,origin.host,websiteOnly=true)
         cardOrigin=origin
         capturedLoginUrl=url
         expiredLoginBinding="$loginProcess:${card.id}"
+        loginFolded.value=false
+        loginReturnOrigin=null
         loginCard.value=card
         switchToWebsiteLogin(card.id)
         return expiredLoginBinding
@@ -167,11 +198,13 @@ class AppWebAgent private constructor(private val context:Context) {
             else "로그인 입력창으로 돌아왔어요. 사이트 연결을 확인한 뒤 다시 시도해 주세요."
     }
 
-    suspend fun loadWebsiteLogin(id:Long):Boolean{
+    suspend fun loadWebsiteLogin(id:Long,retry:Boolean=false):Boolean{
         val request=websiteLogin.value?.takeIf{it.card.id==id}?:return false
         if(secureOrigin(request.url)!=cardOrigin)return false
         val browser=view()
-        val alreadyHere=browser.url==request.url&&!loading&&navigation.value.error==null
+        val wasPresented=websiteDisplayedId==id||browser.url==request.url
+        websiteDisplayedId=id
+        val alreadyHere=wasPresented&&loginNavigationAllowed(browser.url)&&!retry&&!loading&&navigation.value.error==null
         val revision=if(alreadyHere)navigationRevision else beginNavigation(request.url)
         val loaded=if(alreadyHere)navigation.value else withTimeoutOrNull(20_000){navigation.first{!it.loading}}
         if(loaded==null&&revision==navigationRevision&&navigation.value.loading){
@@ -179,7 +212,7 @@ class AppWebAgent private constructor(private val context:Context) {
             browser.stopLoading()
             return false
         }
-        if(loaded?.error!=null||websiteLogin.value!=request||secureOrigin(browser.url)!=cardOrigin)return false
+        if(loaded?.error!=null||websiteLogin.value!=request||!loginNavigationAllowed(browser.url))return false
         val drawn=withTimeoutOrNull(4_000){
             while(!browser.isAttachedToWindow||browser.width<=0||browser.height<=0)delay(40)
             val ready=CompletableDeferred<Unit>()
@@ -276,10 +309,11 @@ class AppWebAgent private constructor(private val context:Context) {
         try{
             settle()
             if(websiteLogin.value!=request)return false
-            if(websiteLoginFormPresent(id)!=false){
+            if(websiteLoginFormPresent(id)!=false||websiteFormObservedId!=id){
                 loginStatus.value="사이트 로그인이 확인되지 않았어요. 다시 시도하거나 입력창으로 돌아갈 수 있어요."
                 return false
             }
+            persistWebsiteSession()
             val continues=loginCompletion?.complete(true)==true
             showWebsiteWork(request.card.host,waiting=!continues)
             val queued=notifyGoalAuth(id)
@@ -295,8 +329,12 @@ class AppWebAgent private constructor(private val context:Context) {
 
     internal suspend fun websiteLoginFormPresent(id:Long):Boolean? {
         if(websiteLogin.value?.card?.id!=id||navigation.value.error!=null||navigation.value.loading||
-            loading||secureOrigin(view().url)!=cardOrigin)return null
-        return loginFormPresent()?.let { if(!it&&isHallymLoginPage(view().url))null else it }
+            loading||!loginNavigationAllowed(view().url))return null
+        return loginFormPresent()?.let {
+            if(websiteLogin.value?.card?.id!=id)return null
+            if(it)websiteFormObservedId=id
+            if(!it&&(isHallymLoginPage(view().url)||loginReturnOrigin!=null&&secureOrigin(view().url)!=loginReturnOrigin))null else it
+        }
     }
 
     internal fun dismissTestLogin(runId:String){
@@ -316,6 +354,8 @@ class AppWebAgent private constructor(private val context:Context) {
         capturedLoginUrl=null
         pendingPcLogin=null
         expiredLoginBinding=null
+        loginReturnOrigin=null
+        loginFolded.value=false
         loginStatus.value="로그인을 취소했어요. 현재 작업은 멈춰 있습니다."
         loginCompletion?.complete(false)
     }
@@ -343,6 +383,7 @@ class AppWebAgent private constructor(private val context:Context) {
                         navigation.value.error?:if(sameForm)"SITE_FORM_REMAINED" else "RESULT_NOT_CONFIRMED")
                     return false
                 }
+                persistWebsiteSession()
                 val continued=loginCompletion?.complete(true)==true
                 showWebsiteWork(origin.host,waiting=!continued)
                 val queued=notifyGoalAuth(id)
@@ -449,6 +490,7 @@ class AppWebAgent private constructor(private val context:Context) {
     private var paymentOffer:PaymentOffer?=null
     private var paymentDocumentRevision=0L
     private var browserNavigationWork:WorkBinding?=null
+    private var browserPublicSearchUrl:String?=null
     private var paymentDocumentWork:WorkBinding?=null
     private val paymentCard=MutableStateFlow<PaymentCard?>(null)
     internal val ownerPaymentCard:StateFlow<PaymentCard?> get()=paymentCard
@@ -543,7 +585,11 @@ class AppWebAgent private constructor(private val context:Context) {
         }.getOrNull()!=null
     }
 
-    fun closeBrowser(){presentation.value=null;loginCompletion?.complete(false)}
+    fun closeBrowser(){
+        presentation.value=null
+        val card=loginCard.value
+        if(card!=null)foldOwnerLogin(card.id) else loginCompletion?.complete(false)
+    }
     fun ownerFinishedBrowserLogin(id:Long){
         if(loginWait.value==id)loginCompletion?.complete(true)
     }
@@ -585,7 +631,7 @@ class AppWebAgent private constructor(private val context:Context) {
             override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean {
                 if(upgradeHallymLoginRedirect(request))return true
                 val url=request.url.toString()
-                if(request.isForMainFrame&&websiteLogin.value!=null&&secureOrigin(url)!=cardOrigin){
+                if(request.isForMainFrame&&websiteLogin.value!=null&&!loginNavigationAllowed(url)){
                     navigationFailed(if(url.startsWith("http:",true))"HTTPS_REQUIRED" else "NAVIGATION_BLOCKED")
                     return true
                 }
@@ -654,7 +700,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     /** Sends a public URL entered by the owner to the same WebView the assistant observes. */
     suspend fun openFromAddress(input:String) {
-        if(agentActive.value)return
+        if(agentActive.value||loginCard.value!=null)return
         val text=input.trim()
         val url=if(text.contains("://"))text else "https://$text"
         if(!WebAgentPolicy.urlAllowed(url)){
@@ -666,6 +712,7 @@ class AppWebAgent private constructor(private val context:Context) {
             return
         }
         browserNavigationWork=null
+        browserPublicSearchUrl=null
         val revision=beginNavigation(url)
         val completed=withTimeoutOrNull(20_000){navigation.first{!it.loading}}
         if(completed==null&&navigationRevision==revision&&navigation.value.loading){
@@ -902,13 +949,24 @@ class AppWebAgent private constructor(private val context:Context) {
         return URI("https",null,uri.host.lowercase(),-1,null,null,null)
     }
 
-    /** Keeps the original open tool alive while the owner uses the site's own login form. */
-    private suspend fun afterOwnerLogin(requestedUrl:String?,initial:JsonObject,deferLogin:Boolean=false):JsonObject {
+    private fun loginNavigationAllowed(url:String?):Boolean {
+        val origin=secureOrigin(url)?:return false
+        return origin==cardOrigin||origin==loginReturnOrigin
+    }
+
+    /** Preserves the owner handoff when the secure card is folded or the tool wait ends. */
+    private suspend fun afterOwnerLogin(requestedUrl:String?,initial:JsonObject,deferLogin:Boolean=false,
+        allowPublicFallback:Boolean=true):JsonObject {
         if(initial["loginRequired"]!=JsonPrimitive(true))return initial
         if(pendingPcLogin!=null)return initial
         confirmedPcLogin=null
         val requiredOrigin=secureOrigin(requestedUrl)?:return initial
         val loginOrigin=secureOrigin(view().url)?:return initial
+        if(allowPublicFallback&&(BrowserLoginRoutes.isPublicSearch(requestedUrl)||BrowserLoginRoutes.isPublicSearch(browserPublicSearchUrl))){
+            presentation.value=null
+            return fail("PUBLIC_SEARCH_LOGIN_WALL")
+        }
+        val naverHandoff=BrowserLoginRoutes.isNaverLoginFrom(requiredOrigin,view().url)
         val completion=CompletableDeferred<Boolean>()
         loginCompletion=completion
         val id=++nextLoginId
@@ -917,11 +975,15 @@ class AppWebAgent private constructor(private val context:Context) {
         var keepCard=false
         try {
             val nativeForm=requiredOrigin==loginOrigin&&loginDom("capture",id,loginOrigin)
-            if(requiredOrigin==loginOrigin && (nativeForm || loginFormPresent()==true) && secureOrigin(view().url)==loginOrigin){
+            if((requiredOrigin==loginOrigin||naverHandoff) && (nativeForm || loginFormPresent()==true) && secureOrigin(view().url)==loginOrigin){
+                loginFolded.value=false
+                loginReturnOrigin=requiredOrigin.takeIf{naverHandoff}
                 cardOrigin=loginOrigin
                 capturedLoginUrl=view().url?.takeIf{secureOrigin(it)==loginOrigin}
                 presentation.value=null
-                val card=LoginCard(id,loginOrigin.host)
+                val card=LoginCard(id,loginOrigin.host,websiteOnly=naverHandoff||!nativeForm)
+                websiteFormObservedId=id
+                websiteDisplayedId=id
                 loginCard.value=card
                 if(!nativeForm)switchToWebsiteLogin(id)
                 loginStatus.value="사이트에 로그인하면 작업을 이어갈 수 있어요."
@@ -930,9 +992,9 @@ class AppWebAgent private constructor(private val context:Context) {
             val ownerFinished=if(deferLogin && loginCard.value?.id==id)null
                 else withTimeoutOrNull(55_000){completion.await()}
             if(ownerFinished!=true){
-                keepCard=ownerFinished==null&&loginCard.value?.id==id
+                keepCard=loginCard.value?.id==id&&browserWorkBinding.value!=null
                 if(keepCard)expiredLoginBinding="$loginProcess:$id"
-                if(keepCard)loginStatus.value="작업이 인증 대기에서 일시정지됐어요. 여기서 로그인할 수 있어요."
+                if(keepCard&&!loginFolded.value)loginStatus.value="로그인 대기 중이에요. 이 채팅에서 이어갈 수 있어요."
                 return JsonObject(initial+("phoneBrowserVisible" to JsonPrimitive(isPresented())))
             }
             // Only after the owner is done do we observe the page again. Never replay the open.
@@ -953,7 +1015,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 }
             return page
         } finally {
-            if(!keepCard){websiteLogin.value=null;loginCard.value=null;cardOrigin=null;capturedLoginUrl=null}
+            if(!keepCard){websiteLogin.value=null;loginCard.value=null;cardOrigin=null;capturedLoginUrl=null;loginReturnOrigin=null;loginFolded.value=false}
             loginCompletion=null
             loginWait.value=null
         }
@@ -964,6 +1026,7 @@ class AppWebAgent private constructor(private val context:Context) {
         val destination=hallymSecureLoginRedirect(url,"GET","hallymedu.co.kr")?:url
         if(showOnPhone)showBrowser(destination)
         browserNavigationWork=work
+        browserPublicSearchUrl=destination.takeIf(BrowserLoginRoutes::isPublicSearch)
         beginNavigation(destination)
         settle()
         val error=navigation.value.error
@@ -1055,7 +1118,8 @@ class AppWebAgent private constructor(private val context:Context) {
                 com.user.localagent.FailureLog.record(context,"app_browser_navigation",null,navigationError)
                 return@guarded JsonObject(actionFailure("ACTION_OUTCOME_UNKNOWN")+("navigationError" to JsonPrimitive(navigationError)))
             }
-            val page=afterOwnerLogin(sourceUrl,readPage())
+            if(!BrowserLoginRoutes.isPublicSearch(view().url))browserPublicSearchUrl=null
+            val page=afterOwnerLogin(sourceUrl,readPage(),allowPublicFallback=false)
             if(page["error"]!=null)return@guarded actionFailure("ACTION_OUTCOME_UNKNOWN")
             val after=snapshot?.second
             val changed=sourceUrl!=view().url || after!=current.second || page["loginRequired"]==JsonPrimitive(true)
@@ -1123,7 +1187,8 @@ class AppWebAgent private constructor(private val context:Context) {
             if(work!=null&&requestedHost!=null&&loginCard.value==null)putWebsiteWork(
                 statusBefore?.copy(status=label,working=true)?:WebsiteWork(requestedHost,label,emptyList(),true,work))
             try{
-                if(loginCard.value!=null||loginSubmitting)buildJsonObject{
+                if(loginCard.value!=null&&work!=browserWorkBinding.value)fail("BROWSER_OWNER_BUSY")
+                else if(loginCard.value!=null||loginSubmitting)buildJsonObject{
                     put("loginRequired",true);put("dataOnly",true);put("phoneBrowserVisible",false)
                 }else block().also { page ->
                     websiteWorkFor(work)?.takeIf{it.host==requestedHost&&it.binding==work}?.let{work->
