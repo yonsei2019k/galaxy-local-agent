@@ -166,7 +166,9 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
             waitingForReply=run.status=="paused"&&run.errorCode=="cloud_clarification_read_only",waitingForGoal=run.status=="paused"&&run.errorCode=="waiting_goal_condition"&&
                 runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
-            userMessageId=run.userMessageId,finishedAt=run.finishedAt))
+            userMessageId=run.userMessageId,finishedAt=run.finishedAt,
+            canOpenOwnerLogin=run.status=="paused" && run.errorCode in setOf("browser_auth_on_phone","waiting_browser_auth") &&
+                runCatching { BrowserAuthContinuation.ownerLoginPage(QueuedChatRequest.fromJson(run.contextJson).previousSteps)!=null }.getOrDefault(false)))
     }
 }
 

@@ -1733,6 +1733,26 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     /** Cloud owns interpretation/next actions; this parent retains scope, approval and evidence. */
+    private suspend fun launchPhoneProvider(request:QueuedChatRequest,client:PcExternalAgentClient,publicResearch:Boolean,
+        allowCloudPersonalData:Boolean,verifyAuthority:suspend ()->Unit):JsonObject {
+        verifyAuthority()
+        val conversationContext=if(publicResearch)null else captureCloudContext(request,allowCloudPersonalData)
+        verifyAuthority()
+        val storedContext=checkNotNull(app.repository.chat.run(request.runId))
+        val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
+        app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
+            "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
+        // Cloud gets the public persona only: owner-entered ages stay on the phone (profile=null).
+        val officePersona=if(request.officeStage==null) JIPSOONI_VOICE else com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,null,
+            java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
+            colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW)
+        return client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
+            beforeLaunch={verifyAuthority()},
+            officePersona=officePersona+if(request.browserAuthParentRunId!=null)
+                " The owner completed login on the phone. Continue the original request. Include ${com.user.localagent.integrations.AppWebAgent.get(context).confirmedReadTool()} in the plan and execute it first on the authenticated browser. Do not replay previous effects."
+                else "")
+    }
+
     private suspend fun executeCloudPhoneRequest(request:QueuedChatRequest) {
         val mode=AgentWorkMode.parse(request.mode)
         val publicResearch=mode==AgentWorkMode.RESEARCH
@@ -1868,6 +1888,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if(privatePlan || "save_note" in proposed.requiredTools&&"search_notes" !in proposed.requiredTools)false else {
                     plan=proposed;requestAuthorizedTools=proposed.requiredTools.intersect(tools)
                     checkNotNull(requestTools).bindAvailableTools(requestAuthorizedTools)
+                    checkNotNull(requestTools).deferBrowserLogin={
+                        (request.goalSegment!=null || (request.goal==null && request.officeStage==null &&
+                            request.browserAuthParentRunId==null && request.attachments.isEmpty() && request.mode=="act")) &&
+                            BrowserAuthContinuation.safeBeforeLogin(requestSteps)
+                    }
                     requestDirectSelectedTools=requestAuthorizedTools
                     taskGoal=com.user.localagent.core.TaskGoal(request.text,listOf(proposed.goal)+proposed.constraints,
                         com.user.localagent.core.WorkSegments.STEP_BUDGET,requestAuthorizedTools-SkillToolCatalog.names)
@@ -1893,22 +1918,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         try {
             controller.start().also{bridgeSessionId=it.sessionId}
             status.value="클라우드 모델이 요청을 해석하고 있습니다."
-            check(authority().permits(capture))
-            val conversationContext=if(publicResearch)null else captureCloudContext(request,allowCloudPersonalData)
-            check(authority().permits(capture))
-            val storedContext=checkNotNull(app.repository.chat.run(request.runId))
-            val persisted=Json.parseToJsonElement(storedContext.contextJson).jsonObject
-            app.repository.chat.updateRunContext(request.runId,JsonObject(persisted+mapOf(
-                "cloudConversationContext" to (conversationContext?:JsonNull))).toString())
-            // Cloud gets the public persona only: owner-entered ages stay on the phone (profile=null).
-            val officePersona=if(request.officeStage==null) JIPSOONI_VOICE else com.user.localagent.core.office.OfficePersonas.instruction(request.threadId,null,
-                java.time.LocalDate.now(ZoneId.of("Asia/Seoul")),
-                colleagueDiscussion = request.officeStage == OfficeStage.PROPOSAL || request.officeStage == OfficeStage.REVIEW)
-            val launch=client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
-                beforeLaunch={check(authority().permits(capture))},
-                officePersona=officePersona+if(request.browserAuthParentRunId!=null)
-                    " The owner completed login on the phone. Continue the original request. Include ${com.user.localagent.integrations.AppWebAgent.get(context).confirmedReadTool()} in the plan and execute it first on the authenticated browser. Do not replay previous effects."
-                    else "")
+            val launch=launchPhoneProvider(request,client,publicResearch,allowCloudPersonalData){check(authority().permits(capture))}
             lastProviderState=launch.getValue("state").jsonPrimitive.content
             val provider=withTimeout(330_000) {
                 var lastStage:String?=null
@@ -2070,6 +2080,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         } catch(error:com.user.localagent.externalagent.PcAgentBridgeTimeout){
             val stop=controller.stopMetadata()
             FailureLog.cloudStop(context,error.stageCode,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
+            // A lease poll can time out while the phone is finishing the claimed browser read.
+            // Use only this call's durable no-effect login evidence to enter the usual owner handoff.
+            if(BrowserAuthContinuation.canPauseAfterStatusTimeout(error.stageCode,stop.pendingCallId,
+                    observedOutcomes.lastOrNull()?.call?.id,requestSteps) && authority().permits(capture) &&
+                pauseForBrowserAuthentication(request))return
             throw error
         } finally {
             externalEffectGuard=null
@@ -3210,6 +3225,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val shown=auth?.get("phoneBrowserVisible")==JsonPrimitive(true)
         val requiresReadback=observedOutcomes.any{!it.result.effectNotApplied&&!com.user.localagent.core.ToolReadPolicy.isReadOnly(it.call.name)}
         val where=site?.let{" ($it)"}.orEmpty()
+        if(app.repository.chat.isRemoteTestThread(request.threadId)){
+            withContext(Dispatchers.Main.immediate){
+                com.user.localagent.integrations.AppWebAgent.get(context).dismissTestLogin(request.runId)
+            }
+            answer("사이트 로그인이 필요해요$where. 이 요청은 숨겨진 PC 시험 대화에서 실행됐어요. 집순이 채팅에서 사이트를 열어 달라고 하면 그 대화에서 로그인할 수 있어요.")
+            persistStepEvidence()
+            app.repository.chat.updateRun(request.runId,"paused",errorCode="remote_test_owner_login_required")
+            status.value="실제 대화에서 사이트 로그인 필요"
+            return true
+        }
         val next=if(requiresReadback)"로그인한 뒤에는 같은 동작을 다시 하기 전에 이전 결과부터 확인해 주세요."
             else "로그인이 끝나면 이 채팅에서 이어갈 수 있어요."
         if(request.goalSegment!=null && outcome.result.effectNotApplied &&
@@ -3479,6 +3504,40 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(selectedThreadId.value==threadId)goalState.value=paused
         app.repository.chat.updateRun(record.parentRunId,"paused",errorCode="goal_wait_cancelled")
         app.goalWaits.cancel(record)
+    }
+
+    internal suspend fun reopenOwnerLogin(runId:String,threadId:String,branchId:String):Boolean = withContext(Dispatchers.Main.immediate) {
+        queueMutation.withLock {
+            fun currentRoom()=selectionReady.value && selectedThreadId.value==threadId && viewportState.value?.branchId==branchId
+            if(!currentRoom()||executionForRun(runId)!=null)return@withLock false
+            val parent=app.repository.chat.run(runId)?:return@withLock false
+            if(parent.threadId!=threadId||parent.branchId!=branchId||parent.status!="paused"||
+                parent.errorCode !in setOf("browser_auth_on_phone","waiting_browser_auth")||app.repository.chat.isRemoteTestThread(threadId))return@withLock false
+            val original=QueuedChatRequest.fromJson(parent.contextJson)
+            if(original.goal!=null||original.officeStage!=null||original.browserAuthParentRunId!=null||
+                original.attachments.isNotEmpty()||original.mode!="act")return@withLock false
+            val url=BrowserAuthContinuation.ownerLoginPage(original.previousSteps)?:return@withLock false
+            verifyBrowserAuthSource(parent,original)
+            val browser=com.user.localagent.integrations.AppWebAgent.get(context)
+            val old=app.goalWaits.store.get(runId)
+            if(old!=null&&(!old.ordinaryBrowserAuth||old.observedEvent!=null))return@withLock false
+            val other=browser.ownerWorkBinding.value
+            if(other!=null && browser.ownerLoginCard.value!=null && app.repository.chat.isRemoteTestThread(other.threadId) &&
+                currentRoom())browser.dismissTestLogin(other.runId)
+            if(!currentRoom())return@withLock false
+            val binding=browser.reopenOwnerLogin(com.user.localagent.integrations.AppWebAgent.WorkBinding(runId,threadId,branchId),url)?:return@withLock false
+            val now=System.currentTimeMillis()
+            val record=GoalWaitRecord(UUID.randomUUID().toString(),runId,threadId,branchId,runId,original.externalAgentRevision,
+                WaitCondition.OwnerAuth(binding),now,now,now+30*60_000,dayKey=java.time.LocalDate.now(ZoneId.systemDefault()).toString(),ordinaryBrowserAuth=true)
+            if(!app.goalWaits.store.replace(record,old)){
+                browser.ownerLoginCard.value?.let{browser.cancelLoginCard(it.id)}
+                return@withLock false
+            }
+            app.repository.chat.updateRun(runId,"paused",errorCode="waiting_browser_auth")
+            app.goalWaits.arm(record)
+            if(browser.authAlreadyConfirmed(binding))app.goalWaits.confirmAuth(binding)
+            true
+        }
     }
 
     internal suspend fun wakeBrowserAuth(record:GoalWaitRecord):Boolean = withContext(Dispatchers.Main.immediate) {

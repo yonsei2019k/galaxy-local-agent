@@ -88,12 +88,13 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                     com.user.localagent.integrations.AppWebAgent.get(context).offerPcLogin(binding,offer)
                 }) JsonObject(result+("nativeOwnerCard" to JsonPrimitive(true))) else result
         }
-        fun app(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null})=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
+        fun app(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null},
+                deferLogin:()->Boolean={false})=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
             val web=com.user.localagent.integrations.AppWebAgent.get(context)
             val binding=work()
             when(operation){
-                "open"->web.open(body.getValue("url").jsonPrimitive.content,body["showOnPhone"]==JsonPrimitive(true),binding)
-                "read"->web.read(body["observeMedia"]==JsonPrimitive(true),binding)
+                "open"->web.open(body.getValue("url").jsonPrimitive.content,body["showOnPhone"]==JsonPrimitive(true),binding,deferLogin())
+                "read"->web.read(body["observeMedia"]==JsonPrimitive(true),binding,deferLogin())
                 else->web.act(body,body[APP_APPROVED_SNAPSHOT]?.jsonPrimitive?.contentOrNull,binding)
             }
         }

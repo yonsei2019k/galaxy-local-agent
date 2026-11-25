@@ -6,6 +6,7 @@ import org.junit.Test
 
 class HallymLoginRedirectTest {
     @Test fun upgradesSameSiteGetWithoutRewritingTheDestination() {
+        assertEquals("https://hallymedu.co.kr/",hallymSecureLoginRedirect("http://hallymedu.co.kr","GET","hallymedu.co.kr"))
         assertEquals("https://hallymedu.co.kr/new_home/My/?course=a%20b",
             hallymSecureLoginRedirect("http://hallymedu.co.kr/new_home/My/?course=a%20b","GET","hallymedu.co.kr"))
     }

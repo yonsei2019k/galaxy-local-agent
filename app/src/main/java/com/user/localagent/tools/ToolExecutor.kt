@@ -103,7 +103,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 com.user.localagent.integrations.AppWebAgent.WorkBinding(it.id,it.threadId,it.branchId)
             }
     private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding)}
-    private val appBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.app(context,::browserWorkBinding)}
+    internal var deferBrowserLogin:()->Boolean={false}
+    private val appBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.app(context,::browserWorkBinding){deferBrowserLogin()}}
     private fun browserFor(name:String)=when(name){
         in com.user.localagent.core.PcBrowserToolCatalog.names->pcBrowser
         in com.user.localagent.core.AppBrowserToolCatalog.names->appBrowser

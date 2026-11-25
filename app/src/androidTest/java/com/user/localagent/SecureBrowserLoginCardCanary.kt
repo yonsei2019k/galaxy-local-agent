@@ -21,12 +21,43 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class SecureBrowserLoginCardCanary {
+    @Test fun boundBrowserReadReturnsWhileTheSameLoginCardIsStillAvailable() {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("secureLoginCardApproved")=="true")
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val web=AppWebAgent.get(context)
+        val binding=AppWebAgent.WorkBinding("bound-login-canary","canary-thread","canary-branch")
+        ActivityScenario.launch(MainActivity::class.java).use {
+            runBlocking {
+                try {
+                    val tools=BrowserAgentTools.app(context,{binding}){true}
+                    val request=ToolCall("bound-login",AppBrowserToolCatalog.OPEN,buildJsonObject {
+                        put("url","https://hallymedu.co.kr/new_home/My/login/")
+                        put("showOnPhone",true)
+                    })
+                    val result=async {tools.execute(request)}
+                    val card=withTimeout(30_000){web.ownerLoginCard.filterNotNull().first()}
+                    assertEquals(BrowserAgentTools.PHONE_AUTH_REQUIRED,withTimeout(5_000){result.await()}.verificationSummary)
+                    withContext(Dispatchers.Main){
+                        assertEquals(card,web.ownerLoginCard.value)
+                        assertNotNull(web.waitingAuthBinding(binding.runId))
+                    }
+                } finally {
+                    withContext(Dispatchers.Main){
+                        web.ownerLoginCard.value?.let { web.cancelLoginCard(it.id) }
+                        web.closeBrowser()
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun actualSitePromptsInTheSecureNativeCardWithoutSubmittingCredentials() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("secureLoginCardApproved")=="true")
         val instrumentation=InstrumentationRegistry.getInstrumentation()

@@ -423,6 +423,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         database.knowledgeDao().meta(KnowledgeMeta("chat.title.manual.$threadId",1))
         renamed
     }
+    suspend fun isRemoteTestThread(threadId:String)=dao.metaValue("chat.remoteQa."+threadId)==1L
     suspend fun createRemoteTestThread():ChatThreadRecord=database.withTransaction {
         val thread=createThread(title="PC 원격 시험").copy(allowOwnerLearning=false)
         dao.thread(thread)
