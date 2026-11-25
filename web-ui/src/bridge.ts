@@ -163,7 +163,7 @@ type Intent =
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
   | { action: 'copy' | 'messageFiles' | 'messageMenu' | 'toggleAnswerSpeech'; payload: { messageId: string } }
-  | { action: 'stayPhoto'; payload: { messageId: string; index: number } }
+  | { action: 'stayPhoto'; payload: { messageId: string; index: number; kind?: 'map' } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }
   | { action: 'steer'; payload: RunTarget & { text: string } }

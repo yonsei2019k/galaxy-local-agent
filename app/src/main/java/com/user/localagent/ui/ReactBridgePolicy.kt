@@ -35,7 +35,7 @@ internal object ReactBridgePolicy {
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
             "copy","messageFiles","messageMenu","toggleAnswerSpeech"->setOf("messageId")
-            "stayPhoto"->setOf("messageId","index")
+            "stayPhoto"->if("kind" in payload)setOf("messageId","index","kind")else setOf("messageId","index")
             "chooseReply"->setOf("runId","index")
             "renameThread"->setOf("title")
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
@@ -50,6 +50,7 @@ internal object ReactBridgePolicy {
             else->emptySet()
         }
         require(payload.keys==allowed)
+        if(action=="stayPhoto"&&"kind" in payload)require(payload["kind"]==JsonPrimitive("map"))
         if(action=="navigate")require(payload.getValue("panel").jsonPrimitive.content in
             setOf("chat","settings","images","tools","projects","history","collab","capabilities","connections","privacy","contacts","historySearch"))
         if(action=="saveOfficeProfile")requireOfficeEntries(payload.getValue("entries"))

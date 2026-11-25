@@ -65,6 +65,27 @@ test('shows a compact comparison and degrades invalid or incomplete results safe
   expect(render(stayBlock([quote], '2026-11-31'))).not.toContain('숙소 상세')
 })
 
+test('shows confirmed travel and amenity context without adding optional fees to the quote', () => {
+  const html = render(stayBlock([{ ...quote, driveMinutes: 21, driveFrom: '시청',
+    bathroom: '공용 화장실', heating: '바닥난방', optionalFees: '바비큐 20,000원' }]))
+  expect(html).toContain('시청 기준 차량 약 21분 · 공용 화장실 · 바닥난방')
+  expect(html).toContain('선택 비용 · 바비큐 20,000원')
+  expect(html).toContain('219,000원')
+  expect(render(stayBlock([{ ...quote, driveMinutes: 21 }]))).not.toContain('약 21분')
+})
+
+test('keeps the campground map and inventory links separate and never embeds arbitrary images', () => {
+  const card = (item: object) => render('```service-result\n' + JSON.stringify({
+    version: 1, kind: 'camp_sites', items: [{ title: '시험 캠핑장', availableSites: 'A-04, A-12', ...item }],
+  }) + '\n```')
+  const html = card({ mapUrl: 'https://example.org/map.png', inventoryUrl: 'https://reserve.example.org/sites' })
+  expect(html).toContain('A-04, A-12')
+  expect(html).toContain('href="https://example.org/map.png"')
+  expect(html).toContain('href="https://reserve.example.org/sites"')
+  expect(html).not.toContain('<img')
+  expect(card({ mapUrl: 'file:///private.png', inventoryUrl: 'https://user:secret@example.org/' })).not.toContain('href=')
+})
+
 test.each([
   ['mail', 'sender', '보낸 사람'],
   ['calendar', 'start', '시작'],

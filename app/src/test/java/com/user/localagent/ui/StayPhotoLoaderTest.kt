@@ -44,4 +44,37 @@ class StayPhotoLoaderTest {
         assertFalse(StayPhotoLoader.allowedDirect(URI(property),URI("https://image.withstatic.com.example.org/a.jpg")))
         assertEquals(media+"?format=webp&height=360&width=560",StayPhotoLoader.thumbnailUrl(URI(media)).toString())
     }
+
+    @Test fun campgroundMapUsesOnlyTheExactImageOnThePublicMapHost(){
+        fun snapshot(image:String):String{
+            val card=buildJsonObject {
+                put("kind","camp_sites");put("version",1)
+                put("items",buildJsonArray { add(buildJsonObject {
+                    put("mapUrl","https://example.org/guide")
+                    put("mapImageUrl",image)
+                }) })
+            }
+            val fence="`".repeat(3)
+            return buildJsonObject {
+                put("threadId","thread");put("branchId","branch")
+                put("messages",buildJsonArray {add(buildJsonObject {
+                    put("id","message");put("role","assistant")
+                    put("text","${fence}service-result\n$card\n$fence")
+                })})
+            }.toString()
+        }
+        val valid="https://example.org/layout.png"
+        fun candidate(image:String)=StayPhotoLoader.candidate(snapshot(image),"thread","branch","message",0,map=true)
+        assertEquals(StayPhotoLoader.Candidate("https://example.org/guide",valid,map=true),candidate(valid))
+        assertNull(candidate("https://unrelated.example.com/layout.png"))
+        assertNull(candidate(valid+"?session=sensitive"))
+    }
+
+    @Test fun localRecognitionDropsUnmatchedAmbiguousAndOutOfImageLabels(){
+        val exact=StayPhotoLoader.SitePin("A-04",40.0,65.0)
+        assertEquals(listOf(exact),StayPhotoLoader.matchedSitePins(setOf("A-04","A-12","A-02"),listOf(
+            exact,exact.copy(site="A-09"),exact.copy(site="A-I2"),
+            exact.copy(site="A-12"),exact.copy(site="A-12",x=42.0),exact.copy(site="A-02",x=480.0),
+        )))
+    }
 }

@@ -17,6 +17,11 @@ type Stay = {
   address: string | null
   rateTerms: string | null
   checkoutHost: string | null
+  driveMinutes: number | null
+  driveFrom: string | null
+  bathroom: string | null
+  heating: string | null
+  optionalFees: string | null
 }
 type Comparison = { checkIn: string; checkOut: string; guests: number; party: string | null; stays: Stay[] }
 
@@ -60,10 +65,15 @@ function readStay(value: unknown, index: number): Stay | null {
   const onsite = money(row.onsite)
   const quotedTotal = money(row.total)
   const total = online !== null && onsite !== null && online + onsite === quotedTotal ? quotedTotal : null
+  const driveMinutes = money(row.driveMinutes)
+  const driveFrom = label(row.driveFrom, 60)
   return { index, name, room, area, url: url.href, host: url.hostname, checkedAt,
     online, onsite, total, available: typeof row.available === 'boolean' ? row.available : null,
     cancellation: label(row.cancellation, 140), address: label(row.address, 180),
-    rateTerms: label(row.rateTerms, 200), checkoutHost: publicCheckoutHost(row.checkoutHost) }
+    rateTerms: label(row.rateTerms, 200), checkoutHost: publicCheckoutHost(row.checkoutHost),
+    driveMinutes: driveFrom && driveMinutes !== null && driveMinutes <= 1440 ? driveMinutes : null,
+    driveFrom, bathroom: label(row.bathroom, 60), heating: label(row.heating, 90),
+    optionalFees: label(row.optionalFees, 180) }
 }
 
 function publicCheckoutHost(value: unknown): string | null {
@@ -149,7 +159,7 @@ function bookingDraft(data: Comparison, stay: Stay): string {
   ].join('\n')
 }
 
-export type StayPhotoRequest = { messageId: string; request: (messageId: string, index: number) => boolean }
+export type StayPhotoRequest = { messageId: string; request: (messageId: string, index: number, kind?: 'map') => boolean }
 type Photo = 'loading' | 'missing' | { src: string; representative: boolean }
 
 export function StayComparison({ data, onPrepare, photo }: {
@@ -162,7 +172,7 @@ export function StayComparison({ data, onPrepare, photo }: {
     if (!messageId) return
     function receive(event: Event) {
       const response = (event as CustomEvent).detail
-      if (response?.messageId !== messageId || !Number.isInteger(response.index) ||
+      if (response?.messageId !== messageId || response.kind === 'map' || !Number.isInteger(response.index) ||
           response.index < 0 || response.index > 5) return
       const src = response.src
       const loaded: Photo = typeof src === 'string' && src.length <= 240_024 &&
@@ -187,11 +197,21 @@ export function StayComparison({ data, onPrepare, photo }: {
   function offer(stay: Stay) {
     const thumbnail = photos[stay.index]
     const image = typeof thumbnail === 'object' ? thumbnail : null
+    const amenities = [stay.bathroom, stay.heating].filter(Boolean)
+    const drive = stay.driveMinutes === null ? null : stay.driveFrom + ' 기준 차량 약 ' + stay.driveMinutes + '분'
+    const detailsDraft = [
+      `${stay.name} · ${stay.room}의 상세 정보를 확인해줘. ${data.checkIn} ~ ${data.checkOut}에 ${data.guests}명이야.`,
+      '같은 객실의 인원 추가비, 난방·화장실, 입퇴실 시간, 선택 비용과 취소 조건을 확인해줘.',
+      '캠핑장이면 공식 전체 배치도와 해당 날짜에 예약 가능한 자리도 같이 보여줘.',
+      '진행 중인 다른 예약이나 선택은 그대로 두고 상세 조회만 해줘.',
+      stay.url,
+    ].join('\n')
     return <li key={stay.index}>
       <details>
         <summary className="stay-top">
           {image && <img className="stay-thumbnail" src={image.src} alt="" />}
-          <span className="stay-name"><strong>{stay.name}</strong><span>{stay.area} · {stay.room}</span><span>{stay.host}</span></span>
+          <span className="stay-name"><strong>{stay.name}</strong><span>{stay.area} · {stay.room}</span>
+            <span>{[drive, ...amenities].filter(Boolean).join(' · ') || stay.host}</span></span>
           <span className="stay-price"><strong>{stay.total === null ? '총액 미확인' : won(stay.total)}</strong>
             <span>{stay.available === true ? '조회 당시 예약 가능' : stay.available === false ? '조회 당시 예약 불가' : '예약 가능 여부 미확인'}</span></span>
         </summary>
@@ -200,6 +220,7 @@ export function StayComparison({ data, onPrepare, photo }: {
           <span>현장 {stay.onsite === null ? '미확인' : won(stay.onsite)}</span>
         </div>
         {stay.rateTerms && <p className="stay-cancellation">객실 조건 · {stay.rateTerms}</p>}
+        {stay.optionalFees && <p className="stay-cancellation">선택 비용 · {stay.optionalFees}</p>}
         <p className="stay-cancellation">취소 · {stay.cancellation ?? "미확인"}</p>
         <p className="stay-source">{stay.host} · {localTime.format(new Date(stay.checkedAt))} 조회</p>
         {image && <figure className="stay-photo">
@@ -211,6 +232,7 @@ export function StayComparison({ data, onPrepare, photo }: {
           {photo && !image && <button type="button" disabled={Object.values(photos).includes('loading')}
             onClick={() => loadPhoto(stay.index)}>{thumbnail === 'loading' ? '사진 불러오는 중' : '사진 보기'}</button>}
           <a href={stay.url} rel="noreferrer noopener" referrerPolicy="no-referrer">숙소 상세</a>
+          {onPrepare && <button type="button" onClick={() => onPrepare(detailsDraft)}>집순이에게 더 물어보기</button>}
           {onPrepare && stay.available !== false && <button type="button" onClick={() => onPrepare(
             bookingDraft(data, stay)
           )}>예약 준비</button>}

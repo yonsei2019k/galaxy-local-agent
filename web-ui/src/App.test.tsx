@@ -1103,6 +1103,54 @@ describe('office staff profile form', () => {
   })
 })
 
+it('drafts a read-only follow-up for the exact offer without submitting a reservation action', () => {
+  mount()
+  const value = JSON.stringify({
+    version: 1, currency: 'KRW', checkIn: '2026-12-01', checkOut: '2026-12-02', guests: 4,
+    stays: [{ name: '시험 캠핑장', room: '자리 A-04', area: '시험 지역', url: 'https://example.org/camp/a-04',
+      checkedAt: '2026-11-24T20:10:00+09:00', online: 90000, onsite: 0, total: 90000, available: true }],
+  })
+  snapshot({ ...base, messages: [{ id: 'stay-details', role: 'assistant', text: '```stays\n' + value + '\n```' }] })
+  host.querySelector('details')!.open = true
+  click('집순이에게 더 물어보기')
+  const draft = requests().find(entry => entry.action === 'draft')?.payload.text
+  expect(draft).toContain('자리 A-04')
+  expect(draft).toContain('2026-12-01 ~ 2026-12-02에 4명')
+  expect(draft).toContain('진행 중인 다른 예약이나 선택은 그대로')
+  expect(requests().some(entry => entry.action === 'send' || entry.action === 'steer')).toBe(false)
+})
+
+it('overlays only available sites on the matching map and drafts a recheck', () => {
+  mount()
+  const map = 'https://example.org/camp/layout.png'
+  const value = JSON.stringify({
+    version: 1, kind: 'camp_sites', items: [{ title: '시험 캠핑장', mapUrl: 'https://example.org/camp',
+      mapImageUrl: map, inventoryUrl: 'https://example.org/booking', checkedAt: '2026-11-24T20:10:00+09:00',
+      dates: '2026-12-01 ~ 2026-12-02', party: '4명', availableSites: 'A-04, A-12',
+      pins: [{ site: 'A-12', x: 10, y: 10 }] }],
+  })
+  snapshot({ ...base, messages: [{ id: 'camp-map', role: 'assistant', text: '```service-result\n' + value + '\n```' }] })
+  const response = (imageUrl: string) => act(() => {window.dispatchEvent(new CustomEvent('ziphap:stayPhoto', {detail: {
+    messageId: 'camp-map', index: 0, kind: 'map', imageUrl, src: 'data:image/jpeg;base64,/9j/',
+    pins: [{ site: 'A-04', x: 40, y: 65 }, { site: 'A-09', x: 65, y: 40 }, { site: 'A-12', x: 160, y: 20 }],
+  }}))})
+  click('채팅에서 배치도 보기')
+  expect(requests().find(entry => entry.action === 'stayPhoto')?.payload).toEqual({ messageId: 'camp-map', index: 0, kind: 'map' })
+  response('https://example.org/camp/wrong.png')
+  expect(host.querySelector('.camp-map-pin')).toBeNull()
+  click('채팅에서 배치도 보기')
+  response(map)
+  expect(host.querySelectorAll('.camp-map-pin')).toHaveLength(1)
+  click('배치도 확대')
+  expect(host.querySelector('.camp-map-picture.is-zoomed')).not.toBeNull()
+  act(() => {host.querySelector<HTMLButtonElement>('[aria-label="빈자리 A-04"]')!.click()})
+  click('이 자리 다시 확인')
+  const draft = requests().find(entry => entry.action === 'draft')?.payload.text
+  expect(draft).toContain('자리 A-04')
+  expect(draft).toContain('2026-12-01 ~ 2026-12-02, 4명')
+  expect(requests().some(entry => entry.action === 'send' || entry.action === 'steer')).toBe(false)
+})
+
 it('loads a selected photo using the original row after price sorting', () => {
   mount()
   const source = {

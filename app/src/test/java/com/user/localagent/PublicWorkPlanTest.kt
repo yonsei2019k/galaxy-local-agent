@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PublicWorkPlanTest {
+    @Test fun noticeUsesTheExistingPublicPlanWithoutExposingHiddenContent(){
+        val notice=checkNotNull(publicWorkPlanNotice("네 명의 주말 숙소 총액을 비교할게요. 연락처 user@example.com"))
+        assertTrue(notice.contains("네 명의 주말 숙소 총액"))
+        assertTrue(notice.contains("잠시만 기다려 주세요"))
+        assertFalse(notice.contains("example.com"))
+        assertNull(publicWorkPlanNotice("<think>private</think>"))
+    }
+
     @Test fun actualTaskExplanationIsPreservedInsteadOfReplacingItWithStatusText(){
         val plan="가족 네 명의 항공권을 찾는 요청으로 이해했습니다. 날짜를 확인하고 총액과 수하물을 비교하겠습니다."
         assertEquals(plan,publicWorkPlanParts(plan,emptyList()).joinToString(""))

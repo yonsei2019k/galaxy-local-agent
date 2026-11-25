@@ -130,6 +130,7 @@ const expectations = {
   taskRunning: { messages: 1, cards: 1 }, taskPaused: { messages: 1, cards: 1 }, taskWaitingGoal: { messages: 1, cards: 1 },
   taskFailed: { messages: 1, cards: 1 }, taskCompleted: { messages: 2, cards: 1 }, unanchoredTasks: { messages: 1, cards: 3 },
   mixedLong: { messages: 20, cards: 10 }, twoLiveTasks: { messages: 1, cards: 2 }, websiteCard: { messages: 1, cards: 2 }, files: { messages: 2, cards: 0 },
+  camping: { messages: 4, cards: 1 },
 };
 
 for (const [name, snapshot] of Object.entries(fixtures)) {
@@ -148,6 +149,28 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
           return !document.querySelector('.loading') && document.querySelectorAll('.message').length === wantMessages;
         }, [SNAPSHOT_EVENT, snapshot, want.messages], { polling: 50, timeout: 5000 });
         await page.waitForFunction(cards => document.querySelectorAll('.task-card, .work-card').length >= cards, want.cards, { timeout: 5000 });
+        if (name === 'camping') {
+          await page.locator('.stay-top').click();
+          assert.equal(await page.getByRole('link', { name: '전체 배치도' }).getAttribute('href'), 'https://example.org/map.png');
+          assert.equal(await page.getByText('결제 기한', { exact: true }).count(), 1);
+          await page.getByRole('button', { name: '채팅에서 배치도 보기' }).click();
+          await page.evaluate(() => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 400; canvas.height = 220;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 400, 220);
+            ctx.fillStyle = '#1a1a1a'; ctx.fillText('A-04', 150, 145);
+            window.dispatchEvent(new CustomEvent('ziphap:stayPhoto', {detail: {
+              kind: 'map', messageId: 'camp3', index: 0, imageUrl: 'https://example.org/map.png',
+              src: canvas.toDataURL('image/jpeg'), pins: [{site: 'A-04', x: 40, y: 65}],
+            }}));
+          });
+          await page.getByRole('button', { name: '배치도 확대' }).click();
+          await page.getByRole('button', { name: '빈자리 A-04' }).click();
+          assert.equal(await page.getByText('A-04 선택').count(), 1);
+          assert.equal(await page.getByRole('button', { name: '빈자리 A-12' }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: 'A-12', exact: true }).count(), 1);
+        }
         await page.evaluate(async () => {
           await document.fonts.ready;
           await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));

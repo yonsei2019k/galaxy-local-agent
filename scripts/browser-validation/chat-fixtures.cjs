@@ -65,6 +65,27 @@ const u = user('u1', '강의 자료를 정리해 주세요');
 const anchored = t => ({ ...t, messageId: 'u1' });
 const evidence = [{ id: 'e1', label: '문서 열기', detail: '합성 문서를 열었습니다' }, { id: 'e2', label: '요약 작성', detail: '세 문단으로 정리했습니다' }];
 
+function camping() {
+  const result = (kind, row) => '```service-result\n' +
+    JSON.stringify({version: 1, kind, items: [{title: '시험 캠핑장', ...row}]}) + '\n```';
+  const stays = '```stays\n' + JSON.stringify({
+    version: 1, currency: 'KRW', checkIn: '2026-12-01', checkOut: '2026-12-02', guests: 4,
+    stays: [{
+      name: '시험 캠핑장', room: 'A-04', area: '테스트 지역', url: 'https://example.org/camp/a-04',
+      checkedAt: '2026-11-24T20:10:00+09:00', online: 90000, onsite: 10000, total: 100000, available: true,
+      driveFrom: '시청', driveMinutes: 21, bathroom: '개별 화장실', heating: '바닥난방'
+    }]
+  }) + '\n```';
+  return {...base, messages: [
+    user('camp1', '4인 가족 글램핑 자리를 비교해 줘.'),
+    assistant('camp2', stays),
+    assistant('camp3', result('camp_sites', {dates: '2026-12-01 ~ 2026-12-02', party: '4명', availableSites: 'A-04, A-12',
+      mapUrl: 'https://example.org/map.png', mapImageUrl: 'https://example.org/map.png',
+      inventoryUrl: 'https://example.org/booking', checkedAt: '2026-11-24T20:10:00+09:00'})),
+    assistant('camp4', result('booking_review', {room: 'A-04', paymentDeadline: '오늘 21:53', total: '100,000원'})),
+  ], tasks: [{...task('camp-run', 'paused', '글램핑 예약 준비', '휴대폰 인증 대기'), messageId: 'camp1'}]};
+}
+
 module.exports = {
   empty: { ...base },
   chatShort: { ...base, messages: [user('m1', '안녕하세요'), assistant('m2', '안녕하세요. 무엇을 도와드릴까요?')] },
@@ -82,4 +103,5 @@ module.exports = {
     websiteCard: { id: 'w1', messageId: 'u1', title: '웹사이트 작업', status: '페이지를 확인하는 중입니다', steps: ['접속 중', '페이지를 확인하는 중입니다'], working: true },
   }),
   files: { ...base, messages: [user('f0', '보고서를 만들어 주세요'), assistant('f1', '보고서를 PDF로 만들었습니다.', { fileFormats: ['pdf'] })] },
+  camping: camping(),
 };

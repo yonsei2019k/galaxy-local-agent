@@ -160,13 +160,23 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                             } else if(value.action=="stayPhoto"&&ready){
                                 val id=value.payload.getValue("messageId").jsonPrimitive.content
                                 val index=value.payload.getValue("index").jsonPrimitive.int
-                                val candidate=StayPhotoLoader.candidate(currentSnapshot,value.threadId,value.branchId,id,index)
-                                val key=Triple(value.threadId,id,index)
+                                val isMap=value.payload["kind"]==JsonPrimitive("map")
+                                val candidate=StayPhotoLoader.candidate(currentSnapshot,value.threadId,value.branchId,id,index,isMap)
+                                val key=Triple(value.threadId,id,if(isMap)index+6 else index)
                                 fun reply(result:StayPhotoLoader.Thumbnail?){
                                     if(host!==view)return
                                     val response=buildJsonObject {
                                         put("messageId",id);put("index",index)
-                                        result?.let {put("src",it.data);put("representative",it.representative)}
+                                        if(isMap)put("kind","map")
+                                        result?.let {
+                                            put("src",it.data);put("representative",it.representative)
+                                            if(isMap){
+                                                put("imageUrl",candidate?.image)
+                                                put("pins",buildJsonArray {it.pins.forEach {pin->add(buildJsonObject {
+                                                    put("site",pin.site);put("x",pin.x);put("y",pin.y)
+                                                })}})
+                                            }
+                                        }
                                     }
                                     view.evaluateJavascript("window.dispatchEvent(new CustomEvent('ziphap:stayPhoto',{detail:$response}));",null)
                                 }
@@ -179,7 +189,7 @@ internal fun ReactChatHost(snapshot:String,onCommand:(ReactUiCommand)->Unit,onUn
                                             catch(cancel:CancellationException){throw cancel}
                                             catch(_:Exception){null}
                                             finally {photoRequests.remove(key)}
-                                            if(StayPhotoLoader.candidate(currentSnapshot,value.threadId,value.branchId,id,index)==candidate)
+                                            if(StayPhotoLoader.candidate(currentSnapshot,value.threadId,value.branchId,id,index,isMap)==candidate)
                                                 reply(result)
                                         }
                                     }

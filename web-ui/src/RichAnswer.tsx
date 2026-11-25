@@ -75,6 +75,7 @@ function renderAnswer(text: string, onPrepareStay?: (text: string) => void, phot
   const result: ReactNode[] = []
   let i = 0
   let firstStayBlock = true
+  let firstMapBlock = true
   while (i < lines.length) {
     const key = i
     const line = lines[i++]
@@ -89,7 +90,10 @@ function renderAnswer(text: string, onPrepareStay?: (text: string) => void, phot
       const code = body.join('\n')
       if (opening[2] === 'service-result') {
         const data = closed ? parseServiceResult(code) : null
-        if (data) result.push(<ServiceResultCard key={key} result={data} />)
+        if (data) {
+          result.push(<ServiceResultCard key={key} result={data} photo={firstMapBlock ? photo : undefined} onAsk={onPrepareStay} />)
+          if (data.kind === 'camp_sites') firstMapBlock = false
+        }
         continue
       }
       if (opening[2] === 'stays') {

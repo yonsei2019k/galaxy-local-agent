@@ -64,3 +64,14 @@
 .service-result dd {
   margin: 0;
 }
+.camp-map { margin: var(--space-3) 0 0; }
+.camp-map-scroll { overflow: auto; max-height: min(50vh, 380px); margin-top: var(--space-2); }
+.camp-map-picture { position: relative; line-height: 0; }
+.camp-map-picture.is-zoomed { width: 240%; }
+.camp-map-picture img { display: block; width: 100%; height: auto; }
+.camp-map-pin {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 20px; height: 20px; border: 2px solid #087a51; outline: 1px solid white;
+  border-radius: 50%; padding: 0; background: #e2fff044; cursor: pointer;
+}
+.camp-map-pin[aria-pressed="true"], .camp-map-pin:focus-visible { background: #d3fbe4; outline: 3px solid #1266bc; z-index: 1; }

@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react'
+import type { StayPhotoRequest } from './StayComparison'
+
 const templates = {
   order_review: { label: '주문 전 확인', fields: { seller: '판매처', option: '옵션', quantity: '수량', delivery: '배송·배달비', discount: '적용 할인', total: '총액', paymentMethods: '결제 방법', checkedAt: '확인 시각' } },
-  booking_review: { label: '예약 전 확인', fields: { seller: '예약처', dates: '일정', party: '인원', room: '객실', online: '온라인 결제', onsite: '현장 결제', total: '총액', cancellation: '취소 조건', paymentMethods: '결제 방법', checkedAt: '확인 시각' } },
+  booking_review: { label: '예약 전 확인', fields: { seller: '예약처', dates: '일정', stayTimes: '입실·퇴실', party: '인원', room: '객실·자리', vehicles: '차량', online: '온라인 결제', onsite: '현장 결제', total: '총액', optionalFees: '선택 비용', cancellation: '취소·환불', paymentMethods: '결제 방법', paymentDeadline: '결제 기한', checkedAt: '확인 시각' } },
+  camp_sites: { label: '캠핑장 자리 확인', fields: { dates: '일정', party: '인원', availableSites: '예약 가능한 자리', facilities: '화장실·개수대·매점', access: '자리별 동선', checkedAt: '확인 시각' } },
   government: { label: '민원 안내', fields: { agency: '담당 기관', documents: '준비 서류', fee: '수수료', next: '다음 단계' } },
   performance: { label: '공연 일정', fields: { venue: '공연장', start: '시작일', end: '종료일', status: '공연 상태' } },
   place: { label: '장소', fields: { address: '주소', category: '업종', source: '출처' } },
@@ -14,7 +18,9 @@ const templates = {
 } as const
 
 type CardKind = keyof typeof templates
-type CardRow = { title: string; summary?: string; fields: [string, string][] }
+type SitePin = { site: string; x: number; y: number }
+type CampMap = { dates: string; party: string; checkedAt: string; mapUrl: string; imageUrl: string; sites: string[] }
+type CardRow = { title: string; summary?: string; fields: [string, string][]; mapUrl?: string; inventoryUrl?: string; map?: CampMap }
 type ServiceResult = { kind: CardKind; rows: CardRow[] }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -24,6 +30,44 @@ function record(value: unknown): value is Record<string, unknown> {
 function boundedText(value: unknown, limit: number): string | undefined {
   if (typeof value !== 'string' || value.length > limit) return
   return value.trim() || undefined
+}
+
+function publicLink(value: unknown): string | undefined {
+  const text = boundedText(value, 2048)
+  if (!text) return
+  try {
+    const url = new URL(text)
+    if (url.protocol === 'https:' && !url.username && !url.password && !url.port &&
+      /^[a-z0-9.-]+\.[a-z][a-z0-9-]*$/.test(url.hostname) &&
+      !/\.(?:localhost|local|internal)$/.test(url.hostname) &&
+      url.hostname !== 'appassets.androidplatform.net') return url.href
+  } catch { /* Keep malformed URLs out of actions. */ }
+}
+
+function campMap(item: Record<string, unknown>, mapUrl: string | undefined): CampMap | undefined {
+  const dates = boundedText(item.dates, 100), party = boundedText(item.party, 80)
+  const checkedAt = boundedText(item.checkedAt, 100), mapImage = publicLink(item.mapImageUrl)
+  if (!dates || !party || !checkedAt || !mapUrl || !mapImage ||
+      !publicLink(item.inventoryUrl) || new URL(mapUrl).hostname !== new URL(mapImage).hostname ||
+      new URL(mapImage).search || new URL(mapImage).hash ||
+      !/^(?:\d{4}-\d{2}-\d{2})\s*~\s*(?:\d{4}-\d{2}-\d{2})$/.test(dates) ||
+      !Number.isFinite(Date.parse(checkedAt))) return
+  const sitePattern = /^[A-Z0-9][A-Z0-9-]{0,9}$/
+  const sites = [...new Set(boundedText(item.availableSites, 240)?.toUpperCase().split(/[,·\s]+/).filter(site => sitePattern.test(site)))]
+  return { dates, party, checkedAt, mapUrl, imageUrl: mapImage, sites }
+}
+
+function mapPins(value: unknown, sites: string[]): SitePin[] {
+  if (!Array.isArray(value) || value.length > 60) return []
+  const pins = new Map<string, SitePin>()
+  for (const pin of value as unknown[]) {
+    if (!record(pin) || typeof pin.site !== 'string' || typeof pin.x !== 'number' || typeof pin.y !== 'number') continue
+    const site = pin.site.trim().toUpperCase()
+    if (!sites.includes(site) || ![pin.x, pin.y].every(value => Number.isFinite(value) && value >= 0 && value <= 100)) continue
+    if (pins.has(site)) return [] // Conflicting coordinates must not suggest a position.
+    pins.set(site, {site, x: pin.x, y: pin.y})
+  }
+  return [...pins.values()]
 }
 
 export function parseServiceResult(source: string): ServiceResult | null {
@@ -45,7 +89,10 @@ export function parseServiceResult(source: string): ServiceResult | null {
         const value = boundedText(item[key], 240)
         if (value) fields.push([label, value])
       }
-      rows.push({ title, summary: boundedText(item.summary, 320), fields })
+      const mapUrl = kind === 'camp_sites' ? publicLink(item.mapUrl) : undefined
+      rows.push({ title, summary: boundedText(item.summary, 320), fields, mapUrl,
+        ...(kind === 'camp_sites' ? { inventoryUrl: publicLink(item.inventoryUrl),
+          map: data.items.length === 1 ? campMap(item, mapUrl) : undefined } : {}) })
     }
     return { kind, rows }
   } catch {
@@ -53,16 +100,78 @@ export function parseServiceResult(source: string): ServiceResult | null {
   }
 }
 
-export function ServiceResultCard({ result }: { result: ServiceResult }) {
+function CampMapPreview({ map, title, photo, onAsk }: {
+  map: CampMap; title: string; photo: StayPhotoRequest; onAsk?: (text: string) => void
+}) {
+  const [state, setState] = useState<'idle' | 'loading' | 'missing' | {src: string; pins: SitePin[]}>('idle')
+  const [selectedSite, setSelectedSite] = useState<string>()
+  const [zoomed, setZoomed] = useState(false)
+  useEffect(() => {
+    function receive(event: Event) {
+      const detail = (event as CustomEvent).detail
+      if (detail?.messageId !== photo.messageId || detail.index !== 0 || detail.kind !== 'map') return
+      const valid = publicLink(detail.imageUrl) === map.imageUrl &&
+        typeof detail.src === 'string' && detail.src.length <= 533_372 &&
+        /^data:image\/jpeg;base64,[a-z0-9+/=]+$/i.test(detail.src)
+      setState(current => current === 'loading'
+        ? (valid ? {src: detail.src, pins: mapPins(detail.pins, map.sites)} : 'missing') : current)
+    }
+    window.addEventListener('ziphap:stayPhoto', receive)
+    return () => window.removeEventListener('ziphap:stayPhoto', receive)
+  }, [photo.messageId, map.imageUrl, map.sites])
+  if (typeof state === 'string') return <>
+    <div className="stay-actions"><button type="button" disabled={state === 'loading'} onClick={() => {
+      setState('loading')
+      if (!photo.request(photo.messageId, 0, 'map')) setState('missing')
+    }}>{state === 'loading' ? '배치도를 불러오는 중' : '채팅에서 배치도 보기'}</button></div>
+    {state === 'missing' && <p role="status">배치도를 불러오지 못했어요. 전체 배치도 링크에서 확인할 수 있어요.</p>}
+  </>
+  return <figure className="camp-map">
+    <div className="stay-actions"><button type="button" aria-pressed={zoomed}
+      onClick={() => setZoomed(value => !value)}>{zoomed ? '전체 보기' : '배치도 확대'}</button></div>
+    <div className="camp-map-scroll" role="region" aria-label="캠핑장 배치도" tabIndex={0}>
+      <div className={zoomed ? 'camp-map-picture is-zoomed' : 'camp-map-picture'}>
+      <img src={state.src} alt={title + ' 공식 자리 배치도'} onError={() => setState('missing')} />
+      {state.pins.map(pin => <button type="button" key={pin.site} className="camp-map-pin"
+        style={{left: pin.x + '%', top: pin.y + '%'}} aria-label={`빈자리 ${pin.site}`}
+        aria-pressed={selectedSite === pin.site} onClick={() => setSelectedSite(pin.site)} />)}
+      </div>
+    </div>
+    <figcaption>{state.pins.length ? '지도에 위치가 확인된 빈자리 ' + state.pins.length + '곳을 표시했어요.' :
+      '지도에서 위치를 확인한 빈자리가 없어요. 목록에서 자리 번호를 확인해 주세요.'}</figcaption>
+    {map.sites.length > 0 && <div className="stay-actions" role="group" aria-label="빈자리 번호 목록">
+      {map.sites.map(site => <button key={site} type="button" aria-pressed={selectedSite === site}
+        onClick={() => setSelectedSite(site)}>{site}</button>)}
+    </div>}
+    {selectedSite && <div className="stay-actions">
+      <span aria-live="polite">{selectedSite} 선택</span>
+      {onAsk && <button type="button" onClick={() => onAsk([
+        `${title}의 자리 ${selectedSite}를 다시 확인해줘. ${map.dates}, ${map.party} 기준이야.`,
+        '공식 예약 페이지에서 자리와 최종 금액을 확인하고 예약이나 결제는 확정하지 마.',
+        `배치도 출처 ${map.mapUrl}`,
+      ].join('\n'))}>이 자리 다시 확인</button>}
+    </div>}
+  </figure>
+}
+
+export function ServiceResultCard({ result, photo, onAsk }: {
+  result: ServiceResult; photo?: StayPhotoRequest; onAsk?: (text: string) => void
+}) {
   const label = templates[result.kind].label
   return <section className="service-result" aria-label={label + ' 결과'}>
     <header><strong>{label}</strong><span>{result.rows.length}건</span></header>
-    <ul>{result.rows.map(({ title, summary, fields }, index) => <li key={index}>
+    <ul>{result.rows.map(({ title, summary, fields, mapUrl, inventoryUrl, map }, index) => <li key={index}>
       <h3>{title}</h3>
       {summary && <p>{summary}</p>}
       {fields.length > 0 && <dl>{fields.map(([name, value]) => <div key={name}>
         <dt>{name}</dt><dd>{value}</dd>
       </div>)}</dl>}
+      {(mapUrl || inventoryUrl) && <div className="stay-actions">
+        {mapUrl && <a href={mapUrl} rel="noreferrer noopener" referrerPolicy="no-referrer">전체 배치도</a>}
+        {inventoryUrl && <a href={inventoryUrl} rel="noreferrer noopener" referrerPolicy="no-referrer">예약 페이지</a>}
+      </div>}
+      {map && photo && <CampMapPreview key={JSON.stringify([map.imageUrl, map.dates, map.party, map.checkedAt])}
+        map={map} title={title} photo={photo} onAsk={onAsk} />}
     </li>)}</ul>
   </section>
 }

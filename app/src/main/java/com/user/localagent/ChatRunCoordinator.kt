@@ -1962,6 +1962,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("externalAgentPlan" to checkpoint)).toString())
                     persistStepEvidence()
                     workTraceSession?.publicPlan(proposed.goal,proposed.constraints)
+                    if(requestAuthorizedTools.isNotEmpty()&&authority().permits(capture))
+                        publicWorkPlanNotice(proposed.goal)?.let {answer(it)}
                     authority().permits(capture)
                 }
             })

@@ -121,7 +121,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   onSpeak?: (messageId: string) => void
   speaking?: boolean
   onPrepareStay?: (text: string) => void
-  onStayPhoto?: (messageId: string, index: number) => boolean
+  onStayPhoto?: (messageId: string, index: number, kind?: 'map') => boolean
 }) {
   const [character] = useCharacter()
   const user = message.role === 'user'
@@ -182,7 +182,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onOfficeCalendar(): void
   hasDraft: boolean
   onDraftExample(text: string, needsFile?: boolean): void
-  onStayPhoto?: (messageId: string, index: number) => boolean
+  onStayPhoto?: (messageId: string, index: number, kind?: 'map') => boolean
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
   historyOpen?: boolean
