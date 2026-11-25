@@ -1838,6 +1838,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 external.enabled&&external.revision==request.externalAgentRevision&&pc.revision==request.capturedPcRevision,
                 tools-currentDisabled,active=active,cancelled=!currentCoroutineContext().isActive,awaitingApproval=approval.value!=null)
         }
+        if(tools.any { it=="search_web" || it=="search_shopping" }) {
+            checkNotNull(requestTools).bindPairedPublicSearch { tool ->
+                val live=authority()
+                live.permits(capture) && tool in live.phoneTools
+            }
+        }
         if(com.user.localagent.core.PcBrowserToolCatalog.OPEN in tools&&
             com.user.localagent.core.AppBrowserToolCatalog.OPEN in tools)
             checkNotNull(requestTools).bindPairedBrowserFallback {

@@ -46,7 +46,11 @@ object ToolCapabilityCatalog {
                 ScreenControlToolCatalog.READ,ScreenControlToolCatalog.ACTION->"screen_control_access"
                 else->null
             }
-            val handler=consumer?.takeUnless {tool.name==com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL}?.let {"consumer:${it.id}"}?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN->"browser";else->null}
+            val handler=consumer?.takeUnless {tool.name==com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL}?.let { app ->
+                val native = "consumer:${app.id}"
+                if(native !in env.installedHandlers && tool.name in com.user.localagent.core.connections.ConsumerAppCatalog.webFallbackTools &&
+                    "browser" in env.installedHandlers) "browser" else native
+            }?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN->"browser";else->null}
             val model=when(tool.name){"generate_image"->"image";"transcribe_recording"->"asr_file";in PrivateAnalysisToolCatalog.analysisNames->"text";else->null}
             val messenger=tool.name in setOf("list_messenger_notifications","reply_messenger_notification")
             val state=when {

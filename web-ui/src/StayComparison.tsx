@@ -80,11 +80,18 @@ function channelSite(host: string): string {
   return canonical.split('.').slice(compound ? -3 : -2).join('.')
 }
 
+function confirmedTerm(value: string | null): boolean {
+  if (!value) return false
+  const term = value.normalize('NFKC').trim()
+  return !/^(?:[-–—?]+|n\/?a|null|none|tbd)$/i.test(term) &&
+    !/(?:미확인|확인\s*필요|알\s*수\s*없|unknown|unconfirmed|not verified)/i.test(term)
+}
+
 function groupStays(stays: Stay[]): Stay[][] {
   const groups = new Map<string, Stay[]>()
   for (const stay of stays) {
     const identity = [stay.address, stay.name, stay.room, stay.rateTerms, stay.cancellation]
-    const match = identity.every(value => value !== null)
+    const match = identity.every(confirmedTerm)
       ? JSON.stringify(identity.map(value => value!.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ')))
       : String(stay.index)
     const group = groups.get(match)
@@ -104,7 +111,8 @@ function priceComparison(group: Stay[]) {
   const site = channelSite(winner.host)
   const checkout = channelSite(winner.checkoutHost)
   const baseline = group.slice(1).find(candidate => priceConfirmed(candidate) && candidate.checkoutHost &&
-    channelSite(candidate.host) !== site && channelSite(candidate.checkoutHost) !== checkout &&
+    ![site, checkout].includes(channelSite(candidate.host)) &&
+    ![site, checkout].includes(channelSite(candidate.checkoutHost)) &&
     Math.abs(checkedAt - Date.parse(candidate.checkedAt)) <= 30 * 60 * 1000)
   if (!baseline || !priceConfirmed(baseline) || baseline.total <= winner.total) return null
   return { winner, baseline, savings: baseline.total - winner.total }
@@ -128,6 +136,18 @@ const won = (amount: number) => amount.toLocaleString('ko-KR') + '원'
 const localTime = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
 })
+
+function bookingDraft(data: Comparison, stay: Stay): string {
+  const amount = (value: number | null) => value === null ? '미확인' : won(value)
+  return [
+    `${stay.name}의 ${stay.room} 예약을 준비해줘. ${data.checkIn} ~ ${data.checkOut}, ${data.guests}명${data.party ? ' (' + data.party + ')' : ''}이야.`,
+    `비교할 때 확인한 금액은 온라인 ${amount(stay.online)}, 현장 ${amount(stay.onsite)}, 총액 ${amount(stay.total)}이야.`,
+    `판매처의 객실 조건은 “${stay.rateTerms ?? '미확인'}”, 취소 조건은 “${stay.cancellation ?? '미확인'}”으로 표시됐어.`,
+    `조회 시각 ${localTime.format(new Date(stay.checkedAt))} · ${stay.url}`,
+    '같은 객실·일정·인원으로 온라인 요금, 현장 추가비, 취소 조건을 다시 확인하고 달라진 점을 알려줘.',
+    '인증은 휴대폰에서 진행하고 예약 확정이나 결제 전 최종 확인 화면에서 멈춰줘.',
+  ].join('\n')
+}
 
 export type StayPhotoRequest = { messageId: string; request: (messageId: string, index: number) => boolean }
 type Photo = 'loading' | 'missing' | { src: string; representative: boolean }
@@ -179,6 +199,7 @@ export function StayComparison({ data, onPrepare, photo }: {
           <span>온라인 {stay.online === null ? '미확인' : won(stay.online)}</span>
           <span>현장 {stay.onsite === null ? '미확인' : won(stay.onsite)}</span>
         </div>
+        {stay.rateTerms && <p className="stay-cancellation">객실 조건 · {stay.rateTerms}</p>}
         <p className="stay-cancellation">취소 · {stay.cancellation ?? "미확인"}</p>
         <p className="stay-source">{stay.host} · {localTime.format(new Date(stay.checkedAt))} 조회</p>
         {image && <figure className="stay-photo">
@@ -191,7 +212,7 @@ export function StayComparison({ data, onPrepare, photo }: {
             onClick={() => loadPhoto(stay.index)}>{thumbnail === 'loading' ? '사진 불러오는 중' : '사진 보기'}</button>}
           <a href={stay.url} rel="noreferrer noopener" referrerPolicy="no-referrer">숙소 상세</a>
           {onPrepare && stay.available !== false && <button type="button" onClick={() => onPrepare(
-            `${stay.name}의 ${stay.room} 객실을 ${data.checkIn}부터 ${data.checkOut}까지 ${data.guests}명${data.party ? ` (${data.party})` : ""}으로 예약 준비해줘. ${stay.url}에서 객실과 인원, 최종 총액과 현장 추가비 및 취소 조건을 다시 확인해. 인증이 필요하면 휴대폰에서 이어갈 수 있게 알려줘. 예약 확정·결제는 하지 말고 최종 확인 화면에서 멈춰줘.`
+            bookingDraft(data, stay)
           )}>예약 준비</button>}
         </div>
       </details>

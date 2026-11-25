@@ -46,6 +46,26 @@ def subject():
 
 
 class ServerAgentAdapterTests(unittest.TestCase):
+    def test_public_search_dispatches_only_paired_requests_without_delegated_headers(self):
+        for api in ("naver", "kopis"):
+            for authorized, header, status in ((False, None, 401), (True, "X-ZipHap-Agent-Capability", 403),
+                                             (True, "X-ZipHap-Phone-Capability", 403), (True, None, 200)):
+                with self.subTest(api=api, authorized=authorized, header=header):
+                    body = {"query":"fixture"}
+                    ns, _, call, response, limits = self.make("/v1/public-search/" + api, authorized=authorized, body=body)
+                    adapter = mock.Mock()
+                    adapter.search.return_value = (200, {"items":[]})
+                    ns[api + "_search"] = adapter
+                    if header:
+                        call.headers.add_header(header, CAP)
+                    ns["Handler"].dispatch(call)
+                    self.assertEqual(status, response[0][0])
+                    if status == 200:
+                        adapter.search.assert_called_once_with(body)
+                        self.assertEqual([4096], limits)
+                    else:
+                        adapter.search.assert_not_called()
+
     def test_pc_agent_start_requires_pairing_and_rejects_delegated_capabilities(self):
         path = "/v1/pc-agent/jobs"
         for authorized, header, expected in (

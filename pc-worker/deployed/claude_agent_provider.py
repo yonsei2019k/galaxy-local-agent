@@ -21,7 +21,7 @@ from codex_agent_provider import (BOOTSTRAP_ENV, FINAL_SCHEMA, MAX_LINE,
 from provider_conversation_context import (ConversationContextError, provider_input,
                                            validate_conversation_context)
 
-from model_orchestration import claude_profile, skill_body
+from model_orchestration import WORKER_ONLY_ENV, claude_profile, skill_body
 
 TOOL_PREFIX = "mcp__ziphap_device__"
 # --json-schema makes Claude Code add this built-in tool to return the final object (observed with 2.1.330:
@@ -30,7 +30,7 @@ STRUCTURED_TOOL = "StructuredOutput"
 DISALLOWED = "Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task"
 STRIPPED_ENV = ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
                 "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR",
-                "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", BOOTSTRAP_ENV)
+                "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", BOOTSTRAP_ENV, *WORKER_ONLY_ENV)
 
 
 def build_launch(config, bootstrap, static, external_allowed=False, *, allowed_tools=(), read_recovery=None):

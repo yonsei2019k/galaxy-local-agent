@@ -70,6 +70,12 @@ test.each([
   ['calendar', 'start', '시작'],
   ['contact', 'phone', '전화번호'],
   ['file', 'format', '형식'],
+  ['government', 'agency', '담당 기관'],
+  ['place', 'address', '주소'],
+  ['product', 'listedPrice', '표시 가격'],
+  ['performance', 'venue', '공연장'],
+  ['issue', 'repository', '저장소'],
+  ['channel', 'channel', '채널'],
 ])('renders observed %s card fields as inert text', (kind, key, label) => {
   const json = JSON.stringify({ version: 1, kind, items: [{ title: '<img src=x>', [key]: 'fixture', action: 'send' }] })
   const markup = render('```service-result\n' + json + '\n```')
@@ -119,4 +125,19 @@ test.each([
   ['a price tie', { online: 156000, total: 156000 }],
 ])('does not show savings for %s', (_label, changes) => {
   expect(render(stayBlock([comparisonQuote, { ...alternativeQuote, ...changes }]))).not.toContain('절약')
+})
+
+test.each([
+  { rateTerms: '조식 포함 여부 확인 필요' },
+  { cancellation: '미확인' },
+  { address: 'N/A' },
+])('keeps quotes with matching unknown terms separate', fields => {
+  const html = render(stayBlock([{ ...comparisonQuote, ...fields }, { ...alternativeQuote, ...fields }]))
+  expect(html).not.toContain('같은 객실의 판매처')
+  expect(html).not.toContain('절약')
+})
+
+test('does not count a shared seller appearing as the other quote’s checkout', () => {
+  const html = render(stayBlock([{ ...comparisonQuote, checkoutHost: 'pay.example.net' }, { ...alternativeQuote, checkoutHost: 'pay.other.example.com' }]))
+  expect(html).not.toContain('절약')
 })

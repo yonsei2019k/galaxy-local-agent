@@ -2,11 +2,21 @@
 
 2026-10-31 사용자의 앱 연결·빌드 우선 요청에 따라 추가했다. 소스와 APK 포함 여부, 실제 로그인·폰 동작은 별도의 증거다.
 
+## Outlook 메일·일정 연결 준비
+
+2026-11-25 소스에서 Outlook 알림 수신 경로만 확인했다. 집합 Android의 Microsoft OAuth 로그인·Graph 조회와 계정별 연결 해제는 미구현 상태다.
+
+1. Entra에 집합의 공개 클라이언트를 등록하고 Android 플랫폼을 추가한다. 패키지는 `com.user.localagent`이며 배포 APK 서명 인증서의 서명 해시를 등록한다. 준비할 값은 Application (client) ID, 대상 계정 유형, 해당 조직 전용인 경우 Directory (tenant) ID, 포털이 생성한 정확한 리디렉션 URI다. 네이티브 앱은 클라이언트 시크릿이 필요 없다. [Android 앱 등록과 MSAL 설정](https://learn.microsoft.com/en-us/entra/identity-platform/tutorial-mobile-app-android-prepare-app)
+2. 앱 등록 후 MSAL의 휴대폰 대화형 로그인으로 소유자가 계정과 권한을 선택하도록 연결한다. 후속 실행은 같은 계정의 SDK 토큰 캐시를 사용하고 권한 철회·계정 변경은 새 승인을 요구한다. 조직의 사용자 동의 정책에 따라 관리자의 승인이 필요할 수 있다.
+3. 읽기 검증은 받은편지함의 `GET /v1.0/me/mailFolders/inbox/messages?$select=id,subject,receivedDateTime&$top=10`과 명시한 기간의 `GET /v1.0/me/calendar/calendarView?startDateTime={시작}&endDateTime={끝}&$select=id,subject,start,end`로 진행한다. 시작과 끝은 UTC 또는 오프셋 포함 시각으로 URL 인코딩한다. 기본 제목·시각에는 위임 권한 `Mail.ReadBasic`, `Calendars.ReadBasic`를 각각 적용한다. 본문 읽기는 별도의 `Mail.Read` 동의 범위다. [메일 조회](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) · [일정 조회](https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0)
+
 ## 앱 진입점
 
 도구 화면 상단의 **계정·앱 연결 · 사진 글자 읽기**를 누른다. 기존 문서·Word/Excel·이메일·음성·영상·사진 도구와 메시지 알림 설정은 유지한다.
 
 - Google Drive, Docs, Sheets, Slides, Gmail, Calendar, Tasks, Contacts, Forms, YouTube, Photos: 서비스별 계정 연결과 실제 자료 조회 버튼을 제공한다. 사용자가 제공한 Android OAuth 등록과 기존 앱 서명을 확인한다. 계정 연결만으로 실제 자료 읽기 성공을 표시하지 않는다.
+- **GitHub**는 지정한 저장소의 최근 열린 이슈 한 페이지를 조회한다. 저장소를 선택한 세분화 토큰에 Issues 읽기 권한을 주고 보안 입력란에 등록한다. 토큰 소유자를 먼저 확인하고, 실제 자료 조회에는 `소유자/저장소`를 입력한다. 응답의 PR은 제외하므로 최대 20개보다 적을 수 있다. [GitHub 저장소 이슈 조회](https://docs.github.com/en/rest/issues/issues#list-repository-issues)
+- **Slack**은 선택한 채널 ID의 최근 메시지를 최대 15개 조회한다. 공개 채널은 `channels:history`, 비공개 채널은 `groups:history` 권한이 필요하다. 봇을 사용할 때는 해당 채널에 초대한 뒤 보안 입력란에 연결 토큰을 등록한다. 워크스페이스의 앱 설치 승인 정책이 적용된다. [Slack 채널 이력 API](https://docs.slack.dev/reference/methods/conversations.history/)
 - **구글 전체 연결 · 서비스별 권한 확인**은 11개 서비스를 순서대로 승인한다. 각 요청에서 이전 프로젝트의 권한 자동 합산을 끄고 같은 계정에 연결한다. Drive와 YouTube 권한의 합산으로 발생했던 실제 `400 invalid_request`를 이 방식으로 해결했다.
 - Telegram Bot, Notion, Todoist: 네이티브 설정 화면에서 연결 토큰을 입력한다. 토큰은 모델 대화에 보내지 않으며 Android Keystore로 암호화한다. Telegram은 Bot이 볼 수 있는 허용 대화의 업데이트만 조회하며 개인 계정 전체 기록에 접근하는 기능은 아니다.
 - OCR: 사용자가 선택한 사진의 한글·영문 글자를 읽는다. Google Play의 인식 모듈 준비·다운로드가 필요할 수 있으며 OCR 모델을 APK에 넣지 않는다.

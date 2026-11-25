@@ -8,15 +8,30 @@ import org.junit.Test
 class ConsumerAppCatalogTest {
     private fun call(name:String,vararg args:Pair<String,String>)=ToolCall("consumer-test",name,buildJsonObject {args.forEach {(key,value)->put(key,value)}})
     @Test fun allFixedAppToolsAreRegistered() {
-        assertEquals(10,ConsumerAppCatalog.names.size)
+        assertEquals(13,ConsumerAppCatalog.names.size)
         assertTrue(ToolRegistry.definitions.keys.containsAll(ConsumerAppCatalog.names))
         assertEquals(ConsumerAppCatalog.names,ConsumerAppCatalog.appForTool.keys)
         assertTrue(ConsumerAppCatalog.definitions.all {it.risk==Risk.LOW})
     }
     @Test fun launchOnlyUsesFourKnownPackages() {
         val targets=listOf("open_tmap","open_netflix","open_coupang","open_coupang_eats").map {ConsumerAppCatalog.target(call(it))}
-        assertEquals(ConsumerApp.entries.toSet(),targets.map {it.app}.toSet())
+        assertEquals(setOf(ConsumerApp.TMAP, ConsumerApp.NETFLIX, ConsumerApp.COUPANG, ConsumerApp.EATS), targets.map {it.app}.toSet())
         assertTrue(targets.all {it.uri==null})
+    }
+    @Test fun railLinksKeepPrivateInputsOnThePhone() {
+        val targets = mapOf(
+            "open_korail_booking" to (ConsumerApp.KORAIL to "https://www.korail.com/ticket/main"),
+            "open_korail_guest_receipt" to (ConsumerApp.KORAIL to "https://www.korail.com/ticket/reserve/nonmember/receipt"),
+            "open_srt_guest_receipt" to (ConsumerApp.SRT to "https://eticket.srail.kr/hpg/hma/04/selectReceiptForm.do?pageId=TK0104050000"),
+        )
+        for ((name, expected) in targets) {
+            assertEquals(ConsumerTarget(expected.first, expected.second), ConsumerAppCatalog.target(call(name)))
+            assertTrue(PreparedHandoff.opensScreenOnly(name))
+            val available = ToolCapabilityCatalog.snapshot(CapabilityEnvironment(installedHandlers=setOf("browser"))).single { it.id == name }
+            assertEquals(CapabilityAvailability.INSTALLED, available.availability)
+            assertFalse(available.offline)
+            assertTrue(runCatching { ConsumerAppCatalog.target(call(name, "ticketNumber" to "123")) }.isFailure)
+        }
     }
     @Test fun searchTextCannotBecomeIntentParametersOrAnotherHost() {
         val result=ConsumerAppCatalog.target(call("search_coupang","query" to "물 & next=https://invalid.example/ #fragment"))

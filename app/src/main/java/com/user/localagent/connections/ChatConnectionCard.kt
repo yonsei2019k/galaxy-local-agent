@@ -115,6 +115,8 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
                 if(ConnectionCatalog.tools.values.any{it.service==service&&it.writes})
                     OutlinedButton(onClick={authorize(true)},enabled=available){Text("계정 연결 · 읽기와 작성")}
             }else{
+                if(service==ConnectedService.GITHUB)Text("조회할 저장소에 이슈 읽기 권한을 준 GitHub 토큰을 입력해 주세요.")
+                if(service==ConnectedService.SLACK)Text("채널 기록 읽기 권한이 있는 Slack 토큰을 입력해 주세요. 봇을 쓰면 먼저 그 채널에 초대해 주세요.")
                 OutlinedTextField(token,{token=it},Modifier.fillMaxWidth(),singleLine=true,enabled=available,
                     label={Text("연결 토큰")},visualTransformation=PasswordVisualTransformation(),
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password))

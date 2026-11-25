@@ -75,6 +75,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private val projectWorkspace get()=projectWorkspaceProvider?.invoke()?:fallbackProjectWorkspace
     private var capturedAvailableTools:Set<String> = emptySet()
     fun bindAvailableTools(names:Set<String>){require(names.all{it in ToolRegistry.definitions});capturedAvailableTools=names.toSet()}
+    private var pairedPublicSearch:com.user.localagent.web.PairedPublicSearch?=null
+    internal fun bindPairedPublicSearch(allowed:suspend(String)->Boolean) {
+        pairedPublicSearch=com.user.localagent.web.PairedPublicSearch(context,allowed)
+    }
     private var pairedBrowserFallback:com.user.localagent.compute.BrowserBackend?=null
     internal fun bindPairedBrowserFallback(stillAllowed:suspend()->Boolean) {
         val read=com.user.localagent.compute.BrowserAgentTools.pcReadFallback(context)
@@ -248,8 +252,19 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 "create_document"->checkNotNull(createDocument){"문서 생성 연결이 필요합니다."}.invoke(call)
                 "generate_image"->checkNotNull(createImage){"이미지 생성 연결을 준비해주세요."}.invoke(call)
                 "search_web","search_shopping"->{
-                    val data=checkNotNull(researchWeb){"웹 검색 연결이 필요합니다."}.invoke(call)
-                    check(Json.parseToJsonElement(data).jsonObject["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."};data
+                    val official=pairedPublicSearch?.read(call)
+                    verifyGrant()
+                    val result=if(official!=null && (call.name=="search_web" || call.s("store")=="naver"))official else {
+                        val fallback=if(call.s("source")=="kopis") {
+                            val query=listOf(call.s("query"),"공연 일정",call.s("startDate"),call.s("endDate"))
+                                .filter(String::isNotBlank).joinToString(" ")
+                            call.copy(arguments=buildJsonObject {put("query",query)})
+                        }else call
+                        val other=Json.parseToJsonElement(checkNotNull(researchWeb){"웹 검색 연결이 필요합니다."}.invoke(fallback)).jsonObject
+                        if(official==null)other else com.user.localagent.web.PairedPublicSearch.combinedShopping(official,other)
+                    }
+                    check(result["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."}
+                    result.toString()
                 }
                 "save_browser_pdf","save_public_pdf" -> {
                     val progress=PdfSaveProgress()
@@ -507,18 +522,20 @@ internal suspend fun PublicWebClient.readGovernmentServicePage(call: ToolCall): 
     fun unavailable(code: String, detail: String) = ToolResult(call.id, false, JsonObject(known + mapOf(
         "status" to JsonPrimitive("public_page_unverified"), "detail" to JsonPrimitive(detail)
     )).toString(), VerificationState.FAILED, code, effectNotApplied = true)
-    if (service != com.user.localagent.core.connections.GovernmentService.RESIDENCY)
+    if (service.guideSubject == null)
         return unavailable("GOV_PUBLIC_INSPECTION_UNSUPPORTED", "이 기관은 공식 주소와 휴대폰 연결을 지원해요.")
     return try {
         val page = fetchPage(service.url)
-        val topics = GovernmentServiceCatalog.residencyObservation(page.url, page.title, page.text)
-            ?: return unavailable("GOV_PUBLIC_PAGE_MISMATCH", "공식 페이지에서 등·초본 발급 안내 본문을 확인하지 못했어요.")
+        val topics = GovernmentServiceCatalog.guideObservation(service, page.url, page.title, page.text)
+            ?: return unavailable("GOV_PUBLIC_PAGE_MISMATCH", "공식 페이지에서 ${service.label}의 발급 안내를 확인하지 못했어요.")
         val content = JsonObject(known + mapOf(
             "status" to JsonPrimitive("public_information_observed"),
             "observedAt" to JsonPrimitive(page.fetchedAt),
             "observedTopics" to JsonArray(topics.map(::JsonPrimitive)),
         ))
-        ToolResult(call.id, true, content.toString(), VerificationState.VERIFIED, "정부24 등·초본 공개 안내 본문 확인")
+        ToolResult(call.id, true, content.toString(), VerificationState.VERIFIED, "${service.label} 공개 안내 본문 확인")
+    } catch (cancel: CancellationException) {
+        throw cancel
     } catch (error: Exception) {
         val reason = PublicPageReadReason.from(error)
         unavailable((error as? PublicPageReadException)?.auditCode ?: reason.name, reason.userMessage)

@@ -13,7 +13,7 @@ class CloudPhoneToolScopeTest {
         // The on-device sub-agent reuses the local engine and is never offered to cloud runs.
         assertEquals(ToolRegistry.definitions.keys-LocalSubagentToolCatalog.names,tools)
         assertFalse(LocalSubagentToolCatalog.RUN_SUBAGENT in tools)
-        assertTrue(tools.size<=128) // agent_bridge.py / device_tools_mcp.py MAX_TOOLS
+        assertTrue(tools.size<=ExternalAgentContract.MAX_PHONE_TOOLS) // PC workspace slots are separate.
         assertFalse(tools.any{it.startsWith("pc_")})
         assertTrue(tools.all{it.matches(Regex("[a-z][a-z0-9_]{0,63}"))})
     }

@@ -24,8 +24,32 @@ class ConnectionContractsTest {
         assertEquals(setOf("send_gmail_message"),ConnectionCatalog.tools.keys.filter {it.contains("send")}.toSet())
         assertFalse(ConnectionCatalog.tools.keys.any {it.contains("delete")})
         assertTrue(GmailSendContract.names.all {ConnectionCatalog.tools.getValue(it).writes&&ConnectionCatalog.tools.getValue(it).definition.risk==Risk.HIGH})
-        assertEquals(28,ConnectionCatalog.tools.size)
+        assertEquals(30,ConnectionCatalog.tools.size)
     }
+    @Test fun workspaceReadsBindTargetsAndExcludeUnrequestedData()=runBlocking {
+        assertTrue(ToolRegistry.definitions.keys.containsAll(listOf("list_github_repository_issues","read_slack_channel_history")))
+        val github=call("list_github_repository_issues","repository" to "sample/team")
+        val slack=call("read_slack_channel_history","channel" to "C01234")
+        assertEquals("https://api.github.com/repos/sample/team/issues?state=open&sort=updated&direction=desc&per_page=20",ConnectionRequests.build(github).first.url)
+        assertEquals("https://slack.com/api/conversations.history?channel=C01234&limit=15",ConnectionRequests.build(slack).first.url)
+        for(repository in listOf("sample/..","sample/team?x","sample/team/other","https://example.org/sample/team")){
+            assertThrows(IllegalArgumentException::class.java){ConnectionRequests.build(call(github.name,"repository" to repository))}
+        }
+        assertThrows(IllegalArgumentException::class.java){ConnectionRequests.build(call(slack.name,"channel" to "C123&limit=200"))}
+        val host=Host()
+        val runtime=ConnectionRuntime(host)
+        host.responses+=ApiResponse(200,"""[{"number":1,"title":"first","body":"private-body"},{"number":2,"pull_request":{}}]""")
+        val rows=Json.parseToJsonElement(runtime.execute(github).data).jsonObject.getValue("data").jsonArray
+        assertEquals(1,rows.size)
+        assertEquals(setOf("number","title"),rows.single().jsonObject.keys)
+        host.responses+=ApiResponse(200,"""{"ok":false,"error":"missing_scope"}""")
+        assertFalse(runtime.execute(slack).success)
+        host.responses+=ApiResponse(200,"""{"ok":true,"messages":[{"ts":"1.1","text":"hi","files":[{}]}],"has_more":true}""")
+        val result=Json.parseToJsonElement(runtime.execute(slack).data).jsonObject
+        assertTrue(result.getValue("hasMore").jsonPrimitive.boolean)
+        assertEquals(setOf("ts","text"),result.getValue("data").jsonArray.single().jsonObject.keys)
+    }
+
     @Test fun broaderGoogleGrantCoversItsReadScopeButNotOtherServices() {
         assertTrue(ConnectedService.DOCS.coveredBy(listOf("https://www.googleapis.com/auth/documents"),true))
         assertFalse(ConnectedService.GMAIL.coveredBy(listOf("https://www.googleapis.com/auth/documents"),false))

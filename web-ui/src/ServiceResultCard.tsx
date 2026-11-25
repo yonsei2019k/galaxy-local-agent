@@ -1,4 +1,10 @@
 const templates = {
+  government: { label: '민원 안내', fields: { agency: '담당 기관', documents: '준비 서류', fee: '수수료', next: '다음 단계' } },
+  performance: { label: '공연 일정', fields: { venue: '공연장', start: '시작일', end: '종료일', status: '공연 상태' } },
+  place: { label: '장소', fields: { address: '주소', category: '업종', source: '출처' } },
+  product: { label: '상품', fields: { seller: '판매처', option: '옵션', listedPrice: '표시 가격', shipping: '배송비', source: '출처' } },
+  issue: { label: '저장소 이슈', fields: { repository: '저장소', number: '번호', state: '상태', updated: '수정일' } },
+  channel: { label: '채널 메시지', fields: { workspace: '워크스페이스', channel: '채널', author: '작성자', date: '날짜' } },
   mail: { label: '메일', fields: { account: '계정', sender: '보낸 사람', recipient: '받는 사람', date: '날짜', attachments: '첨부' } },
   calendar: { label: '일정', fields: { calendar: '캘린더', start: '시작', end: '종료', location: '장소' } },
   contact: { label: '연락처', fields: { organization: '소속', phone: '전화번호', email: '이메일' } },

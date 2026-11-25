@@ -17,9 +17,12 @@ _cache = {}
 _lock = threading.Lock()
 
 
+WORKER_ONLY_ENV = frozenset({"NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET", "KOPIS_SERVICE_KEY"})
+
+
 def subscription_environment():
     return {key: value for key, value in os.environ.items()
-            if key not in {"OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY",
+            if key not in WORKER_ONLY_ENV and key not in {"OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY",
                            "ZIPHAP_DEVICE_BRIDGE_BOOTSTRAP"}}
 
 

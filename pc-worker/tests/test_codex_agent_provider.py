@@ -59,10 +59,13 @@ class ProviderTests(unittest.TestCase):
                       self.bootstrap|dict(parentRunId="other"),self.bootstrap|dict(agentCapability="short"),{}]:
             with self.assertRaisesRegex(p.ProviderError,"INVALID_AGENT_BOOTSTRAP"):self.launch(value)
     def test_secret_only_in_child_environment_and_only_scoped_mcp_is_configured(self):
-        with mock.patch.dict(p.os.environ,{"OPENAI_API_KEY":"fixture-api-key","CODEX_API_KEY":"fixture-api-key"}):
+        with mock.patch.dict(p.os.environ,{"OPENAI_API_KEY":"fixture-api-key","CODEX_API_KEY":"fixture-api-key",
+                                          "NAVER_CLIENT_ID":"fixture-id","NAVER_CLIENT_SECRET":"fixture-secret"}):
             args, environment = self.launch()
         self.assertNotIn(self.bootstrap["agentCapability"]," ".join(args))
         self.assertEqual(self.bootstrap,json.loads(environment[p.BOOTSTRAP_ENV]))
+        self.assertNotIn("NAVER_CLIENT_SECRET",environment)
+        self.assertNotIn("NAVER_CLIENT_ID",environment)
         self.assertNotIn("OPENAI_API_KEY",environment);self.assertNotIn("CODEX_API_KEY",environment)
         self.assertIn("--ignore-user-config",args);self.assertIn("--ephemeral",args)
         self.assertEqual("read-only",args[args.index("--sandbox")+1])

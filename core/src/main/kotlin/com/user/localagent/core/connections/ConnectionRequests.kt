@@ -20,7 +20,7 @@ data class ApiRequest(val url:String,val method:String="GET",val body:String?=nu
         require(extraHeaders.keys.all {it in setOf("Notion-Version","If-None-Match")})
         require(extraHeaders.values.none {it.any {c->c=='\r'||c=='\n'}})
     }
-    companion object {val hosts=setOf("www.googleapis.com","docs.googleapis.com","sheets.googleapis.com","slides.googleapis.com","gmail.googleapis.com","forms.googleapis.com","tasks.googleapis.com","people.googleapis.com","photospicker.googleapis.com","api.telegram.org","api.notion.com","api.todoist.com")}
+    companion object {val hosts=setOf("www.googleapis.com","docs.googleapis.com","sheets.googleapis.com","slides.googleapis.com","gmail.googleapis.com","forms.googleapis.com","tasks.googleapis.com","people.googleapis.com","photospicker.googleapis.com","api.telegram.org","api.notion.com","api.todoist.com","api.github.com","slack.com")}
 }
 
 data class ResponseProof(val verified:Boolean,val summary:String)
@@ -106,6 +106,17 @@ object ConnectionRequests {
             "search_youtube_videos"->read("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q="+encode(call.s("query")))
             "list_youtube_playlists"->read("https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=20")
             "list_telegram_bot_updates"->read("https://api.telegram.org/getUpdates") // token path is bound only by the host, never model arguments
+            "list_github_repository_issues"->{
+                val repository=call.s("repository")
+                require(repository.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) &&
+                    repository.substringAfter('/') !in setOf(".","..")){"저장소를 소유자/이름으로 입력해주세요."}
+                read("https://api.github.com/repos/$repository/issues?state=open&sort=updated&direction=desc&per_page=20")
+            }
+            "read_slack_channel_history"->{
+                val channel=call.s("channel")
+                require(channel.matches(Regex("[CG][A-Z0-9]{1,31}"))){"Slack 채널 ID를 확인해주세요."}
+                read("https://slack.com/api/conversations.history?channel=$channel&limit=15")
+            }
             "search_notion_pages"->read("https://api.notion.com/v1/search","POST",buildJsonObject {put("query",call.s("query"));put("page_size",20)}.toString(),mapOf("Notion-Version" to "2026-03-11"))
             "list_todoist_tasks"->read("https://api.todoist.com/api/v1/tasks?limit=20")
             else->error("연결 구현이 없습니다.")

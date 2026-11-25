@@ -16,6 +16,9 @@ class ConsumerApps(private val context:Context) {
         if (call.name == com.user.localagent.core.connections.CoupangReviewEvidence.OPEN_TOOL) {
             return Intent(context, CoupangReviewActivity::class.java)
         }
+        if(call.name=="open_korail_booking") {
+            context.packageManager.getLaunchIntentForPackage(target.app.packageName)?.let { return it }
+        }
         if(target.uri==null)return context.packageManager.getLaunchIntentForPackage(target.app.packageName)
             ?:error("${target.app.label} 앱이 설치되어 있는지 확인해주세요.")
         val uri=Uri.parse(target.uri)

@@ -70,3 +70,15 @@
 - [이러닝 완주 인계](handoff-elearning-2026-11-24.ko.md)
 - [대화와 기억 설계](conversation-workflow.ko.md)
 - [OpenClaw·Rust 전환 지도](openclaw-smartphone-rust-map.ko.md)
+
+### 플랫폼 연결 인계 (2026-11-25)
+
+| 업무 | 집합에서 준비된 경로 | 남은 연결 및 검증 |
+| --- | --- | --- |
+| 국내 장소·숙박·상품 검색 | 휴대폰 검색 도구를 통해 페어링된 PC의 네이버 지역·쇼핑 공식 API를 선택한다. 검색 키가 없으면 공개 검색을 사용한다. | 운영 키로 결과 확인. 숙소의 날짜·인원·현장 추가비·취소 조건 및 최종 결제처를 다시 조회해야 예약 준비를 확인할 수 있다. |
+| 쿠팡·네이버 예약·여기어때·NOL·캐치테이블·테이블링 | 쿠팡 앱·상품 상세와 공식 웹·앱에서 확인하는 경로. 숙소 비교 카드는 조회 시점의 조건과 금액을 예약 준비 초안에 전달한다. | 판매자·가맹점과 소비자 예약은 권한이 다르다. 플랫폼별 소비자 주문 권한·파트너 자격을 확인하고, 웹을 사용할 경우 결제 전 화면·영수증을 별도로 검증한다. [쿠팡 개발자](https://developers.coupang.com/ko/getting-started/coupang-open-api) · [네이버 스마트플레이스](https://new.smartplace.naver.com/notices/1108) |
+| GitHub·Slack·Notion | GitHub 지정 저장소 이슈, Slack 지정 채널 이력, Notion 페이지 검색은 서비스별 계정 API로 읽는다. | 실제 계정에서 연결·권한 철회와 대상 범위를 확인한다. 공급자의 원격 MCP OAuth는 별도 경로다. [GitHub MCP](https://docs.github.com/en/copilot/concepts/customizations/mcp) · [Slack MCP](https://docs.slack.dev/ai/slack-mcp-server/connect-to-harnesses/) · [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp) |
+| Google·Telegram·Todoist | 기존 서비스별 범위와 과거 실기 결과는 [앱 연결 기록](app-connections.ko.md)에 있다. | 이번 신규 변경과의 복합 작업을 일괄 검증한다. |
+| Outlook | Microsoft Graph는 계정 위임으로 메시지 목록을 제공한다. | 집합의 Microsoft 앱 등록 및 로그인·토큰 갱신·철회 경로 확인. [Graph 메일 조회](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) |
+| 정부24·홈택스·위택스·자동차검사·이파인·형사사법포털 | 공식 기관 주소 진입과 정부24 4종의 공개 안내 확인. | 본인 자료 조회·발급·납부·영수증은 각각 인증과 실서비스 검증이 필요하다. [디지털서비스 개방 절차](https://openservice.go.kr/serviceProc) |
+| 철도·항공·렌터카·공연·생활예약 | KOPIS 공연 목록 조회 경로는 작업기 서비스키를 사용한다. 코레일 예매와 코레일·SRT 비회원 영수증은 공식 앱·웹 진입을 제공한다. | 시간표와 잔여 좌석, 예약 접수와 실제 발권을 분리한다. 교통 API 운영키·렌터카 제휴 자격·공연 예매처 권한을 확인한다. [TAGO 국내항공](https://www.data.go.kr/data/15098526/openapi.do) · [서울 공공예약 정보](https://data.seoul.go.kr/dataList/OA-2271/A/1/datasetView.do) |

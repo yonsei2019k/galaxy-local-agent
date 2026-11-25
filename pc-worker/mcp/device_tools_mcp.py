@@ -26,7 +26,8 @@ PROTOCOL_VERSION = "2024-11-05"
 MAX_MESSAGE_BYTES = 128 * 1024
 MAX_ARGUMENT_BYTES = 64 * 1024
 MAX_SCHEMA_BYTES = 48 * 1024
-MAX_TOOLS = 128
+MAX_PHONE_TOOLS = 128
+WORKSPACE_TOOLS = frozenset(("pc_inspect_workspace", "pc_read_file"))
 MAX_DEPTH = 24
 MAX_WAIT_SECONDS = 120
 POLL_SECONDS = 0.25
@@ -462,7 +463,7 @@ class Gateway:
         if self.expires_at is not None and expires != self.expires_at:
             raise BridgeError("SESSION_CHANGED")
         tools = snapshot.get("tools")
-        if not isinstance(tools, list) or not 1 <= len(tools) <= MAX_TOOLS:
+        if not isinstance(tools, list) or not 1 <= len(tools) <= MAX_PHONE_TOOLS + len(WORKSPACE_TOOLS):
             raise BridgeError("INVALID_CATALOG")
         catalog = {}
         for tool in tools:
@@ -478,6 +479,8 @@ class Gateway:
             if not closed_object_schema(schema):
                 raise BridgeError("INVALID_CATALOG")
             catalog[tool["name"]] = tool
+        if len(catalog.keys() - WORKSPACE_TOOLS) > MAX_PHONE_TOOLS:
+            raise BridgeError("INVALID_CATALOG")
         digest = hashlib.sha256(json_bytes(tools)).hexdigest()
         if self.catalog_digest is not None and digest != self.catalog_digest:
             raise BridgeError("SESSION_CHANGED")

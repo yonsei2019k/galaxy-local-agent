@@ -101,7 +101,11 @@ class ConnectionsActivity:Activity() {
         if(consentLost)output.text="이전 Google 권한 요청이 종료됐습니다. 연결할 서비스를 확인한 뒤 다시 연결해주세요."
         button("닫기") {finish()}
         servicePicker.onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long){refresh()}
+            override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long){
+                token.text.clear()
+                chat.text.clear()
+                refresh()
+            }
             override fun onNothingSelected(parent:AdapterView<*>?)=Unit
         }
         refresh()
@@ -113,6 +117,11 @@ class ConnectionsActivity:Activity() {
         connectRead.visibility=if(service.google)View.VISIBLE else View.GONE
         connectWrite.visibility=if(ConnectionCatalog.tools.values.any {it.service==service&&it.writes})View.VISIBLE else View.GONE
         token.visibility=if(service.google)View.GONE else View.VISIBLE
+        input.hint=when(service){
+            ConnectedService.GITHUB -> "저장소 소유자/저장소 이름"
+            ConnectedService.SLACK -> "Slack 채널 ID"
+            else -> "검색어 또는 문서 ID"
+        }
         chat.visibility=if(service==ConnectedService.TELEGRAM)View.VISIBLE else View.GONE
     }
     private suspend fun advanceGoogleBatch(){
@@ -183,6 +192,8 @@ class ConnectionsActivity:Activity() {
             ConnectedService.YOUTUBE->{args["query"]=input;if(input.isBlank())"list_youtube_playlists"else"search_youtube_videos"}
             ConnectedService.TELEGRAM->"list_telegram_bot_updates"
             ConnectedService.NOTION->{args["query"]=input;"search_notion_pages"}
+            ConnectedService.GITHUB->{args["repository"]=input;"list_github_repository_issues"}
+            ConnectedService.SLACK->{args["channel"]=input;"read_slack_channel_history"}
             ConnectedService.TODOIST->"list_todoist_tasks"
             ConnectedService.PHOTOS->error("사진 선택 버튼을 사용해주세요.")
         }

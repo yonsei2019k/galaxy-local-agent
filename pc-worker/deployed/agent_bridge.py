@@ -46,6 +46,7 @@ MAX_REJECTED_CALLS = 6
 # Rejections caused by the model's call content (never values) count toward the pre-execution cap.
 _COUNTED_REJECTIONS = frozenset({"TOOL_NOT_OFFERED", "PRIVATE_IMAGE_WORKROOM", "PLAN_TOOL_NOT_SELECTED",
                                  "ARGUMENT_OBJECT", "BROWSER_RECOVERY_READ_ONLY", "RECALL_RECOVERY_READ_ONLY", "WORKSPACE_PROFILE"})
+MAX_PHONE_TOOLS = 128
 MAX_TTL_MS = 900_000
 PHONE_LEASE_MS = 30_000
 MAX_ARGUMENT_BYTES = 32_768
@@ -479,7 +480,7 @@ class AgentBridge:
         _require(profile is None or type(profile) is str and
                  (profile == "phone-only" or profile in self._profiles), "WORKSPACE_PROFILE")
         offered = body["phoneTools"]
-        _require(type(offered) is list and len(offered) <= 128, "TOOL_CATALOG_BOUND")
+        _require(type(offered) is list and len(offered) <= MAX_PHONE_TOOLS, "TOOL_CATALOG_BOUND")
         catalog = {}
         for spec in offered:
             _shape(spec, ("name", "description", "inputSchema"))

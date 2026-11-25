@@ -22,9 +22,11 @@ class GoalRegistryIntegrationTest {
         .getValue("parameters").jsonObject.getValue("properties").jsonObject
 
     @Test fun allSevenGoalToolsAreRegisteredExactlyOnceWithTheExistingTools(){
-        assertEquals(123,ToolRegistry.definitions.size)
-        assertEquals(7,GoalToolCatalog.names.size)
-        assertTrue(ToolRegistry.definitions.keys.containsAll(GoalToolCatalog.names))
+        val expected=listOf("get_goal","create_goal","update_goal","start_goal","pause_goal","resume_goal","clear_goal")
+        assertEquals(expected.sorted(),GoalToolCatalog.definitions.map { it.name }.sorted())
+        // Registry construction rejects duplicates across all catalogs. Check the callable schema as well.
+        val exported=Json.parseToJsonElement(ToolRegistry.schemaJson(expected)).jsonArray
+        assertEquals(expected.sorted(),exported.map { it.jsonObject.getValue("name").jsonPrimitive.content }.sorted())
         assertEquals(Risk.HIGH,ToolRegistry.definitions.getValue(GoalToolCatalog.CLEAR).risk)
         assertFalse(CapabilityPolicy.canPreapprove(GoalToolCatalog.CLEAR))
     }

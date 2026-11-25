@@ -126,6 +126,19 @@ class GatewayTests(unittest.TestCase):
         tools[0]["inputSchema"]["required"] = []
         self.assertEqual(["id"], gateway.catalog["read_note"]["inputSchema"]["required"])
 
+    def test_full_phone_catalog_and_only_fixed_workspace_slots(self):
+        phone = [dict(catalog()[0], name=f"phone_{n}") for n in range(128)]
+        pc = [dict(catalog()[1], name=name) for name in sorted(mcp.WORKSPACE_TOOLS)]
+        for extra, succeeds in ((pc, True), ([dict(pc[0], name="extra_phone")], False),
+                                ([dict(pc[0], name="extra_phone"), pc[1]], False)):
+            transport, clock = FakeTransport(), Clock()
+            transport.status.update(tools=phone + extra, requiresPlan=True, plan=None)
+            gateway = mcp.Gateway(binding(), transport, clock.now, clock.now, clock.wait, lambda: CALL)
+            if succeeds:
+                self.assertEqual(131, len(gateway.list_tools()["tools"]))  # Includes virtual plan_task.
+            else:
+                self.assert_code("INVALID_CATALOG", gateway.list_tools)
+
     def test_phone_call_transmits_no_owner_or_authority_in_model_arguments(self):
         gateway, transport, _ = fixture()
         result = gateway.call_tool("read_note", {"id": "qa-note"})

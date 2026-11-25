@@ -157,6 +157,17 @@ pub struct RunRequest {
     pub timeout_ms: u64,
 }
 
+// A full phone catalog can be accompanied by the broker's two fixed workspace tools.
+// Never spend those reserved slots on extra phone tools or arbitrary PC actions.
+fn catalog_count_fits(tools: &[ToolCapability]) -> bool {
+    const MAX_PHONE_TOOLS: usize = 128;
+    const WORKSPACE: [&str; 2] = ["pc_inspect_workspace", "pc_read_file"];
+    tools.len() <= MAX_PHONE_TOOLS || (tools.len() <= MAX_PHONE_TOOLS + WORKSPACE.len()
+        && tools.len() - WORKSPACE.iter().filter(|name| {
+            tools.iter().any(|tool| tool.location == ToolLocation::Pc && tool.name.as_str() == **name)
+        }).count() <= MAX_PHONE_TOOLS)
+}
+
 impl RunRequest {
     fn validate(&self) -> Result<()> {
         if !self.external_allowed {
@@ -184,7 +195,7 @@ impl RunRequest {
             || self.owner_request.len() > 48000
             || self.timeout_ms == 0
             || self.timeout_ms > 600000
-            || self.tools.len() > 128
+            || !catalog_count_fits(&self.tools)
         {
             return Err(error("RUN_BOUND"));
         }
@@ -1538,6 +1549,25 @@ pub fn strict_json(data: &[u8]) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_extra_slots_are_only_for_the_bound_workspace() {
+        let tool = |name: String, location| ToolCapability {
+            name,
+            description: "fixture".into(),
+            input_schema: json!({"type":"object","additionalProperties":false}),
+            location,
+        };
+        let mut tools: Vec<_> = (0..128).map(|n| tool(format!("phone_{n}"), ToolLocation::Phone)).collect();
+        assert!(catalog_count_fits(&tools));
+        tools.push(tool("pc_read_file".into(), ToolLocation::Phone));
+        assert!(!catalog_count_fits(&tools));
+        tools.last_mut().unwrap().location = ToolLocation::Pc;
+        tools.push(tool("pc_inspect_workspace".into(), ToolLocation::Pc));
+        assert!(catalog_count_fits(&tools));
+        tools.push(tool("extra".into(), ToolLocation::Pc));
+        assert!(!catalog_count_fits(&tools));
+    }
 
     #[test]
     fn clock_rollback_cannot_extend_phone_authority() {

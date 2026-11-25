@@ -123,9 +123,30 @@ class ConnectionRuntime(private val host:ConnectionHost) {
     private fun readOutcome(call:ToolCall,body:String,cached:Boolean):ConnectionOutcome {
         val parsed=runCatching {Json.parseToJsonElement(body)}.getOrNull()
         val nextPage=if(parsed is JsonObject)listOf("nextPageToken","next_cursor","nextCursor","has_more").any {parsed[it]?.let {v->v !is JsonNull && v.toString()!="false" && v.toString()!="\"\""}==true}else false
-        val display=if(call.name=="read_gmail_message"&&parsed is JsonObject)gmailPreview(parsed).toString()else body
+        val display=when(call.name){
+            "read_gmail_message" -> if(parsed is JsonObject)gmailPreview(parsed).toString() else body
+            "list_github_repository_issues" -> {
+                val issues=parsed as? JsonArray ?: return fail("github_response_invalid")
+                val rows=issues.map { it as? JsonObject ?: return fail("github_response_invalid") }
+                    .filterNot { "pull_request" in it }
+                if(rows.any { (it["number"] as? JsonPrimitive)?.longOrNull == null ||
+                        (it["title"] as? JsonPrimitive)?.isString != true })return fail("github_response_invalid")
+                JsonArray(rows.map { issue -> JsonObject(issue.filterKeys { it in setOf("number","title","state","html_url","updated_at") }) }).toString()
+            }
+            "read_slack_channel_history" -> {
+                val channel=parsed as? JsonObject ?: return fail("slack_response_invalid")
+                if(channel["ok"]?.jsonPrimitive?.booleanOrNull!=true)return fail("slack_request_rejected")
+                val messages=channel["messages"] as? JsonArray ?: return fail("slack_response_invalid")
+                JsonArray(messages.map { message ->
+                    val entry=message as? JsonObject ?: return fail("slack_response_invalid")
+                    if((entry["ts"] as? JsonPrimitive)?.isString!=true)return fail("slack_response_invalid")
+                    JsonObject(entry.filterKeys { it in setOf("ts","user","bot_id","text","thread_ts") })
+                }).toString()
+            }
+            else -> body
+        }
         val limited=display.length>12000
-        val report=buildJsonObject {put("service",ConnectionCatalog.tools.getValue(call.name).service.id);put("untrustedSourceData",true);put("completeDataset",false);put("cached",cached);put("sourceRevalidated",true);put("observedAt",host.now());put("hasMore",nextPage);put("truncated",limited)
+        val report=buildJsonObject {put("service",ConnectionCatalog.tools.getValue(call.name).service.id);put("untrustedSourceData",true);put("completeDataset",false);put("cached",cached);put("sourceRevalidated",true);put("observedAt",host.now());if(call.name!="list_github_repository_issues")put("hasMore",nextPage);put("truncated",limited)
             if(!limited && call.name!="read_drive_text_file" && runCatching {Json.parseToJsonElement(display)}.isSuccess)put("data",Json.parseToJsonElement(display))else put("preview",clip(display,12000))}
         return ConnectionOutcome(true,VerificationState.VERIFIED,report.toString(),"read_verified")
     }

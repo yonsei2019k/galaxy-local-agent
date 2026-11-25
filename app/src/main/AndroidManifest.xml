@@ -88,6 +88,8 @@
         </activity>
     </application>
     <queries>
+        <package android:name="com.korail.talk" />
+        <package android:name="kr.co.srail.newapp" />
         <package android:name="com.skt.tmap.ku" />
         <package android:name="com.netflix.mediaclient" />
         <package android:name="com.coupang.mobile" />

@@ -28,7 +28,7 @@ class ExternalAgentCapture(
         require(expiresAfterMs in 1000..ExternalAgentContract.MAX_TTL_MS)
         require(pcWorkspaceProfile.matches(Regex("[a-z0-9_-]{1,64}")))
         if (!settingsAssistant) {
-            require(this.phoneTools.isNotEmpty()&&this.phoneTools.size<=128&&this.phoneTools.all { it in ToolRegistry.definitions })
+            require(this.phoneTools.isNotEmpty()&&this.phoneTools.size<=ExternalAgentContract.MAX_PHONE_TOOLS&&this.phoneTools.all { it in ToolRegistry.definitions })
             if(requirePlan)require(this.phoneTools.all { it in ExternalAgentContract.NORMAL_PHONE_TOOLS }){"BRIDGE_UNQUALIFIED_NORMAL_TOOL"}
         }
     }
@@ -121,6 +121,7 @@ class ExternalAgentPlan(
 }
 
 object ExternalAgentContract {
+    const val MAX_PHONE_TOOLS=128
     const val MAX_TTL_MS=900_000L
     const val MAX_WIRE_BYTES=262_144
     const val MAX_RESULT_BYTES=131_072
@@ -128,7 +129,7 @@ object ExternalAgentContract {
      * Phone tools a cloud model may propose: the same registered set the local model is offered
      * (the coordinator still removes project-disabled and work-mode-excluded tools). Each call still runs
      * through runTool: project/mode policy, recipient choice, owner approval and the effect guard.
-     * PREPARED hand-offs pause the run. The PC broker accepts at most 128 tools per session.
+     * PREPARED hand-offs pause the run. The PC broker accepts up to 128 phone tools plus the workspace profile's fixed PC tools.
      */
     /** The on-device sub-agent reuses the local engine; cloud runs use their own provider sub-agents instead. */
     val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys-com.user.localagent.core.LocalSubagentToolCatalog.names

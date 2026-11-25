@@ -31,6 +31,24 @@ class GovernmentServiceCatalogTest {
         assertTrue(PreparedHandoff.opensScreenOnly(GovernmentServiceCatalog.OPEN))
     }
 
+    @Test fun publicGuideEvidenceBelongsToTheRequestedCertificate() {
+        val services = listOf(
+            GovernmentService.LOCAL_TAX_CLEARANCE to "지방세 납세증명서 발급",
+            GovernmentService.LOCAL_TAX_RECEIPT to "지방세 납부확인서 발급",
+            GovernmentService.VEHICLE_REGISTER to "자동차 등록원부등본(초본) 발급(열람)",
+        )
+        for ((service, title) in services) {
+            val text = "$title 신청방법 인터넷 수수료 안내"
+            assertEquals(listOf("신청방법", "수수료"), GovernmentServiceCatalog.guideObservation(service, service.url, title, text))
+            val other = services.first { it.first != service }
+            assertNull(GovernmentServiceCatalog.guideObservation(service, other.first.url, title, text))
+            assertNull(GovernmentServiceCatalog.guideObservation(service, service.url, other.second, text))
+            assertNull(GovernmentServiceCatalog.guideObservation(service, service.url, title, "로그인"))
+        }
+        assertNull(GovernmentServiceCatalog.guideObservation(GovernmentService.VEHICLE, GovernmentService.VEHICLE.url,
+            "자동차등록원부 발급", "자동차등록원부 신청방법 수수료"))
+    }
+
     @Test fun onlyARegisteredServiceCanBecomeAPhoneDestination() {
         val request = call(GovernmentServiceCatalog.OPEN, "traffic_fine")
         assertEquals("www.efine.go.kr", URI(GovernmentServiceCatalog.target(request).url).host)

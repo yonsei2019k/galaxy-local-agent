@@ -1125,4 +1125,11 @@ it('loads a selected photo using the original row after price sorting', () => {
   })) })
   expect(row.querySelector('figcaption')?.textContent).toBe('숙소 대표 사진')
   expect(row.querySelector<HTMLImageElement>('.stay-thumbnail')?.getAttribute('src')).toBe('data:image/jpeg;base64,/9j/')
+  const prepare = [...row.querySelectorAll('button')].find(button => button.textContent === '예약 준비')!
+  act(() => { prepare.click() })
+  const draft = requests().reverse().find(entry => entry.action === 'draft')?.payload.text
+  expect(draft).toContain('총액 90,000원')
+  expect(draft).toContain(stays[1].url)
+  expect(draft).not.toContain(stays[0].url)
+  expect(requests().some(entry => entry.action === 'send')).toBe(false)
 })

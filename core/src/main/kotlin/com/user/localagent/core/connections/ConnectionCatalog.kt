@@ -18,9 +18,10 @@ enum class ConnectedService(val id:String,val label:String,val readScopes:List<S
     PHOTOS("photos","Google Photos",listOf("photospicker.mediaitems.readonly")),
     TELEGRAM("telegram","Telegram Bot",emptyList()),
     NOTION("notion","Notion",emptyList()),
-    TODOIST("todoist","Todoist",emptyList());
+    TODOIST("todoist","Todoist",emptyList()),
+    GITHUB("github","GitHub",emptyList()), SLACK("slack","Slack",emptyList());
 
-    val google get()=this !in setOf(TELEGRAM,NOTION,TODOIST)
+    val google get()=readScopes.isNotEmpty()
     fun scopes(write:Boolean)=((if(write)readScopes+writeScopes else readScopes).distinct()).map {"https://www.googleapis.com/auth/$it"}
     fun coveredBy(granted:Collection<String>,write:Boolean)=scopes(write).all {required->
         required in granted || (required.endsWith(".readonly") && required.removeSuffix(".readonly") in granted) ||
@@ -63,6 +64,8 @@ object ConnectionCatalog {
         tool("search_youtube_videos",ConnectedService.YOUTUBE,"Search YouTube video metadata. Does not download videos, audio or arbitrary captions.","query" to s(max=300)),
         tool("list_youtube_playlists",ConnectedService.YOUTUBE,"List a bounded page of the authorized account's user-created YouTube playlists, not complete viewing history."),
         tool("list_telegram_bot_updates",ConnectedService.TELEGRAM,"Read updates visible to the configured bot and its allowed chat. Not the owner's complete Telegram account history."),
+        tool("list_github_repository_issues",ConnectedService.GITHUB,"List one page of open issues in the specified GitHub owner/repository. Pull requests are excluded. Read-only.","repository" to s(max=140)),
+        tool("read_slack_channel_history",ConnectedService.SLACK,"Read the newest 15 messages in one specified Slack channel accessible to the connected token.","channel" to s(max=32)),
         tool("search_notion_pages",ConnectedService.NOTION,"Search pages shared with the configured Notion connection.","query" to s(max=200)),
         tool("list_todoist_tasks",ConnectedService.TODOIST,"Read a bounded page of active tasks accessible to the configured Todoist connection.")
     ).associateBy {it.definition.name}

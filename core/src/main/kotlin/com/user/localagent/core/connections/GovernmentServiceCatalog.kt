@@ -12,10 +12,16 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** Fixed phone entry points. Selecting one does not authorize reading or changing an account. */
-enum class GovernmentService(val id: String, val label: String, val url: String, val nextStep: String) {
+enum class GovernmentService(val id: String, val label: String, val url: String, val nextStep: String, val guideSubject: String? = null) {
     CIVIL("gov24", "정부24", "https://www.gov.kr/", "민원명을 선택하고 신청·발급 요건을 확인해 주세요."),
     RESIDENCY("resident_certificate", "정부24 주민등록표 등·초본",
-        "https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=13100000015", "신청할 서류와 공개할 항목을 선택해 주세요."),
+        "https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=13100000015", "신청할 서류와 공개할 항목을 선택해 주세요.", "주민등록표"),
+    LOCAL_TAX_CLEARANCE("local_tax_clearance", "정부24 지방세 납세증명서",
+        "https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=13100000056", "지방세 납세증명서의 신청 자격과 방법을 확인해 주세요.", "지방세납세증명"),
+    LOCAL_TAX_RECEIPT("local_tax_receipt", "정부24 지방세 납부확인서",
+        "https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=13110000017", "확인할 지방세 납부 건과 신청 방법을 확인해 주세요.", "지방세납부확인"),
+    VEHICLE_REGISTER("vehicle_register", "정부24 자동차 등록원부",
+        "https://www.gov.kr/mw/AA020InfoCappView.do?CappBizCD=15000000334", "필요한 자동차 등록원부의 종류와 열람·발급 방법을 확인해 주세요.", "자동차등록원부"),
     FAMILY("family_certificate", "대법원 전자가족관계등록시스템",
         "https://efamily.scourt.go.kr/", "발급할 가족관계 증명서의 종류와 발급 대상을 확인해 주세요."),
     NATIONAL_TAX("hometax", "국세청 홈택스", "https://www.hometax.go.kr/", "납부·고지·환급에서 해당 국세 고지 건을 확인해 주세요."),
@@ -36,6 +42,7 @@ object GovernmentServiceCatalog {
 
     private val choices = """
         Select one service ID from the current request. gov24 (정부24 or old 민원24), resident_certificate (주민등록 등본·초본),
+        local_tax_clearance (지방세 납세증명), local_tax_receipt (지방세 납부확인), vehicle_register (자동차등록원부),
         family_certificate (법원 가족관계증명), hometax (국세, 홈택스·손택스), wetax (지방세·세외수입),
         seoul_etax (서울시 고지), vehicle_inspection (자동차검사), traffic_fine (경찰 단속·교통민원24·이파인),
         criminal_fine (형사 벌과금), giro (only when the official notice directs to 인터넷지로).
@@ -45,7 +52,7 @@ object GovernmentServiceCatalog {
     private val arguments = mapOf("service" to Argument("string", maxLength = 40, description = choices))
     val definitions = listOf(
         ToolDefinition(GET, Risk.LOW, arguments + ("inspect" to Argument("boolean", required = false)),
-            "Return the fixed official Korean service link and next step. Set inspect=true to inspect the public residency certificate information page on the phone (resident_certificate only). " +
+            "Return the fixed official Korean service link and next step. Set inspect=true to read the official public guide on the phone for resident_certificate, local_tax_clearance, local_tax_receipt or vehicle_register. " +
             "This does not read private records or verify submission or payment. " + choices, timeoutMillis = 45_000),
         ToolDefinition(OPEN, Risk.LOW, arguments,
             "When the owner asks to open or continue on the phone, hand off the fixed official service page. " +
@@ -66,14 +73,16 @@ object GovernmentServiceCatalog {
     fun inspectRequested(call: ToolCall): Boolean =
         call.name == GET && call.arguments["inspect"] == JsonPrimitive(true)
 
-    fun residencyObservation(finalUrl: String, title: String, text: String): List<String>? {
-        val entry = URI(GovernmentService.RESIDENCY.url)
+    fun guideObservation(service: GovernmentService, finalUrl: String, title: String, text: String): List<String>? {
+        val subject = service.guideSubject ?: return null
+        val entry = URI(service.url)
         val observed = runCatching { URI(finalUrl) }.getOrNull() ?: return null
         val matchingCodes = observed.rawQuery.orEmpty().split('&').filter { it.substringBefore('=') == "CappBizCD" }
         if (!observed.scheme.equals("https", true) || !observed.host.equals(entry.host, true) ||
             observed.rawUserInfo != null || observed.port !in setOf(-1, 443) ||
             observed.rawPath != entry.rawPath || matchingCodes != listOf(entry.rawQuery)) return null
-        if ("주민등록표" !in title || "발급" !in title || "주민등록표" !in text) return null
+        if (subject !in title.filterNot(Char::isWhitespace) || "발급" !in title ||
+            subject !in text.filterNot(Char::isWhitespace)) return null
         val confirmedTopics = listOf("신청방법", "신청자격", "발급서류", "구비서류", "수수료").filter { it in text }
         return confirmedTopics.takeIf { "신청방법" in it && "수수료" in it }
     }

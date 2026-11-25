@@ -95,7 +95,8 @@ class ClaudeProviderTests(unittest.TestCase):
             seen["static"] = static
             seen["instructions"] = (static / "instructions.txt").read_text(encoding="utf-8")
             return Process(self.good())
-        env = {"ANTHROPIC_API_KEY": "k", "ANTHROPIC_AUTH_TOKEN": "t", "ANTHROPIC_BASE_URL": "u", "OPENAI_API_KEY": "o"}
+        env = {"ANTHROPIC_API_KEY": "k", "ANTHROPIC_AUTH_TOKEN": "t", "ANTHROPIC_BASE_URL": "u", "OPENAI_API_KEY": "o",
+               "NAVER_CLIENT_ID": "fixture-id", "NAVER_CLIENT_SECRET": "fixture-secret"}
         with mock.patch.dict(os.environ, env), mock.patch.object(p.subprocess, "Popen", side_effect=popen):
             report = p.run(self.config, self.bootstrap, "synthetic", external_allowed=True)
         args = seen["args"]

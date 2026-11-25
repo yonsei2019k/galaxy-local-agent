@@ -24,6 +24,8 @@ from overlay_endpoint import overlay_endpoint
 from remote_test import RemoteTestQueue,RemoteTestError
 REMOTE_TESTS=RemoteTestQueue()
 from browser_agent import BrowserAgent,BrowserError
+import naver_search
+import kopis_search
 BROWSER=BrowserAgent()
 def overlay():
  return overlay_endpoint(CONFIG['port'])
@@ -141,9 +143,15 @@ class Handler(BaseHTTPRequestHandler):
     self.reply({'error':'COLLAB_PAIR_ONLY'},403);return
    status,value=COLLAB.handle(self.command,path,query,self.body)
    self.reply(value,status);return
+  if path in ('/v1/public-search/naver','/v1/public-search/kopis'):
+   if self.command!='POST' or self.headers.get_all('X-ZipHap-Agent-Capability',[]) or self.headers.get_all('X-ZipHap-Phone-Capability',[]):
+    self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
+   search=kopis_search.search if path.endswith('/kopis') else naver_search.search
+   status,value=search(self.body(4096))
+   self.reply(value,status);return
   if path=='/v1/health' and self.headers.get_all('X-ZipHap-Agent-Capability',[]):
    self.reply({'error':'HEALTH_HOST_ONLY'},403);return
-  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'serverId':CONFIG['server_id'],'deviceToolBridge':{'version':1,'publicReadFailureRecovery':1,'restartPolicy':'RAM_ONLY_RESTART_REVOKES','bootstrapLoopbackOnly':True}|AGENT_PROVIDER.health()}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
+  if self.command=='GET' and path=='/v1/health':self.reply(MEDIA.health(ENGINE.health())|{'naverPublicSearch':naver_search.configured(),'kopisPublicSearch':kopis_search.configured(),'serverId':CONFIG['server_id'],'deviceToolBridge':{'version':1,'publicReadFailureRecovery':1,'restartPolicy':'RAM_ONLY_RESTART_REVOKES','bootstrapLoopbackOnly':True}|AGENT_PROVIDER.health()}|overlay()|resident(self.headers.get('X-ZipHap-Compute-Owner')));return
   owners=self.headers.get_all('X-ZipHap-Compute-Owner',[])
   if len(owners)>1:raise ValueError('DUPLICATE_OWNER')
   owner=owner_value(owners[0] if owners else None)
