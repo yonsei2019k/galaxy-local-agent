@@ -14,7 +14,7 @@ env:
   ZIPHAP_X_CLIENT_ID: ${{ vars.ZIPHAP_X_CLIENT_ID }}
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/codex/internal-release' }}
 jobs:
   build:
     runs-on: ubuntu-latest
