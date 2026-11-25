@@ -16,6 +16,16 @@ class BrowserLoginRoutesTest {
         assertFalse(BrowserLoginRoutes.isPublicSearch("https://someone@map.naver.com/p/search/camping"))
     }
 
+    @Test fun directLoginReadbackOnlyAllowsOfficialNaverOrigins() {
+        assertTrue(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("https://nid.naver.com")))
+        assertTrue(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("https://www.naver.com")))
+        assertTrue(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("https://m.naver.com")))
+        assertFalse(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("https://booking.naver.com")))
+        assertFalse(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("https://www.naver.com.example.org")))
+        assertFalse(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("http://www.naver.com")))
+        assertFalse(BrowserLoginRoutes.isDirectNaverSessionOrigin(URI("https://www.naver.com:9443")))
+    }
+
     @Test fun onlyExactNaverServiceCanBindObservedNaverLogin() {
         val booking = URI("https://booking.naver.com")
         val login = "https://nid.naver.com/nidlogin.login?url=opaque"

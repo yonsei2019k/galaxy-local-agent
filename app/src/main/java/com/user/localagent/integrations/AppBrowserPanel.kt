@@ -262,10 +262,14 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
         while(!returned){
             if(!checking){
                 naverGuide=agent.observeNaverLoginGuide(request.card.id)
-                if(naverGuide!=null)sawLoginForm=true
+                if(naverGuide!=null){
+                    readbacks=0
+                    kotlinx.coroutines.delay(500)
+                    continue
+                }
                 when(agent.websiteLoginFormPresent(request.card.id)){
                     true->{sawLoginForm=true;readbacks=0}
-                    false->if(sawLoginForm&&++readbacks>=2){
+                    false->if((sawLoginForm||request.card.host=="nid.naver.com")&&++readbacks>=2){
                         checking=true
                         val confirmed=try{agent.finishWebsiteLogin(request.card.id)}finally{checking=false}
                         if(confirmed)return@LaunchedEffect
@@ -376,6 +380,8 @@ internal fun InlineNolConnection(
                 if(!agent.openNolVaultForm(request.card.id))
                     externalMessage="이 페이지는 보안 입력칸에 연결할 수 없어요. 아래 NOL 화면에서 로그인해 주세요."
             }}){Text("이메일 로그인 · 금고 사용") }
+            if(request.vaultSaveFailed)Text("이번 비밀번호는 금고에 저장되지 않았어요. 공식 화면에서 인증을 계속할 수 있어요.",
+                style=MaterialTheme.typography.bodySmall)
             externalMessage?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
             if(resetting||navigation.loading)LinearProgressIndicator(Modifier.fillMaxWidth())
             Box(Modifier.weight(1f).fillMaxWidth()){

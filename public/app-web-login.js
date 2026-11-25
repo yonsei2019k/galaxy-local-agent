@@ -31,6 +31,18 @@ function (request) {
     return {form, account: identifiers[0], password, submit, action: action.href, page: location.href};
   }
 
+  if (request.action === 'authenticated') {
+    if (location.origin !== request.origin || doc.readyState !== 'complete') return false;
+    const fields = [...doc.querySelectorAll('input')].filter(visible);
+    if (fields.some(field => field.type === 'password' ||
+        /password|one-time-code|otp|인증\s*(?:번호|코드)|verification\s*code/i.test(
+          [field.name, field.id, field.autocomplete, field.placeholder, field.getAttribute('aria-label'),
+            ...Array.from(field.labels || [], label => label.innerText)].join(' ')))) return false;
+    return [...doc.querySelectorAll('a[href],button,[role=button]')].some(node =>
+      visible(node) && /^(?:로그아웃|sign out|log out)$/i.test(
+        (node.getAttribute('aria-label') || node.innerText || '').trim()));
+  }
+
   if (request.action === 'capture') {
     const bound = candidate();
     if (!bound) return false;

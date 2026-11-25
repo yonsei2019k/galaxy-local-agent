@@ -41,8 +41,8 @@ function (request) {
     return false;
   };
 
-  const protectedKind = () => {
-    const controls = ownerDocument.querySelectorAll('input:not([type=hidden]),select,textarea');
+  const protectedKind = (doc = ownerDocument) => {
+    const controls = doc.querySelectorAll('input:not([type=hidden]),select,textarea');
     if (controls.length > maxScanned) return 'unreadable';
     let login = false;
     for (const field of controls) {
@@ -54,7 +54,8 @@ function (request) {
           containsPan(String(field.value || ''))) return 'payment';
       if (field.type === 'password' || /(?:^|\s)(?:current-password|new-password|one-time-code)(?:\s|$)/i.test(field.autocomplete || '')) login = true;
     }
-    if (containsPan(location.href) || containsPan(ownerDocument.body?.innerText || '')) return 'payment';
+    const url = doc === ownerDocument ? location.href : doc.URL || '';
+    if (containsPan(url) || containsPan(doc.body?.innerText || '')) return 'payment';
     return login ? 'login' : null;
   };
 
@@ -152,7 +153,20 @@ function (request) {
   const sameControl = (a, b) => a.node === b.node && a.form === b.form && a.binding === b.binding &&
     a.options.length === b.options.length && a.options.every((node, i) => node === b.options[i]);
 
-  if (request.action === 'securityCheck') return {safe: protectedKind() === null};
+  const safeForExport = () => {
+    const documents = [ownerDocument];
+    for (const doc of documents) {
+      if (protectedKind(doc) !== null) return false;
+      for (const frame of doc.querySelectorAll('iframe,frame')) {
+        const child = frame.contentDocument;
+        if (documents.length >= 32 || !child?.defaultView || child.readyState !== 'complete') return false;
+        documents.push(child);
+      }
+    }
+    return true;
+  };
+
+  if (request.action === 'securityCheck') return {safe: safeForExport()};
   if (!Object.prototype.hasOwnProperty.call(ownerDocument, request.key)) {
     if (request.action !== 'observe') return fail('SNAPSHOT_STALE');
     let observed;
@@ -227,6 +241,10 @@ function (request) {
       }
       const expected = observed;
       if (!expected || expected.id !== input.snapshotId) return fail('SNAPSHOT_STALE');
+      if (['checkPdfLink', 'startBlobPdf', 'readBlobPdf'].includes(input.action) && !safeForExport()) {
+        blobPdf = null;
+        return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
+      }
       if (!['checkPdfLink', 'startBlobPdf', 'readBlobPdf', 'clearBlobPdf'].includes(input.action)) {
         observed = null;
         blobPdf = null;

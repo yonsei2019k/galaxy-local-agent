@@ -16,7 +16,8 @@
   ];
   const loginLabel = /로그인|계정으로|계속하기|sign in|continue with/i;
   const offered = sources.filter(([id, pattern]) =>
-    names.some(name => pattern.test(name) && (loginLabel.test(name) || name.length <= 22)) ||
+    names.some(name => pattern.test(name) &&
+      (loginLabel.test(name) || name.match(pattern)?.[0].toLowerCase() === name.toLowerCase())) ||
     (id === 'email' && inputs.some(input => input.type === 'email'))).map(([id]) => id);
   const alerts = Array.from(document.querySelectorAll('[role=alert],[role=status],[aria-live]')).filter(visible)
     .slice(0,24).map(node => (node.innerText || '').trim()).filter(Boolean);
@@ -63,10 +64,11 @@
   else if (/동의하기|권한 요청|개인정보 제공 동의/.test(heading)) stage='consent';
   else if (/비밀번호 (?:찾기|재설정|변경)/.test(heading)) stage='reset';
   else if (!onNol) stage='provider';
+  else if (location.hostname === 'nol.yanolja.com' && /^\/(?:member\/)?mypage\/?$/.test(location.pathname) &&
+      !hasPassword && names.some(name => /^로그아웃$/.test(name)) &&
+      names.some(name => /예약 ?내역|회원 ?정보/.test(name))) stage='connected';
   else if (resultLine && !hasPassword) stage='found';
   else if (recover && !hasPassword) stage='recover';
   else if (hasPassword || offered.length) stage='login';
-  else if (names.some(name => /^로그아웃$/.test(name)) &&
-      names.some(name => /예약 ?내역|회원 ?정보/.test(name))) stage='connected';
   return {stage, providers:offered, notices, additional, foundProvider:resultProvider || null, maskedAccount:mask || null};
 })()

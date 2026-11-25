@@ -3,6 +3,7 @@ const {test}=require('node:test')
 const {readFileSync}=require('node:fs')
 const {chromium}=require('playwright')
 const script=readFileSync(require('node:path').join(__dirname,'../../public/nol-connection-guide.js'),'utf8')
+const loginScript=readFileSync(require('node:path').join(__dirname,'../../public/app-web-login.js'),'utf8')
 
 test('NOL guidance follows the actual pages without exporting form values', async()=>{
   const browser=await chromium.launch({headless:true})
@@ -31,7 +32,9 @@ test('NOL guidance follows the actual pages without exporting form values', asyn
     assert.equal(result.stage,'found')
     assert.equal(result.foundProvider,'kakao')
     assert.equal((await check('<p>일시적으로 서비스를 이용하실 수 없습니다</p>')).stage,'error')
-    assert.equal((await check('<button>로그아웃</button><a>예약 내역</a>')).stage,'connected')
+    const account='<button>로그아웃</button><a>예약 내역</a><footer><a>Kakao support</a></footer>'
+    assert.equal((await check(account)).stage,'connected')
+    assert.notEqual((await check(account,'https://nol.yanolja.com/member/login')).stage,'connected')
     const naver='https://nid.naver.com/nidlogin.login'
     const approval='<h1>2단계 인증</h1><button>알림 다시 보내기</button><button>OTP 인증번호를 입력하여 로그인하기</button>'
     assert.equal((await check(approval,naver)).stage,'naver_approve')
@@ -45,5 +48,44 @@ test('NOL guidance follows the actual pages without exporting form values', asyn
     assert.equal((await check('<div role="heading">Two-step verification</div><div role="button">Resend notification</div>',naver)).stage,'naver_approve')
     assert.equal((await check('<label for="field">Verification code</label><input id="field">',naver)).stage,'naver_otp')
     assert.equal((await check('<h1>Security check</h1><input autocomplete="current-password">',naver)).stage,'provider')
+  } finally {await browser.close()}
+})
+
+test('authentication requires a visible sign-out action on the bound origin', async()=>{
+  const browser=await chromium.launch({headless:true})
+  try {
+    const page=await browser.newPage()
+    let fixture=''
+    await page.route('https://nid.naver.com/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:fixture}))
+    async function check(html,origin='https://nid.naver.com'){
+      fixture=html
+      await page.goto('https://nid.naver.com/nidlogin.login',{waitUntil:'load'})
+      return page.evaluate('('+loginScript+')('+JSON.stringify({action:'authenticated',origin})+')')
+    }
+    assert.equal(await check('<h1>2단계 인증</h1><button>알림 다시 보내기</button>'),false)
+    assert.equal(await check('<p>로그인을 완료하지 않았습니다.</p>'),false)
+    assert.equal(await check('<button hidden>로그아웃</button>'),false)
+    assert.equal(await check('<button>로그아웃</button><label for="mfa">인증번호</label><input id="mfa">'),false)
+    assert.equal(await check('<button>로그아웃</button>','https://www.naver.com'),false)
+    assert.equal(await check('<button>로그아웃</button>'),true)
+  } finally {await browser.close()}
+})
+
+test('printing refuses an opaque frame in Chromium', async()=>{
+  const browser=await chromium.launch({headless:true})
+  try {
+    const page=await browser.newPage()
+    let fixture=''
+    await page.route('https://nol.yanolja.com/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:fixture}))
+    await page.route('https://payment-frame.example/**',route=>route.fulfill({contentType:'text/html',body:'<p>Owner confirmation</p>'}))
+    const exportScript=readFileSync(require('node:path').join(__dirname,'../../public/app-web-agent.js'),'utf8')
+    async function check(html){
+      fixture=html
+      await page.goto('https://nol.yanolja.com/member/mypage',{waitUntil:'load'})
+      return page.evaluate('('+exportScript+')({action:"securityCheck"})')
+    }
+    assert.equal((await check('<iframe srcdoc="<p>Ordinary document</p>"></iframe>')).safe,true)
+    assert.equal((await check('<iframe srcdoc="<input autocomplete=cc-number>"></iframe>')).safe,false)
+    assert.equal((await check('<iframe src="https://payment-frame.example/"></iframe>')).safe,false)
   } finally {await browser.close()}
 })

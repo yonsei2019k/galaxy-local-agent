@@ -22,6 +22,10 @@ internal object BrowserLoginRoutes {
         return publicSearchPaths[url.host]?.any { url.path == it || url.path.startsWith("$it/") } == true
     }
 
+    fun isDirectNaverSessionOrigin(origin: URI): Boolean =
+        origin.scheme == "https" && origin.rawUserInfo == null && origin.port in setOf(-1,443) &&
+            origin.host in setOf("nid.naver.com", "www.naver.com", "m.naver.com")
+
     fun isNaverLoginFrom(requested: URI, actual: String?): Boolean {
         val login = https(actual) ?: return false
         return requested.host in naverServices && login.host == "nid.naver.com" &&

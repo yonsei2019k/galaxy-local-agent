@@ -90,7 +90,7 @@ class AppWebAgent private constructor(private val context:Context) {
         putWebsiteWork(WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding,
             prior?.anchorRunId?:binding.runId))
     }
-    data class WebsiteLogin(val card:LoginCard,val url:String,val nolGuide:Boolean=false)
+    data class WebsiteLogin(val card:LoginCard,val url:String,val nolGuide:Boolean=false,val vaultSaveFailed:Boolean=false)
     data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
     data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,
         val binding:WorkBinding?=null,val anchorRunId:String?=binding?.runId,val anchorMessageId:String?=null)
@@ -439,11 +439,18 @@ class AppWebAgent private constructor(private val context:Context) {
         try{
             settle()
             if(websiteLogin.value!=request)return false
-            if(websiteLoginFormPresent(id)!=false||websiteFormObservedId!=id){
-                loginStatus.value="사이트 로그인이 확인되지 않았어요. 다시 시도하거나 입력창으로 돌아갈 수 있어요."
+            if(websiteLoginFormPresent(id)!=false||(request.card.host!="nid.naver.com"&&websiteFormObservedId!=id)){
+                loginStatus.value=if(request.card.host=="nid.naver.com")
+                    "네이버 로그인을 아직 확인하지 못했어요. 인증을 마치고 원래 서비스 화면에서 로그인 상태를 확인해 주세요."
+                    else "사이트 로그인이 확인되지 않았어요. 다시 시도하거나 입력창으로 돌아갈 수 있어요."
                 return false
             }
+            val page=webView?:return false
+            val address=page.url
+            val revision=navigationRevision
             persistWebsiteSession()
+            if(websiteLogin.value!=request||webView!==page||page.url!=address||loading||
+                navigationRevision!=revision||navigation.value.error!=null)return false
             val continues=loginCompletion?.complete(true)==true
             showWebsiteWork(request.card.host,waiting=!continues)
             val queued=notifyGoalAuth(id)
@@ -458,8 +465,20 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     internal suspend fun websiteLoginFormPresent(id:Long):Boolean? {
-        if(websiteLogin.value?.card?.id!=id||navigation.value.error!=null||navigation.value.loading||
-            loading||!loginNavigationAllowed(view().url))return null
+        val request=websiteLogin.value?.takeIf{it.card.id==id}?:return null
+        val page=webView?:return null
+        val address=page.url
+        if(navigation.value.error!=null||navigation.value.loading||loading||!loginNavigationAllowed(address))return null
+        if(request.card.host=="nid.naver.com"){
+            if(observeNaverLoginGuide(id)!=null)return true
+            val origin=secureOrigin(address)?:return null
+            if(loginReturnOrigin!=null&&origin!=loginReturnOrigin)return null
+            val revision=navigationRevision
+            val confirmed=loginDom("authenticated",id,origin)
+            if(!confirmed||websiteLogin.value!=request||webView!==page||page.url!=address||
+                navigationRevision!=revision||loading||navigation.value.error!=null)return null
+            return false
+        }
         return loginFormPresent()?.let {
             if(websiteLogin.value?.card?.id!=id)return null
             if(it)websiteFormObservedId=id
@@ -510,7 +529,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 loginStatus.value="로그인 정보를 제출했어요. 다음 페이지를 확인하고 있어요."
                 val nol=nolNativeFallback?.takeIf{it.card.id==id}
                 if(nol!=null&&!awaitNolVaultReadback(id)){
-                    if(loginCard.value?.id==id)restoreNolGuide(nol)
+                    if(loginCard.value?.id==id)restoreNolGuide(nol.copy(vaultSaveFailed=saveOnPhone))
                     return false
                 }
                 if(nol==null&&!awaitLoginReadback(id,origin)){
@@ -531,7 +550,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 }catch(cancel:CancellationException){throw cancel}
                 catch(_:Exception){com.user.localagent.FailureLog.record(context,"website_vault",null,"SAVE_FAILED")}
                 if(nol!=null){
-                    if(loginCard.value?.id==id)restoreNolGuide(nol)
+                    if(loginCard.value?.id==id)restoreNolGuide(nol.copy(vaultSaveFailed=saveOnPhone&&!saved))
                     return true
                 }
                 val continued=loginCompletion?.complete(true)==true
@@ -596,11 +615,15 @@ class AppWebAgent private constructor(private val context:Context) {
             val address=webView?.url
             if(!NolConnectionGuide.allowsPage(address)||navigation.value.error!=null)return@withTimeoutOrNull false
             if(!loading){
-                val observed=eval(nolGuideScript,4_000) as? JsonObject
+                val observed=try{eval(nolGuideScript,4_000) as? JsonObject}
+                    catch(_:TimeoutCancellationException){return@withTimeoutOrNull false}
+                    catch(cancel:CancellationException){throw cancel}
+                    catch(_:Exception){return@withTimeoutOrNull false}
                 if(webView?.url!=address||loginCard.value?.id!=id)return@withTimeoutOrNull false
                 val stage=observed?.let{NolConnectionGuide.read(address,it)}
                 if(stage?.connected==true)return@withTimeoutOrNull true
-                if(stage?.key in setOf("code","consent","provider","recover","reset","app_approve","qr"))return@withTimeoutOrNull false
+                if(stage?.key in setOf("code","consent","provider","recover","reset","app_approve","qr")||
+                    NolConnectionGuide.isNaverApproval(stage?.key))return@withTimeoutOrNull false
             }
             delay(350)
         }
@@ -763,7 +786,12 @@ class AppWebAgent private constructor(private val context:Context) {
         if(card!=null)foldOwnerLogin(card.id) else loginCompletion?.complete(false)
     }
     fun ownerFinishedBrowserLogin(id:Long){
-        if(loginWait.value==id)loginCompletion?.complete(true)
+        if(loginWait.value!=id)return
+        if(secureOrigin(webView?.url)?.host=="nid.naver.com"){
+            loginStatus.value="네이버 인증 확인을 기다리고 있어요. 공식 화면에서 인증을 마쳐 주세요."
+            return
+        }
+        loginCompletion?.complete(true)
     }
     private suspend fun isPresented():Boolean {
         if(presentation.value==null)return false
@@ -1140,7 +1168,8 @@ class AppWebAgent private constructor(private val context:Context) {
     private fun loginNavigationAllowed(url:String?):Boolean {
         if(websiteLogin.value?.nolGuide==true||nolNativeFallback!=null)return NolConnectionGuide.allowsPage(url)
         val origin=secureOrigin(url)?:return false
-        return origin==cardOrigin||origin==loginReturnOrigin
+        return origin==cardOrigin||origin==loginReturnOrigin||
+            cardOrigin?.host=="nid.naver.com"&&loginReturnOrigin==null&&BrowserLoginRoutes.isDirectNaverSessionOrigin(origin)
     }
 
     /** Preserves the owner handoff when the secure card is folded or the tool wait ends. */
@@ -1163,7 +1192,7 @@ class AppWebAgent private constructor(private val context:Context) {
         expiredLoginBinding=null
         var keepCard=false
         try {
-            val nativeForm=requiredOrigin==loginOrigin&&loginDom("capture",id,loginOrigin)
+            val nativeForm=requiredOrigin==loginOrigin&&loginOrigin.host!="nid.naver.com"&&loginDom("capture",id,loginOrigin)
             if((requiredOrigin==loginOrigin||naverHandoff) && (nativeForm || loginFormPresent()==true) && secureOrigin(view().url)==loginOrigin){
                 loginFolded.value=false
                 loginReturnOrigin=requiredOrigin.takeIf{naverHandoff}
@@ -1188,14 +1217,21 @@ class AppWebAgent private constructor(private val context:Context) {
             }
             // Only after the owner is done do we observe the page again. Never replay the open.
             val currentOrigin=secureOrigin(view().url)?:return initial
-            if(currentOrigin!=requiredOrigin&&currentOrigin!=loginOrigin){
+            val directNaver=requiredOrigin==loginOrigin&&loginOrigin.host=="nid.naver.com"
+            fun expected(origin:URI)=origin==requiredOrigin||!naverHandoff&&
+                (origin==loginOrigin||directNaver&&BrowserLoginRoutes.isDirectNaverSessionOrigin(origin))
+            if(!expected(currentOrigin)){
                 loginStatus.value="로그인 뒤 다른 사이트로 이동해 작업을 멈췄어요."
                 return initial
             }
             settle()
             val finalOrigin=secureOrigin(view().url)?:return initial
-            if((finalOrigin!=requiredOrigin&&finalOrigin!=loginOrigin)||navigation.value.error!=null||
+            if(!expected(finalOrigin)||navigation.value.error!=null||
                 navigation.value.loading){loginStatus.value=loginReadbackStatus();return initial}
+            if((naverHandoff||directNaver)&&!loginDom("authenticated",id,finalOrigin)){
+                loginStatus.value="네이버 로그인 결과를 아직 확인하지 못했어요."
+                return initial
+            }
             val page=readPage()
             loginStatus.value=if(page["loginRequired"]==JsonPrimitive(true)||page["error"]!=null)
                 loginReadbackStatus() else {

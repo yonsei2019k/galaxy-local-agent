@@ -374,6 +374,28 @@ test('protects payment fields before the browser can observe or reuse an action'
   assert.equal(effects.length, 0);
 });
 
+test('permits PDF export only when every frame can be checked', () => {
+  const {context, invoke, Input, makeDocument}=fixture();
+  const link=new Input('Document','A');
+  link.href='https://fixture.example.test/file.pdf';
+  const frame=new Input('', 'IFRAME');
+  const child=makeDocument();
+  child.readyState='complete';
+  frame.contentDocument=child;
+  context.document.nodes=[link,frame];
+  invoke({action:'observe'});
+  const check=()=>invoke({action:'checkPdfLink',href:link.href});
+  assert.equal(invoke({action:'securityCheck'}).safe,true);
+  assert.equal(check().current,true);
+  child.nodes=[Object.assign(new Input('', 'INPUT'),{autocomplete:'cc-number'})];
+  assert.equal(invoke({action:'securityCheck'}).safe,false);
+  assert.equal(check().error,'PAGE_SECURITY_CHECK_INCOMPLETE');
+  frame.contentDocument=null;
+  assert.equal(invoke({action:'securityCheck'}).safe,false);
+  assert.equal(check().error,'PAGE_SECURITY_CHECK_INCOMPLETE');
+  assert.ok(invoke({action:'observe'}).elements);
+});
+
 test('blocks unmasked card text but allows masked receipts', () => {
   const {context, invoke} = fixture();
   assert.equal(invoke({action:'securityCheck'}).safe, true);

@@ -885,7 +885,8 @@ class MainActivity : ComponentActivity() {
                         }else if(inlineSite?.nolGuide==true)com.user.localagent.integrations.InlineNolConnection(webAgent,
                             inlineSite,window,Modifier.fillMaxSize(),onVerified={lifecycleScope.launch {
                                 app.repository.chat.addMessage(composerThreadId,currentBranchId,"assistant",
-                                    "NOL 로그인 상태를 확인했어요. 로그인 상태가 유지되는 동안 이 휴대폰에서 같은 연결을 이어서 쓸 수 있어요.")
+                                    "NOL 로그인 상태를 확인했어요. 로그인 상태가 유지되는 동안 이 휴대폰에서 같은 연결을 이어서 쓸 수 있어요."+
+                                        if(inlineSite.vaultSaveFailed)" 이번 비밀번호는 금고에 저장되지 않았어요." else "")
                             }})
                         else if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
                         else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,

@@ -64,7 +64,7 @@ internal object NolConnectionGuide {
         val provider = text("foundProvider")?.let(labels::get)
         val mask = text("maskedAccount")?.takeIf { it.length<=75 && Regex("[A-Za-z0-9._%+-]{1,24}[*•]{2,}[A-Za-z0-9._%+-]{0,20}@[A-Za-z0-9.-]+[.][A-Za-z]{2,}").matches(it) }
         if (stage in setOf("found", "connected") && page.host !in setOf(host, "accounts.nol.com")) stage = "provider"
-        if (stage == "connected" && (page.host != host || page.path !in setOf("/member/mypage", "/mypage"))) stage = "entry"
+        if (stage == "connected" && (page.host != host || page.path.trimEnd('/') !in setOf("/member/mypage", "/mypage"))) stage = "entry"
         val choices = (result["providers"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(labels::get) }.distinct()
         val details = (result["notices"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(notices::get) }.distinct()
         val plain = when {
