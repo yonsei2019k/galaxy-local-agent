@@ -10,7 +10,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import android.graphics.BitmapRegionDecoder
+import android.graphics.Rect
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -22,7 +24,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun SettingsAssistantPanel(
-    app:AppContainer, open:(SettingsLink)->Unit, moveToChat:(String)->Boolean, modifier:Modifier=Modifier,
+    app:AppContainer, character:CharacterPreference, open:(SettingsLink)->Unit, moveToChat:(String)->Boolean, modifier:Modifier=Modifier,
 ) {
     val context = LocalContext.current
     val runner = remember(app, context) { SettingsAssistantRunner(context, app) }
@@ -48,8 +50,7 @@ internal fun SettingsAssistantPanel(
                     } else {
                         ZipHapCard {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (index == 0) Image(painterResource(R.drawable.ziphap_mascot_v1), contentDescription = null,
-                                    modifier = Modifier.size(34.dp))
+                                if (index == 0) SettingsPortrait(character)
                                 Text(reply.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
@@ -112,5 +113,33 @@ internal fun SettingsAssistantPanel(
                 }
             }) { Text("보내기") }
         }
+    }
+}
+
+@Composable
+private fun SettingsPortrait(character: CharacterPreference) {
+    val resources = LocalContext.current.resources
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, resources, character) {
+        value = null
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                resources.openRawResource(R.drawable.jipsooni_portraits).use { stream ->
+                    val decoder = BitmapRegionDecoder.newInstance(stream) ?: return@use null
+                    try {
+                        val (column, row) = character.portraitCell()
+                        val side = 128
+                        val bounds = Rect(column * side, row * side, (column + 1) * side, (row + 1) * side)
+                        decoder.decodeRegion(bounds, null)?.asImageBitmap()
+                    } finally {
+                        decoder.recycle()
+                    }
+                }
+            } catch (_: java.io.IOException) {
+                null
+            }
+        }
+    }
+    Box(Modifier.size(34.dp)) {
+        bitmap?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
     }
 }

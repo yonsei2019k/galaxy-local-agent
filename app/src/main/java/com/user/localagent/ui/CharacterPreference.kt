@@ -21,15 +21,23 @@ internal data class CharacterPreference(val variant:String,val color:String,val 
         else->this
     }
 
+    // Atlas rows are colors. Each variant occupies a consecutive group of expression columns.
+    fun portraitCell(): Pair<Int, Int> {
+        val variants = options.getValue("variant")
+        val expressions = options.getValue("expr")
+        val column = variants.indexOf(variant) * expressions.size + expressions.indexOf(expr)
+        return column to options.getValue("color").indexOf(color)
+    }
+
     fun save(prefs:SharedPreferences) {
         prefs.edit().putString("variant",variant).putString("color",color).putString("expr",expr).apply()
     }
 
     companion object {
         private val options=mapOf(
-            "variant" to setOf("bear","cat","bunny"),
-            "color" to setOf("butter","peach","strawberry","sky","matcha","grey","cocoa","snow"),
-            "expr" to setOf("basic","smile","focus","surprise","sleepy","wink")
+            "variant" to listOf("bear","cat","bunny"),
+            "color" to listOf("butter","peach","strawberry","sky","matcha","grey","cocoa","snow"),
+            "expr" to listOf("basic","smile","focus","surprise","sleepy","wink")
         )
         fun accepts(field:String,value:String):Boolean = options[field]?.contains(value)==true
         private val default=CharacterPreference("bear","butter","basic")

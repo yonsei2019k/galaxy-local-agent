@@ -903,7 +903,7 @@ class MainActivity : ComponentActivity() {
                 if(panelStatus.isNotBlank() && (tab!=4 || manualSettings))Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
                 when(tab){1->VoiceSettingsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->if(manualSettings) key(settingsPage){
                     SettingsScreen(settingsPage,chatScreenUnavailable,{settingsPage=it}){openPanel(it,fromSettings=true)}
-                }else SettingsAssistantPanel(app,::showManual,moveToChat={request->
+                }else SettingsAssistantPanel(app,character,::showManual,moveToChat={request->
                     if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||
                         composerThreadId.isBlank()||chat.draft.value.isNotEmpty())false
                     else {
