@@ -7,8 +7,8 @@ on:
 permissions:
   contents: read
 env:
-  # Workflow run 27 publishes code 2049, above the installed local 2048 build.
-  RELEASE_VERSION_OFFSET: 2022
+  # Keep signed updates above the previously installed versionCode 2084.
+  RELEASE_VERSION_OFFSET: 2035
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
