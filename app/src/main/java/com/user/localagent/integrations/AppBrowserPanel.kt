@@ -252,6 +252,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
     var visible by remember {mutableStateOf(false)}
     var checking by remember {mutableStateOf(false)}
     var returned by remember {mutableStateOf(false)}
+    var naverGuide by remember(request.card.id){mutableStateOf<NolConnectionGuide.Status?>(null)}
     LaunchedEffect(request.card.id,reload){
         visible=false
         visible=agent.loadWebsiteLogin(request.card.id,retry=reload!=0)
@@ -260,6 +261,8 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
         var readbacks=0
         while(!returned){
             if(!checking){
+                naverGuide=agent.observeNaverLoginGuide(request.card.id)
+                if(naverGuide!=null)sawLoginForm=true
                 when(agent.websiteLoginFormPresent(request.card.id)){
                     true->{sawLoginForm=true;readbacks=0}
                     false->if(sawLoginForm&&++readbacks>=2){
@@ -283,7 +286,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
     Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
         Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text(request.card.host,style=MaterialTheme.typography.titleSmall)
-            loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+            naverGuide?.let{NaverLoginHelp(it)}?:loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
             if(navigation.loading||checking||returned)LinearProgressIndicator(Modifier.fillMaxWidth())
             if(navigation.error!=null)Text(when(navigation.error){
                 "HTTPS_REQUIRED"->"사이트가 보안 연결을 제공하지 않는 페이지로 이동했어요."
@@ -306,6 +309,104 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
                 },enabled=visible&&!navigation.loading&&!checking&&!returned){Text("로그인 확인")}
             }
         }
+    }
+}
+
+@Composable
+internal fun InlineNolConnection(
+    agent:AppWebAgent, request:AppWebAgent.WebsiteLogin, window:Window,
+    modifier:Modifier=Modifier, onVerified:()->Unit
+){
+    SecureBrowserWindow(window)
+    val context=LocalContext.current
+    val scope=rememberCoroutineScope()
+    val navigation by agent.navigationStatus.collectAsState()
+    var reload by remember(request.card.id){mutableIntStateOf(0)}
+    var guide by remember(request.card.id){mutableStateOf<NolConnectionGuide.Status?>(null)}
+    var externalMessage by remember {mutableStateOf<String?>(null)}
+    var resetting by remember {mutableStateOf(false)}
+    fun fold()=agent.foldOwnerLogin(request.card.id)
+    androidx.activity.compose.BackHandler {fold()}
+    LaunchedEffect(request.card.id,reload){
+        guide=null
+        resetting=true
+        try{agent.loadWebsiteLogin(request.card.id,retry=reload!=0)}
+        finally{resetting=false}
+        while(true){
+            val next=agent.observeNolGuide(request.card.id)
+            if(next!=null)guide=next
+            if(next?.connected==true&&agent.finishNolConnection(request.card.id)){
+                onVerified()
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(900)
+        }
+    }
+    fun openOfficial(){
+        try{
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse(NolConnectionGuide.entry)).addCategory(android.content.Intent.CATEGORY_BROWSABLE))
+            externalMessage="휴대폰 브라우저에서 NOL을 열었어요. 집순이는 이 채팅 카드 안에서 확인한 로그인 상태를 연결 결과로 표시해요."
+        }catch(_:android.content.ActivityNotFoundException){
+            externalMessage="휴대폰 브라우저를 열 수 없어요. 이 카드에서 다시 열어 주세요."
+        }
+    }
+    val failed=navigation.error!=null||guide?.key=="error"
+    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+        Column(Modifier.fillMaxSize().padding(10.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
+            Text("NOL 계정 연결",style=MaterialTheme.typography.titleMedium)
+            val showingNaver=!failed&&!resetting&&!navigation.loading&&NolConnectionGuide.isNaverApproval(guide?.key)
+            if(showingNaver)guide?.let{NaverLoginHelp(it)}
+            else Text(when {
+                navigation.error=="NAVIGATION_BLOCKED"->"인증 화면이 다른 주소로 이동했어요. 휴대폰 브라우저에서 공식 로그인 화면을 확인해 주세요."
+                navigation.error=="TLS_ERROR"->"사이트의 보안 연결을 확인하지 못했어요. 연결을 확인한 뒤 다시 열어 주세요."
+                navigation.error=="PAGE_TIMEOUT"->"NOL 화면이 늦게 열리고 있어요. 잠시 뒤 다시 열어 주세요."
+                failed->"NOL이 지금 이 화면을 열어 주지 않았어요. 잠시 후 다시 열거나 휴대폰 브라우저를 사용해 주세요."
+                resetting||navigation.loading->"NOL에서 다음 화면을 보내 주기를 기다리고 있어요."
+                else->guide?.text?: "NOL 화면에서 ‘로그인’을 눌러 주세요. 공식 페이지 안에서 진행할 수 있어요."
+            },style=MaterialTheme.typography.bodySmall)
+            if(!failed)guide?.takeUnless{NolConnectionGuide.isNaverApproval(it.key)}?.let{observed->
+                if(observed.notices.isNotEmpty()||observed.siteNotices.isNotEmpty())
+                    Column(Modifier.heightIn(max=102.dp).verticalScroll(rememberScrollState())){
+                        observed.notices.forEach{Text(it,style=MaterialTheme.typography.bodySmall)}
+                        observed.siteNotices.forEach{Text(it,style=MaterialTheme.typography.bodySmall)}
+                    }
+            }
+            if(!failed&&guide?.key=="login")TextButton(onClick={scope.launch {
+                if(!agent.openNolVaultForm(request.card.id))
+                    externalMessage="이 페이지는 보안 입력칸에 연결할 수 없어요. 아래 NOL 화면에서 로그인해 주세요."
+            }}){Text("이메일 로그인 · 금고 사용") }
+            externalMessage?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+            if(resetting||navigation.loading)LinearProgressIndicator(Modifier.fillMaxWidth())
+            Box(Modifier.weight(1f).fillMaxWidth()){
+                if(!failed||resetting)AndroidView(factory={_->agent.view().also{(it.parent as? ViewGroup)?.removeView(it)}},
+                    modifier=Modifier.fillMaxSize(),onRelease={agent.detach()})
+            }
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                TextButton(onClick={fold()}){Text("나중에")}
+                TextButton(onClick={reload++;externalMessage=null},enabled=!resetting&&!navigation.loading){Text("다시 열기")}
+                if(failed||guide?.key=="provider")TextButton(onClick={openOfficial()}){Text("브라우저에서 확인")}
+            }
+        }
+    }
+}
+
+@Composable
+private fun NaverLoginHelp(guide:NolConnectionGuide.Status){
+    val context=LocalContext.current
+    var appUnavailable by remember{mutableStateOf(false)}
+    val appIntent=remember(context){context.packageManager.getLaunchIntentForPackage("com.nhn.android.search")}
+    Column(verticalArrangement=Arrangement.spacedBy(2.dp)){
+        Text(guide.text,style=MaterialTheme.typography.bodySmall)
+        if(guide.notices.isNotEmpty()||guide.siteNotices.isNotEmpty())
+            Column(Modifier.heightIn(max=66.dp).verticalScroll(rememberScrollState())){
+                (guide.notices+guide.siteNotices).forEach{Text(it,style=MaterialTheme.typography.bodySmall)}
+            }
+        if(guide.key!="naver_challenge"&&appIntent!=null)TextButton(onClick={
+            appUnavailable=runCatching{context.startActivity(appIntent)}.isFailure
+        }){Text("네이버 앱 열기")}
+        if(guide.key!="naver_challenge"&&(appIntent==null||appUnavailable))Text("인증에 등록한 휴대폰에서 네이버 앱을 열어 주세요.",
+            style=MaterialTheme.typography.bodySmall)
     }
 }
 

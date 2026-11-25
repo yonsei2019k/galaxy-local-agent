@@ -112,6 +112,7 @@
         <package android:name="co.kr.catchtable.android.catchtable_app" />
         <package android:name="com.mealant.tabling" />
         <package android:name="com.nhn.android.nmap" />
+        <package android:name="com.nhn.android.search" />
         <package android:name="kr.goodchoice.abouthere" />
         <package android:name="com.cultsotry.yanolja.nativeapp" />
         <package android:name="com.coupang.mobile.eats" />

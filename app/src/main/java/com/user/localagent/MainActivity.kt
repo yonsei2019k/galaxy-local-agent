@@ -599,11 +599,16 @@ class MainActivity : ComponentActivity() {
                         val workRun=visibleWebsiteWork?.anchorRunId?:websiteBinding?.runId
                         put("id",websiteSlotId?:workRun.orEmpty())
                         visibleWebsiteWork?.binding?.runId?.let { put("runId",it) }
-                        val anchor=activeExecutions.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
+                        val anchor=visibleWebsiteWork?.anchorMessageId
+                            ?:activeExecutions.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
                             ?:roomActivities.values.firstOrNull {it.runId==workRun&&it.threadId==composerThreadId}?.userMessageId
                         anchor?.let { put("messageId",it) }
                         val domain=inlineCredentials?.host?:visibleWebsiteWork?.host.orEmpty()
-                        put("title",if(domain=="www.kairb.org")"KAIRB 온라인 교육" else domain)
+                        put("title",when(domain){
+                            "www.kairb.org"->"KAIRB 온라인 교육"
+                            com.user.localagent.integrations.NolConnectionGuide.host->"야놀자(NOL) 로그인"
+                            else->domain
+                        })
                         put("status",visibleWebsiteWork?.status.orEmpty())
                         put("working",visibleWebsiteWork?.working==true)
                         put("steps",JsonArray(visibleWebsiteWork?.steps.orEmpty().map(::JsonPrimitive)))
@@ -877,7 +882,12 @@ class MainActivity : ComponentActivity() {
                                 }}){Text("로그인 열기")}
                                 TextButton(onClick={webAgent.cancelLoginCard(inlineCredentials.id)}){Text("대기 그만두기")}
                             }
-                        }else if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
+                        }else if(inlineSite?.nolGuide==true)com.user.localagent.integrations.InlineNolConnection(webAgent,
+                            inlineSite,window,Modifier.fillMaxSize(),onVerified={lifecycleScope.launch {
+                                app.repository.chat.addMessage(composerThreadId,currentBranchId,"assistant",
+                                    "NOL 로그인 상태를 확인했어요. 로그인 상태가 유지되는 동안 이 휴대폰에서 같은 연결을 이어서 쓸 수 있어요.")
+                            }})
+                        else if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
                         else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,
                             Modifier.fillMaxSize(),websiteKeyboardOpen)
                     }
@@ -904,7 +914,20 @@ class MainActivity : ComponentActivity() {
                 if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
                         onClose={connectionsOpen=false},onStatus={connectionStatus=it},
-                        modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
+                        onConnectNol={
+                            if(!composerReady||chat.selectedThreadId.value!=composerThreadId||currentBranchId.isBlank()||
+                                !webAgent.canStartNolConnection())false
+                            else {
+                                val guide=com.user.localagent.integrations.NolConnectionGuide
+                                val message=app.repository.chat.beginWebsiteConnection(composerThreadId,currentBranchId,guide.request,guide.intro)
+                                val binding=com.user.localagent.integrations.AppWebAgent.WorkBinding(message.id,composerThreadId,currentBranchId)
+                                val started=webAgent.startNolConnection(binding,message.id)
+                                if(started){connectionsOpen=false;connectionStatus=null}
+                                else app.repository.chat.addMessage(composerThreadId,currentBranchId,"assistant",
+                                    "다른 로그인 작업이 열려 있어요. 그 작업을 마친 뒤 다시 연결할 수 있어요.")
+                                started
+                            }
+                        }, modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
                 }
                 }
                 if(launchIntroPending) LaunchIntro(Modifier.matchParentSize())

@@ -24,12 +24,14 @@ import com.user.localagent.core.connections.ConnectionCatalog
 import kotlinx.coroutines.*
 
 @Composable
-internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,onStatus:(String)->Unit,modifier:Modifier=Modifier){
+internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,onStatus:(String)->Unit,
+    onConnectNol:suspend ()->Boolean,modifier:Modifier=Modifier){
     val hub=remember(context){ConnectionHub.get(context)}
     val scope=rememberCoroutineScope()
     var serviceId by rememberSaveable {mutableStateOf(ConnectedService.entries.first().id)}
     val service=ConnectedService.entries.first {it.id==serviceId}
     var choosing by remember {mutableStateOf(false)}
+    var nolDetails by rememberSaveable {mutableStateOf(false)}
     var pendingToken by rememberSaveable {mutableStateOf<String?>(null)}
     var busy by remember {mutableStateOf(false)}
     var status by remember {mutableStateOf("")}
@@ -107,9 +109,27 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
         }
     }
     val available=!busy&&pendingToken==null
+    if(nolDetails){
+        Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement=Arrangement.spacedBy(9.dp)){
+                Text("야놀자(NOL)",style=MaterialTheme.typography.titleLarge)
+                Text("숙소와 여행 상품을 찾을 때는 바로 검색해요. 내 예약을 보거나 회원 혜택을 확인할 때 계정을 연결해요.")
+                Text("로그인은 NOL의 공식 화면에서 진행해요. 가입 방식이 기억나지 않으면 계정 찾기를 같이 볼 수 있어요.")
+                Text("예약을 확정하기 전에 일정, 최종 금액과 취소 조건을 확인해요.")
+                status.takeIf{it.isNotBlank()}?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+                Button(enabled=available,onClick={run("채팅에 로그인 화면을 준비하고 있어요."){
+                    if(onConnectNol())"" else "다른 로그인 작업이 열려 있어요. 그 작업을 마치거나 대기를 끝낸 뒤 다시 눌러 주세요."
+                }}){Text("채팅에서 연결")}
+                TextButton(enabled=available,onClick={nolDetails=false;status=""}){Text("연결 목록으로")}
+            }
+        }
+        return
+    }
     Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text("앱과 컴퓨터 연결",style=MaterialTheme.typography.titleLarge)
+            OutlinedButton(enabled=available,onClick={nolDetails=true;status=""}){Text("야놀자(NOL)") }
             Box {
                 OutlinedButton(onClick={choosing=true},enabled=available){Text(service.label)}
                 DropdownMenu(expanded=choosing,onDismissRequest={choosing=false}){

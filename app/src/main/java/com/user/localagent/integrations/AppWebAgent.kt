@@ -90,10 +90,10 @@ class AppWebAgent private constructor(private val context:Context) {
         putWebsiteWork(WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding,
             prior?.anchorRunId?:binding.runId))
     }
-    data class WebsiteLogin(val card:LoginCard,val url:String)
+    data class WebsiteLogin(val card:LoginCard,val url:String,val nolGuide:Boolean=false)
     data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
     data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,
-        val binding:WorkBinding?=null,val anchorRunId:String?=binding?.runId)
+        val binding:WorkBinding?=null,val anchorRunId:String?=binding?.runId,val anchorMessageId:String?=null)
     private val browserWorkBinding=MutableStateFlow<WorkBinding?>(null)
     val ownerWorkBinding:StateFlow<WorkBinding?> get()=browserWorkBinding
     private val websiteWorks=MutableStateFlow<List<WebsiteWork>>(emptyList())
@@ -111,6 +111,98 @@ class AppWebAgent private constructor(private val context:Context) {
     }
     private val websiteLogin=MutableStateFlow<WebsiteLogin?>(null)
     val ownerWebsiteLogin:StateFlow<WebsiteLogin?> get()=websiteLogin
+    private var nolNativeFallback:WebsiteLogin?=null
+    private val nolGuideScript by lazy {context.assets.open("nol-connection-guide.js").bufferedReader().use{it.readText()}}
+
+    internal fun canStartNolConnection()=!agentActive.value&&!loginSubmitting&&loginCard.value==null&&pendingPcLogin==null
+
+    internal fun startNolConnection(binding:WorkBinding,anchorMessageId:String):Boolean {
+        if(!canStartNolConnection())return false
+        val card=LoginCard(++nextLoginId,NolConnectionGuide.host,websiteOnly=true)
+        browserWorkBinding.value=binding
+        loginFolded.value=false
+        confirmedPcLogin=null
+        lastConfirmedCard=null
+        lastConfirmedOrigin=null
+        loginReturnOrigin=null
+        expiredLoginBinding=null
+        nolNativeFallback=null
+        cardOrigin=secureOrigin(NolConnectionGuide.entry)
+        capturedLoginUrl=NolConnectionGuide.entry
+        presentation.value=null
+        loginStatus.value="NOL의 공식 로그인 화면을 열고 있어요."
+        loginCard.value=card
+        websiteLogin.value=WebsiteLogin(card,NolConnectionGuide.entry,nolGuide=true)
+        putWebsiteWork(WebsiteWork(card.host,loginStatus.value.orEmpty(),emptyList(),true,binding,anchorMessageId=anchorMessageId))
+        return true
+    }
+
+    internal suspend fun openNolVaultForm(id:Long):Boolean {
+        val request=websiteLogin.value?.takeIf{it.nolGuide&&it.card.id==id&&!loginFolded.value}?:return false
+        if(observeNolGuide(id)?.key!="login")return false
+        val address=webView?.url?:return false
+        val origin=secureOrigin(address)?.takeIf{it.host in setOf(NolConnectionGuide.host,"accounts.nol.com")}?:return false
+        if(!loginDom("capture",id,origin)||websiteLogin.value!=request||webView?.url!=address)return false
+        nolNativeFallback=request
+        cardOrigin=origin
+        capturedLoginUrl=address
+        loginCard.value=request.card.copy(websiteOnly=false)
+        websiteLogin.value=null
+        loginStatus.value="저장된 로그인을 쓰거나, 이메일과 비밀번호를 입력할 수 있어요."
+        return true
+    }
+
+    private fun restoreNolGuide(request:WebsiteLogin){
+        cardOrigin=secureOrigin(request.url)
+        capturedLoginUrl=request.url
+        loginCard.value=request.card
+        websiteLogin.value=request
+        nolNativeFallback=null
+    }
+
+    internal suspend fun observeNolGuide(id:Long):NolConnectionGuide.Status? {
+        val request=websiteLogin.value?.takeIf { it.nolGuide&&it.card.id==id }?:return null
+        val guide=readLoginGuide(request)?:return null
+        val work=websiteWorkFor(browserWorkBinding.value)?:return guide
+        val steps=(work.steps+guide.text+guide.notices).distinct().takeLast(8)
+        if(work.status!=guide.text||work.steps!=steps||work.working)
+            putWebsiteWork(work.copy(status=guide.text,steps=steps,working=false))
+        return guide
+    }
+
+    internal suspend fun observeNaverLoginGuide(id:Long):NolConnectionGuide.Status? {
+        val request=websiteLogin.value?.takeIf{it.card.id==id}?:return null
+        if(secureOrigin(webView?.url)?.host!="nid.naver.com")return null
+        return readLoginGuide(request)?.takeIf{NolConnectionGuide.isNaverApproval(it.key)}
+    }
+
+    private suspend fun readLoginGuide(request:WebsiteLogin):NolConnectionGuide.Status? {
+        if(loginFolded.value)return null
+        val page=webView?:return null
+        val address=page.url
+        if(loading||navigation.value.error!=null||!NolConnectionGuide.allowsPage(address))return null
+        val observed=try{eval(nolGuideScript,4_000) as? JsonObject}
+            catch(_:TimeoutCancellationException){null}
+            catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){null}
+        if(websiteLogin.value!=request||webView!==page||page.url!=address||loading)return null
+        return observed?.let{NolConnectionGuide.read(address,it)}
+    }
+
+    internal suspend fun finishNolConnection(id:Long):Boolean {
+        val request=websiteLogin.value?.takeIf { it.nolGuide&&it.card.id==id }?:return false
+        val page=webView ?: return false
+        val address=page.url
+        if(observeNolGuide(id)?.connected!=true)return false
+        persistWebsiteSession()
+        if(websiteLogin.value!=request||webView!==page||page.url!=address||navigation.value.loading)return false
+        websiteLogin.value=null
+        loginCard.value=null
+        cardOrigin=null
+        capturedLoginUrl=null
+        loginStatus.value=null
+        return true
+    }
     private val loginCard=MutableStateFlow<LoginCard?>(null)
     val ownerLoginCard:StateFlow<LoginCard?> get()=loginCard
     private val loginStatus=MutableStateFlow<String?>(null)
@@ -186,6 +278,7 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     fun switchToWebsiteLogin(id:Long){
+        nolNativeFallback?.takeIf{it.card.id==id&&loginCard.value?.id==id}?.let{restoreNolGuide(it);return}
         val card=loginCard.value?.takeIf{it.id==id&&!it.pairedPc}?:return
         val url=capturedLoginUrl?.takeIf{secureOrigin(it)==cardOrigin}
         if(url==null){
@@ -382,6 +475,9 @@ class AppWebAgent private constructor(private val context:Context) {
 
     fun cancelLoginCard(id:Long){
         val card=loginCard.value?.takeIf{it.id==id}?:return
+        if(websiteLogin.value?.nolGuide==true||nolNativeFallback?.card?.id==id)websiteWorkFor(browserWorkBinding.value)?.let {
+            putWebsiteWork(it.copy(status="로그인 대기를 끝냈어요. 앱 연결에서 다시 열 수 있어요.",working=false))
+        }
         if(card.pairedPc)browserWorkBinding.value?.let {
             recordPcWork(it,"로그인 입력을 닫았어요. 요청은 채팅에 남아 있어요.","로그인 입력 닫힘",working=false)
         }
@@ -392,6 +488,7 @@ class AppWebAgent private constructor(private val context:Context) {
         pendingPcLogin=null
         expiredLoginBinding=null
         loginReturnOrigin=null
+        nolNativeFallback=null
         loginFolded.value=false
         loginStatus.value="로그인을 취소했어요. 현재 작업은 멈춰 있습니다."
         loginCompletion?.complete(false)
@@ -411,7 +508,12 @@ class AppWebAgent private constructor(private val context:Context) {
             val submitted=loginDom("submit",id,origin,account,password)
             if(submitted&&loginCard.value?.id==id){
                 loginStatus.value="로그인 정보를 제출했어요. 다음 페이지를 확인하고 있어요."
-                if(!awaitLoginReadback(id,origin)){
+                val nol=nolNativeFallback?.takeIf{it.card.id==id}
+                if(nol!=null&&!awaitNolVaultReadback(id)){
+                    if(loginCard.value?.id==id)restoreNolGuide(nol)
+                    return false
+                }
+                if(nol==null&&!awaitLoginReadback(id,origin)){
                     loginStatus.value=loginReadbackStatus()
                     // The previous binding is consumed by the submit. Prepare a fresh one on the same site for an owner retry.
                     val sameForm=loginCard.value?.id==id && secureOrigin(view().url)==origin && !loading &&
@@ -428,6 +530,10 @@ class AppWebAgent private constructor(private val context:Context) {
                     saved=true
                 }catch(cancel:CancellationException){throw cancel}
                 catch(_:Exception){com.user.localagent.FailureLog.record(context,"website_vault",null,"SAVE_FAILED")}
+                if(nol!=null){
+                    if(loginCard.value?.id==id)restoreNolGuide(nol)
+                    return true
+                }
                 val continued=loginCompletion?.complete(true)==true
                 showWebsiteWork(origin.host,waiting=!continued)
                 val queued=notifyGoalAuth(id)
@@ -483,6 +589,23 @@ class AppWebAgent private constructor(private val context:Context) {
         catch(_:Exception){loginStatus.value="PC 연결이나 로그인 결과를 확인하지 못했어요. 자동으로 다시 제출하지 않아요.";return false}
         finally{loginSubmitting=false}
     }
+
+    private suspend fun awaitNolVaultReadback(id:Long):Boolean=withTimeoutOrNull(14_000){
+        delay(350)
+        while(loginCard.value?.id==id){
+            val address=webView?.url
+            if(!NolConnectionGuide.allowsPage(address)||navigation.value.error!=null)return@withTimeoutOrNull false
+            if(!loading){
+                val observed=eval(nolGuideScript,4_000) as? JsonObject
+                if(webView?.url!=address||loginCard.value?.id!=id)return@withTimeoutOrNull false
+                val stage=observed?.let{NolConnectionGuide.read(address,it)}
+                if(stage?.connected==true)return@withTimeoutOrNull true
+                if(stage?.key in setOf("code","consent","provider","recover","reset","app_approve","qr"))return@withTimeoutOrNull false
+            }
+            delay(350)
+        }
+        false
+    }?:false
 
     private suspend fun awaitLoginReadback(id:Long,origin:URI):Boolean = withTimeoutOrNull(14_000) {
         delay(400)
@@ -680,7 +803,7 @@ class AppWebAgent private constructor(private val context:Context) {
             override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean {
                 if(upgradeHallymLoginRedirect(request))return true
                 val url=request.url.toString()
-                if(request.isForMainFrame&&websiteLogin.value!=null&&!loginNavigationAllowed(url)){
+                if(request.isForMainFrame&&(websiteLogin.value!=null||nolNativeFallback!=null)&&!loginNavigationAllowed(url)){
                     navigationFailed(if(url.startsWith("http:",true))"HTTPS_REQUIRED" else "NAVIGATION_BLOCKED")
                     return true
                 }
@@ -1015,6 +1138,7 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private fun loginNavigationAllowed(url:String?):Boolean {
+        if(websiteLogin.value?.nolGuide==true||nolNativeFallback!=null)return NolConnectionGuide.allowsPage(url)
         val origin=secureOrigin(url)?:return false
         return origin==cardOrigin||origin==loginReturnOrigin
     }

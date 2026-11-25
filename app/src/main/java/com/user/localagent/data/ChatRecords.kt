@@ -511,6 +511,14 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         require(role in setOf("user","assistant"));require('\u0000' !in text);activeBranch(threadId,branchId)
         insertMessage(MessageRecord(role=role,text=text,threadId=threadId,branchId=branchId))
     }
+    internal suspend fun beginWebsiteConnection(threadId:String,branchId:String,request:String,notice:String):MessageRecord =
+        database.withTransaction {
+            activeBranch(threadId,branchId)
+            val entry=insertMessage(MessageRecord(role="user",text=request,threadId=threadId,branchId=branchId))
+            insertMessage(MessageRecord(role="assistant",text=notice,threadId=threadId,branchId=branchId))
+            entry
+        }
+
     private suspend fun insertMessage(message:MessageRecord,afterMessageId:String?=null):MessageRecord {
         val after=afterMessageId?.let {dao.position(message.branchId,it)?:error("요청 메시지가 현재 분기에 없습니다.")}
         if(after!=null){dao.shiftPositionsTemporary(message.branchId,after);dao.restoreShiftedPositions(message.branchId)}
