@@ -17,6 +17,9 @@ class CalendarTargetRegressionTest {
         var identity:ConnectionAccess?=ConnectionAccess("public-account-a",1,true,true)
         var postId:String?="expected";var getId:String?="expected";var status:String?="confirmed";var title="Synthetic meeting"
         var posts=0;var gets=0;var afterPost:(()->Unit)?=null
+        var visibility:String?=null
+        var attendees:JsonArray?=null
+        var htmlLink:String?=null
         private val records=mutableMapOf<String,MutationRecord>()
         val expectedId=checkNotNull(ConnectionRequests.build(sourceCall).knownId)
         override suspend fun access(service:ConnectedService)=identity
@@ -34,6 +37,9 @@ class CalendarTargetRegressionTest {
                 getId?.let{put("id",if(it=="expected")expectedId else it)};status?.let{put("status",it)};put("summary",title)
                 put("start",buildJsonObject{put("dateTime","2026-11-15T00:00:00Z")})
                 put("end",buildJsonObject{put("dateTime","2026-11-15T01:00:00Z")})
+                visibility?.let{put("visibility",it)}
+                attendees?.let{put("attendees",it)}
+                htmlLink?.let{put("htmlLink",it)}
             }.toString())
         }
     }

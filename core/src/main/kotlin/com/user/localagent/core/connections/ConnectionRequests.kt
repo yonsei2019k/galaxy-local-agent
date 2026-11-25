@@ -56,7 +56,18 @@ object ConnectionRequests {
     fun build(call:ToolCall):ApiPlan {
         val spec=ConnectionCatalog.tools[call.name]?:error("등록되지 않은 연결 도구")
         require(call.arguments.keys.all {it in spec.definition.arguments})
-        spec.definition.arguments.forEach {(name,arg)->val value=call.arguments[name];require(!arg.required || value!=null);if(value!=null)require(value is JsonPrimitive&&value.isString&&value.content.isNotBlank()&&value.content.length<=arg.maxLength&&'\u0000' !in value.content)}
+        spec.definition.arguments.forEach { (name,arg) ->
+            val value=call.arguments[name]
+            require(!arg.required||value!=null)
+            if(value!=null){
+                require(value is JsonPrimitive)
+                when(arg.type){
+                    "boolean" -> require(!value.isString&&value.booleanOrNull!=null)
+                    "string" -> require(value.isString&&value.content.isNotBlank()&&value.content.length<=arg.maxLength&&'\u0000' !in value.content)
+                    else -> error("지원하지 않는 연결 도구 인자 형식")
+                }
+            }
+        }
         val service=spec.service
         fun read(url:String,method:String="GET",body:String?=null,headers:Map<String,String> = emptyMap())=ApiPlan(service,false,ApiRequest(url,method,body,extraHeaders=headers))
         val title=call.s("title");val content=call.s("content");val id=call.s("id").takeIf {it.isNotBlank()}?.let(::key)
@@ -96,7 +107,17 @@ object ConnectionRequests {
                 val endTimestamp=end.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
                 if(!spec.writes)read("$base?singleEvents=true&maxResults=20&timeMin=${encode(startTimestamp)}&timeMax=${encode(endTimestamp)}")else {
                     val eventId=java.security.MessageDigest.getInstance("SHA-256").digest(call.id.toByteArray()).joinToString(""){"%02x".format(it)}
-                    ApiPlan(service,true,ApiRequest(base,"POST",buildJsonObject {put("id",eventId);put("summary",title);put("start",buildJsonObject {put("dateTime",startTimestamp)});put("end",buildJsonObject {put("dateTime",endTimestamp)})}.toString()),createdIdField="id",knownId=eventId,readback={ApiRequest("$base/${key(it)}")},verify={body->CalendarTargetIntegrity.readback(eventId,title,start,end,body)})}}
+                    val privateEvent=call.arguments["private"]==JsonPrimitive(true)
+                    val payload=buildJsonObject {
+                        put("id",eventId);put("summary",title)
+                        put("start",buildJsonObject {put("dateTime",startTimestamp)})
+                        put("end",buildJsonObject {put("dateTime",endTimestamp)})
+                        if(privateEvent)put("visibility","private")
+                    }
+                    val insertUrl=if(privateEvent)"$base?sendUpdates=none" else base
+                    ApiPlan(service,true,ApiRequest(insertUrl,"POST",payload.toString()),createdIdField="id",knownId=eventId,
+                        readback={ApiRequest("$base/${key(it)}")},
+                        verify={body->CalendarTargetIntegrity.readback(eventId,title,start,end,body,privateEvent)})}}
             "list_google_tasks"->read("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?maxResults=20&showCompleted=false")
             "create_google_task"->{val body=buildJsonObject {put("title",title);if(call.s("notes").isNotEmpty())put("notes",call.s("notes"));if(call.s("dueDate").isNotEmpty())put("due",LocalDate.parse(call.s("dueDate")).toString()+"T00:00:00.000Z")}.toString()
                 ApiPlan(service,true,ApiRequest("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks","POST",body),"id",readback={ApiRequest("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${key(it)}")},verify={titleProof(it,title,"id")})}

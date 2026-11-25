@@ -116,6 +116,9 @@ class ConnectionRuntime(private val host:ConnectionHost) {
                     put("event",buildJsonObject{
                         put("id",event.getValue("id"));put("status",event.getValue("status"));put("title",event.getValue("summary"))
                         put("start",event.getValue("start").jsonObject.getValue("dateTime"));put("end",event.getValue("end").jsonObject.getValue("dateTime"))
+                        if(call.arguments["private"]==JsonPrimitive(true))put("visibility","private")
+                        CalendarTargetIntegrity.eventLink((event["htmlLink"] as? JsonPrimitive)?.takeIf {it.isString}?.content)
+                            ?.let {put("htmlLink",it)}
                     })
                 }}.toString(),"verified")
         }catch(cancel:CancellationException){clearCache();throw cancel}

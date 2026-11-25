@@ -70,6 +70,7 @@ object ActionCompletionReport {
                     }else{append("메모 부분 수정의 저장 근거를 확인하지 못했습니다.");observationIncomplete=true}
                 }
                 "create_google_calendar_event"->{
+                    val privateEvent=call.arguments["private"]==JsonPrimitive(true)
                     val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
                     val event=receipt?.get("event") as? JsonObject
                     val proven=runCatching{
@@ -78,13 +79,17 @@ object ActionCompletionReport {
                         require(receipt.text("calendarSelector")==value("calendarId").ifEmpty{"primary"}&&receipt.text("accountBindingSha256")?.matches(Regex("[a-f0-9]{64}"))==true)
                         require(event!=null&&event.text("id")==receipt.text("remoteId")&&event.text("id")?.matches(Regex("[a-f0-9]{64}"))==true)
                         require(event.text("status") in setOf("confirmed","tentative")&&event.text("title")==value("title"))
+                        require(!privateEvent||event.text("visibility")=="private")
                         require(java.time.OffsetDateTime.parse(event.text("start")).toInstant()==java.time.OffsetDateTime.parse(value("start")).toInstant()&&
                             java.time.OffsetDateTime.parse(event.text("end")).toInstant()==java.time.OffsetDateTime.parse(value("end")).toInstant())
                     }.isSuccess
                     if(proven){
                         append("일정 생성 후 실제 ID·활성 상태·제목·시각 재조회를 확인했습니다.")
                         append("\n일정: ").append(event?.text("title"));append("\n시작: ").append(event?.text("start"));append("\n종료: ").append(event?.text("end"))
-                        append("\n참석자 수신·수락은 확인하지 않았습니다.")
+                        if(privateEvent)append("\n비공개로 등록됐고 참석자 초대는 없어요.")
+                        else append("\n참석자 수신·수락은 확인하지 않았습니다.")
+                        com.user.localagent.core.connections.CalendarTargetIntegrity.eventLink(event?.text("htmlLink"))
+                            ?.let {append("\n[Google Calendar에서 열기](").append(it).append(")")}
                     }else{append("일정 생성의 대상·활성 상태·저장 근거를 확인하지 못했습니다.");observationIncomplete=true}
                 }
                 "save_note","update_note"->{append("메모 ").append(if(call.name=="save_note")"저장"else"수정").append(" 후 재조회를 확인했습니다.");if(value("title").isNotEmpty())append("\n제목: ").append(value("title"));append("\n본문:\n").append(value("content"))}
