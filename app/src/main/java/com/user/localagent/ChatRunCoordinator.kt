@@ -3958,7 +3958,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val name = service.label
                 "휴대폰에 $name 공식 페이지를 여는 요청을 전달했어요. ${service.nextStep} " +
                     "조회·신청·예약·납부 결과는 아직 확인되지 않았어요."
-            } else "관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송 완료는 확인되지 않았습니다."
+            } else if (call.name == com.user.localagent.core.KakaoShare.TOOL) com.user.localagent.core.KakaoShare.HANDOFF
+            else "관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송 완료는 확인되지 않았습니다."
             val prepared=ToolResult(call.id,true,handoffMessage,VerificationState.PREPARED,"Android Intent 전달 확인")
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,prepared)
             persistStepEvidence()

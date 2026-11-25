@@ -62,6 +62,7 @@ object CloudAgentFinals {
                 "ELEMENT_OBSCURED"->"다른 화면이 ${target}을 가려 누르지 못했어요."
                 "ELEMENT_UNAVAILABLE"->"${target}을 현재 화면에서 찾지 못했어요. 이 단계에서 멈췄어요."
                 "SNAPSHOT_STALE"->"버튼을 누르기 전에 화면이 바뀌었어요. 바뀐 화면에서 다음 버튼을 확인하지 못했어요."
+                "TRANSACTION_READBACK_REQUIRED"->"앞선 거래 결과를 확인하지 못했어요. 주문·예약 내역이나 영수증을 확인해야 해요."
                 "ACTION_OUTCOME_UNKNOWN"->"${target}을 누르는 중에 페이지를 다시 확인하지 못했어요. 버튼이 눌렸는지는 아직 확인하지 못했어요."
                 "PAGE_TIMEOUT"->"사이트 응답을 기다렸지만 페이지가 열리지 않아 멈췄어요."
                 "TLS_ERROR","HTTPS_REQUIRED"->"사이트에 안전하게 연결하지 못해 페이지를 열 수 없었어요."

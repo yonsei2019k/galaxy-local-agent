@@ -194,6 +194,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
         handlers+=com.user.localagent.connections.ConsumerApps(appContext).installed().map {"consumer:${it.id}"}
         val candidates=mapOf("calendar" to android.content.Intent(android.content.Intent.ACTION_INSERT,android.provider.CalendarContract.Events.CONTENT_URI),
             "alarm" to android.content.Intent(android.provider.AlarmClock.ACTION_SET_ALARM),
+            com.user.localagent.core.KakaoShare.HANDLER to com.user.localagent.integrations.KakaoShareIntent.prepare(),
             "sms" to android.content.Intent(android.content.Intent.ACTION_SENDTO,android.net.Uri.parse("smsto:")),
             "email" to android.content.Intent(android.content.Intent.ACTION_SENDTO,android.net.Uri.parse("mailto:")),
             "maps" to android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("geo:0,0")),

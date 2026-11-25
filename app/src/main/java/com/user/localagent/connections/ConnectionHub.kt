@@ -19,13 +19,14 @@ class ConnectionHub private constructor(private val context:Context,
     private val calendarAuthorizedSender:(suspend(ConnectedService,ApiRequest,ConnectionAccess)->ApiResponse)?=null) {
     val store=ConnectionStore(context)
     val google by lazy {check(calendarAuthorizedSender==null){"isolated_calendar_has_no_google_auth"};GoogleConnectionAuth(context,store)}
+    internal val privateReads by lazy {check(calendarAuthorizedSender==null);PrivateAccountReads(context,store)}
     internal val outlook by lazy {check(calendarAuthorizedSender==null);OutlookAuthorization(context,store)}
     val pc by lazy {check(calendarAuthorizedSender==null){"isolated_calendar_has_no_pc_client"};PcToolClient(context,store)}
     private val runtimes=java.util.concurrent.ConcurrentHashMap<ConnectedService,ConnectionRuntime>()
     fun clearCache(){runtimes.values.forEach {it.clearCache()}}
-    fun authorizedServiceIds(writeOnly:Boolean=false):Set<String> = ConnectedService.entries.filter {(!it.outlook||outlook.configured) && store.connection(it)?.let {value->!writeOnly||value.writeAllowed}==true}.map {it.id}.toSet()+if(!writeOnly&&pc.authorized())setOf("pc-tools")else emptySet()
-    fun verifiedServiceIds():Set<String> = ConnectedService.entries.filter {(!it.outlook||outlook.configured) && store.connection(it)?.verifiedAt?.let {at->at>0}==true}.map {it.id}.toSet()+if(pc.verified())setOf("pc-tools")else emptySet()
-    fun disconnect(service:ConnectedService){if(service.outlook)outlook.disconnect(service) else store.disconnect(service);clearCache()}
+    fun authorizedServiceIds(writeOnly:Boolean=false):Set<String> = ConnectedService.entries.filter {(!it.outlook||outlook.configured) && (it!=ConnectedService.X_BOOKMARKS||privateReads.xConfigured) && store.connection(it)?.let {value->!writeOnly||value.writeAllowed}==true}.map {it.id}.toSet()+if(!writeOnly&&pc.authorized())setOf("pc-tools")else emptySet()
+    fun verifiedServiceIds():Set<String> = ConnectedService.entries.filter {(!it.outlook||outlook.configured) && (it!=ConnectedService.X_BOOKMARKS||privateReads.xConfigured) && store.connection(it)?.verifiedAt?.let {at->at>0}==true}.map {it.id}.toSet()+if(pc.verified())setOf("pc-tools")else emptySet()
+    fun disconnect(service:ConnectedService){if(service==ConnectedService.NAVER_MAIL || service==ConnectedService.X_BOOKMARKS)privateReads.disconnect(service) else if(service.outlook)outlook.disconnect(service) else store.disconnect(service);clearCache()}
     private fun runtime(service:ConnectedService)=runtimes.getOrPut(service){ConnectionRuntime(object:ConnectionHost {
         override suspend fun access(service:ConnectedService):ConnectionAccess? {
             val value=store.connection(service)?:return null
@@ -43,6 +44,7 @@ class ConnectionHub private constructor(private val context:Context,
                 currentCoroutineContext().ensureActive()
                 return sender(service,request,expectedAccess).also {currentCoroutineContext().ensureActive()}
             }
+            if(service==ConnectedService.NAVER_MAIL || service==ConnectedService.X_BOOKMARKS)return privateReads.read(service,request,expectedAccess)
             val token=try {if(service.google)google.token(service,state.writeAllowed,expectedAccess) else if(service.outlook)outlook.token(service,expectedAccess){ microsoftAccountId(service,it) } else store.read("token.${service.id}")?:return ApiResponse(401,"{}")}
                 catch(cancel:CancellationException){throw cancel}catch(_:Exception){return ApiResponse(401,"{}")}
             if(!service.google && !service.outlook && tokenPrincipal(token)!=state.principal)return ApiResponse(401,"{}")
@@ -133,6 +135,7 @@ class ConnectionHub private constructor(private val context:Context,
         }
     }
     suspend fun transport(service:ConnectedService,request:ApiRequest,token:String,testingToken:Boolean=false):ApiResponse=withContext(Dispatchers.IO) {
+        require(service!=ConnectedService.NAVER_MAIL && service!=ConnectedService.X_BOOKMARKS && java.net.URI(request.url).host !in setOf("imap.naver.com","api.x.com"))
         require(token.isNotBlank()&&token.none {it=='\r'||it=='\n'})
         if(service==ConnectedService.GMAIL&&request.method=="POST"&&request.url=="https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
             return@withContext GmailSendTransport.send(request,token)

@@ -118,6 +118,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
 
     suspend fun reviewForAction(call:ToolCall):String? {
         ToolRegistry.validate(call)
+        if (call.name == KakaoShare.TOOL) return "카카오톡에서 받을 대화방을 직접 고르게 돼요. 공유할 내용:\n\n" + call.s("message")
         if(call.name=="patch_note")return checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.review(resolveOwnerText(call))
         if(call.name==com.user.localagent.core.PcBrowserToolCatalog.ACTION||call.name==com.user.localagent.core.AppBrowserToolCatalog.ACTION)
             return checkNotNull(browserFor(call.name)).review(call).second
@@ -174,6 +175,9 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         return when(call.name){
             "prepare_calendar_event"->Intent(Intent.ACTION_INSERT,CalendarContract.Events.CONTENT_URI).putExtra(CalendarContract.Events.TITLE,call.s("title")).putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,OffsetDateTime.parse(call.s("start")).toInstant().toEpochMilli()).putExtra(CalendarContract.EXTRA_EVENT_END_TIME,OffsetDateTime.parse(call.s("end")).toInstant().toEpochMilli()).putExtra(CalendarContract.Events.DESCRIPTION,call.s("description")).putExtra(CalendarContract.Events.EVENT_LOCATION,call.s("location"))
             "create_alarm"->Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR,call.i("hour",0)).putExtra(AlarmClock.EXTRA_MINUTES,call.i("minute",0)).putExtra(AlarmClock.EXTRA_MESSAGE,call.s("label","알람")).putExtra(AlarmClock.EXTRA_SKIP_UI,false).apply {call.arguments["days"]?.jsonArray?.let {putIntegerArrayListExtra(AlarmClock.EXTRA_DAYS,ArrayList(it.map {value->value.jsonPrimitive.int}))}}
+            KakaoShare.TOOL -> com.user.localagent.integrations.KakaoShareIntent.prepare(call.s("message")).also {
+                require(it.resolveActivity(context.packageManager) != null) { "카카오톡에서 글을 공유할 수 없습니다. 이 휴대폰에 카카오톡이 설치되어 있는지 확인해 주세요." }
+            }
             "prepare_sms"->Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",call.s("phoneNumber"),null)).putExtra("sms_body",call.s("message"))
             "prepare_email"->Intent(Intent.ACTION_SENDTO,Uri.parse("mailto:"+Uri.encode(call.s("to")))).putExtra(Intent.EXTRA_EMAIL,arrayOf(call.s("to"))).putExtra(Intent.EXTRA_SUBJECT,call.s("subject")).putExtra(Intent.EXTRA_TEXT,call.s("body"))
             "open_map"->Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q="+Uri.encode(call.s("query"))))
@@ -258,8 +262,14 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                     val official=pairedPublicSearch?.read(call)
                     verifyGrant()
                     val result=if(official!=null && (call.name=="search_web" || call.s("store")=="naver"))official else {
-                        val fallback=if(call.s("source")=="kopis") {
-                            val query=listOf(call.s("query"),"공연 일정",call.s("startDate"),call.s("endDate"))
+                        val officialSubject=when(call.s("source")) {
+                            "kopis" -> "공연 일정"
+                            "tago_flights" -> "국내선 운항 일정"
+                            "seoul_reservations" -> "site:yeyak.seoul.go.kr 서울시 공공서비스예약"
+                            else -> null
+                        }
+                        val fallback=if(officialSubject!=null) {
+                            val query=listOf(call.s("query"),officialSubject,call.s("startDate"),call.s("endDate"))
                                 .filter(String::isNotBlank).joinToString(" ")
                             call.copy(arguments=buildJsonObject {put("query",query)})
                         }else call

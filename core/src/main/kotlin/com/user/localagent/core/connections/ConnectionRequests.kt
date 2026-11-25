@@ -13,14 +13,16 @@ import kotlinx.serialization.json.*
 data class ApiRequest(val url:String,val method:String="GET",val body:String?=null,val contentType:String="application/json; charset=utf-8",val extraHeaders:Map<String,String> = emptyMap()) {
     init {
         val uri=URI(url)
-        require(uri.scheme=="https" && uri.userInfo==null && uri.port in listOf(-1,443) && uri.fragment==null)
+        val inbox=url=="imaps://imap.naver.com:993/INBOX"
+        require(inbox || (uri.scheme=="https" && uri.host!="imap.naver.com" && uri.userInfo==null && uri.port in listOf(-1,443) && uri.fragment==null))
+        if(inbox)require(method=="GET" && body==null && extraHeaders.isEmpty())
         require(uri.host in hosts && uri.rawPath.none {it=='\\'})
         require(method in setOf("GET","POST","PUT","PATCH"))
         require(body==null || body.toByteArray().size<=100_000)
         require(extraHeaders.keys.all {it in setOf("Notion-Version","If-None-Match")})
         require(extraHeaders.values.none {it.any {c->c=='\r'||c=='\n'}})
     }
-    companion object {val hosts=setOf("www.googleapis.com","docs.googleapis.com","sheets.googleapis.com","slides.googleapis.com","gmail.googleapis.com","forms.googleapis.com","tasks.googleapis.com","people.googleapis.com","photospicker.googleapis.com","api.telegram.org","api.notion.com","api.todoist.com","api.github.com","slack.com","graph.microsoft.com")}
+    companion object {val hosts=setOf("www.googleapis.com","docs.googleapis.com","sheets.googleapis.com","slides.googleapis.com","gmail.googleapis.com","forms.googleapis.com","tasks.googleapis.com","people.googleapis.com","photospicker.googleapis.com","api.telegram.org","api.notion.com","api.todoist.com","api.github.com","slack.com","graph.microsoft.com","api.x.com","imap.naver.com")}
 }
 
 data class ResponseProof(val verified:Boolean,val summary:String)
@@ -105,6 +107,11 @@ object ConnectionRequests {
             "create_google_form"->{val questions=Json.parseToJsonElement(call.s("questionsJson")) as? JsonArray?:error("질문 배열 필요");require(questions.size in 1..10&&questions.all {it is JsonPrimitive&&it.isString&&it.content.isNotBlank()&&it.content.length<=300})
                 ApiPlan(service,true,ApiRequest("https://forms.googleapis.com/v1/forms","POST",obj("info" to buildJsonObject {put("title",title)})),"formId",populate={ApiRequest("https://forms.googleapis.com/v1/forms/${key(it)}:batchUpdate","POST",buildJsonObject {put("requests",buildJsonArray {questions.forEachIndexed {index,q->add(buildJsonObject {put("createItem",buildJsonObject {put("location",buildJsonObject {put("index",index)});put("item",buildJsonObject {put("title",q);put("questionItem",buildJsonObject {put("question",buildJsonObject {put("required",false);put("textQuestion",buildJsonObject {})})})})})})}})}.toString())},readback={ApiRequest("https://forms.googleapis.com/v1/forms/${key(it)}")},verify={body->ResponseProof(runCatching {val data=Json.parseToJsonElement(body).jsonObject;data.getValue("info").jsonObject["title"]?.jsonPrimitive?.content==title&&data.getValue("items").jsonArray.map {it.jsonObject.getValue("title").jsonPrimitive.content}==questions.map {it.jsonPrimitive.content}}.getOrDefault(false),"설문 제목·질문 순서 재조회")})}
             "search_youtube_videos"->read("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q="+encode(call.s("query")))
+            "list_naver_mail_inbox" -> read("imaps://imap.naver.com:993/INBOX")
+            "list_x_bookmarks" -> {
+                val cursor=call.s("pageToken")
+                read("https://api.x.com/2/users/me/bookmarks?max_results=10"+if(cursor.isEmpty())"" else "&pagination_token="+encode(cursor))
+            }
             "list_youtube_playlists"->{
                 val playlist=call.s("playlistId");val token=pageToken(call.s("pageToken"))
                 if(playlist.isEmpty())read("https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=20"+token)

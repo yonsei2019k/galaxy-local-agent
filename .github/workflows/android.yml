@@ -11,6 +11,7 @@ env:
   RELEASE_VERSION_OFFSET: 2022
   ZIPHAP_OUTLOOK_CLIENT_ID: ${{ vars.ZIPHAP_OUTLOOK_CLIENT_ID }}
   ZIPHAP_OUTLOOK_TENANT: ${{ vars.ZIPHAP_OUTLOOK_TENANT }}
+  ZIPHAP_X_CLIENT_ID: ${{ vars.ZIPHAP_X_CLIENT_ID }}
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true

@@ -13,8 +13,9 @@ internal class PairedPublicSearch(
 ) {
     suspend fun read(call: ToolCall): JsonObject? {
         val store = call.arguments["store"]?.jsonPrimitive?.content
+        val source = call.arguments["source"]?.jsonPrimitive?.content
         val kind = when {
-            call.name == "search_web" && call.arguments["source"]?.jsonPrimitive?.content == "kopis" -> "kopis"
+            call.name == "search_web" && source in setOf("kopis", "tago_flights", "seoul_reservations") -> requireNotNull(source)
             call.name == "search_web" && call.arguments["source"]?.jsonPrimitive?.content == "naver_places" -> "local"
             call.name == "search_shopping" && (store == null || store == "naver") -> "shop"
             else -> return null
@@ -28,18 +29,23 @@ internal class PairedPublicSearch(
         } catch (_: Exception) {
             null
         } ?: return null
-        val kopis = kind == "kopis"
-        val healthKey = if (kopis) "kopisPublicSearch" else "naverPublicSearch"
+        val endpoint = if (kind in setOf("local", "shop")) "naver" else kind
+        val healthKey = when (endpoint) {
+            "kopis" -> "kopisPublicSearch"
+            "tago_flights" -> "tagoPublicSearch"
+            "seoul_reservations" -> "seoulReservationSearch"
+            else -> "naverPublicSearch"
+        }
         if (transport.lastHealth?.get(healthKey) != JsonPrimitive(true)) return null
         check(allowed(call.name)) { "검색 연결 권한이 변경됐어요." }
         val body = buildJsonObject {
-            if (kopis) {
+            if (endpoint != "naver") {
                 for (key in listOf("startDate", "endDate", "page")) call.arguments[key]?.let { put(key, it) }
             } else put("kind", kind)
             put("query", call.arguments.getValue("query"))
         }
         val result = try {
-            transport.json(config, if (kopis) "/v1/public-search/kopis" else "/v1/public-search/naver", "POST", body, 6500)
+            transport.json(config, "/v1/public-search/$endpoint", "POST", body, 6500)
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (_: Exception) {

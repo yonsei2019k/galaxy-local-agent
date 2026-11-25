@@ -9,11 +9,12 @@ import java.io.File
 class CloudPhoneToolScopeTest {
     private val tools=ExternalAgentContract.NORMAL_PHONE_TOOLS
 
-    @Test fun cloudIsOfferedEveryToolTheLocalModelIsOffered(){
+    @Test fun cloudPreservesToolCoverageWithinOlderWorkerLimits(){
         // The on-device sub-agent reuses the local engine and is never offered to cloud runs.
-        assertEquals(ToolRegistry.definitions.keys-LocalSubagentToolCatalog.names,tools)
+        assertEquals(ToolRegistry.definitions.keys-LocalSubagentToolCatalog.names-ExternalAgentContract.CLOUD_HOME_ALIASES,tools)
         assertFalse(LocalSubagentToolCatalog.RUN_SUBAGENT in tools)
         val outlook = setOf("list_outlook_inbox", "list_outlook_calendar")
+        assertTrue(tools.containsAll(setOf("open_url", "prepare_kakao_share", "list_naver_mail_inbox", "list_x_bookmarks")))
         val ownerOnly = setOf(GoalToolCatalog.CREATE, GoalToolCatalog.START, GoalToolCatalog.RESUME)
         val progress = GoalProgressToolCatalog.names + GoalWaitToolCatalog.WAIT
         for (segment in listOf(false, true)) {

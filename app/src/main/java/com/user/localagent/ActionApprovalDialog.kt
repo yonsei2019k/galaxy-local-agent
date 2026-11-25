@@ -11,6 +11,7 @@ import com.user.localagent.core.CapabilityPolicy
 
 private fun approvalTitle(action:PendingAction):String =
     if(action.recipientChoices.isNotEmpty())"문자를 받을 사람 선택" else when(action.call.name){
+        com.user.localagent.core.KakaoShare.TOOL->"카카오톡에 공유할 내용 확인"
         "prepare_sms"->"문자 초안 확인"
         "prepare_email"->"메일 초안 확인"
         "send_gmail_message","reply_gmail_message"->"보낼 메일 확인"

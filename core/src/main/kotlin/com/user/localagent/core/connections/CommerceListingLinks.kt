@@ -8,6 +8,9 @@ object CommerceListingLinks {
     private val stayFields = setOf("checkIn", "checkOut", "checkInDate", "checkOutDate", "adultCount", "childCount", "roomTypeId", "ratePlanId")
     /** Exact service homes have no merchant, order or reservation selection to lose. */
     private val serviceHomes = mapOf(
+        "https://www.netflix.com" to "com.netflix.mediaclient",
+        "https://www.coupang.com" to "com.coupang.mobile",
+        "https://www.coupangeats.com" to "com.coupang.mobile.eats",
         "https://www.baemin.com" to "com.sampleapp",
         "https://www.yogiyo.co.kr" to "com.fineapp.yogiyo",
         "https://www.kakaomobility.com/kakaot/index.html" to "com.kakao.taxi",

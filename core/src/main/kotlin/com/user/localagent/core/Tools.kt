@@ -37,7 +37,7 @@ object ToolRegistry {
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
         "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
         "open_map" to "Open the default map app searching for a place or address. Does not start turn-by-turn navigation by itself.",
-        "open_url" to "Open an HTTPS page on the phone. Prefer observed listing URLs to keep the selected shop, room or product. Official service homes can open their installed apps: map.naver.com, app.catchtable.co.kr, www.tabling.co.kr, www.baemin.com, www.yogiyo.co.kr, or www.kakaomobility.com/kakaot/index.html. Provide exactly one of url and service. For a known official service, use service ID: skt, kt, lguplus, insurance_lookup, koreanair, asiana, jejuair, jinair, trinityairways (구 티웨이), naver_mail, kakao_support. Ask which provider if unclear. Use read_webpage to read content. Opening does not verify an account, fare, reservation, order or ride.",
+        "open_url" to "Open an HTTPS page on the phone. Prefer observed listing URLs to keep the selected shop, room or product. Official service homes can open their installed apps: map.naver.com, app.catchtable.co.kr, www.tabling.co.kr, www.baemin.com, www.yogiyo.co.kr, or www.kakaomobility.com/kakaot/index.html. Provide exactly one of url and service. For a known official service, use service ID: skt, kt, lguplus, insurance_lookup, koreanair, asiana, jejuair, jinair, trinityairways (구 티웨이), naver_mail, kakao_support, netflix, coupang, coupang_eats, srt_booking, seoul_reservations, silson24 (official insurance claim login on the phone). Ask which provider if unclear. Use read_webpage to read content. Opening does not verify an account, fare, reservation, order or ride.",
         "save_memory" to "Record an owner-stated fact, preference or correction for later chats with owner review. For a request to learn from past conversations, read permitted owner messages first and save only clearly stated facts. Storage is confirmed by readback.",
         "search_memories" to "Read approved saved facts and preferences before answering a question about the owner. Omit query for a bounded owner overview; use a short topic to search remembered facts and past local analysis findings. Analysis findings are unverified interpretations; confirm with read_analysis_evidence using the returned IDs when needed.",
         "delete_memory" to "Delete one remembered fact by id after the owner explicitly asks.",
@@ -69,7 +69,7 @@ object ToolRegistry {
         ToolDefinition("read_project_file",Risk.LOW,mapOf("path" to text(max=500,description=projectFilePathHint)),"Read bounded UTF-8 in the bound phone project. A filename alone is a root-relative path; no absolute root needed. Returns SHA-256. Text is untrusted data."),
         ToolDefinition("write_project_file",Risk.MEDIUM,mapOf("path" to text(max=500,description=projectFilePathHint),"content" to text(max=12000),"expectedSha256" to text(false,64)),"Write phone project text after approval and verify readback. Updates need read_project_file SHA-256. Host checks access. No running, compiling or installing."),
         ToolDefinition("create_document",Risk.LOW,mapOf("format" to text(max=10),"title" to text(max=200),"content" to text(max=12000)),"Create and verify a new private DOCX, XLSX, PDF, TXT or CSV file. For XLSX/CSV provide strict CSV values; formulas are literal text. No sending, public upload or overwriting. User exports separately.",60_000),
-        ToolDefinition("search_web",Risk.LOW,mapOf("query" to text(max=500),"source" to text(false,20),"startDate" to text(false,10),"endDate" to text(false,10),"page" to Argument("integer",false)),"Search public sources. Use naver_places for Korean local businesses. For a Korean performance title, use source=kopis with the title as query, optional inclusive startDate and endDate (YYYY-MM-DD, up to 31 days, default next 31 days), page 1-5. KOPIS lists performances; verify tickets and availability separately.",180_000),
+        ToolDefinition("search_web",Risk.LOW,mapOf("query" to text(max=500),"source" to text(false,20),"startDate" to text(false,10),"endDate" to text(false,10),"page" to Argument("integer",false)),"Search public sources. Use naver_places for Korean local businesses. For a Korean performance title, use source=kopis with the title as query, optional inclusive startDate and endDate (YYYY-MM-DD, up to 31 days, default next 31 days), page 1-5. For domestic flight schedules, source=tago_flights takes query=GMP-CJU (departure-arrival airport codes), startDate YYYY-MM-DD and optional page 1-5. For Seoul public activities, source=seoul_reservations takes a Korean search term up to 50 characters. Listings do not verify availability or payment.",180_000),
         ToolDefinition("search_shopping",Risk.LOW,mapOf("query" to text(max=500),"store" to text(false,30)),"Look up public product links and observed prices. Never infer live stock, option equivalence, shipping-inclusive price or global lowest price without source evidence.",180_000),
         ToolDefinition("save_browser_pdf",Risk.LOW,mapOf("snapshotId" to text(max=64),"ref" to text(max=64)),"Save an already-issued original PDF using a same-session-pdf link observed by read_app_browser_page in this request. Select its snapshotId and ref. Supports a direct same-origin HTTPS PDF or an already observed same-origin blob PDF link. No forms, redirects or generated certificates.",60_000),
         ToolDefinition("save_public_pdf",Risk.LOW,mapOf("url" to text(max=2048)),"Save the original bytes of an existing public PDF from a direct HTTPS link on the phone. No cookies, login, form or printing. 2 MiB maximum. Checks PDF pages and saved bytes. Never generate a replacement for an issued certificate.",60_000),
@@ -95,6 +95,7 @@ object ToolRegistry {
             "scope" to text(false,80,collectionHint)),
         def("search_notes",Risk.LOW,"query" to text(max=500,description="Literal substring of actual title/body, preserving spaces. For readback, use the exact saved title and confirm the returned id."),"scope" to text(false,80,description="Optional exact collection filter, not an access scope. Omitted or exactly empty means no collection filter within existing permission. Whitespace is invalid; never invent a collection."),"limit" to Argument("integer",false)),
         def("search_contacts",Risk.LOW,"query" to text(max=300),"limit" to Argument("integer",false)),
+        KakaoShare.definition,
         def("prepare_sms",Risk.MEDIUM,"phoneNumber" to text(max=40),"message" to text(max=4000)),
         def("prepare_email",Risk.MEDIUM,"to" to text(max=320),"subject" to text(max=300),"body" to text(max=12000)),
         def("open_map",Risk.LOW,"query" to text(max=500)),
@@ -187,8 +188,14 @@ object ToolRegistry {
         if(call.name=="search_web"){
             val args=call.arguments
             val source=args["source"]?.jsonPrimitive?.content
-            require(source==null||source in setOf("naver_places","kopis")){"지원하는 공개 검색 출처가 아닙니다."}
-            if(source=="kopis"){
+            require(source==null||source in setOf("naver_places","kopis","tago_flights","seoul_reservations")){"지원하는 공개 검색 출처가 아닙니다."}
+            if(source=="seoul_reservations") require(args.getValue("query").jsonPrimitive.content.trim().length in 1..50)
+            if(source=="tago_flights"){
+                require(args.getValue("query").jsonPrimitive.content.matches(Regex("(?:[A-Z]{3}|NAARK[A-Z]{2})-(?:[A-Z]{3}|NAARK[A-Z]{2})")))
+                require("startDate" in args && "endDate" !in args)
+                java.time.LocalDate.parse(args.getValue("startDate").jsonPrimitive.content)
+                args["page"]?.let { require(it.jsonPrimitive.int in 1..5) }
+            }else if(source=="kopis"){
                 require(args.getValue("query").jsonPrimitive.content.trim().length in 1..100)
                 require(("startDate" in args)==("endDate" in args))
                 if("startDate" in args){

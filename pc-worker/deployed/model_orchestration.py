@@ -17,7 +17,7 @@ _cache = {}
 _lock = threading.Lock()
 
 
-WORKER_ONLY_ENV = frozenset({"NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET", "KOPIS_SERVICE_KEY"})
+WORKER_ONLY_ENV = frozenset({"NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET", "KOPIS_SERVICE_KEY", "TAGO_SERVICE_KEY"})
 
 
 def subscription_environment():

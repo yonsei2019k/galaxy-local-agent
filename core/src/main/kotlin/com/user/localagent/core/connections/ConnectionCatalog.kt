@@ -20,6 +20,8 @@ enum class ConnectedService(val id:String,val label:String,val readScopes:List<S
     NOTION("notion","Notion",emptyList()),
     TODOIST("todoist","Todoist",emptyList()),
     GITHUB("github","GitHub",emptyList()), SLACK("slack","Slack",emptyList()),
+    NAVER_MAIL("naver-mail","네이버 메일",emptyList()),
+    X_BOOKMARKS("x-bookmarks","X 북마크",emptyList()),
     OUTLOOK_MAIL("outlook-mail","Outlook 메일",emptyList()),
     OUTLOOK_CALENDAR("outlook-calendar","Outlook 일정",emptyList());
 
@@ -66,6 +68,8 @@ object ConnectionCatalog {
         tool("list_google_form_responses",ConnectedService.FORMS,"Read a bounded page of private responses to an authorized Google Form.","id" to s(max=250)),
         tool("create_google_form",ConnectedService.FORMS,"Create a private form from questionsJson: up to10 plain text question titles. Does not publish or distribute it.","title" to s(max=200),"questionsJson" to s(max=4000),write=true),
         tool("search_youtube_videos",ConnectedService.YOUTUBE,"Search YouTube video metadata. Does not download videos, audio or arbitrary captions.","query" to s(max=300)),
+        tool("list_naver_mail_inbox",ConnectedService.NAVER_MAIL,"Read the latest 10 inbox message subjects, senders and dates from the authorized Naver Mail account. Does not mark mail read."),
+        tool("list_x_bookmarks",ConnectedService.X_BOOKMARKS,"Read the current X user's saved posts. Use the returned pageToken to continue.","pageToken" to s(false,512)),
         tool("list_youtube_playlists",ConnectedService.YOUTUBE,"List the authorized user's playlists; provide a returned playlistId to read its video titles, IDs and positions. Reuse pageToken for more results.","playlistId" to s(false,128),"pageToken" to s(false,512)),
         tool("list_telegram_bot_updates",ConnectedService.TELEGRAM,"Read updates visible to the configured bot and its allowed chat. Not the owner's complete Telegram account history."),
         tool("list_outlook_inbox",ConnectedService.OUTLOOK_MAIL,"List the most recent 20 messages in the connected Outlook inbox. Headers only, no message bodies or attachments."),

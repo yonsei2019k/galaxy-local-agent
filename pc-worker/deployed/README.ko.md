@@ -23,3 +23,9 @@ Codex·Claude의 기존 휴대폰 MCP에서 `search_web(source="naver_places")`�
 공연 조회 배포 시 `kopis_search.py`를 `server.py`와 함께 설치한다. 기존 서버에서 두 커넥터를 함께 import하므로 사용 여부와 관계없이 두 모듈 파일을 함께 배포한다. 운영자가 이미 발급받은 `KOPIS_SERVICE_KEY`가 작업기 환경에 있을 때 health의 `kopisPublicSearch`가 설정된다. 모델 프로세스의 환경에서 이 키를 제거한다.
 
 `search_web(source="kopis", query="공연명")`으로 공연 목록을 읽으며 기본 조회 기간은 한국 날짜 기준 오늘부터 31일이다. 선택 인자 `startDate`, `endDate`로 양 끝을 지정하고 1~5페이지에서 한 번에 5건씩 읽는다. 공연 ID, 장소, 공연기간·상태를 표시한다. 예매 가능 좌석·가격·할인·실제 구매 결과는 판매처에서 확인한다. 연결 불가 시 원래 공연명과 지정 기간을 공개 웹 검색으로 이어간다. [KOPIS 공식 개발 가이드](https://kopis.or.kr/upload/openApi/공연예술통합전산망OpenAPI개발가이드.pdf)
+
+### 국내 항공 운항과 서울 공공서비스예약
+
+`travel_public_search.py`를 작업기의 `server.py`와 함께 설치한다. `search_web(source="tago_flights", query="GMP-CJU", startDate="2026-12-01")`는 작업기 환경의 `TAGO_SERVICE_KEY`(공공데이터포털의 디코딩된 키)로 해당 날짜의 편명, 공항, 예정 시각을 조회한다. 할인·잔여 좌석·발권은 항공사에서 확인한다. [국토교통부 TAGO](https://www.data.go.kr/data/15098526/openapi.do)
+
+`search_web(source="seoul_reservations", query="테니스")`는 키 없이 서울시 공식 통합 검색의 첫 화면에서 최대 5개 항목을 읽는다. 결과의 상세 주소에서 시설별 조건과 예약 가능 여부를 확인한다. `open_url`의 `service=srt_booking`, `seoul_reservations`, `silson24`는 공식 사이트를 휴대폰에서 연다. 실손 청구는 사이트에서 가입자의 인증·계약 선택·서류 확인·전송이 필요하다. [서울 공공서비스예약](https://yeyak.seoul.go.kr/web/main.do) · [SR 승차권](https://eticket.srail.kr/hpg/hra/01/selectScheduleList.do?pageId=TK0100000000) · [금융위원회 실손24 안내](https://fsc.go.kr/po010103/85456)

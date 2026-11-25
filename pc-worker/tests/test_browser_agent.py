@@ -52,6 +52,26 @@ class Policy(unittest.TestCase):
             agent.act(action | {'approvalId': approval['approvalId']})
         self.assertEqual(clicks, [])
 
+    def test_checkout_click_lost_readback_consumes_the_approval(self):
+        agent = b.BrowserAgent(profile='unused')
+        agent._ensure = lambda: None
+        observed = {'url': 'https://example.org/checkout', 'title': 'Checkout', 'text': 'Total 90,000 won',
+                    'truncated': False, 'elements': [{'ref': 'e1', 'tag': 'button', 'label': 'Pay'}]}
+        agent.page = type('Page', (), {'evaluate': lambda *_args, **_options: observed})()
+        clicks = []
+        agent._click = clicks.append
+        def fail_readback():
+            raise b.BrowserError('PAGE_TIMEOUT', 504)
+        agent._settle = fail_readback
+        action = {'action': 'click', 'ref': 'e1', 'snapshotId': agent._read()['snapshotId']}
+        approval = agent.act(action)
+        approved = action | {'approvalId': approval['approvalId']}
+        with self.assertRaisesRegex(b.BrowserError, 'ACTION_OUTCOME_UNKNOWN'):
+            agent.act(approved)
+        with self.assertRaisesRegex(b.BrowserError, 'SNAPSHOT_STALE'):
+            agent.act(approved)
+        self.assertEqual(clicks, ['e1'])
+
     def test_only_public_web_pages(self):
         for good in ('https://www.letskorail.com/', 'http://example.com/a?b=1', 'https://map.naver.com:443/p'):
             self.assertTrue(b.url_allowed(good), good)

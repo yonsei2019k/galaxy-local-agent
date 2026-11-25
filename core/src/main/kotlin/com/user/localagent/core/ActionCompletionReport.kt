@@ -7,7 +7,7 @@ data class ObservedToolOutcome(val call:ToolCall,val result:ToolResult)
 
 object ActionCompletionReport {
     val managedTools=setOf("patch_note","read_note","create_google_calendar_event","save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
-        "prepare_sms","prepare_email","prepare_calendar_event","create_alarm","get_current_datetime","search_contacts",
+        KakaoShare.TOOL,"prepare_sms","prepare_email","prepare_calendar_event","create_alarm","get_current_datetime","search_contacts",
         "inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")+
         com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")+setOf(ScheduledReadToolCatalog.CREATE, ScheduledReadToolCatalog.CANCEL)
     private val auxiliaryReads=setOf("read_note","get_current_datetime","search_contacts","list_reminders","get_agent_capabilities")
@@ -25,6 +25,10 @@ object ActionCompletionReport {
             fun value(key:String)=call.arguments[key]?.jsonPrimitive?.content.orEmpty()
             if(!result.success||result.verification in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)){
                 append("실행 결과 미확인 · ").append(result.content.take(1200));return@forEachIndexed
+            }
+            if(call.name == KakaoShare.TOOL) {
+                append(if (result.verification == VerificationState.PREPARED) KakaoShare.HANDOFF else "카카오톡 전송 결과를 확인할 수 없어요.")
+                return@forEachIndexed
             }
             if(call.name in observationTools){
                 if(result.verification!=VerificationState.VERIFIED){

@@ -22,6 +22,9 @@ android {
         require(outlookId.isEmpty() || guid.matches(outlookId)) { "Invalid Outlook public client ID" }
         require(outlookTenant in setOf("common","consumers","organizations") || guid.matches(outlookTenant)) { "Invalid Outlook tenant" }
         manifestPlaceholders["outlookClientId"] = outlookId.ifEmpty { "unconfigured" }
+        val xClient = providers.environmentVariable("ZIPHAP_X_CLIENT_ID").orNull.orEmpty().trim()
+        require(xClient.isEmpty() || xClient.matches(Regex("[A-Za-z0-9_-]{8,200}")))
+        manifestPlaceholders["ziphapXClientId"] = xClient.ifEmpty { "." }
         manifestPlaceholders["outlookTenant"] = outlookTenant
         manifestPlaceholders["ziphapUpdateUrl"] = "https://github.com/yonsei2019k/galaxy-local-agent/releases/latest/download/update.json"
     }

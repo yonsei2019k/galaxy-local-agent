@@ -95,3 +95,13 @@
 | 통신사 | SKT T world·KT 마이페이지·LG U+ 공식 화면 진입 | 계정별 청구서 조회, 납부 확인, 변경 승인. [방송통신이용자정보포털](https://wiseuser.go.kr/info.do?boardno=5&boardtypecode=5110&sorting=5) |
 | 항공·이동 | 대한항공·아시아나·제주항공·진에어·트리니티항공 공식 화면, 카카오 T 진입 | 동일 일정 운임·수하물 비교, 발권 승인 및 예약 정보 재조회. [국내 항공사 안내](https://www.easylaw.go.kr/CSP/CnpClsMainBtr.laf?ccfNo=2&cciNo=1&cnpClsNo=3&csmSeq=1662&popMenu=ov) · [트리니티항공](https://www.trinityairways.com/) |
 | 쿠팡·배달·식당 예약 | 쿠팡 상품과 쿠팡이츠, 배민·요기요, 캐치테이블·테이블링 공식 연결 | 실제 지점·메뉴·배달비·예약금과 처리 결과 확인 |
+
+#### 추가 연결 구현과 검증
+
+| 연결 | 앱과 PC 작업기에 반영된 범위 | 운영 검증 |
+| --- | --- | --- |
+| SRT·실손24 | 휴대폰 공식 예매·청구 화면을 열어 사용자 인증을 계속한다. | 좌석·운임, 청구 접수·결과는 각각 공식 화면에서 읽어야 한다. [SR](https://eticket.srail.kr/main.do?language=KR) · [실손24](https://www.silson24.or.kr/) |
+| TAGO 국내선·서울시 공공예약 | TAGO 운항 일정과 서울시 검색 결과 및 상세 URL을 가져온다. | 서울시 공개 검색 3건과 상세 1건 확인. TAGO 운영키가 필요하다. [TAGO](https://www.data.go.kr/data/15098526/openapi.do) · [서울시 공공서비스예약](https://yeyak.seoul.go.kr/web/main.do) |
+| 네이버 메일·X | 네이버 받은편지함 헤더 및 X 북마크를 계정별 읽기로 연결한다. | 실제 네이버 앱 전용 비밀번호 설정 및 X 배포용 클라이언트 등록 후 기기 조회를 확인한다. [계정 연결](app-connections.ko.md) |
+| 카카오톡 | 집합에서 확인한 초안을 휴대폰 카카오톡으로 공유한다. 사용자가 대화방 선택과 전송을 마친다. | 공식 API 직접 발송에는 등록·동의·수신자별 성공 확인이 필요하다. [카카오톡 연동](kakaotalk-share-and-message.ko.md) |
+| 숙소·쿠팡·배달 | 예약·주문 전 확인 내용을 채팅에서 표시하고 승인 실행 응답이 유실되면 같은 실행에서 재시도를 차단한다. | 실제 사이트 최종 확인 화면과 예약·주문·결제 결과의 재조회를 확인한다. |

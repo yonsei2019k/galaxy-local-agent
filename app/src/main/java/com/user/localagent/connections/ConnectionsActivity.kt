@@ -49,14 +49,15 @@ class ConnectionsActivity:Activity() {
         servicePicker=Spinner(this).apply {adapter=ArrayAdapter(this@ConnectionsActivity,android.R.layout.simple_spinner_dropdown_item,ConnectedService.entries.map {it.label})};root.addView(servicePicker)
         status=label("")
         connectRead=button("계정 연결 · 읽기") {val service=selected
-            if(service.outlook)startActivityForResult(Intent(this,OutlookConnectActivity::class.java).putExtra("service",service.id),OUTLOOK_REQUEST)
+            if(service==ConnectedService.X_BOOKMARKS)startActivity(hub.privateReads.startX())
+            else if(service.outlook)startActivityForResult(Intent(this,OutlookConnectActivity::class.java).putExtra("service",service.id),OUTLOOK_REQUEST)
             else authorize(false)
         }
         button("구글 전체 연결 · 서비스별 권한 확인") {run {check(pendingConsentToken==null){"이전 Google 권한 확인을 먼저 마쳐주세요."};googleBatch.begin();advanceGoogleBatch()}}
         connectWrite=button("계정 연결 · 읽기와 새 자료 작성") {authorize(true)}
         token=EditText(this).apply {hint="서비스 연결 토큰 · 채팅으로 보내지 마세요";inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;isSaveEnabled=false;importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS};root.addView(token)
         chat=EditText(this).apply {hint="Telegram에서 허용할 대화 ID";inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED;isSaveEnabled=false};root.addView(chat)
-        saveToken=button("토큰 연결 확인·저장") {val service=selected;val secret=token.text.toString();val allowed=chat.text.toString().takeIf {it.isNotBlank()};token.text.clear();run {require(!service.google);hub.configureToken(service,secret,allowed);output.text="연결 정보를 서비스에서 확인하고 암호화 저장했습니다."}}
+        saveToken=button("토큰 연결 확인·저장") {val service=selected;val secret=token.text.toString();val allowed=chat.text.toString().takeIf {it.isNotBlank()};token.text.clear();run {require(!service.google);if(service==ConnectedService.NAVER_MAIL)hub.privateReads.connectNaver(requireNotNull(allowed),secret) else hub.configureToken(service,secret,allowed);output.text="연결 정보를 서비스에서 확인하고 암호화 저장했습니다."}}
         button("이 앱의 연결 해제") {val service=selected;run {withContext(Dispatchers.IO){hub.disconnect(service)};output.text="이 앱의 접근과 캐시를 해제했습니다. 구글 계정에서의 권한 철회는 별도로 할 수 있습니다."}}
         button("구글 계정의 연결 권한 관리") {run {startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://myaccount.google.com/connections")))}}
         button("구글 앱 등록 정보 확인") {run {output.text=hub.google.registration.publicRegistrationInfo()}}
@@ -114,22 +115,32 @@ class ConnectionsActivity:Activity() {
         }
         refresh()
     }
+    override fun onResume(){super.onResume();if(::status.isInitialized)refresh()}
     private fun refresh(){
         val service=selected
         val state=runCatching {hub.store.connection(service)}.getOrNull()
         status.text=when {state==null->"연결 전";state.verifiedAt==0L->"계정 권한 연결됨 · 실제 자료 조회 검증 전";else->"실제 조회 성공 이력 있음 · 실행할 때 권한 다시 확인"}
         if(service.outlook && !hub.outlook.configured)status.text="이 버전에는 Microsoft 계정 연결 설정이 아직 없어요."
-        connectRead.isEnabled=!service.outlook || hub.outlook.configured
-        connectRead.visibility=if(service.google||service.outlook)View.VISIBLE else View.GONE
+        val x=service==ConnectedService.X_BOOKMARKS
+        if(x)status.text=if(!hub.privateReads.xConfigured)"이 배포판에는 X 개발자 앱이 연결되지 않았어요." else status.text.toString()+" · X API 사용량은 연결을 제공하는 개발자 계정에 집계돼요."
+        connectRead.isEnabled=(!service.outlook || hub.outlook.configured) && (!x || hub.privateReads.xConfigured)
+        connectRead.visibility=if(service.google||service.outlook||x)View.VISIBLE else View.GONE
         connectWrite.visibility=if(ConnectionCatalog.tools.values.any {it.service==service&&it.writes})View.VISIBLE else View.GONE
-        token.visibility=if(service.google||service.outlook)View.GONE else View.VISIBLE
+        token.visibility=if(service.google||service.outlook||x)View.GONE else View.VISIBLE
         saveToken.visibility=token.visibility
         input.hint=when(service){
             ConnectedService.GITHUB -> "저장소 소유자/저장소 이름"
             ConnectedService.SLACK -> "Slack 채널 ID"
             else -> "검색어 또는 문서 ID"
         }
-        chat.visibility=if(service==ConnectedService.TELEGRAM)View.VISIBLE else View.GONE
+        if(token.visibility==View.VISIBLE)window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        val naver=service==ConnectedService.NAVER_MAIL
+        token.hint=if(naver)"네이버 2단계 인증에서 발급한 앱 비밀번호" else "서비스 연결 토큰 · 채팅으로 보내지 마세요"
+        saveToken.text=if(naver)"네이버 IMAP 계정 연결" else "토큰 연결 확인·저장"
+        chat.inputType=if(naver)InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
+        chat.hint=if(naver)"네이버 메일 아이디" else "Telegram에서 허용할 대화 ID"
+        chat.visibility=if(naver||service==ConnectedService.TELEGRAM)View.VISIBLE else View.GONE
     }
     private suspend fun advanceGoogleBatch(){
         val result=googleBatch.authorize()
@@ -200,6 +211,8 @@ class ConnectionsActivity:Activity() {
             ConnectedService.YOUTUBE->{args["query"]=input;if(input.isBlank())"list_youtube_playlists"else"search_youtube_videos"}
             ConnectedService.TELEGRAM->"list_telegram_bot_updates"
             ConnectedService.NOTION->{args["query"]=input;"search_notion_pages"}
+            ConnectedService.NAVER_MAIL->"list_naver_mail_inbox"
+            ConnectedService.X_BOOKMARKS->"list_x_bookmarks"
             ConnectedService.OUTLOOK_MAIL->"list_outlook_inbox"
             ConnectedService.OUTLOOK_CALENDAR->{val start=ZonedDateTime.now(ZoneId.systemDefault()).toOffsetDateTime()
                 args["start"]=start.toString();args["end"]=start.plusDays(7).toString();"list_outlook_calendar"}

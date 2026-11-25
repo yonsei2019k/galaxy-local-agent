@@ -76,6 +76,15 @@
         </receiver>
         <meta-data android:name="ziphap.outlook.client" android:value="${outlookClientId}" />
         <meta-data android:name="ziphap.outlook.tenant" android:value="${outlookTenant}" />
+        <meta-data android:name="ziphap.x.client" android:value="${ziphapXClientId}" />
+        <activity android:name=".connections.XLoginResultActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.user.localagent.x" android:host="oauth" android:path="/callback" />
+            </intent-filter>
+        </activity>
         <activity android:name=".connections.OutlookConnectActivity" android:exported="false" />
         <activity android:name=".connections.ConnectionsActivity" android:exported="false" />
         <activity android:name=".connections.CoupangReviewActivity" android:exported="false"

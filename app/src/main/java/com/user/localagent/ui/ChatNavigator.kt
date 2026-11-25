@@ -362,7 +362,7 @@ internal fun toolLabel(name:String)=when(name){
     "create_document"->"문서 파일 만들기";"search_web"->"공개 웹 검색";"search_shopping"->"상품·가격 검색";"read_webpage"->"웹페이지 읽기";"generate_image"->"로컬 이미지 생성"
     "search_conversation_history"->"집합 대화 기록 조회";"list_imported_conversations"->"가져온 대화 목록";"search_conversation_imports"->"가져온 대화 검색";"get_sms_summary"->"문자 조회·요약";"analyze_sms"->"문자 내용 분석"
     "get_call_log_summary"->"통화 내역 조회";"list_audio_recordings"->"녹음 파일 목록";"search_audio_transcripts"->"녹음 전사 검색";"list_calendar_events"->"일정 조회";"prepare_calendar_event"->"일정 작성"
-    "create_reminder"->"리마인더 생성";"create_alarm"->"알람 생성";"save_note"->"메모 저장";"search_notes"->"메모 검색";"search_contacts"->"연락처 검색";"prepare_sms"->"문자 초안 작성";"prepare_email"->"이메일 초안 작성"
+    "create_reminder"->"리마인더 생성";"create_alarm"->"알람 생성";"save_note"->"메모 저장";"search_notes"->"메모 검색";"search_contacts"->"연락처 검색";com.user.localagent.core.KakaoShare.TOOL->"카카오톡 공유 준비";"prepare_sms"->"문자 초안 작성";"prepare_email"->"이메일 초안 작성"
     "open_map"->"지도 열기";"open_url"->"웹페이지 열기";"save_memory"->"개인 기억 저장";"search_memories"->"개인 기억 검색";"delete_memory"->"개인 기억 삭제";"update_note"->"메모 수정";"update_reminder"->"리마인더 수정"
     "delete_note"->"메모 삭제";"delete_reminder"->"리마인더 삭제";"list_messenger_notifications"->"연결한 메신저 알림 조회";"reply_messenger_notification"->"연결한 메신저 답장";else->name
 }

@@ -62,6 +62,7 @@ class AgentCapabilities(context:Context) {
         val candidates=mapOf(
             "calendar" to Intent(Intent.ACTION_INSERT,CalendarContract.Events.CONTENT_URI),
             "alarm" to Intent(AlarmClock.ACTION_SET_ALARM),
+            com.user.localagent.core.KakaoShare.HANDLER to com.user.localagent.integrations.KakaoShareIntent.prepare(),
             "sms" to Intent(Intent.ACTION_SENDTO,Uri.parse("smsto:")),
             "email" to Intent(Intent.ACTION_SENDTO,Uri.parse("mailto:")),
             "maps" to Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0")),

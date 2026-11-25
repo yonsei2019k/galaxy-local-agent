@@ -108,6 +108,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private var recoveredTarget:String?=null
     private var ruleRecoveryBlocked=false
     private var ruleEffectUncertain=false
+    private var pcApprovalOutcomeUncertain = false
     private data class MediaWatch(val url:String,val player:String,val epoch:Int,val progress:BrowserMediaProgress)
     private var mediaWatch:MediaWatch?=null
 
@@ -179,6 +180,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             ref?.let { observed?.third?.get(it)?.label } else null
         val approvedPcTarget=pcAction&&approvedSnapshot!=null&&observed!=null&&observed.first==approvedSnapshot&&
             call.arguments["snapshotId"]?.jsonPrimitive?.contentOrNull==approvedSnapshot&&ref!=null&&ref in observed.third
+        if (pcAction && pcApprovalOutcomeUncertain && (review(call).first || approvedSnapshot != null))
+            return refused(call, "TRANSACTION_READBACK_REQUIRED", attemptedControl = attemptedControl)
         if(pcAction&&(review(call).first||approvedSnapshot!=null)&&!approvedPcTarget)
             return refused(call,"APPROVAL_MISMATCH")
         val (operation,body)=when(call.name){
@@ -209,7 +212,19 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val token=result["approvalId"] as? JsonPrimitive
             if(token==null||!token.isString||!Regex("[0-9a-f]{32}").matches(token.content))
                 return refused(call,"APPROVAL_MISMATCH")
-            result=backend(operation,JsonObject(body+("approvalId" to token)))
+            pcApprovalOutcomeUncertain = true
+            result = try {
+                backend(operation, JsonObject(body + ("approvalId" to token)))
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                buildJsonObject { put("error", "ACTION_OUTCOME_UNKNOWN") }
+            }
+            val commitError = result["error"]?.jsonPrimitive?.contentOrNull
+            pcApprovalOutcomeUncertain = commitError != null &&
+                commitError !in setOf("SNAPSHOT_STALE", "APPROVAL_MISMATCH", "ELEMENT_UNAVAILABLE")
+            if (pcApprovalOutcomeUncertain && commitError != "ACTION_OUTCOME_UNKNOWN")
+                result = buildJsonObject { put("error", "ACTION_OUTCOME_UNKNOWN") }
             if(result["status"]?.jsonPrimitive?.contentOrNull=="approval_required")return refused(call,"APPROVAL_MISMATCH")
         }
         val target=recoveredTarget
@@ -229,7 +244,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         }
         val error=phoneError
         if(error!=null){
-            if(catalog==AppBrowserToolCatalog&&error=="ACTION_OUTCOME_UNKNOWN"){
+            if(error=="ACTION_OUTCOME_UNKNOWN"){
                 last=null
                 lastPage=null
                 ruleRecoveryBlocked=true
@@ -527,6 +542,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         "PAGE_UNREACHABLE","HTTP_ERROR"->"사이트가 응답하지 않습니다. 주소나 연결을 확인하세요."
         "TLS_ERROR"->"사이트의 보안 연결을 확인하지 못했습니다."
         "PC_RECOVERY_UNAVAILABLE"->"현재 요청에서 같은 페이지의 새 조회 결과를 확인하지 못했습니다."
+        "TRANSACTION_READBACK_REQUIRED"->"앞선 결제·주문·예약 결과가 확인되지 않았어요. 처리 내역이나 영수증을 먼저 조회해 주세요."
         "ACTION_OUTCOME_UNKNOWN"->"동작이 실행됐는지 확인되지 않았습니다. 다시 실행하기 전에 페이지에서 결과를 확인하세요."
         "RULE_SOURCE_CHANGED","RULE_LINK_UNPROVEN"->"같은 링크와 새 확인 문구를 증명하지 못해 이동하지 않았습니다. 현재 페이지를 다시 읽어 주세요."
         "RULE_EFFECT_PENDING"->"앞선 동작의 결과를 먼저 읽어 확인해 주세요."

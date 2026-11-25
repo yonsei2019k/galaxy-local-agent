@@ -24,7 +24,7 @@ class ConnectionContractsTest {
         assertEquals(setOf("send_gmail_message"),ConnectionCatalog.tools.keys.filter {it.contains("send")}.toSet())
         assertFalse(ConnectionCatalog.tools.keys.any {it.contains("delete")})
         assertTrue(GmailSendContract.names.all {ConnectionCatalog.tools.getValue(it).writes&&ConnectionCatalog.tools.getValue(it).definition.risk==Risk.HIGH})
-        assertEquals(32,ConnectionCatalog.tools.size)
+        assertEquals(34,ConnectionCatalog.tools.size)
     }
     @Test fun workspaceReadsBindTargetsAndExcludeUnrequestedData()=runBlocking {
         assertTrue(ToolRegistry.definitions.keys.containsAll(listOf("list_github_repository_issues","read_slack_channel_history")))
@@ -50,6 +50,28 @@ class ConnectionContractsTest {
         assertEquals(setOf("ts","text"),result.getValue("data").jsonArray.single().jsonObject.keys)
     }
 
+    @Test fun newPrivateInboxAndBookmarksStayScopedToTheirAccount()=runBlocking {
+        val x=call("list_x_bookmarks","pageToken" to "a&b")
+        assertEquals(ConnectedService.X_BOOKMARKS,ConnectionRequests.build(x).service)
+        assertTrue(ConnectionRequests.build(x).first.url.endsWith("pagination_token=a%26b"))
+        assertEquals("imaps://imap.naver.com:993/INBOX",ConnectionRequests.build(call("list_naver_mail_inbox")).first.url)
+        for(uri in listOf("imaps://other.test:993/INBOX","imaps://imap.naver.com:993/Trash","https://imap.naver.com/INBOX")){
+            assertThrows(IllegalArgumentException::class.java){ApiRequest(uri)}
+        }
+        val host=Host()
+        host.responses+=ApiResponse(200,"""{"data":[{"id":"4","text":"saved","private":"hidden"}],"meta":{"result_count":1,"next_token":"more"}}""")
+        val runtime=ConnectionRuntime(host)
+        val read=runtime.execute(x)
+        assertTrue(read.success)
+        val json=Json.parseToJsonElement(read.data).jsonObject
+        assertEquals("more",json.getValue("pageToken").jsonPrimitive.content)
+        assertFalse(read.data.contains("hidden"))
+        host.responses+=ApiResponse(200,"""{"errors":[],"meta":{"result_count":0}}""")
+        assertFalse(runtime.execute(x).success)
+        host.identity=null
+        assertFalse(runtime.execute(x).success)
+        assertEquals(2,host.sent.size)
+    }
     @Test fun notionNestedBodyCanBeReadWithoutLosingLongTextOrAccountScope()=runBlocking {
         val host=Host()
         val runtime=ConnectionRuntime(host)

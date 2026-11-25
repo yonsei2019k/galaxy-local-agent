@@ -558,6 +558,18 @@ class BrowserAgent:
                         prior_tabs = {tab['targetId'] for tab in self.page.call('Target.getTargets', timeout=3)['targetInfos']}
                     except (BrowserError, OSError, ValueError, KeyError):
                         pass
+                if element['needsApproval']:
+                    # Consume both the challenge and the stale DOM observation before dispatch.
+                    self.snapshot = None
+                    try:
+                        self._click(element['ref'])
+                        observed = self._observe_action(action, request, element, prior_tabs, current['url'])
+                        if not observed.get('snapshotId'):
+                            raise BrowserError('ACTION_OUTCOME_UNKNOWN', 409)
+                        return observed
+                    except (BrowserError, OSError, ValueError):
+                        self.snapshot = None
+                        raise BrowserError('ACTION_OUTCOME_UNKNOWN', 409) from None
                 if element.get('tag') == 'video':
                     self._play_video(element['ref'])
                 else:
@@ -587,13 +599,16 @@ class BrowserAgent:
                 self.page.evaluate(f'window.scrollBy(0, {step})')
             elif action == 'back':
                 self.page.evaluate('history.back()')
-            self._settle()
-            if prior_tabs is not None:
-                self._follow_opened_page(prior_tabs, current['url'])
-            result = self._read()
-            result['performed'] = {'action': action, 'ref': request.get('ref'), 'control': element['label'] if element else None}
-            result['evidence'] = '동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.'
-            return result
+            return self._observe_action(action, request, element, prior_tabs, current['url'])
+
+    def _observe_action(self, action, request, element, prior_tabs, previous_url):
+        self._settle()
+        if prior_tabs is not None:
+            self._follow_opened_page(prior_tabs, previous_url)
+        result = self._read()
+        result['performed'] = {'action': action, 'ref': request.get('ref'), 'control': element['label'] if element else None}
+        result['evidence'] = '동작 후 페이지를 다시 읽었습니다. 사이트 안의 최종 처리 결과까지 보증하지는 않습니다.'
+        return result
 
     def _focus(self, ref):
         self.page.evaluate(f"(() => {{ const e = document.querySelector('[data-ziphap-ref=\"{ref}\"]'); e.scrollIntoView({{block:'center'}}); e.focus(); }})()")

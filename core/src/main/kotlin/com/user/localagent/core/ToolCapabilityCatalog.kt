@@ -50,7 +50,7 @@ object ToolCapabilityCatalog {
                 val native = "consumer:${app.id}"
                 if(native !in env.installedHandlers && tool.name in com.user.localagent.core.connections.ConsumerAppCatalog.webFallbackTools &&
                     "browser" in env.installedHandlers) "browser" else native
-            }?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN->"browser";else->null}
+            }?:when(tool.name){"prepare_calendar_event"->"calendar";"create_alarm"->"alarm";KakaoShare.TOOL->KakaoShare.HANDLER;"prepare_sms"->"sms";"prepare_email"->"email";"open_map"->"maps";"open_url",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN->"browser";else->null}
             val model=when(tool.name){"generate_image"->"image";"transcribe_recording"->"asr_file";in PrivateAnalysisToolCatalog.analysisNames->"text";else->null}
             val messenger=tool.name in setOf("list_messenger_notifications","reply_messenger_notification")
             val state=when {
@@ -66,7 +66,7 @@ object ToolCapabilityCatalog {
             ToolCapability(tool.name,tool.name,tool.description.ifBlank {"기기 내장 도구"},state,listOfNotNull(permission,handler?.let {"Android handler: $it"},model?.let {"Verified local model: $it"})+
                 (if(goalTool)listOf("현재 대화의 전체 접근 범위")else emptyList())+
                 (if(tool.name in GoalToolCatalog.mutationNames)listOf("사용자가 명시한 목표 관리 요청")else emptyList()),tool.risk!=Risk.LOW,
-                connection==null && !pcTool && consumer==null && tool.name !in EvidenceToolCatalog.names && tool.name !in setOf("search_web","search_shopping","read_webpage","open_url","open_map",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN,"prepare_sms","prepare_email","reply_messenger_notification"),
+                connection==null && !pcTool && consumer==null && tool.name !in EvidenceToolCatalog.names && tool.name !in setOf("search_web","search_shopping","read_webpage","open_url","open_map",com.user.localagent.core.connections.GovernmentServiceCatalog.OPEN,KakaoShare.TOOL,"prepare_sms","prepare_email","reply_messenger_notification"),
                 when(tool.name){
                     "read_kakao_screen"->"개별 요청에서 현재 화면만 제한적으로 읽습니다. 전체 대화방·과거 기록·요약 정확도는 별도 실기기 검증이 필요하며 전송·입력·삭제는 지원하지 않습니다."
                     GoalToolCatalog.GET->"이 대화에 저장된 목표와 완료 기준의 일부 페이지를 읽습니다. 목표가 없다는 조회나 지침 읽기는 실제 업무 완료 근거가 아닙니다."
@@ -74,6 +74,7 @@ object ToolCapabilityCatalog {
                     GoalToolCatalog.START,GoalToolCatalog.RESUME->"사용자가 요청한 기존 목표를 한 번의 제한된 실행으로 대기열에 넣습니다. 대기열 저장은 목표 완료·주기 실행·외부 작업 권한이 아닙니다."
                     GoalToolCatalog.PAUSE->"이 목표에 연결된 실행을 중단하고 일시 정지 상태를 저장합니다. 호출한 실행의 중단이 뒤로 미뤄지면 PREPARED로 구분하며 중단 완료라고 표시하지 않습니다."
                     GoalToolCatalog.CLEAR->"명시한 요청과 승인으로 대화 목표만 삭제합니다. 연결 실행을 먼저 정리하고, 이미 수행한 외부 작업이나 대화 기록은 삭제하지 않습니다."
+                    KakaoShare.TOOL -> "휴대폰에서 받을 대화방을 선택하고 전송합니다."
                     "prepare_sms","prepare_email"->"작성 화면만 준비하며 실제 발송 완료를 의미하지 않습니다."
                     "prepare_calendar_event","create_alarm"->"외부 확인 화면 준비와 실제 저장 완료는 별도 검증합니다."
                     "list_messenger_notifications"->"허용한 앱의 수신 세션 알림이며 전체 과거 대화 접근이 아닙니다."

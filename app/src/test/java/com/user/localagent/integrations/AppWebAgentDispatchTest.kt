@@ -220,6 +220,31 @@ class AppWebAgentDispatchTest {
     }
 
     @Test
+    fun lostCheckoutResponseAllowsReceiptReadButBlocksApprovedReplay() = runBlocking {
+        var submissions = 0
+        val tools = BrowserAgentTools(PcBrowserToolCatalog, "fixture", { true }) { operation, body ->
+            when {
+                operation == "read" -> snapshot(risky = true)
+                body["approvalId"] == null -> challenge()
+                else -> {
+                    submissions++
+                    throw java.io.IOException("connection closed after dispatch")
+                }
+            }
+        }
+        val read = ToolCall("read", PcBrowserToolCatalog.READ, JsonObject(emptyMap()))
+        val action = click(PcBrowserToolCatalog.ACTION)
+        assertTrue(tools.execute(read).success)
+        val result = tools.execute(action, approvedSnapshot = "snapshot")
+        assertEquals(VerificationState.UNVERIFIED, result.verification)
+        assertFalse(result.effectNotApplied)
+        assertTrue(tools.execute(read).success)
+        val replay = tools.execute(action, approvedSnapshot = "snapshot")
+        assertTrue(replay.content.contains("TRANSACTION_READBACK_REQUIRED"))
+        assertEquals(1, submissions)
+    }
+
+    @Test
     fun unexpectedWorkerChallengeDoesNotGrantConsentOrTriggerASecondDispatch() = runBlocking {
         var attempts=0
         val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){operation,_->

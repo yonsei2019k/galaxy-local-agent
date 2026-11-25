@@ -126,6 +126,19 @@ class ConnectionRuntime(private val host:ConnectionHost) {
         val nextPage=if(parsed is JsonObject)listOf("nextPageToken","next_cursor","nextCursor","has_more","@odata.nextLink").any {parsed[it]?.let {v->v !is JsonNull && v.toString()!="false" && v.toString()!="\"\""}==true}else false
         val display=when(call.name){
             "read_gmail_message" -> if(parsed is JsonObject)gmailPreview(parsed).toString() else body
+            "list_x_bookmarks" -> {
+                val page=parsed as? JsonObject ?: return fail("x_response_invalid")
+                val meta=page["meta"] as? JsonObject ?: return fail("x_response_invalid")
+                val count=meta["result_count"]?.jsonPrimitive?.intOrNull ?: return fail("x_response_invalid")
+                val posts=(page["data"] as? JsonArray)?:JsonArray(emptyList())
+                if(count!=posts.size || count !in 0..10 || "errors" in page)return fail("x_response_invalid")
+                JsonArray(posts.map {
+                    val post=it.jsonObject
+                    require(post.getValue("id").jsonPrimitive.content.matches(Regex("[0-9]{1,22}")))
+                    require(post.getValue("text").jsonPrimitive.isString)
+                    JsonObject(post.filterKeys {k->k in setOf("id","text")})
+                }).toString()
+            }
             "search_notion_pages" -> {
                 val block=call.arguments["blockId"]?.jsonPrimitive?.content
                 val offset=call.arguments["offset"]?.jsonPrimitive?.content
@@ -170,7 +183,10 @@ class ConnectionRuntime(private val host:ConnectionHost) {
             else -> body
         }
         val limited=display.length>12000
-        val report=buildJsonObject {put("service",ConnectionCatalog.tools.getValue(call.name).service.id);put("untrustedSourceData",true);put("completeDataset",false);put("cached",cached);put("sourceRevalidated",true);put("observedAt",host.now());if(call.name!="list_github_repository_issues")put("hasMore",nextPage);put("truncated",limited)
+        val report=buildJsonObject {put("service",ConnectionCatalog.tools.getValue(call.name).service.id);put("untrustedSourceData",true);put("completeDataset",false);put("cached",cached);put("sourceRevalidated",true);put("observedAt",host.now());if(call.name=="list_x_bookmarks"){
+                val token=parsed?.jsonObject?.get("meta")?.jsonObject?.get("next_token")?.jsonPrimitive?.contentOrNull
+                put("hasMore",!token.isNullOrBlank());if(!token.isNullOrBlank())put("pageToken",token)
+            }else if(call.name!="list_github_repository_issues")put("hasMore",nextPage);put("truncated",limited)
             if(call.name=="search_notion_pages")
                 (parsed as? JsonObject)?.get("next_cursor")?.jsonPrimitive?.contentOrNull?.let { put("cursor",it) }
             if(call.name=="list_youtube_playlists")

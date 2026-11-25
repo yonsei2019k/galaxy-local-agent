@@ -36,7 +36,7 @@ def subject():
     def owner(value):
         if value is not None and value!=OWNER:raise ValueError("OWNER")
         return value
-    namespace=dict(BaseHTTPRequestHandler=object,re=re,json=json,uuid=uuid,Path=Path,AGENT_BRIDGE=bridge,
+    namespace=dict(PUBLIC_SEARCH={},BaseHTTPRequestHandler=object,re=re,json=json,uuid=uuid,Path=Path,AGENT_BRIDGE=bridge,
         BridgeError=BridgeError,ConversationContextError=ConversationContextError,MAX_CONTEXT_BYTES=MAX_CONTEXT_BYTES,
         validate_conversation_context=validate_conversation_context,
         AGENT_PROVIDER=mock.Mock(),PC_OPENCLAW=mock.Mock(),PcAgentError=PcAgentError,owner_value=owner,LOG_LOCK=threading.Lock(),LOG_LIMIT=2097152,LOG="fixture.log",
@@ -47,7 +47,7 @@ def subject():
 
 class ServerAgentAdapterTests(unittest.TestCase):
     def test_public_search_dispatches_only_paired_requests_without_delegated_headers(self):
-        for api in ("naver", "kopis"):
+        for api in ("naver", "kopis", "tago_flights", "seoul_reservations"):
             for authorized, header, status in ((False, None, 401), (True, "X-ZipHap-Agent-Capability", 403),
                                              (True, "X-ZipHap-Phone-Capability", 403), (True, None, 200)):
                 with self.subTest(api=api, authorized=authorized, header=header):
@@ -55,7 +55,7 @@ class ServerAgentAdapterTests(unittest.TestCase):
                     ns, _, call, response, limits = self.make("/v1/public-search/" + api, authorized=authorized, body=body)
                     adapter = mock.Mock()
                     adapter.search.return_value = (200, {"items":[]})
-                    ns[api + "_search"] = adapter
+                    ns["PUBLIC_SEARCH"]["/v1/public-search/" + api] = adapter.search
                     if header:
                         call.headers.add_header(header, CAP)
                     ns["Handler"].dispatch(call)

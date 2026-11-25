@@ -132,7 +132,9 @@ object ExternalAgentContract {
      * PREPARED hand-offs pause the run. The PC broker accepts up to 128 phone tools plus the workspace profile's fixed PC tools.
      */
     /** The on-device sub-agent reuses the local engine; cloud runs use their own provider sub-agents instead. */
-    val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys-com.user.localagent.core.LocalSubagentToolCatalog.names
+    internal val CLOUD_HOME_ALIASES = setOf("open_netflix", "open_coupang", "open_coupang_eats")
+    val NORMAL_PHONE_TOOLS:Set<String> get() = ToolRegistry.definitions.keys -
+        com.user.localagent.core.LocalSubagentToolCatalog.names - CLOUD_HOME_ALIASES
     internal val PUBLIC_WEB_READS = setOf("search_web", "read_webpage", "search_shopping")
     val PUBLIC_RESEARCH_PHONE_TOOLS = PUBLIC_WEB_READS + setOf(
         "search_youtube_videos", "get_current_datetime", "calculate", "date_calculate") +
