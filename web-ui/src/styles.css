@@ -333,6 +333,19 @@ svg { width: 20px; height: 20px; flex: none; }
   border-radius: 8px 18px 18px 18px;
   background: var(--surface);
 }
+.booking-payment-card {
+  align-self: flex-start;
+  width: min(100%, 37rem);
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px 18px 18px 18px;
+  background: var(--surface);
+}
+.booking-payment-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+.booking-payment-heading strong { overflow-wrap: anywhere; }
+.booking-payment-heading span { color: var(--accent); font-weight: 700; }
+.booking-payment-card p { margin: 5px 0 0; color: var(--muted); font-size: var(--fs-small); }
 .text-button { display: inline-flex; align-items: center; gap: 6px; min-height: var(--tap); padding: 4px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--accent); font-size: var(--fs-small); font-weight: 700; }
 .text-button:disabled { opacity: .5; }
 .text-button svg { width: 16px; height: 16px; }

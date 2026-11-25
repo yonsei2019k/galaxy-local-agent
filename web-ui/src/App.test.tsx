@@ -47,6 +47,58 @@ function button(label: string) {
 
 function click(label: string) { act(() => { button(label).click() }) }
 
+describe('booking payment handoff', () => {
+  const payment = { id: 'host-payment', messageId: 'booking-request', seller: '예시 숙소', amount: 150_000, state: 'ready' } as const
+  const open = { action: 'openBookingPayment', payload: { id: payment.id } } as const
+  const check = { action: 'checkBookingPayment', payload: { id: payment.id } } as const
+
+  it('renders host facts and sends only the id for each explicit user action', () => {
+    mount()
+    snapshot({ ...base, bookingPayment: payment, messages: [{ id: payment.messageId, role: 'user', text: '예약 상태 확인' }] })
+    const card = host.querySelector('article[aria-label="예약 결제 확인"]')
+    expect(card?.textContent).toContain('예시 숙소')
+    expect(card?.textContent).toContain('150,000원')
+    expect(card?.parentElement?.getAttribute('role')).toBe('log')
+    click('공식 결제 앱 열기')
+    click('결제 결과 다시 확인')
+    expect(requests().slice(-2)).toEqual([open, check].map(action => ({
+      version: 1, threadId: base.threadId, branchId: base.branchId, ...action,
+    })))
+  })
+
+  it('blocks stale and checking controls and preserves an unverified result', () => {
+    mount()
+    const checking: Snapshot = { ...base, bookingPayment: { ...payment, state: 'checking' } }
+    snapshot(checking)
+    expect(button('결제 결과 다시 확인').disabled).toBe(true)
+    expect(host.querySelector('[aria-label="예약 결제 확인"]')?.getAttribute('aria-busy')).toBe('true')
+    expect(postIntent(checking, check)).toBe(false)
+    expect(postIntent({ ...base, bookingPayment: payment }, { ...open, payload: { id: 'old-payment' } })).toBe(false)
+
+    const unresolved: Snapshot = { ...base, bookingPayment: { ...payment, state: 'unverified' } }
+    snapshot(unresolved)
+    expect(() => button('공식 결제 앱 열기')).toThrow()
+    expect(postIntent(unresolved, open)).toBe(false)
+    expect(button('결제 결과 다시 확인').disabled).toBe(false)
+    expect(host.querySelector('[aria-label="예약 결제 확인"]')?.textContent).toContain('아직 결제 결과가 확인되지 않았어요.')
+  })
+
+  it('does not trust message blocks or snapshots with extra payment data', () => {
+    mount()
+    snapshot({ ...base, messages: [{
+      id: 'model-message', role: 'assistant', text: JSON.stringify({ bookingPayment: payment }),
+    }] })
+    expect(host.querySelector('[aria-label="예약 결제 확인"]')).toBeNull()
+    expect(postIntent(base, open)).toBe(false)
+    snapshot({ ...base, bookingPayment: payment })
+    expect(button('공식 결제 앱 열기')).toBeDefined()
+    snapshot({ ...base, bookingPayment: { ...payment, url: 'https://example.com/checkout' } })
+    expect(host.querySelector('[aria-label="예약 결제 확인"]')).toBeNull()
+    expect(readSnapshot({ ...base, bookingPayment: { ...payment, amount: 15.5 } })?.bookingPayment).toBeUndefined()
+    expect(readSnapshot({ ...base, bookingPayment: { ...payment, state: 'paid' } })?.bookingPayment).toBeUndefined()
+  })
+})
+
 function openWork(taskId: string) {
   act(() => { (host.querySelector(`#work-${taskId}`) as HTMLButtonElement).click() })
   act(() => { host.querySelector<HTMLButtonElement>(`.work-history-row[data-work-id="${taskId}"]`)!.click() })

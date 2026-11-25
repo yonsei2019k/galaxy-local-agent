@@ -442,13 +442,98 @@ class AppWebAgent private constructor(private val context:Context) {
         catch(_:Exception){false}
     }
 
+
+    private class PaymentOffer(val id:String,val binding:WorkBinding,val browser:WebView,val document:String,
+        val issuerData:String,val expiresAt:Long)
+    internal data class PaymentCard(val id:String,val binding:WorkBinding,val amount:Long,val state:String)
+    private var paymentOffer:PaymentOffer?=null
+    private var paymentDocumentRevision=0L
+    private var browserNavigationWork:WorkBinding?=null
+    private var paymentDocumentWork:WorkBinding?=null
+    private val paymentCard=MutableStateFlow<PaymentCard?>(null)
+    internal val ownerPaymentCard:StateFlow<PaymentCard?> get()=paymentCard
+    private val paymentScreen=MutableStateFlow(false)
+    internal val showingPaymentPage:StateFlow<Boolean> get()=paymentScreen
+
+    private fun offerPaymentApp(browser:WebView,request:WebResourceRequest):Boolean {
+        if(!RuntimeGate.foreground.get()||presentation.value==null||agentActive.value||loading||
+            !browser.isShown||!browser.hasWindowFocus()||loginCard.value!=null||websiteLogin.value!=null)return false
+        val document=browser.url?:return false
+        val data=OwnerPaymentAppPolicy.issuerData(document,request.url.toString(),request.isForMainFrame,request.hasGesture())
+            ?:return false
+        val binding=paymentDocumentWork?.takeIf{it==browserWorkBinding.value}?:return false
+        val offer=PaymentOffer(token(),binding,browser,document,data,android.os.SystemClock.elapsedRealtime()+120_000L)
+        val revision=paymentDocumentRevision
+        paymentOffer=offer
+        paymentCard.value=null
+        browser.evaluateJavascript("""(() => {
+            const text = (document.body?.innerText || '').slice(0, 12000);
+            const matches = Array.from(text.matchAll(/(?:총\s*)?결제\s*금액\s*[:：]?\s*(\d[\d,]{0,13})\s*원/g))
+                .map(x => Number(x[1].replace(/,/g, '')));
+            const amounts = [...new Set(matches)];
+            return amounts.length === 1 && Number.isSafeInteger(amounts[0]) && amounts[0] > 0 ? amounts[0] : null;
+        })()""") { result ->
+            if(paymentOffer!==offer||paymentDocumentRevision!=revision||browser.url!=document||browserWorkBinding.value!=binding)
+                return@evaluateJavascript
+            val amount=result?.toLongOrNull()
+            if(amount!=null)paymentCard.value=PaymentCard(offer.id,binding,amount,"ready")
+        }
+        browser.postDelayed({
+            if(paymentOffer===offer){
+                paymentOffer=null
+                paymentCard.value=paymentCard.value?.takeIf{it.id==offer.id}?.copy(state="unverified")
+            }
+        },120_000L)
+        return true
+    }
+
+    internal fun hasOwnerPaymentOffer():Boolean=
+        paymentOffer?.let{it.browser.url==it.document&&android.os.SystemClock.elapsedRealtime()<it.expiresAt}==true
+
+    internal fun openOwnerPayment(owner:android.app.Activity,id:String?,threadId:String?,branchId:String?):Boolean {
+        val offer=paymentOffer?:return false
+        if(!RuntimeGate.foreground.get()||agentActive.value||offer.browser!==webView||!hasOwnerPaymentOffer()||
+            browserWorkBinding.value!=offer.binding||loginCard.value!=null||websiteLogin.value!=null||
+            (id!=null&&(id!=offer.id||threadId!=offer.binding.threadId||branchId!=offer.binding.branchId))||
+            (id==null&&(presentation.value==null||!offer.browser.isShown)))return false
+        val intent=android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse(offer.issuerData))
+            .addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+            .setPackage(OwnerPaymentAppPolicy.issuerPackage)
+        return try {
+            owner.startActivity(intent)
+            paymentOffer=null
+            paymentCard.value=paymentCard.value?.takeIf{it.id==offer.id}?.copy(state="unverified")
+            true
+        } catch(_:android.content.ActivityNotFoundException) {
+            false
+        } catch(_:SecurityException) {
+            false
+        }
+    }
+
+    internal fun checkOwnerPayment(id:String,threadId:String,branchId:String):Boolean {
+        val card=paymentCard.value ?: return false
+        if(card.id!=id||card.binding.threadId!=threadId||card.binding.branchId!=branchId||
+            browserWorkBinding.value!=card.binding||agentActive.value||loginCard.value!=null||
+            !OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return false
+        showBrowser()
+        return true
+    }
+
+    private fun paymentHandoff():JsonObject=buildJsonObject {
+        if(presentation.value==null)showBrowser()
+        put("paymentOwnerRequired",true)
+        put("dataOnly",true)
+        put("message","휴대폰의 공식 결제 화면에서 직접 진행해 주세요. 결제 결과는 아직 확인되지 않았어요.")
+    }
+
     fun showBrowser(address:String=""){presentation.value=address}
     /** Android's public print flow. The owner chooses Save as PDF and its destination. */
     fun openPrintPreview(owner:Context):Boolean {
         val activity=owner as? android.app.Activity ?: return false
         val page=webView ?: return false
         if(!RuntimeGate.foreground.get() || presentation.value==null || agentActive.value ||
-            credentialScreen.value || loginCard.value!=null || websiteLogin.value!=null ||
+            credentialScreen.value || OwnerPaymentAppPolicy.trustedCheckout(page.url) || loginCard.value!=null || websiteLogin.value!=null ||
             loading || navigation.value.error!=null || secureOrigin(page.url)==null || !page.isShown)return false
         return runCatching {
             val name="ZipHap 화면 사본"
@@ -505,12 +590,17 @@ class AppWebAgent private constructor(private val context:Context) {
                     return true
                 }
                 if(WebAgentPolicy.urlAllowed(url))return false
-                // Payment/app hand-offs (intent://, card apps) are the owner's step; never launched by the agent.
+                if(offerPaymentApp(view,request))return true
                 blockedNavigation.value=url.substringBefore(':').take(20)
                 if(request.isForMainFrame)navigationFailed("NAVIGATION_BLOCKED")
                 return true
             }
             override fun onPageStarted(view:WebView,url:String?,favicon:Bitmap?){
+                paymentDocumentRevision++
+                paymentOffer=null
+                paymentCard.value=paymentCard.value?.copy(state="unverified")
+                paymentScreen.value=OwnerPaymentAppPolicy.trustedCheckout(url)
+                paymentDocumentWork=browserNavigationWork.takeIf{paymentScreen.value}
                 pdfDocument=null
                 loadingUrl=url
                 loading=true
@@ -575,6 +665,7 @@ class AppWebAgent private constructor(private val context:Context) {
             navigationFailed("HTTPS_REQUIRED")
             return
         }
+        browserNavigationWork=null
         val revision=beginNavigation(url)
         val completed=withTimeoutOrNull(20_000){navigation.first{!it.loading}}
         if(completed==null&&navigationRevision==revision&&navigation.value.loading){
@@ -624,11 +715,13 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private suspend fun readPage(observeMedia:Boolean=false):JsonObject {
         snapshot=null
+        if(OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return paymentHandoff()
         val id=token()
         val value=dom(buildJsonObject{put("key",domKey);put("action","observe");put("snapshotId",id)
             if(observeMedia)put("observeMedia",true)})
             ?:return fail("PAGE_UNREADABLE")
         val url=value.s("url")
+        if(OwnerPaymentAppPolicy.trustedCheckout(url))return paymentHandoff()
         if(!WebAgentPolicy.urlAllowed(url)){snapshot=null;return buildJsonObject{put("url","");put("blocked",true);put("message","이 페이지는 브라우저 에이전트가 읽지 않습니다.")}}
         if(value["loginRequired"]==JsonPrimitive(true))return loginHandoff(url)
         val raw=value["elements"]?.jsonArray.orEmpty().map{it.jsonObject}
@@ -870,6 +963,7 @@ class AppWebAgent private constructor(private val context:Context) {
         if(!WebAgentPolicy.urlAllowed(url))return@guarded fail("URL_NOT_ALLOWED")
         val destination=hallymSecureLoginRedirect(url,"GET","hallymedu.co.kr")?:url
         if(showOnPhone)showBrowser(destination)
+        browserNavigationWork=work
         beginNavigation(destination)
         settle()
         val error=navigation.value.error
@@ -892,6 +986,7 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     suspend fun act(arguments:JsonObject,approvedSnapshot:String?,work:WorkBinding?=null):JsonObject = guarded("요청한 화면 동작 진행 중",work=work){
+        if(OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return@guarded paymentHandoff()
         val action=arguments.s("action")
         val current=snapshot
         if(current==null||current.first!=arguments.s("snapshotId"))return@guarded fail("SNAPSHOT_STALE")

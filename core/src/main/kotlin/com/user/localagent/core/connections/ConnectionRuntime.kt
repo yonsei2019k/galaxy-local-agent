@@ -40,17 +40,22 @@ class ConnectionRuntime(private val host:ConnectionHost) {
         require(call.name==CalendarTargetIntegrity.CREATE);return executeBound(call,null,approval)
     }
     private suspend fun executeBound(call:ToolCall,approveGmailSend:(suspend(GmailSendPreview)->Boolean)?,calendarApproval:ApprovedCalendarTarget?):ConnectionOutcome=lane.withLock {
-        val plan=ConnectionRequests.build(call)
-        val access=host.access(plan.service)?:return@withLock fail("connection_required")
-        if(!access.readAllowed || (plan.writes&&!access.writeAllowed))return@withLock fail("scope_required")
+        val requestPlan=ConnectionRequests.build(call)
+        val access=host.access(requestPlan.service)?:return@withLock fail("connection_required")
+        if(!access.readAllowed || (requestPlan.writes&&!access.writeAllowed))return@withLock fail("scope_required")
         if(call.name==CalendarTargetIntegrity.CREATE){
             if(calendarApproval==null)return@withLock fail("calendar_target_approval_required")
             if(!CalendarTargetIntegrity.matches(calendarApproval,call,access))return@withLock fail("calendar_target_changed_since_approval")
         }
+        val bookingEventId=calendarApproval?.review?.bookingEventId
+        val plan=if(bookingEventId==null)requestPlan else ConnectionRequests.build(call,bookingEventId)
         val principalKey="${plan.service.id}:${access.principal}:${access.generation}"
-        val fingerprint=digest(call.name+"\n"+JsonObject(call.arguments.toSortedMap()).toString())
+        val fingerprint=if(bookingEventId==null)digest(call.name+"\n"+JsonObject(call.arguments.toSortedMap()).toString())
+            else digest(plan.first.url+"\n"+plan.first.body)
         // Revocation/re-authorization changes cache authority, never the identity of an uncertain write.
-        val operation=digest(plan.service.id+":"+access.principal+"\n"+call.id)
+        // A verified booking also keeps its identity across different runs and tool call IDs.
+        val operation=if(bookingEventId==null)digest(plan.service.id+":"+access.principal+"\n"+call.id)
+            else digest("calendar-booking\n"+bookingEventId)
         suspend fun send(request:ApiRequest):ApiResponse {
             val current=host.access(plan.service)?:error("connection_revoked")
             check(current==access && current.readAllowed && (!plan.writes||current.writeAllowed)){"connection_changed"}
@@ -79,8 +84,18 @@ class ConnectionRuntime(private val host:ConnectionHost) {
             }
             val prior=host.mutation(operation)
             if(prior!=null && prior.requestHash!=fingerprint)return@withLock fail("operation_key_conflict")
+            var observed:ApiResponse?=null
             var remoteId=prior?.remoteId
-            if(prior==null) {
+            if(prior==null&&bookingEventId!=null) {
+                // Look up the stable event first even when this device has no mutation journal.
+                val existing=send(checkNotNull(plan.readback).invoke(bookingEventId))
+                when(existing.status) {
+                    in 200..299 -> {observed=existing;remoteId=bookingEventId}
+                    404 -> Unit
+                    else -> return@withLock httpFailure(existing.status,false)
+                }
+            }
+            if(prior==null&&observed==null) {
                 host.saveMutation(operation,MutationRecord(fingerprint,plan.knownId,"request_started"))
                 val response=send(plan.first)
                 if(response.status !in 200..299) {
@@ -102,9 +117,10 @@ class ConnectionRuntime(private val host:ConnectionHost) {
                 }
             }else if(remoteId==null)return@withLock uncertain("previous_write_outcome_unknown")
             clearCache()
-            val observed=send(checkNotNull(plan.readback).invoke(remoteId!!))
-            if(observed.status !in 200..299)return@withLock uncertain("readback_failed",remoteId)
-            val proof=checkNotNull(plan.verify).invoke(observed.body)
+            val result=observed?:send(checkNotNull(plan.readback).invoke(remoteId!!))
+            if(bookingEventId!=null&&host.access(plan.service)!=access)return@withLock uncertain("connection_changed",remoteId)
+            if(result.status !in 200..299)return@withLock uncertain("readback_failed",remoteId)
+            val proof=checkNotNull(plan.verify).invoke(result.body)
             if(!proof.verified)return@withLock uncertain("readback_mismatch",remoteId)
             host.saveMutation(operation,MutationRecord(fingerprint,remoteId,"verified"))
             ConnectionOutcome(true,VerificationState.VERIFIED,buildJsonObject {put("service",plan.service.id);put("remoteId",remoteId);put("verified",true);put("verification",proof.summary);put("sentToOthers",false)
@@ -112,7 +128,7 @@ class ConnectionRuntime(private val host:ConnectionHost) {
                     put("calendarSelector",checkNotNull(calendarApproval).review.calendarSelector)
                     put("accountBindingSha256",digest(access.principal+"\n"+access.generation))
                     put("eventActive",true);put("attendeeDeliveryConfirmed",false);put("attendeeAcceptanceConfirmed",false)
-                    val event=Json.parseToJsonElement(observed.body).jsonObject
+                    val event=Json.parseToJsonElement(result.body).jsonObject
                     put("event",buildJsonObject{
                         put("id",event.getValue("id"));put("status",event.getValue("status"));put("title",event.getValue("summary"))
                         put("start",event.getValue("start").jsonObject.getValue("dateTime"));put("end",event.getValue("end").jsonObject.getValue("dateTime"))

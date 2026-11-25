@@ -53,7 +53,11 @@ object ConnectionRequests {
     }
     private fun pageToken(token:String)=if(token.isEmpty())"" else "&pageToken="+encode(token)
     private fun normalizeRows(values:JsonArray):List<List<String>> = values.map {row->row.jsonArray.map {it.jsonPrimitive.content}.dropLastWhile {it.isEmpty()}}.dropLastWhile {it.isEmpty()}
-    fun build(call:ToolCall):ApiPlan {
+    fun build(call:ToolCall):ApiPlan = build(call,null)
+
+    internal fun build(call:ToolCall,bookingEventId:String?):ApiPlan {
+        require(bookingEventId==null || (call.name==CalendarTargetIntegrity.CREATE &&
+            call.arguments["private"]==JsonPrimitive(true)))
         val spec=ConnectionCatalog.tools[call.name]?:error("등록되지 않은 연결 도구")
         require(call.arguments.keys.all {it in spec.definition.arguments})
         spec.definition.arguments.forEach { (name,arg) ->
@@ -103,21 +107,26 @@ object ConnectionRequests {
                 ApiPlan(service,true,ApiRequest("https://gmail.googleapis.com/gmail/v1/users/me/drafts","POST",obj("message" to buildJsonObject {put("raw",raw)})),"id",readback={ApiRequest("https://gmail.googleapis.com/gmail/v1/users/me/drafts/${key(it)}?format=raw")},verify={body->ResponseProof(runCatching {Base64.getUrlDecoder().decode(Json.parseToJsonElement(body).jsonObject.getValue("message").jsonObject.getValue("raw").jsonPrimitive.content).contentEquals(mime.toByteArray(StandardCharsets.UTF_8))}.getOrDefault(false),"메일 초안 원문 재조회·일치, 미발송")})}
             "list_google_calendar_events","create_google_calendar_event"->{val start=OffsetDateTime.parse(call.s("start"));val end=OffsetDateTime.parse(call.s("end"));require(end.isAfter(start));val calendar=key(call.s("calendarId","primary"));val base="https://www.googleapis.com/calendar/v3/calendars/$calendar/events"
                 // Google Calendar requires seconds even for exact-minute bounds.
-                val startTimestamp=start.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-                val endTimestamp=end.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                val startTimestamp=(if(bookingEventId==null)start else start.withOffsetSameInstant(java.time.ZoneOffset.UTC))
+                    .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                val endTimestamp=(if(bookingEventId==null)end else end.withOffsetSameInstant(java.time.ZoneOffset.UTC))
+                    .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
                 if(!spec.writes)read("$base?singleEvents=true&maxResults=20&timeMin=${encode(startTimestamp)}&timeMax=${encode(endTimestamp)}")else {
-                    val eventId=java.security.MessageDigest.getInstance("SHA-256").digest(call.id.toByteArray()).joinToString(""){"%02x".format(it)}
+                    val eventId=bookingEventId?:java.security.MessageDigest.getInstance("SHA-256").digest(call.id.toByteArray()).joinToString(""){"%02x".format(it)}
                     val privateEvent=call.arguments["private"]==JsonPrimitive(true)
                     val payload=buildJsonObject {
                         put("id",eventId);put("summary",title)
                         put("start",buildJsonObject {put("dateTime",startTimestamp)})
                         put("end",buildJsonObject {put("dateTime",endTimestamp)})
                         if(privateEvent)put("visibility","private")
+                        if(bookingEventId!=null)put("extendedProperties",buildJsonObject {
+                            put("private",buildJsonObject {put(CalendarTargetIntegrity.BOOKING_PROPERTY,bookingEventId)})
+                        })
                     }
                     val insertUrl=if(privateEvent)"$base?sendUpdates=none" else base
                     ApiPlan(service,true,ApiRequest(insertUrl,"POST",payload.toString()),createdIdField="id",knownId=eventId,
                         readback={ApiRequest("$base/${key(it)}")},
-                        verify={body->CalendarTargetIntegrity.readback(eventId,title,start,end,body,privateEvent)})}}
+                        verify={body->CalendarTargetIntegrity.readback(eventId,title,start,end,body,privateEvent,bookingEventId)})}}
             "list_google_tasks"->read("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?maxResults=20&showCompleted=false")
             "create_google_task"->{val body=buildJsonObject {put("title",title);if(call.s("notes").isNotEmpty())put("notes",call.s("notes"));if(call.s("dueDate").isNotEmpty())put("due",LocalDate.parse(call.s("dueDate")).toString()+"T00:00:00.000Z")}.toString()
                 ApiPlan(service,true,ApiRequest("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks","POST",body),"id",readback={ApiRequest("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${key(it)}")},verify={titleProof(it,title,"id")})}

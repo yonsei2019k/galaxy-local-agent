@@ -447,6 +447,7 @@ class MainActivity : ComponentActivity() {
         val websiteLogin by webAgent.ownerWebsiteLogin.collectAsState()
         val websiteWorks by webAgent.ownerWebsiteWorks.collectAsState()
         val websiteBinding by webAgent.ownerWorkBinding.collectAsState()
+        val bookingPayment by webAgent.ownerPaymentCard.collectAsState()
         var connectionsOpen by rememberSaveable {mutableStateOf(false)}
         var connectionStatus by remember {mutableStateOf<String?>(null)}
         LaunchedEffect(loginCard?.id){if(loginCard!=null){chatManagerOpen=false;openPanel(0)}}
@@ -608,6 +609,10 @@ class MainActivity : ComponentActivity() {
                         if(inlineCredentials!=null)put("inputHeight",if(inlineSite!=null)430 else 308)
                         if(websiteKeyboardOpen)put("keyboardOpen",true)
                     })
+                    bookingPayment?.takeIf{!connectionsOpen&&it.binding.threadId==composerThreadId&&it.binding.branchId==currentBranchId}
+                        ?.let { payment->put("bookingPayment",buildJsonObject {
+                            put("id",payment.id);put("seller","NICEPAY");put("amount",payment.amount);put("state",payment.state)
+                        }) }
                     inlineApproval?.let { action->put("approvalCard",buildJsonObject {
                         put("id",action.presentationId)
                         activeExecutions.firstOrNull{it.runId==action.runId}?.userMessageId?.let{put("messageId",it)}
@@ -710,6 +715,14 @@ class MainActivity : ComponentActivity() {
                     if(sameRoom){
                         val payload=command.payload
                         when(command.action){
+                            "openBookingPayment","checkBookingPayment"->if(!connectionsOpen&&lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)){
+                                val id=payload.getValue("id").jsonPrimitive.content
+                                val opened=if(command.action=="openBookingPayment")webAgent.openOwnerPayment(
+                                    this@MainActivity,id,composerThreadId,currentBranchId)
+                                else webAgent.checkOwnerPayment(id,composerThreadId,currentBranchId)
+                                if(!opened)android.widget.Toast.makeText(this@MainActivity,
+                                    "현재 결제 화면을 열 수 없어요. 예약 사이트의 결제 화면을 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
+                            }
                             "chooseReply"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()&&chat.draft.value.isBlank()){
                                 chat.sendOwnerChoice(payload.getValue("runId").jsonPrimitive.content,
                                     payload.getValue("index").jsonPrimitive.int,composerThreadId,currentBranchId)

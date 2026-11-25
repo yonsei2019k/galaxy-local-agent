@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { RichAnswer } from './RichAnswer'
-import type { ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
+import type { BookingPaymentAction, ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
+import { BookingPaymentCard } from './BookingPaymentCard'
 import { isLiveTaskPhase } from './composer'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
@@ -169,7 +170,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onBookingPayment, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -185,6 +186,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onStayPhoto?: (messageId: string, index: number, kind?: 'map') => boolean
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
+  onBookingPayment?(action: BookingPaymentAction, id: string): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
 }) {
@@ -199,6 +201,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
   const website = snapshot?.websiteCard
   const approval = snapshot?.ready ? snapshot.approvalCard : undefined
+  const payment = snapshot?.ready ? snapshot.bookingPayment : undefined
   const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
@@ -207,12 +210,14 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
     const timer = window.setTimeout(() => setSentChoice(null), 8_000)
     return () => window.clearTimeout(timer)
   }, [sentChoice])
-  const empty = messages.length === 0 && tasks.length === 0 && !website && !approval
+  const empty = messages.length === 0 && tasks.length === 0 && !website && !approval && !payment
   const guide = enabled && snapshot?.showOfficeGuide === true
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
   const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
   const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
   const approvalAnchor = approval?.messageId && visibleUserIds.has(approval.messageId) ? approval.messageId : null
+  const paymentAnchor = payment?.messageId && visibleUserIds.has(payment.messageId) ? payment.messageId : null
+  const paymentCard = payment && <BookingPaymentCard payment={payment} enabled={enabled} onAction={onBookingPayment} />
   const approvalCard = approval && <article className="task-card approval-input-slot"
     data-native-approval-slot={approval.id} aria-label="작업 확인이 필요해요" />
   const websiteWork = websiteWorkFor(snapshot)
@@ -319,7 +324,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                   <Message message={item} previous={messages[index - 1]}
                     previousHasCards={newDay || (index > 0 && (
                       !!cardsByMessage.get(messages[index - 1].id)?.length ||
-                      websiteAnchor === messages[index - 1].id || approvalAnchor === messages[index - 1].id))}
+                      websiteAnchor === messages[index - 1].id || approvalAnchor === messages[index - 1].id ||
+                      paymentAnchor === messages[index - 1].id))}
                     previews={snapshot?.resultPreviews?.filter(preview => preview.messageId === item.id) ?? []}
                     speaking={snapshot?.spokenMessageId === item.id}
                     onSpeak={enabled && !snapshot?.voiceTalk && !snapshot?.voicePrompt && !snapshot?.inlineLogin &&
@@ -330,10 +336,12 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                   {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
                   {websiteAnchor === item.id && websiteCard}
                   {approvalAnchor === item.id && approvalCard}
+                  {paymentAnchor === item.id && paymentCard}
                 </Fragment>
               })}
               {!websiteAnchor && websiteCard}
               {!approvalAnchor && approvalCard}
+              {!paymentAnchor && paymentCard}
             </div>
             {unplacedTasks.length > 0 && <section className="work-cards" aria-label="작업">
               {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}

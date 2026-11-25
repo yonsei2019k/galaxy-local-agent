@@ -100,6 +100,7 @@
         </activity>
     </application>
     <queries>
+        <package android:name="net.ib.android.smcard" />
         <package android:name="com.korail.talk" />
         <package android:name="kr.co.srail.newapp" />
         <package android:name="com.skt.tmap.ku" />

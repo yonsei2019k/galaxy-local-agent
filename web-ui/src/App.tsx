@@ -160,6 +160,7 @@ export default function App() {
           onOfficeCalendar={() => request({action:'requestOfficeCalendar'})}
           onChooseReply={(runId, index) => !pending && !draft.trim() &&
             request({ action: 'chooseReply', payload: { runId, index } })}
+          onBookingPayment={(action, id) => request({ action, payload: { id } })}
           hasDraft={!!draft.trim() || !enabled || !!pending || !!snapshot?.voiceTalk || snapshot?.inlineLogin === true} onDraftExample={(text, needsFile) => {
             if (!enabled || pending || draft.trim() || snapshot?.inlineLogin || snapshot?.voiceTalk) return
             editDraft(text)

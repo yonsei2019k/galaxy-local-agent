@@ -68,6 +68,16 @@ interface Attachment {
   name: string
 }
 
+export interface BookingPayment {
+  id: string
+  messageId?: string
+  seller: string
+  amount: number
+  state: 'ready' | 'checking' | 'unverified'
+}
+
+export type BookingPaymentAction = 'openBookingPayment' | 'checkBookingPayment'
+
 export interface Snapshot {
   threadId: string
   branchId: string
@@ -99,6 +109,7 @@ export interface Snapshot {
   inlineLogin?: boolean
   character?: CharacterChoice
   approvalCard?: { id: string; messageId?: string }
+  bookingPayment?: BookingPayment
   websiteCard?: { id: string; messageId?: string; runId?: string; title: string; status: string; steps: string[]; working: boolean; inputHeight?: number; keyboardOpen?: boolean }
   browserLoginStatus?: string
   spokenMessageId?: string
@@ -159,6 +170,7 @@ export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'pro
 
 type Intent =
   | { action: 'chooseReply'; payload: { runId: string; index: number } }
+  | { action: BookingPaymentAction; payload: { id: string } }
   | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
@@ -339,11 +351,23 @@ export function readSnapshot(value: unknown): Snapshot | null {
     typeof talk.reply !== 'string' || talk.reply.length > 900 || typeof talk.blocked !== 'boolean')) return null
   if (value.voicePrompt !== undefined && value.voicePrompt !== 'permission' && value.voicePrompt !== 'listening' && value.voicePrompt !== 'finishing') return null
   if (value.theme !== undefined && value.theme !== 'light' && value.theme !== 'dark' && value.theme !== 'system') return null
-  return { ...(value as unknown as Snapshot), collab: collaboration(value.collab) }
+  return { ...(value as unknown as Snapshot),
+    bookingPayment: validBookingPayment(value.bookingPayment) ? value.bookingPayment : undefined,
+    collab: collaboration(value.collab) }
 }
 
 function epoch(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function validBookingPayment(value: unknown): value is BookingPayment {
+  const field = (item: unknown, limit: number) => typeof item === 'string' &&
+    item.trim().length > 0 && item.length <= limit && !/[\u0000-\u001f\u007f]/.test(item)
+  return record(value) && Object.keys(value).every(key =>
+    ['id', 'messageId', 'seller', 'amount', 'state'].includes(key)) &&
+    field(value.id, 128) && (value.messageId === undefined || field(value.messageId, 128)) &&
+    field(value.seller, 160) && epoch(value.amount) &&
+    (value.state === 'ready' || value.state === 'checking' || value.state === 'unverified')
 }
 
 export function runTarget(scope: Snapshot | null): RunTarget | null {
@@ -362,6 +386,12 @@ export function hasNativeBridge() {
 /** A message hands control to Android. Android owns scope, authorization and the actual result. */
 export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if (intent.action !== 'ready' && !scope?.ready) return false
+  if (intent.action === 'openBookingPayment' || intent.action === 'checkBookingPayment') {
+    const card = scope?.bookingPayment
+    if (!validBookingPayment(card) || card.id !== intent.payload.id ||
+      Object.keys(intent.payload).length !== 1 ||
+      (intent.action === 'openBookingPayment' ? card.state !== 'ready' : card.state === 'checking')) return false
+  }
   if (intent.action === 'chooseReply' && !scope?.tasks.some(task => task.id === intent.payload.runId &&
     task.phase === 'waiting_input' && task.choices?.[intent.payload.index])) return false
   if (intent.action === 'setCharacter' && (!scope?.character ||

@@ -51,6 +51,8 @@ import kotlinx.coroutines.launch
     val navigation by agent.navigationStatus.collectAsState()
     val ownerLogin by agent.waitingForOwnerLogin.collectAsState()
     val credentialPage by agent.showingCredentialPage.collectAsState()
+    val paymentPage by agent.showingPaymentPage.collectAsState()
+    var paymentError by remember { mutableStateOf(false) }
     var printError by remember(initialAddress){mutableStateOf(false)}
     val keyboard=LocalSoftwareKeyboardController.current
     val scope=rememberCoroutineScope()
@@ -62,10 +64,10 @@ import kotlinx.coroutines.launch
     }
     Dialog(onDismissRequest=agent::closeBrowser,properties=DialogProperties(
         usePlatformDefaultWidth=false,
-        securePolicy=if(credentialPage)SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit)){
+        securePolicy=if(credentialPage||paymentPage)SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit)){
         Surface(Modifier.fillMaxSize()){
             Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                if(!paymentPage)Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
                     OutlinedTextField(address,{address=it},Modifier.weight(1f),singleLine=true,label={Text("주소")},
                         keyboardOptions=KeyboardOptions(imeAction=ImeAction.Go),
                         keyboardActions=KeyboardActions(onGo={openAddress()}))
@@ -86,11 +88,18 @@ import kotlinx.coroutines.launch
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
-                    if(!busy && !credentialPage && ownerLogin==null && !navigation.loading && navigation.error==null)
+                    if(!busy && !credentialPage && !paymentPage && ownerLogin==null && !navigation.loading && navigation.error==null)
                         TextButton(onClick={ printError=!agent.openPrintPreview(context) }){Text("화면 PDF 저장")}
                     val loginId=ownerLogin
                     if(loginId!=null)Button(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
                     else if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
+                }
+                if(paymentPage&&!busy){
+                    val activity=context as? android.app.Activity
+                    if(activity!=null)OutlinedButton(onClick={paymentError=!agent.openOwnerPayment(activity,null,null,null)}){
+                        Text("공식 결제 앱 열기")
+                    }
+                    if(paymentError)Text("결제 화면에서 카드사를 선택한 뒤 다시 눌러 주세요. 모니모 앱이 설치되어 있어야 해요.")
                 }
                 if(printError)Text("현재 페이지의 PDF 저장 창을 열지 못했어요.",color=MaterialTheme.colorScheme.error)
                 if(ownerLogin!=null)Text("사이트에서 직접 로그인한 다음 ‘로그인했어요’를 눌러 주세요.",
