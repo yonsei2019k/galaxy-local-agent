@@ -193,6 +193,21 @@ class AppWebAgentDispatchTest {
     }
 
     @Test
+    fun approvalPreviewUsesObservedReservationTermsAndDropsOtherFields()=runBlocking {
+        val page=snapshot(risky=true)
+        val text="객실: A-06\n인원: 성인 2명\n입실: 2026-12-01 15:00\n총 결제 금액: 150,000원\n결제 기한: 오늘 22:00\n카드번호: 1234 5678 9999 0000"
+        val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){_,_->
+            JsonObject(page+("text" to JsonPrimitive(text)))
+        }
+        assertTrue(tools.execute(ToolCall("read",PcBrowserToolCatalog.READ,JsonObject(emptyMap()))).success)
+        val (required,review)=tools.review(click(PcBrowserToolCatalog.ACTION))
+        assertTrue(required)
+        for(fact in listOf("객실: A-06","인원: 성인 2명","입실: 2026-12-01 15:00","150,000원","결제 기한: 오늘 22:00"))
+            assertTrue(review.orEmpty().contains(fact))
+        assertFalse(review.orEmpty().contains("9999"))
+    }
+
+    @Test
     fun readIsAllowedButRiskyPcActionsNeedTheCurrentReviewedSnapshot() = runBlocking {
         val actions=mutableListOf<JsonObject>()
         val tools=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){operation,body->

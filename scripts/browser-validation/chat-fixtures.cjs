@@ -82,7 +82,8 @@ function camping() {
     assistant('camp3', result('camp_sites', {dates: '2026-12-01 ~ 2026-12-02', party: '4명', availableSites: 'A-04, A-12',
       mapUrl: 'https://example.org/map.png', mapImageUrl: 'https://example.org/map.png',
       inventoryUrl: 'https://example.org/booking', checkedAt: '2026-11-24T20:10:00+09:00'})),
-    assistant('camp4', result('booking_review', {room: 'A-04', paymentDeadline: '오늘 21:53', total: '100,000원'})),
+    assistant('camp4', result('booking_review', {seller: '시험 예약처', room: 'A-04', party: '4명',
+      dates: '2026-12-01 ~ 2026-12-02', paymentDeadline: '오늘 21:53', total: '100,000원', methodOptions: ['card', 'bank_transfer']})),
   ], tasks: [{...task('camp-run', 'paused', '글램핑 예약 준비', '휴대폰 인증 대기'), messageId: 'camp1'}]};
 }
 

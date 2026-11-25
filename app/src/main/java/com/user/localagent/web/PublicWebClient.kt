@@ -32,7 +32,44 @@ import javax.net.ssl.SSLSocketFactory
 data class WebSearchResult(val title:String,val url:String,val snippet:String,val source:String,val fetchedAt:String,val offer:WebOffer?=null,val merchant:String?=null)
 data class WebSearchReport(val query:String,val items:List<WebSearchResult>,val fetchedAt:String,val errors:List<String>,val partial:Boolean,val requestCount:Int=0)
 data class WebOffer(val price:String?,val currency:String?,val availability:String?,val shipping:String?,val validThrough:String?,val sourceUrl:String,val fetchedAt:String,val priceSource:String="JSON-LD")
-data class WebPage(val url:String,val title:String,val text:String,val offers:List<WebOffer>,val fetchedAt:String,val untrusted:Boolean=true,val publicExcerpt:String?=null)
+data class WebPage(val url:String,val title:String,val text:String,val offers:List<WebOffer>,val fetchedAt:String,val untrusted:Boolean=true,val publicExcerpt:String?=null,val campMap:PublicCampMap?=null)
+
+data class PublicCampMap(val pageUrl:String,val imageUrl:String) {
+    internal fun json()=buildJsonObject {put("mapUrl",pageUrl);put("mapImageUrl",imageUrl)}
+
+    companion object {
+        private fun detail(raw:String):URI?=runCatching {
+            val url=PublicWebSafety.requireHttps(raw)
+            require(url.host.equals("m.thankqcamping.com",true)&&url.path=="/resv/view.hbb"&&url.port in setOf(-1,443))
+            val campsite=url.rawQuery.orEmpty().split('&').filter {it.startsWith("cseq=")}.single()
+            require(campsite.matches(Regex("cseq=[1-9][0-9]{0,8}")))
+            URI("https://m.thankqcamping.com/resv/view.hbb?$campsite")
+        }.getOrNull()
+
+        private fun original(page:URI,source:String):URI?=runCatching {
+            val image=PublicWebSafety.requireHttps(page.resolve(source).toString())
+            require(image.host.equals(page.host,true)&&image.port in setOf(-1,443)&&image.rawQuery==null&&image.rawFragment==null)
+            require(image.rawPath.matches(Regex("/file/[0-9]{4}/[0-9]{2}/[0-9]{2}/[A-Za-z0-9._-]+\\.(?:jpe?g|png|webp)",RegexOption.IGNORE_CASE)))
+            image
+        }.getOrNull()
+
+        internal fun observe(url:String,document:org.jsoup.nodes.Document):PublicCampMap? {
+            val page=detail(url)?:return null
+            val section=document.select("section#view_map").singleOrNull()?:return null
+            if(section.selectFirst(".sec_title .tit")?.text()!="배치도")return null
+            val image=section.select(".pic img[src]").mapNotNull {original(page,it.attr("src"))}.distinct().singleOrNull()?:return null
+            return PublicCampMap(page.toASCIIString(),image.toASCIIString())
+        }
+
+        internal fun projected(url:String,observation:JsonObject):PublicCampMap? {
+            val page=detail(url)?:return null
+            if(observation["mapUrl"]!=JsonPrimitive(page.toASCIIString()))return null
+            val source=(observation["mapImageUrl"] as? JsonPrimitive)?.takeIf {it.isString}?.content?:return null
+            val image=original(page,source)?:return null
+            return PublicCampMap(page.toASCIIString(),image.toASCIIString())
+        }
+    }
+}
 data class PublicWebResponse(val statusCode:Int,val finalUrl:String,val contentType:String,val body:ByteArray)
 fun interface PublicWebTransport {suspend fun get(url:String,maxBytes:Int):PublicWebResponse}
 class UnsafePublicWebUrlException:IllegalArgumentException("공개 HTTPS 주소만 허용됩니다.")
@@ -251,9 +288,11 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
             throw PublicPageReadException(PublicPageReadReason.ACCESS_CHALLENGE)
         }
         var publicExcerpt:String?=null
+        var campMap:PublicCampMap?=null
         val text=if (type == "text/html" || type == "application/xhtml+xml") {
             val document = org.jsoup.Jsoup.parse(html)
             document.select("script, style, noscript, template, form, textarea, input, select, nav, footer, [hidden], [aria-hidden=true]").remove()
+            campMap=PublicCampMap.observe(response.finalUrl,document)
             val content = document.selectFirst("main, [role=main], #content, #contents, .subContents")
             val body = content?.takeIf { it.hasText() } ?: document.body()
             val bodyText = body.text()
@@ -273,7 +312,7 @@ class PublicWebClient(private val transport:PublicWebTransport=PinnedPublicHttps
             }
             bodyText.take(MAX_TEXT)
         } else pageText
-        return WebPage(response.finalUrl, title, text, extractOffers(html, response.finalUrl, stamp), stamp, publicExcerpt=publicExcerpt)
+        return WebPage(response.finalUrl, title, text, extractOffers(html, response.finalUrl, stamp), stamp, publicExcerpt=publicExcerpt,campMap=campMap)
     }
 
     private fun parseRss(body:String,stamp:String):List<WebSearchResult> {
@@ -501,6 +540,9 @@ object PublicWebSafety {
         val path = uri.rawPath
         val id = Regex("[1-9][0-9]{0,11}")
         return when (uri.host?.lowercase(Locale.ROOT)) {
+            "m.thankqcamping.com" -> path == "/resv/view.hbb" &&
+                fields.keys.all {it=="cseq"||it=="path"} && fields["cseq"]?.matches(id)==true &&
+                (fields["path"]==null||fields["path"]=="RP")
             "rev.yapen.co.kr" -> path == "/external/" && fields.keys == setOf("ypIdx") &&
                 id.matches(fields.getValue("ypIdx"))
             "nol.yanolja.com" -> Regex("/stay/domestic/[1-9][0-9]{0,11}").matches(path) &&

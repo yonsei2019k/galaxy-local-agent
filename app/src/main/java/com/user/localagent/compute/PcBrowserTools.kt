@@ -104,6 +104,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private val reviewAmounts = Regex(
         "(?:총\\s*결제\\s*금액|최종\\s*결제\\s*금액|결제\\s*예정\\s*금액|총\\s*금액|총액|현장\\s*(?:결제|요금)|예약금)[:：\\s]{0,12}(?:₩\\s*)?[0-9][0-9,]{0,14}\\s*원"
     )
+    private val reservationReviewFact=Regex(
+        "^(?:상품명|객실명|객실|자리|사이트\\s*번호|체크인|체크아웃|입실|퇴실|이용\\s*기간|예약\\s*일정|이용\\s*인원|인원|결제\\s*기한|환불\\s*규정|취소\\s*조건)\\s*[:：]\\s*\\S.{0,110}$"
+    )
     private var lastPage:JsonObject?=null
     private var initialOrigin:String?=null
     private var recoveredTarget:String?=null
@@ -138,6 +141,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 val pageText = lastPage?.takeIf { it.string("snapshotId") == snapshot?.first }?.string("text").orEmpty()
                 reviewAmounts.findAll(pageText).map { it.value.replace(Regex("\\s+"), " ") }
                     .distinct().take(5).forEach { append('\n').append(it) }
+                pageText.lineSequence().map(String::trim).filter(reservationReviewFact::matches)
+                    .map(com.user.localagent.data.WorkTraceCodec::redactPublicExplanation)
+                    .filter(String::isNotBlank).distinct().take(8).forEach { append('\n').append(it) }
             }
         }
         return needs to review

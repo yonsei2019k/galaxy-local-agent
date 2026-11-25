@@ -19,6 +19,26 @@ class PublicWebClientTest {
     private val timestamp="2030-01-01T00:00:00Z"
     private fun response(url:String,body:String,type:String="text/html")=PublicWebResponse(200,url,type,body.toByteArray())
     private fun client(transport:PublicWebTransport)=PublicWebClient(transport){Instant.parse(timestamp)}
+    @Test fun campgroundSourceExportsTheOfficialLayoutWithoutReadingInventory()=runBlocking {
+        val page="https://m.thankqcamping.com/resv/view.hbb?cseq=987654&path=RP"
+        val mapPath="/file/2030/01/01/layout.jpg"
+        fun html(path:String)="""<title>시험 캠핑장</title><main>예약 안내</main>
+            <section id="view_map"><div class="sec_title"><p class="tit">배치도</p></div>
+            <div class="pic"><img src="$path"></div></section>"""
+        suspend fun read(href:String,body:String)=client {_,_->response(href,body)}.readToolResult("fixture",href)
+        val result=read(page,html(mapPath))
+        assertEquals(VerificationState.VERIFIED,result.verification)
+        val extracted=Json.parseToJsonElement(result.content).jsonObject.getValue("campMap").jsonObject
+        assertEquals(JsonPrimitive(page.substringBefore("&")),extracted["mapUrl"])
+        assertEquals(JsonPrimitive("https://m.thankqcamping.com$mapPath"),extracted["mapImageUrl"])
+        assertFalse("availableSites" in extracted)
+        val projection=com.user.localagent.externalagent.CloudPublicSearchProjection.from("read_webpage",result)
+        assertEquals(extracted,Json.parseToJsonElement(checkNotNull(projection).content).jsonObject["campMap"])
+        for ((url,source) in listOf(page to "https://other.example.com$mapPath",
+            page to "$mapPath?token=fixture",page.replace("/view.hbb","/pop_mapview.hbb") to mapPath))
+            assertFalse("campMap" in Json.parseToJsonElement(read(url,html(source)).content).jsonObject)
+    }
+
     @Test fun governmentProbeRequiresTheCorrectOfficialPublicPageAndNeverExportsItsBody() = runBlocking {
         val url = GovernmentService.RESIDENCY.url
         val call = ToolCall("gov-read", GovernmentServiceCatalog.GET, buildJsonObject {

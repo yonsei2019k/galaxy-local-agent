@@ -20,7 +20,10 @@ const templates = {
 type CardKind = keyof typeof templates
 type SitePin = { site: string; x: number; y: number }
 type CampMap = { dates: string; party: string; checkedAt: string; mapUrl: string; imageUrl: string; sites: string[] }
-type CardRow = { title: string; summary?: string; fields: [string, string][]; mapUrl?: string; inventoryUrl?: string; map?: CampMap }
+const paymentLabels = { card: '카드결제', bank_transfer: '무통장 입금', kakao_pay: '카카오페이', naver_pay: '네이버페이', toss_pay: '토스페이' } as const
+type PaymentMethod = keyof typeof paymentLabels
+type BookingReview = { seller: string; room: string; dates: string; party: string; total: string; methods: PaymentMethod[] }
+type CardRow = { title: string; summary?: string; fields: [string, string][]; mapUrl?: string; inventoryUrl?: string; map?: CampMap; booking?: BookingReview }
 type ServiceResult = { kind: CardKind; rows: CardRow[] }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -30,6 +33,20 @@ function record(value: unknown): value is Record<string, unknown> {
 function boundedText(value: unknown, limit: number): string | undefined {
   if (typeof value !== 'string' || value.length > limit) return
   return value.trim() || undefined
+}
+
+function bookingReview(item: Record<string, unknown>): BookingReview | undefined {
+  const seller = boundedText(item.seller, 100), room = boundedText(item.room, 100)
+  const dates = boundedText(item.dates, 100), party = boundedText(item.party, 80)
+  const total = boundedText(item.total, 30)
+  if (!seller || !room || !dates || !party || !total ||
+      [seller, room, dates, party].some(value => /[\r\n\u0000-\u001f]/.test(value)) ||
+      !/^[0-9][0-9,]*\s*원$/.test(total) || !Array.isArray(item.methodOptions) ||
+      item.methodOptions.length < 1 || item.methodOptions.length > 5) return
+  const methods = item.methodOptions.filter((value): value is PaymentMethod =>
+    typeof value === 'string' && Object.hasOwn(paymentLabels, value))
+  if (methods.length !== item.methodOptions.length || new Set(methods).size !== methods.length) return
+  return {seller, room, dates, party, total, methods}
 }
 
 function publicLink(value: unknown): string | undefined {
@@ -91,6 +108,7 @@ export function parseServiceResult(source: string): ServiceResult | null {
       }
       const mapUrl = kind === 'camp_sites' ? publicLink(item.mapUrl) : undefined
       rows.push({ title, summary: boundedText(item.summary, 320), fields, mapUrl,
+        booking: kind === 'booking_review' && data.items.length === 1 ? bookingReview(item) : undefined,
         ...(kind === 'camp_sites' ? { inventoryUrl: publicLink(item.inventoryUrl),
           map: data.items.length === 1 ? campMap(item, mapUrl) : undefined } : {}) })
     }
@@ -160,7 +178,7 @@ export function ServiceResultCard({ result, photo, onAsk }: {
   const label = templates[result.kind].label
   return <section className="service-result" aria-label={label + ' 결과'}>
     <header><strong>{label}</strong><span>{result.rows.length}건</span></header>
-    <ul>{result.rows.map(({ title, summary, fields, mapUrl, inventoryUrl, map }, index) => <li key={index}>
+    <ul>{result.rows.map(({ title, summary, fields, mapUrl, inventoryUrl, map, booking }, index) => <li key={index}>
       <h3>{title}</h3>
       {summary && <p>{summary}</p>}
       {fields.length > 0 && <dl>{fields.map(([name, value]) => <div key={name}>
@@ -172,6 +190,13 @@ export function ServiceResultCard({ result, photo, onAsk }: {
       </div>}
       {map && photo && <CampMapPreview key={JSON.stringify([map.imageUrl, map.dates, map.party, map.checkedAt])}
         map={map} title={title} photo={photo} onAsk={onAsk} />}
+      {booking && onAsk && <div className="stay-actions" role="group" aria-label="결제수단 선택">
+        {booking.methods.map(method => <button key={method} type="button" onClick={() => onAsk([
+          `${title} · ${booking.room} 예약의 ${paymentLabels[method]} 화면을 열어줘.`,
+          `예약처 ${booking.seller}, 일정 ${booking.dates}, ${booking.party}, 표시 총액 ${booking.total}이야.`,
+          '원래 예약 페이지에서 대상과 재고, 최종 금액과 선택한 결제수단을 다시 확인하고 공식 결제 화면까지만 열어줘.',
+        ].join('\n'))}>{paymentLabels[method]} 준비</button>)}
+      </div>}
     </li>)}</ul>
   </section>
 }

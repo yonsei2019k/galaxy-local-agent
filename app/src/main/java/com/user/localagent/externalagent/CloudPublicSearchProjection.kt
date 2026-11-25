@@ -5,6 +5,7 @@ import com.user.localagent.core.CredentialRedaction
 import com.user.localagent.core.ToolResult
 import com.user.localagent.core.VerificationState
 import com.user.localagent.web.PublicWebSafety
+import com.user.localagent.web.PublicCampMap
 import kotlinx.serialization.json.*
 
 /** The phone keeps the original search result. Only a safe subset of public source rows leaves it. */
@@ -15,12 +16,15 @@ internal object CloudPublicSearchProjection {
         if (tool == "read_webpage") {
             if (data["untrustedSourceData"] != JsonPrimitive(true)) return null
             val url = safeUrl(data) ?: return null
-            val excerpt = safeField(data, "publicExcerpt", 4000) ?: return null
+            val excerpt = safeField(data, "publicExcerpt", 4000)
+            val campMap=(data["campMap"] as? JsonObject)?.let {PublicCampMap.projected(url,it)}
+            if(excerpt==null&&campMap==null)return null
             return result.copy(content = buildJsonObject {
                 put("url", url)
                 put("untrustedSourceData", true)
                 put("partial", true)
-                put("text", excerpt)
+                excerpt?.let {put("text",it)}
+                campMap?.let {put("campMap",it.json())}
             }.toString())
         }
         if (tool != "search_web") return null

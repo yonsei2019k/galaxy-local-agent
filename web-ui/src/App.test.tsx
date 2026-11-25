@@ -1103,6 +1103,27 @@ describe('office staff profile form', () => {
   })
 })
 
+it('offers only shown payment methods and drafts preparation for the exact booking', () => {
+  mount()
+  const item = { title: '시험캠핑', seller: '공식 예약처', room: 'A-06', dates: '2026-12-01 ~ 2026-12-02',
+    party: '4명', total: '150,000원', methodOptions: ['card', 'bank_transfer'] }
+  const show = (methodOptions: string[]) => snapshot({ ...base, messages: [{
+    id: 'booking-review', role: 'assistant', text: '```service-result\n' + JSON.stringify({
+      version: 1, kind: 'booking_review', items: [{ ...item, methodOptions }],
+    }) + '\n```',
+  }] })
+  show(['card', 'unknown'])
+  expect(() => button('카드결제 준비')).toThrow()
+  show(item.methodOptions)
+  expect(() => button('네이버페이 준비')).toThrow()
+  click('카드결제 준비')
+  const draft = requests().find(entry => entry.action === 'draft')?.payload.text
+  expect(draft).toContain('A-06')
+  expect(draft).toContain('150,000원')
+  expect(draft).toContain('공식 결제 화면까지만')
+  expect(requests().some(entry => entry.action === 'send' || entry.action === 'steer')).toBe(false)
+})
+
 it('drafts a read-only follow-up for the exact offer without submitting a reservation action', () => {
   mount()
   const value = JSON.stringify({

@@ -153,6 +153,8 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
           await page.locator('.stay-top').click();
           assert.equal(await page.getByRole('link', { name: '전체 배치도' }).getAttribute('href'), 'https://example.org/map.png');
           assert.equal(await page.getByText('결제 기한', { exact: true }).count(), 1);
+          assert.equal(await page.getByRole('button', { name: '카드결제 준비' }).count(), 1);
+          assert.equal(await page.getByRole('button', { name: '토스페이 준비' }).count(), 0);
           await page.getByRole('button', { name: '채팅에서 배치도 보기' }).click();
           await page.evaluate(() => {
             const canvas = document.createElement('canvas');
