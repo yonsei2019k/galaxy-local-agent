@@ -123,7 +123,7 @@ private fun SettingsPortrait(character: CharacterPreference) {
         value = null
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                resources.openRawResource(R.drawable.jipsooni_portraits).use { stream ->
+                resources.openRawResource(R.raw.jipsooni_portraits).use { stream ->
                     val decoder = BitmapRegionDecoder.newInstance(stream) ?: return@use null
                     try {
                         val (column, row) = character.portraitCell()

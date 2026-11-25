@@ -12,7 +12,7 @@ import { createServer } from 'vite'
 const browser = process.argv[2]
 if (!browser) throw new Error('Pass the path to a Chromium browser executable')
 const root = fileURLToPath(new URL('.', import.meta.url))
-const output = fileURLToPath(new URL('../app/src/main/res/drawable-nodpi/jipsooni_portraits.png', import.meta.url))
+const output = fileURLToPath(new URL('../app/src/main/res/raw/jipsooni_portraits.png', import.meta.url))
 const server = await createServer({ root, optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: false }, appType: 'custom' })
 const temp = mkdtempSync(join(tmpdir(), 'ziphap-portraits-'))
 try {
