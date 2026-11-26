@@ -845,6 +845,9 @@ class AppWebAgent private constructor(private val context:Context) {
         return true
     }
 
+    internal fun hasBrowserPdf(ticket:String):Boolean =
+        pendingBrowserPdf?.first==ticket||pdfWrite.value?.ticket==ticket
+
     internal fun acknowledgeBrowserPdf(ticket:String){
         val result=pdfWrite.value?:return
         if(result.ticket==ticket&&result.phase!=PdfWritePhase.WRITING)pdfWrite.value=null

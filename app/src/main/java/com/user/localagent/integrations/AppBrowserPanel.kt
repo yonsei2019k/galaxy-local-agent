@@ -97,7 +97,14 @@ import kotlinx.coroutines.launch
         }
     }
     LaunchedEffect(pdfTicket,pdfWrite){
-        val result=pdfWrite?.takeIf{it.ticket==pdfTicket&&it.phase!=AppWebAgent.PdfWritePhase.WRITING}
+        val ticket=pdfTicket?:return@LaunchedEffect
+        if(!agent.hasBrowserPdf(ticket)){
+            pdfTicket=null
+            exportingPdf=false
+            printError=true
+            return@LaunchedEffect
+        }
+        val result=pdfWrite?.takeIf{it.ticket==ticket&&it.phase!=AppWebAgent.PdfWritePhase.WRITING}
             ?:return@LaunchedEffect
         printError=result.phase==AppWebAgent.PdfWritePhase.FAILED
         pdfTicket=null
