@@ -8,6 +8,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.user.localagent.core.CapabilityPolicy
+import com.user.localagent.ui.ZipFilledButton
+import com.user.localagent.ui.ZipHapColors
+import com.user.localagent.ui.ZipHapTokens
+import com.user.localagent.ui.ZipIconTile
+import com.user.localagent.ui.ZipTone
+import com.user.localagent.ui.zipShadow
 
 private fun approvalTitle(action:PendingAction):String =
     if(action.recipientChoices.isNotEmpty())"문자를 받을 사람 선택" else when(action.call.name){
@@ -51,7 +57,7 @@ private fun ApprovalContents(action:PendingAction,review:String,modifier:Modifie
 @Composable
 private fun ApprovalConfirm(action:PendingAction,onDecision:(Boolean)->Unit) {
     val recipient by action.selectedRecipient.collectAsState()
-    TextButton(
+    ZipFilledButton(
         enabled=!action.decision.isCompleted&&(action.recipientChoices.isEmpty()||recipient!=null),
         onClick={onDecision(true)}
     ) { Text(if(action.recipientChoices.isEmpty())"확인하고 실행" else "선택한 번호로 초안 준비") }
@@ -72,13 +78,17 @@ internal fun ActionApprovalDialog(
 
 @Composable
 internal fun InlineActionApproval(action:PendingAction,review:String,onDecision:(Boolean)->Unit) {
-    Card(
-        modifier=Modifier.fillMaxSize(),
-        colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface),
-        border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)
+    val shape=androidx.compose.foundation.shape.RoundedCornerShape(ZipHapTokens.RadiusCard)
+    Surface(
+        modifier=Modifier.fillMaxSize().zipShadow(ZipHapTokens.ShadowCard,shape),
+        shape=shape,
+        color=ZipHapColors.Surface,
     ) {
         Column(Modifier.fillMaxSize().padding(horizontal=14.dp,vertical=8.dp)) {
-            Text(approvalTitle(action),style=MaterialTheme.typography.titleSmall, maxLines=2)
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                ZipIconTile(com.user.localagent.runtime.R.drawable.zi_shield,tone=ZipTone.Coral,size=32.dp,iconSize=18.dp)
+                Text(approvalTitle(action),style=MaterialTheme.typography.titleSmall, maxLines=2)
+            }
             Spacer(Modifier.height(6.dp))
             ApprovalContents(action,review,Modifier.weight(1f).fillMaxWidth())
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {

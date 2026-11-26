@@ -10,7 +10,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -144,7 +143,7 @@ internal fun MessageActionRow(messageId: String, text: String, fromUser: Boolean
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start) {
         if (actions.onCopy != null) TextButton(onClick = { actions.onCopy.invoke(messageId) }, modifier = Modifier.testTag("copy_message_$messageId")) { Text("복사", color = ZipHapColors.TextSecondary) }
         Column {
-            TextButton(onClick = { menu = true }, modifier = Modifier.testTag("message_actions_$messageId")) { Text("⋯", color = ZipHapColors.TextSecondary) }
+            TextButton(onClick = { menu = true }, modifier = Modifier.testTag("message_actions_$messageId")) { ZipIcon(com.user.localagent.runtime.R.drawable.zi_menu, "메시지 작업", tint = ZipHapColors.TextSecondary, size = 20.dp) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 if (fromUser && actions.onEdit != null) DropdownMenuItem(text = { Text("메시지 수정") }, onClick = { menu = false; editedText = text; editing = true }, enabled = !busy)
                 if (actions.onRegenerate != null) DropdownMenuItem(text = { Text(if (fromUser) "이 요청 다시 실행" else "답변 다시 생성") }, onClick = { menu = false; actions.onRegenerate.invoke(messageId) }, enabled = !busy)
@@ -155,7 +154,7 @@ internal fun MessageActionRow(messageId: String, text: String, fromUser: Boolean
     }
     if (editing) AlertDialog(onDismissRequest = { editing = false }, title = { Text("메시지 수정") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(editedText, { editedText = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp), minLines = 3, maxLines = 10)
+            ZipOutlinedTextField(editedText, { editedText = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp), minLines = 3, maxLines = 10)
             Text("수정한 내용으로 다시 실행합니다. 이미 실행된 일정·파일 작업이 자동으로 되돌려지지는 않습니다.", style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary)
         }
     }, confirmButton = { TextButton(onClick = { actions.onEdit?.invoke(messageId, editedText.trim()); editing = false }, enabled = editedText.isNotBlank()) { Text("수정 후 실행") } }, dismissButton = { TextButton(onClick = { editing = false }) { Text("취소") } })

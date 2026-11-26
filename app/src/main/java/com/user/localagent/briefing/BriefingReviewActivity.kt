@@ -15,6 +15,14 @@ import androidx.compose.ui.unit.dp
 import com.user.localagent.LocalAgentApplication
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
+import com.user.localagent.ui.ZipOutlinedButton
+import com.user.localagent.ui.ZipOutlinedTextField
+import com.user.localagent.ui.ZipFilledButton
+import com.user.localagent.ui.ZipHapColors
+import com.user.localagent.ui.ZipHapTokens
+import com.user.localagent.ui.ZipIcon
+import com.user.localagent.ui.ZipScreenTitle
+import com.user.localagent.ui.ZipEmptyState
 
 /** Private activity reached by an immutable notification PendingIntent; no exported action receiver. */
 class BriefingReviewActivity:ComponentActivity() {
@@ -22,8 +30,8 @@ class BriefingReviewActivity:ComponentActivity() {
         val lightBars=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
         enableEdgeToEdge(lightBars,lightBars)
         val app=(application as LocalAgentApplication).container
-        setContent {com.user.localagent.ui.ZipHapTheme {Surface {Column(Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text("일정·업무 확인",style=MaterialTheme.typography.headlineSmall)
+        setContent {com.user.localagent.ui.ZipHapTheme {Surface(color=ZipHapColors.Background) {Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            ZipScreenTitle("일정·업무 확인",Modifier.padding(top=8.dp))
             BriefingAgendaPanel(app)
         }}}}
     }
@@ -44,9 +52,9 @@ class BriefingReviewActivity:ComponentActivity() {
     Text("자동 등록할 캘린더",style=MaterialTheme.typography.titleMedium)
     Text("처음 선택한 캘린더에만 등록합니다. 수정·취소·충돌과 불명확한 항목은 확인 대기합니다.",style=MaterialTheme.typography.bodySmall)
     Box {
-        OutlinedButton(enabled=!working,onClick={calendarMenu=true}){Text(calendars.firstOrNull {it.id==chosen}?.displayName?.let {"$it · 변경"}?:"캘린더 선택")}
+        ZipOutlinedButton(enabled=!working,onClick={calendarMenu=true}){Text(calendars.firstOrNull {it.id==chosen}?.displayName?.let {"$it · 변경"}?:"캘린더 선택")}
         DropdownMenu(expanded=calendarMenu,onDismissRequest={calendarMenu=false},modifier=Modifier.heightIn(max=320.dp)) {
-            calendars.forEach {calendar->DropdownMenuItem(text={Text("${if(chosen==calendar.id)"✓ "else""}${calendar.displayName}")},onClick={calendarMenu=false;scope.launch {
+            calendars.forEach {calendar->DropdownMenuItem(text={Text(calendar.displayName)},trailingIcon={if(chosen==calendar.id)ZipIcon(com.user.localagent.runtime.R.drawable.zi_check,"선택됨",tint=ZipHapTokens.CobaltText,size=20.dp)},onClick={calendarMenu=false;scope.launch {
                 working=true;try {agenda.setCalendar(calendar.id);chosen=calendar.id;message="${calendar.displayName}에 새 확정 일정을 자동 등록합니다."}
                 catch(e:Exception){message=e.message.orEmpty()}finally{working=false}
             }})}
@@ -59,7 +67,7 @@ class BriefingReviewActivity:ComponentActivity() {
         Text(note.body.substringAfter("\n\n").substringBefore("\n\n구조화 결과:"),style=MaterialTheme.typography.bodySmall)
     }
     TextButton(onClick={rows=agenda.items()}){Text("결과 새로고침")}
-    if(rows.isEmpty())Text("새 자료 분석 결과가 도착하면 이곳에서 확인할 수 있습니다.")
+    if(rows.isEmpty())ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_calendar,"새 자료 분석 결과가 도착하면 이곳에서 확인할 수 있습니다.","")
     rows.asReversed().take(100).forEach {item->
         val status=item.getValue("status").jsonPrimitive.content
         if(status!="dismissed")Card {Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -69,16 +77,16 @@ class BriefingReviewActivity:ComponentActivity() {
             Text("장소: "+item.getValue("location").jsonPrimitive.content)
             Text("대상·제출처: "+item.getValue("recipient").jsonPrimitive.content+" · 방법: "+item.getValue("deliveryMethod").jsonPrimitive.content)
             Text("원문 근거: "+item.getValue("quote").jsonPrimitive.content,style=MaterialTheme.typography.bodySmall)
-            if(status!="registered")Button(enabled=!working,onClick={edited=item;title=item.getValue("title").jsonPrimitive.content;
+            if(status!="registered")ZipFilledButton(enabled=!working,onClick={edited=item;title=item.getValue("title").jsonPrimitive.content;
                 start=item["startIso"]?.jsonPrimitive?.contentOrNull.orEmpty();end=item["endIso"]?.jsonPrimitive?.contentOrNull.orEmpty();location=item.getValue("location").jsonPrimitive.content}){Text("확인·수정")}
             else TextButton(onClick={runCatching {context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse(item.getValue("eventUri").jsonPrimitive.content)))}}){Text("캘린더에서 보기")}
         }}
     }
     edited?.let {item->AlertDialog(onDismissRequest={if(!working)edited=null},title={Text("일정 확인·수정")},text={Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(title,{title=it},label={Text("일정 이름")})
-        OutlinedButton(onClick={pickBriefingTime(context,start){start=it}}){Text("시작: "+briefingTimeLabel(start))}
-        OutlinedButton(onClick={pickBriefingTime(context,end){end=it}}){Text("종료: "+briefingTimeLabel(end))}
-        OutlinedTextField(location,{location=it},label={Text("장소")})
+        ZipOutlinedTextField(title,{title=it},label={Text("일정 이름")})
+        ZipOutlinedButton(onClick={pickBriefingTime(context,start){start=it}}){Text("시작: "+briefingTimeLabel(start))}
+        ZipOutlinedButton(onClick={pickBriefingTime(context,end){end=it}}){Text("종료: "+briefingTimeLabel(end))}
+        ZipOutlinedTextField(location,{location=it},label={Text("장소")})
         if(message.isNotBlank())Text(message)
     }},confirmButton={TextButton(enabled=!working,onClick={scope.launch {working=true;try {
         agenda.review(item.getValue("id").jsonPrimitive.content,title,start,end,location);rows=agenda.items();edited=null;message="저장 후 재조회했습니다."
