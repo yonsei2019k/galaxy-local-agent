@@ -1,3 +1,19 @@
+## 2026-11-27 — 디자인 언어 2.0 전 화면 적용 (claude/design-2, Codex 통합 대기)
+
+소유자 지시(2026-11-25~26): AI가 만든 듯한 느낌을 없애라. 기본 글꼴, 진한 구분선, 기본 아이콘과 이모티콘을 바꾸고, 피클처럼 깔끔하고 트렌디하게 만들며, 움직이는 캐릭터를 넣어라. 채팅뿐 아니라 설정과 모든 화면에 적용한다. 기준은 a505dac(codex/work-history)이다.
+
+화면만 바꿨다. 동작, intent, 권한·보안 경계, testTag, semantics, 문구 뜻은 바꾸지 않았다. 최종 브랜치 검토(opus)에서도 숨은 동작 변경을 찾지 못했다.
+- 토큰 2.0: `design/tokens.json`을 원본으로 `tokens.css`와 `ZipHapTokens.kt`를 생성한다. 바탕은 #F3F4F8이고, 흰 카드는 그림자로 구분하며 진한 선을 쓰지 않는다. coral-text는 AA를 맞추려고 #B83C1D로 바꿨다.
+- 아이콘: `design/icons.json` 50종, 그림 12종, 웹 스티커 21종(`design/stickers.json`)을 `scripts/gen-icons.py`가 React와 Android `zi_*.xml`로 생성한다.
+- 글꼴: SUIT Variable(본문)과 주아(제목)를 넣었다. 둘 다 OFL 1.1이고 2026-11-26 공식 저장소에서 소유자 허락을 받아 내려받았다. Pretendard는 삭제했다. 라이선스는 `app/src/main/assets/licenses`, `web-ui/licenses`, NOTICE에 넣었다.
+- 웹 채팅: 선 없는 면 구분, 아이콘 타일, 캐릭터 반응 모션, 화면 표시 시점의 이모티콘→스티커 치환(원문·복사·intent 불변), 움직임 줄이기 설정 준수.
+- Compose: `ZipHapTheme` 2.0, `ZipComponents.kt`, `ZipMaterial.kt`. 모든 Compose 화면에 적용했다. 메뉴형 AlertDialog 6개를 하단 시트로 바꿨고, 닫기 제스처는 닫기만 한다. 동의·승인·삭제 확인은 AlertDialog로 그대로 두었다. 승인 창의 취소 버튼은 확인 버튼과 같은 무게로 맞췄다.
+- 보안 설정 변경: `web-ui/vite.config.ts`의 오프라인 CSP에 `font-src 'self'`를 추가했다. 앱 안에 넣은 글꼴만 허용한다.
+
+검증: core 테스트, android-runtime 단위 테스트 1,226건, lint 2종(오류 0), assembleRelease가 BUILD SUCCESSFUL이다. 웹 vitest 156건, 화면 하네스 51건(일반과 움직임 줄이기), 이모티콘 검사 0건.
+
+미검증: 서명, 설치, 실제 기기 렌더링(그림자, 듀오톤 아이콘 색, WebView 글꼴, 길게 눌러 복사)은 확인하지 않았다. View 기반 Activity 5개는 아직 바꾸지 않았다. 모델 답변이 이모티콘을 덜 쓰게 하는 `JIPSOONI_VOICE` 지침은 Codex 소유라 인계로 넘긴다.
+
 ## 2026-11-26 — PDF 잘림·저장 수명과 네이버 조회 결과 검증
 
 - PDF 본문은 상위 스크롤·잘림 컨테이너의 실제 표시 영역에 온전히 들어오는 텍스트 조각만 복사한다. 부분적으로 잘린 텍스트 노드는 통째로 제외한다.
