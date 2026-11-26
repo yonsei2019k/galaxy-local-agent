@@ -30,7 +30,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
@@ -133,17 +135,20 @@ private val ZipHapScheme = lightColorScheme(
     onErrorContainer = Color(0xFF8C1D18),
 )
 /**
- * The only place font families are chosen. `ui` is body text and controls; `display` is the large playful accent
- * (집순이 name, greeting, empty-state titles). Both are the bundled Pretendard v1.3.9 OTFs (SIL OFL 1.1, no runtime
- * font network) until D4 swaps them for SUIT Variable and Jua by editing only this holder.
- * Pretendard ships 400 and 600 only: a 500 request renders the 400 file and 700 renders the 600 file.
+ * The only place font families are chosen. `ui` is body text and controls (SUIT Variable 2.0.5, weights 400-700 via
+ * variation settings); `display` is the large playful accent (Jua, single weight) for the 집순이 name, greeting and
+ * empty-state titles. Both are bundled SIL OFL 1.1 fonts (no runtime font network); licenses are in assets/licenses.
  */
+@OptIn(ExperimentalTextApi::class)
 object ZipFonts {
-    val ui: FontFamily = FontFamily(
-        Font(R.font.pretendard_regular, weight = FontWeight.Normal),
-        Font(R.font.pretendard_semibold, weight = FontWeight.SemiBold),
+    private fun suit(weight: Int) = Font(
+        R.font.suit_variable,
+        weight = FontWeight(weight),
+        variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
     )
-    val display: FontFamily = ui
+
+    val ui: FontFamily = FontFamily(suit(400), suit(500), suit(600), suit(700))
+    val display: FontFamily = FontFamily(Font(R.font.jua_regular))
 }
 
 private fun zipStyle(size: Float, weight: Int, lineHeight: Float, tight: Boolean, family: FontFamily = ZipFonts.ui) =
