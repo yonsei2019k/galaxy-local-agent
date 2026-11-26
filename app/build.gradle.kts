@@ -13,7 +13,7 @@ android {
         minSdk = 31
         targetSdk = 37
         versionCode = (System.getenv("RELEASE_VERSION_CODE") ?: "1000").toInt()
-        versionName = System.getenv("RELEASE_VERSION_NAME") ?: "0.1.0-dev"
+        versionName = System.getenv("RELEASE_VERSION_NAME") ?: "0.2.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += "arm64-v8a" }
         val outlookId = providers.environmentVariable("ZIPHAP_OUTLOOK_CLIENT_ID").orNull.orEmpty().trim()

@@ -7,8 +7,9 @@ on:
 permissions:
   contents: read
 env:
-  # Keep signed updates above the previously installed versionCode 2084.
-  RELEASE_VERSION_OFFSET: 2035
+  # The 0.2.0 candidate uses 2102. Workflow run 53 is the first slot in this train.
+  RELEASE_VERSION_OFFSET: 2049
+  RELEASE_TRAIN_START_CODE: 2102
   ZIPHAP_OUTLOOK_CLIENT_ID: ${{ vars.ZIPHAP_OUTLOOK_CLIENT_ID }}
   ZIPHAP_OUTLOOK_TENANT: ${{ vars.ZIPHAP_OUTLOOK_TENANT }}
   ZIPHAP_X_CLIENT_ID: ${{ vars.ZIPHAP_X_CLIENT_ID }}
@@ -19,15 +20,22 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    outputs:
+      version-code: ${{ steps.version.outputs.code }}
+      version-name: ${{ steps.version.outputs.name }}
     env:
       RUSTUP_TOOLCHAIN: 1.97.0
       CARGO_BUILD_JOBS: 2
       ZIPHAP_PYTHON: python
     steps:
-      - name: Set monotonic version code
+      - name: Set monotonic release version
+        id: version
         run: |
           code=$((RELEASE_VERSION_OFFSET + GITHUB_RUN_NUMBER))
-          printf 'RELEASE_VERSION_CODE=%s\nRELEASE_VERSION_NAME=0.1.%s\n' "$code" "$((code - 2000))" >> "$GITHUB_ENV"
+          test "$code" -ge "$RELEASE_TRAIN_START_CODE"
+          name="0.2.$((code - RELEASE_TRAIN_START_CODE))"
+          printf 'RELEASE_VERSION_CODE=%s\nRELEASE_VERSION_NAME=%s\n' "$code" "$name" >> "$GITHUB_ENV"
+          printf 'code=%s\nname=%s\n' "$code" "$name" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
@@ -118,13 +126,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      RELEASE_VERSION_CODE: ${{ needs.build.outputs.version-code }}
+      RELEASE_VERSION_NAME: ${{ needs.build.outputs.version-name }}
     permissions:
       contents: write
     steps:
-      - name: Set monotonic version code
-        run: |
-          code=$((RELEASE_VERSION_OFFSET + GITHUB_RUN_NUMBER))
-          printf 'RELEASE_VERSION_CODE=%s\nRELEASE_VERSION_NAME=0.1.%s\n' "$code" "$((code - 2000))" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
