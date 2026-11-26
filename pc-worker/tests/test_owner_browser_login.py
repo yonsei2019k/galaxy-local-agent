@@ -142,6 +142,39 @@ class OwnerLogin(unittest.TestCase):
         finally:
             agent.dispose()
 
+    def test_owner_login_reopens_the_canonical_form_from_the_site_home(self):
+        from concurrent.futures import ThreadPoolExecutor
+        origin = 'https://www.kairb.org'
+        home = 'https://kairb.org/'
+        login_path = origin + '/member/'
+        form = ('<form method="post" action="/member/login_reg.php"><input name="id">'
+                '<input type="password" name="passwd"><input type="submit"></form>')
+        agent = browser.BrowserAgent()
+        try:
+            agent._ensure()
+            with sync_playwright() as pw:
+                chrome = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{agent._port()}')
+                context = chrome.contexts[0]
+                context.route(home, lambda route: route.fulfill(
+                    content_type='text/html', body='<input type="password">'))
+                context.route(login_path, lambda route: route.fulfill(content_type='text/html', body=form))
+                def observe():
+                    initial = agent.open({'url': home})
+                    self.assertEqual(initial.get('loginOrigin'), origin)
+                    return agent.owner_login_form({'origin': origin})
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    task = executor.submit(observe)
+                    for _ in range(160):
+                        if task.done():
+                            break
+                        context.pages[0].wait_for_timeout(100)
+                    result = task.result(timeout=2)
+                self.assertEqual(result.get('origin'), origin)
+                self.assertRegex(result['challenge'], r'^[a-f0-9]{64}$')
+                self.assertEqual(context.pages[0].url, login_path)
+        finally:
+            agent.dispose()
+
     def test_worker_reads_through_the_result_alert(self):
         origin = 'https://www.kairb.org'
         agent = browser.BrowserAgent()

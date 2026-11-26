@@ -311,7 +311,7 @@ KAIRB_SIGNED_IN = r"""(() => location.origin === 'https://www.kairb.org' &&
     [...document.querySelectorAll('a')].some(a => a.getClientRects().length &&
         (a.textContent.trim() === '로그아웃' || (a.origin === location.origin &&
           /\/logout(?:_reg)?\.php$/i.test(a.pathname)))))()"""
-KAIRB_ON_HOME = "location.origin === 'https://www.kairb.org' && location.pathname === '/'"
+KAIRB_ON_HOME = "['https://www.kairb.org', 'https://kairb.org'].includes(location.origin) && location.pathname === '/'"
 KAIRB_ON_COURSES = r"""(document.readyState === 'complete' &&
     location.origin + location.pathname === 'https://www.kairb.org/cme/cme_ing.php' &&
     !document.querySelector('input[type=password]') &&
@@ -336,11 +336,23 @@ class BrowserAgent:
             if self.page is None:
                 raise BrowserError('OWNER_LOGIN_PAGE_CHANGED', 409)
             token = secrets.token_hex(32)
-            frame = self.page.call('Page.getFrameTree')['frameTree']['frame']['id']
-            world = self.page.call('Page.createIsolatedWorld', {'frameId': frame, 'worldName': 'ziphap-owner-input'})['executionContextId']
             marker = secrets.token_hex(16)
-            if not self._owner_form(world, [marker]):
-                raise BrowserError('OWNER_LOGIN_FORM_UNAVAILABLE', 409)
+
+            def bind_visible_form():
+                frame = self.page.call('Page.getFrameTree')['frameTree']['frame']['id']
+                world = self.page.call('Page.createIsolatedWorld', {'frameId': frame, 'worldName': 'ziphap-owner-input'})['executionContextId']
+                return world if self._owner_form(world, [marker]) else None
+
+            world = bind_visible_form()
+            if world is None:
+                current = self.page.evaluate('location.origin', timeout=4)
+                if current in ('https://www.kairb.org', 'https://kairb.org'):
+                    login = self.page.call('Page.navigate', {'url': 'https://www.kairb.org/member/'}, timeout=5)
+                    if not login.get('errorText'):
+                        self._settle(timeout=5)
+                        world = bind_visible_form()
+                if world is None:
+                    raise BrowserError('OWNER_LOGIN_FORM_UNAVAILABLE', 409)
             self.owner_login = (token, time.monotonic() + 600, self.page, world, marker)
             return {'challenge': token, 'origin': 'https://www.kairb.org'}
 
@@ -492,7 +504,7 @@ class BrowserAgent:
             self.snapshot = None
             result = {'loginRequired': True, 'dataOnly': True}
             location = urllib.parse.urlsplit(value['url'])
-            if location.scheme == 'https' and location.netloc == 'www.kairb.org':
+            if location.scheme == 'https' and location.netloc in ('www.kairb.org', 'kairb.org'):
                 result['loginOrigin'] = 'https://www.kairb.org'
             return result
         # Compare renderer observations on both sides. Display-only labels must not change the fingerprint.
