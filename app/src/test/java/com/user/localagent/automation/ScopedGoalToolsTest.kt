@@ -50,7 +50,9 @@ class ScopedGoalToolsTest {
         val store=MemoryStore(scope,old)
         tools(store).execute(call(GoalToolCatalog.UPDATE,old,buildJsonObject {put("criteria",buildJsonArray {add(buildJsonObject {put("id","id-0");put("text","바꾼 기준")})})}))
         assertEquals(20,store.value!!.criteria.size);assertEquals("기준 19",store.value!!.criteria.last().text)
-        assertEquals(GoalStatus.DRAFT,store.value!!.status);assertTrue(store.value!!.criteria.all {it.status==GoalCriterionStatus.PENDING})
+        assertEquals(GoalStatus.DRAFT,store.value!!.status)
+        assertEquals(GoalCriterionStatus.PENDING,store.value!!.criteria.first().status)
+        assertEquals(old.criteria.drop(1),store.value!!.criteria.drop(1))
     }
     @Test fun queueReceiptNeedsActualSameWorkStoreLinkReadback()=runBlocking {
         val store=MemoryStore(scope,goal(GoalStatus.PAUSED))

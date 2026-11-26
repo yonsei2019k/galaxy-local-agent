@@ -3177,7 +3177,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             require(Regex("artifact-[a-f0-9-]{36}\\.(?:docx|xlsx|pdf|txt|csv)").matches(name))
             return "${call.arguments.getValue("title").jsonPrimitive.content} · ${data.getValue("format").jsonPrimitive.content.uppercase()} 파일을 만들고 다시 읽어 확인했습니다.\n[[file:$name]]"
         }
-        if(call.name in setOf("save_public_pdf","save_browser_pdf","save_pc_browser_pdf"))return "원본 PDF를 저장했어요."
+        if(call.name in setOf("save_public_pdf","save_browser_pdf"))return "원본 PDF를 저장했어요."
         if(call.name!="generate_image")return result
         val info=Json.parseToJsonElement(result).jsonObject
         val name=info.getValue("fileName").jsonPrimitive.content
@@ -4281,11 +4281,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
             if (recorded && observed.success && !observed.effectNotApplied &&
                 observed.verification==VerificationState.VERIFIED &&
-                call.name in setOf("app_browser_action","save_browser_pdf","save_public_pdf","save_pc_browser_pdf")) {
+                call.name in setOf("app_browser_action","save_browser_pdf","save_public_pdf")) {
                 traceAttempt?.outcomeAuditId?.let { goalProgressAudits[it] = call.name }
             }
             val file = if (!observed.success || observed.effectNotApplied || observed.verification!=VerificationState.VERIFIED) null else when (call.name) {
-                "save_public_pdf","save_browser_pdf","save_pc_browser_pdf","create_document" -> runCatching {
+                "save_public_pdf","save_browser_pdf","create_document" -> runCatching {
                     val name=Json.parseToJsonElement(observed.content).jsonObject.getValue("fileName").jsonPrimitive.content
                     com.user.localagent.ui.chatFileNames("[[file:$name]]").singleOrNull()?.takeIf { it==name }
                 }.getOrNull()

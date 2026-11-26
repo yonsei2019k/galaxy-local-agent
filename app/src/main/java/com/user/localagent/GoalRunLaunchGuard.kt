@@ -324,7 +324,7 @@ internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefi
 
 
 internal val goalArtifactBrowserReads=setOf("read_pc_browser_page","read_app_browser_page")
-internal val goalArtifactSaveTools=setOf("save_pc_browser_pdf","save_browser_pdf","save_public_pdf")
+internal val goalArtifactSaveTools=setOf("save_browser_pdf","save_public_pdf")
 internal val goalArtifactWrapUpTools=goalArtifactBrowserReads+(goalArtifactSaveTools-"save_public_pdf")
 
 internal const val GOAL_OWNER_INPUT = "goal_owner_input"

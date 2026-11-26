@@ -229,7 +229,7 @@ class GoalSegmentAutopilotTest {
         val source=request(listOf(observation),binding=segment(done)).copy(goal=done)
         val next=goalSegmentDecision(row(source),done,"scope",started+100L,false) as GoalSegmentDecision.Continue
         assertTrue(next.binding.artifactWrapUp)
-        assertTrue("save_pc_browser_pdf" in goalArtifactWrapUpTools)
+        assertTrue("save_browser_pdf" in goalArtifactWrapUpTools)
         assertFalse("act_on_pc_browser_page" in goalArtifactWrapUpTools)
         val wrapped=child(source,next).copy(goal=done.copy(linkedRunIds=listOf("run-a","run-b")))
         assertTrue(QueuedChatRequest.fromJson(wrapped.toJson()).goalSegment!!.artifactWrapUp)

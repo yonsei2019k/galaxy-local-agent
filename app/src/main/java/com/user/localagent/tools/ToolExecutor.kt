@@ -298,12 +298,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                     check(result["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."}
                     result.toString()
                 }
-                "save_browser_pdf","save_pc_browser_pdf","save_public_pdf" -> {
+                "save_browser_pdf","save_public_pdf" -> {
                     val progress=PdfSaveProgress()
                     return@withContext progress.execute(call.id) {
                         if(call.name=="save_public_pdf")
                             PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),call.s("url"),progress=progress)
-                        else if(call.name=="save_pc_browser_pdf") {
+                        else if(call.arguments["browser"]==JsonPrimitive("pc")) {
                             suspend fun current() {
                                 check(connectionRunId!=null&&connectionIsRunLive()&&call.name in capturedAvailableTools)
                                 verifyGrant()
@@ -317,6 +317,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                             PublicPdfArtifact.saveBytes(java.io.File(context.filesDir,"exports"),bytes,
                                 com.user.localagent.web.PublicWebClient.MAX_BYTES,progress,{commit->current();commit()})
                         } else {
+                            check(call.arguments["browser"] in setOf(null,JsonPrimitive("phone")))
                             val id=call.s("snapshotId");val ref=call.s("ref")
                             val web=com.user.localagent.integrations.AppWebAgent.get(context)
                             val work=checkNotNull(browserWorkBinding())
