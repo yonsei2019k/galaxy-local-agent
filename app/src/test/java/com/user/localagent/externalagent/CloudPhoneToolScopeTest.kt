@@ -17,6 +17,8 @@ class CloudPhoneToolScopeTest {
         assertTrue(tools.containsAll(setOf("open_url", "prepare_kakao_share", "list_naver_mail_inbox", "list_x_bookmarks")))
         val ownerOnly = setOf(GoalToolCatalog.CREATE, GoalToolCatalog.START, GoalToolCatalog.RESUME)
         val progress = GoalProgressToolCatalog.names + GoalWaitToolCatalog.WAIT
+        assertFalse(GoalToolCatalog.CLEAR in tools - GoalToolCatalog.unavailableForRun(true))
+        assertTrue(GoalToolCatalog.CLEAR in tools - GoalToolCatalog.unavailableForRun(false))
         for (segment in listOf(false, true)) {
             val eligible = tools - GoalToolCatalog.unavailableForRun(segment)
             assertTrue(eligible.containsAll(outlook))

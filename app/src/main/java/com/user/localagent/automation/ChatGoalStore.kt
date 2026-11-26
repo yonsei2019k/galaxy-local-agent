@@ -130,7 +130,8 @@ class ChatGoalStore(private val repository:LocalRepository) {
             val id=reference.removePrefix("tool-run:")
             require(id.isNotBlank()&&id.length<=128&&id.none{it.code<32}){"검증 근거 식별자가 올바르지 않습니다."}
             val record=scoped.toolRunEvidence(id)?:error("실제 실행 근거를 찾지 못해 완료 기준을 검증됨으로 저장하지 않았습니다.")
-            check(record.name in ToolRegistry.definitions&&record.name !in AgentWorkModePolicy.contextReadTools&&record.name !in GoalToolCatalog.names){"목표 관리·문맥 조회가 아닌 등록된 실제 작업 도구의 근거만 완료 기준에 연결합니다."}
+            check(record.name in ToolRegistry.definitions&&record.name !in AgentWorkModePolicy.contextReadTools&&record.name !in GoalToolCatalog.names&&
+                record.name !in com.user.localagent.core.GoalProgressToolCatalog.names&&record.name!=com.user.localagent.core.GoalWaitToolCatalog.WAIT){"목표 관리·문맥 조회가 아닌 등록된 실제 작업 도구의 근거만 완료 기준에 연결합니다."}
             val runId=record.runId?:error("목표의 실행과 연결되지 않은 근거입니다.")
             val run=repository.chat.run(runId)?:error("검증 근거의 실제 실행 기록이 없습니다.")
             check(record.threadId==goal.threadId&&runId in goal.linkedRunIds&&run.threadId==goal.threadId&&run.projectId==goal.projectId){"검증 근거가 이 목표의 실행 범위에 속하지 않습니다."}

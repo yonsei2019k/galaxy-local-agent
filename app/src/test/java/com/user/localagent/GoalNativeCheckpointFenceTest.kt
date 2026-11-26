@@ -68,6 +68,29 @@ class GoalNativeCheckpointFenceTest {
         val native=checkpoint()
         assertTrue(unresolved(JsonObject((native-"inFlight")+("in_flight" to JsonNull))))
     }
+    @Test fun processRestartOnlyAcceptsOpenJournalWhenAllCallsSettledAndNoApprovalWasPending() {
+        val interrupted=row(checkpoint(closed=false)).copy(status="interrupted",errorCode="process_restarted")
+        assertFalse(goalNativeEffectsUnresolved(interrupted,"scope",true))
+        assertTrue(goalNativeEffectsUnresolved(interrupted.copy(errorCode="process_restarted_approval"),"scope",true))
+        val unfinished=row(JsonObject(checkpoint(closed=false)+("inFlight" to JsonPrimitive("call-1"))))
+            .copy(status="interrupted",errorCode="process_restarted")
+        assertTrue(goalNativeEffectsUnresolved(unfinished,"scope",true))
+    }
+
+    @Test fun localJournalRequiresSameScopeAndNoPendingOrUncertainCall() {
+        val captured=request.copy(modelId="local",allowExternalAgent=false,externalAgentRevision=null)
+        val local=row(null,captured)
+        fun checked(pending:Boolean,uncertain:Boolean,scope:String="scope"):Boolean {
+            val context=Json.parseToJsonElement(local.contextJson).jsonObject
+            val marker=buildJsonObject {put("scopeKey",scope);put("pending",pending);put("uncertain",uncertain)}
+            return goalNativeEffectsUnresolved(local.copy(contextJson=JsonObject(context+("localGoalJournal" to marker)).toString()),"scope",true)
+        }
+        assertFalse(checked(false,false))
+        assertTrue(checked(true,false))
+        assertTrue(checked(false,true))
+        assertTrue(checked(false,false,"different"))
+    }
+
     @Test fun exactNativeBindingCannotCrossScopeRunBranchOrAuthorizationRevision() {
         assertTrue(unresolved(scope="other-scope"))
         val native=checkpoint();val binding=native.getValue("binding").jsonObject

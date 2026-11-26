@@ -890,7 +890,11 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
             val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
             dao.run(r.copy(status=if(stoppedByOwner)"cancelled" else "interrupted",
-                errorCode=if(stoppedByOwner)ScheduledReadPolicy.STOP_REQUESTED else "process_restarted",updatedAt=now(),finishedAt=now()))
+                errorCode=when {
+                    stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
+                    r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
+                    else->"process_restarted"
+                },updatedAt=now(),finishedAt=now()))
         };active.size
     }
     suspend fun messagePage(threadId:String,branchId:String?=null,beforePosition:Long?=null,limit:Int=100):ChatMessagePage {

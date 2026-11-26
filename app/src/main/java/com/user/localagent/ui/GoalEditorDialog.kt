@@ -101,7 +101,7 @@ fun GoalEditorDialog(
                         onClick={edited=edited.copy(status=status);statusMenu=false})
                 }}
             }
-            if(edited.status==GoalStatus.COMPLETE)Text("확인된 기준을 바탕으로 사용자가 완료 상태를 선택했습니다.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
+            if(edited.status==GoalStatus.COMPLETE)Text("저장된 근거와 확인한 완료 조건을 볼 수 있어요.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
             if(feedback.isNotBlank())Text(feedback,style=MaterialTheme.typography.bodySmall,modifier=Modifier.testTag("goal_feedback"))
             if(error.isNotBlank())Text(error,color=ZipHapColors.Error,style=MaterialTheme.typography.bodySmall)
             if(goal!=null)TextButton(onClick={deleting=true}){Text("이 목표 삭제",color=ZipHapColors.Error)}
@@ -114,4 +114,4 @@ fun GoalEditorDialog(
         confirmButton={TextButton(onClick={deleting=false;if(stale)error="목표 상태가 바뀌었습니다. 최신 상태를 불러온 뒤 삭제해주세요." else if(onDeleteVersioned!=null)onDeleteVersioned(edited)else onDelete()}){Text("목표 삭제",color=ZipHapColors.Error)}},dismissButton={TextButton(onClick={deleting=false}){Text("취소")}})
 }
 
-private fun goalStatusLabel(status:GoalStatus)=when(status){GoalStatus.DRAFT->"작성 중";GoalStatus.ACTIVE->"추진 중";GoalStatus.PAUSED->"일시 정지";GoalStatus.WAITING->"재개 조건 대기";GoalStatus.COMPLETE->"완료 · 직접 선택"}
+private fun goalStatusLabel(status:GoalStatus)=when(status){GoalStatus.DRAFT->"작성 중";GoalStatus.ACTIVE->"추진 중";GoalStatus.PAUSED->"일시 정지";GoalStatus.WAITING->"재개 조건 대기";GoalStatus.COMPLETE->"완료"}

@@ -13,7 +13,7 @@ object GoalToolCatalog {
     const val CLEAR="clear_goal"
     // A running segment already owns a started goal. Only an owner turn can start another run.
     fun unavailableForRun(activeSegment: Boolean): Set<String> =
-        if (activeSegment) setOf(CREATE, START, RESUME)
+        if (activeSegment) setOf(CREATE, START, RESUME, CLEAR)
         else GoalProgressToolCatalog.names + GoalWaitToolCatalog.WAIT
 
     val textFields=setOf("outcome","criterion","constraint")

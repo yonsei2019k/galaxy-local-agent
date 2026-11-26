@@ -14,10 +14,12 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
         put("sourceRunId",sourceRunId);put("stepIndex",stepIndex);put("tool",step.tool);put("arguments",step.arguments)
         put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied)
         step.evidence.continuationId?.let {put("continuationId",it)}
+        step.evidence.progressDigest?.let {put("progressDigest",it)}
+        step.evidence.auditId?.let {put("auditId",it)}
     }
     companion object {
         internal fun parse(o:JsonObject):GoalLedgerEntry {
-            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId")})
+            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId","progressDigest","auditId")})
             fun s(key:String)=o.getValue(key).jsonPrimitive.let {require(it.isString);it.content}
             val tool=s("tool");val args=o.getValue("arguments").jsonObject
             val state=VerificationState.valueOf(s("state"))
@@ -27,7 +29,9 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
             val index=o.getValue("stepIndex").jsonPrimitive.let {require(!it.isString);it.int}
             val noEffect=o.getValue("effectNotApplied").jsonPrimitive.let {require(!it.isString);it.boolean}
             return GoalLedgerEntry(s("sourceRunId"),index,HarnessStep(tool,args,StepEvidence(tool,state,s("summary"),
-                o["continuationId"]?.jsonPrimitive?.let {require(it.isString);it.content},noEffect)))
+                o["continuationId"]?.jsonPrimitive?.let {require(it.isString);it.content},noEffect,
+                o["progressDigest"]?.jsonPrimitive?.let {require(it.isString);it.content},
+                o["auditId"]?.jsonPrimitive?.let {require(it.isString);it.content})))
         }
     }
 }
@@ -39,6 +43,80 @@ private fun goalCanonical(value:JsonElement):String=when(value) {
     else->value.toString()
 }
 internal fun goalCallDigest(step:HarnessStep):String=goalDigest(step.tool+":"+goalCanonical(step.arguments))
+private val goalBrowserTools=AppBrowserToolCatalog.names+PcBrowserToolCatalog.names
+
+private fun progressRelevant(tool:String):Boolean=tool !in GoalToolCatalog.names&&
+    tool !in setOf(GoalProgressToolCatalog.READ,GoalProgressToolCatalog.VERIFY,GoalWaitToolCatalog.WAIT,
+        "get_current_datetime","get_agent_capabilities")&&tool !in SkillToolCatalog.names
+
+/** The model receives the usual tool output. Only a hash of the observed result is carried in the ledger. */
+internal fun observedGoalProgress(call:ToolCall,result:ToolResult):String? {
+    if(!result.success||result.verification!=VerificationState.VERIFIED||result.effectNotApplied||!progressRelevant(call.name))return null
+    val content=result.content
+    if(content.isBlank()||content.length>128_000)return null
+    val payload=runCatching {Json.parseToJsonElement(content) as? JsonObject}.getOrNull()
+    val observation=when {
+        call.name in goalBrowserTools -> {
+            val page=payload?:return null
+            val fields=listOf("url","title","text").map {key->
+                page[key]?.jsonPrimitive?.contentOrNull.orEmpty().replace(Regex("\\s+")," ").trim()
+            }
+            if(fields.drop(1).all(String::isBlank))return null
+            JsonArray(fields.map(::JsonPrimitive))
+        }
+        call.name==GoalProgressToolCatalog.UPDATE -> {
+            // Only genuinely completed ledger items qualify. Revision, notes and audit IDs can change on every write.
+            val items=(payload?.get("ledger") as? JsonObject)?.get("items") as? JsonArray?:return null
+            val done=items.mapNotNull {item->
+                val entry=item.jsonObject
+                entry["id"]?.takeIf {entry["status"]==JsonPrimitive("done")}
+            }.sortedBy {it.toString()}
+            if(done.isEmpty())return null
+            JsonArray(done)
+        }
+        payload!=null -> JsonObject(payload-filteredGoalObservationKeys)
+        else -> JsonPrimitive(content.replace(Regex("\\s+")," ").trim())
+    }
+    if(observation is JsonObject && observation.isEmpty())return null
+    return goalDigest(goalCanonical(observation))
+}
+
+private val filteredGoalObservationKeys=setOf("snapshotId","auditId","requestId","runId","callId","elapsedMs","capturedAt","updatedAt")
+
+internal fun goalProgressKey(step:HarnessStep):String? {
+    if(step.evidence.state!=VerificationState.VERIFIED||step.evidence.effectNotApplied||!progressRelevant(step.tool))return null
+    step.evidence.progressDigest?.let {
+        val kind=if(step.tool in goalBrowserTools)"browser-page" else step.tool
+        return "$kind:$it"
+    }
+    // Older browser checkpoints contain only a rendered status, with no stable observation to compare.
+    return if(step.tool in goalBrowserTools||step.tool==GoalProgressToolCatalog.UPDATE)null else goalCallDigest(step)
+}
+
+internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool !in AgentWorkModePolicy.contextReadTools&&
+    tool !in setOf(AppBrowserToolCatalog.OPEN,AppBrowserToolCatalog.ACTION,PcBrowserToolCatalog.OPEN,
+        PcBrowserToolCatalog.ACTION,ScreenControlToolCatalog.ACTION)&&
+    tool !in GoalToolCatalog.names&&tool !in GoalProgressToolCatalog.names&&tool!=GoalWaitToolCatalog.WAIT&&tool !in SkillToolCatalog.names
+
+internal fun goalCriterionEvidence(request:QueuedChatRequest,current:List<HarnessStep>):Map<String,HarnessStep> =
+    (request.goalLedger.map {it.step}+current).mapNotNull {step->
+        step.evidence.auditId?.takeIf {goalCriterionEvidenceTool(step.tool)}?.let {it to step}
+    }.toMap()
+
+internal fun goalCheckpointSummary(request:QueuedChatRequest):JsonArray=buildJsonArray {
+    request.goalLedger.takeLast(8).forEach {entry->
+        add(buildJsonObject {
+            put("tool",entry.step.tool);put("state",entry.step.evidence.state.name)
+            put("summary",entry.step.evidence.summary.take(100))
+        })
+    }
+}
+
+internal fun goalLedgerFits(ledger:List<GoalLedgerEntry>):Boolean=ledger.sumOf {it.json().toString().length+1}<=900_000
+
+internal fun goalUnverifiedEffect(step:HarnessStep):Boolean=
+    step.evidence.state==VerificationState.UNVERIFIED&&!step.evidence.effectNotApplied
+
 internal fun goalUncertainFailure(step:HarnessStep):Boolean=step.evidence.state==VerificationState.FAILED&&
     !ToolReadPolicy.isReadOnly(step.tool)&&!step.evidence.effectNotApplied
 internal fun goalWorkDigest(goal:GoalDefinition):String=goalDigest(buildJsonObject {
@@ -64,7 +142,7 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
         val request=QueuedChatRequest.fromJson(source.contextJson)
         check(request.runId==source.runId&&request.threadId==source.threadId&&request.projectId==source.projectId&&request.goal?.id==goal.id)
         val all=completedGoalLedger(request)
-        check(all.none {it.step.evidence.state==VerificationState.UNVERIFIED||PreparedHandoff.pendingEffect(it.step)||
+        check(all.none {goalUnverifiedEffect(it.step)||PreparedHandoff.pendingEffect(it.step)||
             goalUncertainFailure(it.step)}){"목표의 미확인 효과·실패·외부 확인 대기를 버리고 새 실행을 예약하지 않았습니다."}
         if(!sameGoalWork(goal,checkNotNull(request.goal)))continue
         check(request.allowTools&&request.mode in setOf("act","debug")&&request.workspaceBinding==workspaceBinding)
@@ -88,9 +166,9 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
 internal fun requireGoalLedgerAllowsCall(request:QueuedChatRequest,taskGoal:TaskGoal,call:ToolCall,currentSteps:List<HarnessStep>) {
     if(request.goalSegment==null)return
     check(currentSteps.size<=WorkSegments.STEP_BUDGET)
-    check(request.goalSegment.consumedToolCalls+currentSteps.size<GoalSegmentBinding.MAX_TOOL_CALLS){"목표의 누적 도구 예산에 도달했습니다."}
+    check(goalToolRoom(request.goalSegment,currentSteps.size)>0){"목표의 누적 도구 예산에 도달했습니다."}
     val steps=request.goalLedger.map {it.step}
-    check(steps.none {PreparedHandoff.pendingEffect(it)||it.evidence.state==VerificationState.UNVERIFIED||
+    check(steps.none {PreparedHandoff.pendingEffect(it)||goalUnverifiedEffect(it)||
         goalUncertainFailure(it)}){"이전 목표 구간의 실패·불확실한 효과·외부 확인 대기를 먼저 해결해야 합니다."}
     if(ToolReadPolicy.isReadOnly(call.name))return
     // Keep the existing duplicate/recovery semantics without spending this segment's 18-step budget

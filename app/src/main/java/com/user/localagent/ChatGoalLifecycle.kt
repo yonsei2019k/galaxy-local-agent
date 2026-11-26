@@ -96,14 +96,15 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                 row
             }
             val priorLedger=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey)
-            if(priorLedger.size>=GoalSegmentBinding.MAX_TOOL_CALLS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
+            if(priorLedger.size>=GoalSegmentBinding.MAX_TOOL_CALLS||!goalLedgerFits(priorLedger)||
+                (entryBudget!=null&&priorLedger.size-entryBudget.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS))throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
             val active=withContext(NonCancellable) {
                 goals.saveGuarded(access,goal.copy(status=GoalStatus.ACTIVE)).also {writtenGoal=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
             val segment=nextSegment?.binding?:checkNotNull(entryBudget).let {budget->GoalSegmentBinding(goal.id,budget.originalGoalVersion,goalWorkDigest(goal),access.scopeKey,
-                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,priorLedger.size,budget.noProgressSegments,budget.totalSegments)}
+                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,priorLedger.size,budget.noProgressSegments,budget.totalSegments,budget.phaseStartSegments,budget.phaseStartCalls)}
             check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding

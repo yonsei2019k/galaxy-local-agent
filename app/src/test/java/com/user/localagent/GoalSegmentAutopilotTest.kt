@@ -22,7 +22,7 @@ class GoalSegmentAutopilotTest {
             goalSegment=binding,goalLedger=ledger)
     private fun row(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted")=
         ChatRunRecord(id=request.runId,threadId=request.threadId,branchId=request.branchId,userMessageId=request.userMessageId,
-            projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=request.toJson(),errorCode=errorCode)
+            projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=request.toJson(),errorCode=errorCode,updatedAt=started+10)
     private fun decide(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted",now:Long=started+100,
         unknown:Boolean=false,goal:GoalDefinition=checkNotNull(request.goal))=goalSegmentDecision(row(request,status,errorCode),goal,"scope",now,unknown)
     private fun pause(expected:GoalAutopilotPauseReason,actual:GoalSegmentDecision)=assertEquals(GoalSegmentDecision.Pause(expected),actual)
@@ -73,6 +73,44 @@ class GoalSegmentAutopilotTest {
         for(status in listOf("cancelled","interrupted","failed","running","queued","waiting_approval"))
             pause(GoalAutopilotPauseReason.STOPPED,decide(status=status))
     }
+    @Test fun partialAndInterruptedCheckpointsCanContinueOnlyWithoutUnknownEffects() {
+        for(code in listOf("partial_verified_browser_reads","partial_verified_tool_budget","partial_recoverable_provider")) {
+            assertTrue(decide(errorCode=code) is GoalSegmentDecision.Continue)
+            pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(errorCode=code,unknown=true))
+        }
+        assertTrue(decide(status="interrupted",errorCode="process_restarted") is GoalSegmentDecision.Continue)
+        pause(GoalAutopilotPauseReason.STOPPED,decide(status="interrupted",errorCode="process_restarted_approval"))
+        pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(status="interrupted",errorCode="process_restarted",unknown=true))
+    }
+
+    @Test fun browserProgressUsesObservedPageRatherThanSnapshotOrCallArguments() {
+        fun read(snapshot:String,body:String):HarnessStep {
+            val call=ToolCall("fixture","read_app_browser_page",buildJsonObject {})
+            val result=ToolResult(call.id,true,buildJsonObject {
+                put("snapshotId",snapshot);put("url","https://example.com/status");put("title","Reservation");put("text",body)
+            }.toString(),VerificationState.VERIFIED,"Observed page")
+            return HarnessStep(call,StepEvidence(call.name,result.verification,result.verificationSummary,
+                progressDigest=observedGoalProgress(call,result)))
+        }
+        val old=read("old-snapshot","Reservation pending")
+        val history=listOf(GoalLedgerEntry("past",0,old))
+        val binding=segment().copy(consumedToolCalls=1,noProgressSegments=2)
+        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(request(listOf(read("new-snapshot","Reservation pending")),binding,history)))
+        val changed=request(listOf(read("new-snapshot","Reservation confirmed")),binding,history)
+        assertTrue(decide(changed) is GoalSegmentDecision.Continue)
+        assertEquals(changed.toJson(),QueuedChatRequest.fromJson(changed.toJson()).toJson())
+    }
+
+    @Test fun criterionEvidenceIsBoundToRealCurrentOrInheritedAuditSteps() {
+        val original=step()
+        val verified=HarnessStep(original.tool,original.arguments,original.evidence.copy(auditId="real-proof"))
+        val checkpoint=request(listOf(original),segment().copy(consumedToolCalls=1),listOf(GoalLedgerEntry("past",0,verified)))
+        assertEquals(setOf("real-proof"),goalCriterionEvidence(checkpoint,checkpoint.previousSteps).keys)
+        assertTrue(goalCriterionEvidence(request(),listOf(original)).isEmpty())
+        assertEquals(checkpoint.toJson(),QueuedChatRequest.fromJson(checkpoint.toJson()).toJson())
+        assertFalse(goalCriterionEvidenceTool(GoalProgressToolCatalog.VERIFY))
+    }
+
     @Test fun timedWaitExcludesOnlyHostRecordedIdleTimeAndStillRequiresVerifiedCheckpoint() {
         val parkedAt=started+3_000
         val wokeAt=parkedAt+86_400_000
@@ -95,15 +133,26 @@ class GoalSegmentAutopilotTest {
 
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {
         val eighth=segment().copy(rootRunId="root-run",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
-        pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(binding=eighth)))
-        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(now=started+GoalSegmentBinding.MAX_DURATION_MS))
+        pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(emptyList(),binding=eighth)))
+        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(request(emptyList()),now=started+GoalSegmentBinding.MAX_DURATION_MS))
+        val extended=decide(request(binding=eighth)) as GoalSegmentDecision.Continue
+        assertEquals(9,extended.binding.totalSegments)
+        assertEquals(8,extended.binding.phaseStartSegments)
+        assertEquals(1,extended.binding.phaseStartCalls)
+        assertEquals(144,goalToolRoom(extended.binding,0))
+        val hardLimit=eighth.copy(totalSegments=GoalSegmentBinding.MAX_SEGMENTS,phaseStartSegments=24)
+        pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(binding=hardLimit)))
         pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(now=started-1))
         assertEquals(GoalStatus.ACTIVE,goal().status)
     }
     @Test fun cumulativeToolBudgetIncludesAllEarlierSegmentsAndCurrentAttempts() {
         val history=(0 until 126).map {GoalLedgerEntry("past-${it/18}",it%18,step("old-$it"))}
         val binding=segment().copy(consumedToolCalls=126)
-        pause(GoalAutopilotPauseReason.TOOL_BUDGET,decide(request((0 until 18).map {step("new-$it")},binding,history)))
+        val next=decide(request((0 until 18).map {step("new-$it")},binding,history)) as GoalSegmentDecision.Continue
+        assertEquals(144,next.binding.consumedToolCalls)
+        assertEquals(144,next.binding.phaseStartCalls)
+        assertEquals(144,next.ledger.size)
+        pause(GoalAutopilotPauseReason.TOOL_BUDGET,decide(request((0 until 18).map {step("old-$it")},binding,history)))
     }
     @Test fun threeSegmentsWithoutNewVerifiedHostCallsPause() {
         val same=step()
@@ -112,9 +161,10 @@ class GoalSegmentAutopilotTest {
         val next=decide(request(listOf(step("different")),segment().copy(consumedToolCalls=1,noProgressSegments=2),history)) as GoalSegmentDecision.Continue
         assertEquals(0,next.binding.noProgressSegments)
     }
-    @Test fun completionCriteriaReadyStillRequiresSeparateHostFinalization() {
+    @Test fun completionCriteriaReadyReturnsExplicitCompletionDecision() {
         val current=goal().copy(criteria=goal().criteria.map {it.copy(status=GoalCriterionStatus.USER_CONFIRMED)})
-        pause(GoalAutopilotPauseReason.CRITERIA_READY,decide(goal=current))
+        assertEquals(GoalSegmentDecision.Complete,decide(goal=current))
+        pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(goal=current,unknown=true))
         assertEquals(GoalStatus.ACTIVE,current.status)
     }
     @Test fun oldQueuedGoalDoesNotAcquireAutomaticRunAuthority() {
@@ -210,23 +260,20 @@ class GoalSegmentAutopilotTest {
         requireGoalLedgerAllowsCall(request,task,call,emptyList())
         assertTrue(runCatching {requireGoalLedgerAllowsCall(request,task,call,listOf(step("actual-144")))}.isFailure)
     }
-    @Test fun eightSequentialSegmentsKeepAll144PositionsAndStopWithoutCompletingTheGoal() {
+    @Test fun eightSequentialSegmentsKeepAll144PositionsWhenProgressUnlocksAnotherPhase() {
         var current=request()
         for(index in 1..8) {
             current=current.copy(previousSteps=(0 until 18).map {step("segment-$index-$it")})
             assertEquals(index*18,completedGoalLedger(current).size)
-            val result=decide(current)
-            if(index==8) {
-                pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,result)
-                assertEquals(8,current.goalSegment!!.totalSegments)
-            } else {
-                val next=result as GoalSegmentDecision.Continue
-                val id="run-${index+1}"
-                current=current.copy(runId=id,userMessageId="user-${index+1}",previousSteps=emptyList(),
-                    goal=current.goal!!.copy(linkedRunIds=current.goal.linkedRunIds+id),goalSegment=next.binding,goalLedger=next.ledger)
-                assertEquals(current,QueuedChatRequest.fromJson(current.toJson()))
-            }
+            val next=decide(current) as GoalSegmentDecision.Continue
+            val id="run-${index+1}"
+            current=current.copy(runId=id,userMessageId="user-${index+1}",previousSteps=emptyList(),
+                goal=current.goal!!.copy(linkedRunIds=current.goal.linkedRunIds+id),goalSegment=next.binding,goalLedger=next.ledger)
+            assertEquals(current,QueuedChatRequest.fromJson(current.toJson()))
         }
+        assertEquals(144,current.goalLedger.size)
+        assertEquals(9,current.goalSegment!!.totalSegments)
+        assertEquals(8,current.goalSegment!!.phaseStartSegments)
         assertEquals(GoalStatus.ACTIVE,current.goal!!.status)
     }
     @Test fun registeredReadFailureThenVerifiedAlternativeMayContinueWithoutErasingTheFailure() {

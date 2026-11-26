@@ -6,8 +6,11 @@ import kotlinx.serialization.json.*
 object GoalProgressToolCatalog {
     const val READ="read_goal_progress"
     const val UPDATE="update_goal_progress"
+    const val VERIFY="verify_goal_criterion"
     private val version=mapOf("goalId" to Argument("string",true,100),"expectedUpdatedAt" to Argument("string",true,19))
     val definitions=listOf(
+        ToolDefinition(VERIFY,Risk.LOW,version+mapOf("criterionId" to Argument("string",true,100),"auditId" to Argument("string",true,100)),
+            "Mark one existing goal criterion verified only when a real tool result directly proves the entire criterion. Copy the criterion id and goal revision from get_goal, and an evidence audit id from read_goal_progress. Page opens, plans, drafts, and user handoffs are not proof of downstream completion. Do not claim success before the host accepts every criterion."),
         ToolDefinition(READ,Risk.LOW,mapOf("goalId" to Argument("string",true,100)),
             "Read the progress ledger (courses/units checklist) of a persistent goal. Private context only; never completion evidence."),
         ToolDefinition(UPDATE,Risk.LOW,version+mapOf("ops" to Argument("array",true,20_000)),
