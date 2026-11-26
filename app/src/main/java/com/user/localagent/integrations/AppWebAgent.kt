@@ -212,6 +212,7 @@ class AppWebAgent private constructor(private val context:Context) {
     private val loginFolded=MutableStateFlow(false)
     val ownerLoginFolded:StateFlow<Boolean> get()=loginFolded
     private var loginReturnOrigin:URI?=null
+    private var observedNaverReturnPage:String?=null
     private var websiteDisplayedId:Long?=null
     private var websiteFormObservedId:Long?=null
     private var cardOrigin:URI?=null
@@ -280,7 +281,7 @@ class AppWebAgent private constructor(private val context:Context) {
     fun switchToWebsiteLogin(id:Long){
         nolNativeFallback?.takeIf{it.card.id==id&&loginCard.value?.id==id}?.let{restoreNolGuide(it);return}
         val card=loginCard.value?.takeIf{it.id==id&&!it.pairedPc}?:return
-        val url=capturedLoginUrl?.takeIf{secureOrigin(it)==cardOrigin}
+        val url=capturedLoginUrl?.takeIf(::loginNavigationAllowed)
         if(url==null){
             loginStatus.value="원래 로그인 페이지를 찾지 못했어요. 이 요청에서 사이트를 새로 열어 주세요."
             return
@@ -290,19 +291,22 @@ class AppWebAgent private constructor(private val context:Context) {
         loginStatus.value="사이트 로그인 화면을 채팅 안에 열고 있어요."
     }
 
-    internal fun reopenOwnerLogin(binding:WorkBinding,url:String):String? {
+    internal fun reopenOwnerLogin(binding:WorkBinding,url:String,naver:Boolean):String? {
         val origin=secureOrigin(url)?:return null
+        if(naver&&BrowserLoginRoutes.naverReturnPage(url)!=url)return null
         if(agentActive.value||loginSubmitting||loginCard.value!=null||pendingPcLogin!=null)return null
         browserWorkBinding.value=binding
         confirmedPcLogin=null
         lastConfirmedCard=null
         lastConfirmedOrigin=null
-        val card=LoginCard(++nextLoginId,origin.host,websiteOnly=true)
-        cardOrigin=origin
+        val authOrigin=if(naver)URI(BrowserLoginRoutes.NAVER_LOGIN_ORIGIN) else origin
+        val card=LoginCard(++nextLoginId,authOrigin.host,websiteOnly=true)
+        cardOrigin=authOrigin
         capturedLoginUrl=url
         expiredLoginBinding="$loginProcess:${card.id}"
         loginFolded.value=false
-        loginReturnOrigin=null
+        loginReturnOrigin=origin.takeIf{naver}
+        observedNaverReturnPage=null
         loginCard.value=card
         switchToWebsiteLogin(card.id)
         return expiredLoginBinding
@@ -330,7 +334,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     suspend fun loadWebsiteLogin(id:Long,retry:Boolean=false):Boolean{
         val request=websiteLogin.value?.takeIf{it.card.id==id}?:return false
-        if(secureOrigin(request.url)!=cardOrigin)return false
+        if(!loginNavigationAllowed(request.url))return false
         val browser=view()
         val wasPresented=websiteDisplayedId==id||browser.url==request.url
         websiteDisplayedId=id
@@ -365,6 +369,11 @@ class AppWebAgent private constructor(private val context:Context) {
     internal fun waitingAuthBinding(runId:String):String? {
         if(browserWorkBinding.value?.runId!=runId)return null
         return loginCard.value?.let { "$loginProcess:${it.id}" } ?: expiredLoginBinding
+    }
+
+    internal fun waitingNaverReturnPage(runId:String):String? {
+        if(browserWorkBinding.value?.runId!=runId||loginCard.value?.host!="nid.naver.com"||loginReturnOrigin==null)return null
+        return observedNaverReturnPage
     }
 
     internal fun authAlreadyConfirmed(binding:String):Boolean =
@@ -841,7 +850,11 @@ class AppWebAgent private constructor(private val context:Context) {
             override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean {
                 if(upgradeHallymLoginRedirect(request))return true
                 val url=request.url.toString()
-                if(request.isForMainFrame&&(websiteLogin.value!=null||nolNativeFallback!=null)&&!loginNavigationAllowed(url)){
+                val service=loginReturnOrigin
+                val naverEntryBlocked=service!=null&&secureOrigin(url)==cardOrigin&&secureOrigin(view.url)!=cardOrigin&&
+                    !BrowserLoginRoutes.isNaverLoginFrom(service,url)
+                if(request.isForMainFrame&&(websiteLogin.value!=null||nolNativeFallback!=null)&&
+                    (!loginNavigationAllowed(url)||naverEntryBlocked)){
                     navigationFailed(if(url.startsWith("http:",true))"HTTPS_REQUIRED" else "NAVIGATION_BLOCKED")
                     return true
                 }
@@ -1206,6 +1219,7 @@ class AppWebAgent private constructor(private val context:Context) {
             if((requiredOrigin==loginOrigin||naverHandoff) && (nativeForm || loginFormPresent()==true) && secureOrigin(view().url)==loginOrigin){
                 loginFolded.value=false
                 loginReturnOrigin=requiredOrigin.takeIf{naverHandoff}
+                observedNaverReturnPage=BrowserLoginRoutes.naverReturnPage(requestedUrl).takeIf{naverHandoff}
                 cardOrigin=loginOrigin
                 capturedLoginUrl=view().url?.takeIf{secureOrigin(it)==loginOrigin}
                 presentation.value=null

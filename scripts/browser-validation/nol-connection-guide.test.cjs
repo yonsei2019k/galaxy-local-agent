@@ -101,5 +101,23 @@ test('printing refuses an opaque frame in Chromium', async()=>{
     assert.equal((await check('<iframe srcdoc="<input name=otpNumber>"></iframe>')).safe,false)
     assert.equal((await check('<label for="zip">우편번호</label><input id="zip" type="number">')).safe,true)
     assert.equal((await check('<iframe src="https://payment-frame.example/"></iframe>')).safe,false)
+    fixture='<verification-widget></verification-widget>'
+    await page.goto('https://nol.yanolja.com/member/mypage',{waitUntil:'load'})
+    await page.evaluate(()=>{
+      document.querySelector('verification-widget').attachShadow({mode:'open'}).innerHTML='<p>Ordinary component</p>'
+    })
+    const protectedExport=()=>page.evaluate('('+exportScript+')({action:"securityCheck"})')
+    assert.equal((await protectedExport()).safe,true)
+    await page.evaluate(()=>{
+      const root=document.querySelector('verification-widget').shadowRoot
+      const nested=root.appendChild(document.createElement('nested-widget')).attachShadow({mode:'open'})
+      nested.innerHTML='<span id="code">인증번호</span><input aria-labelledby="code">'
+    })
+    assert.equal((await protectedExport()).safe,false)
+    await page.reload({waitUntil:'load'})
+    await page.evaluate(()=>{
+      document.querySelector('verification-widget').attachShadow({mode:'closed'}).innerHTML='<p>Private component</p>'
+    })
+    assert.equal((await protectedExport()).safe,false)
   } finally {await browser.close()}
 })

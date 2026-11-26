@@ -4,13 +4,33 @@ import com.user.localagent.compute.BrowserAgentTools
 import com.user.localagent.core.HarnessStep
 import com.user.localagent.core.ToolReadPolicy
 import com.user.localagent.core.VerificationState
+import com.user.localagent.integrations.BrowserLoginRoutes
 import java.util.UUID
 import java.net.URI
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
 internal object BrowserAuthContinuation {
     val reopenablePauses=setOf("browser_auth_on_phone","waiting_browser_auth","browser_auth_resume_expired")
     fun childId(parent:String):String = UUID.nameUUIDFromBytes("ziphap-browser-auth:$parent".toByteArray(Charsets.UTF_8)).toString()
+
+    const val NAVER_RETURN_PAGE_KEY = "hostNaverAuthReturnPage"
+    data class ReopenPage(val url:String,val naver:Boolean)
+
+    fun reopenPage(contextJson:String):ReopenPage? {
+        val steps=QueuedChatRequest.fromJson(contextJson).previousSteps
+        if(!safeSteps(steps))return null
+        val action=steps.last()
+        val originalUrl=(action.arguments["url"] as? JsonPrimitive)?.content
+        val naverOpen=BrowserLoginRoutes.naverReturnPage(originalUrl)
+        val saved=(Json.parseToJsonElement(contextJson).jsonObject[NAVER_RETURN_PAGE_KEY] as? JsonPrimitive)?.content
+        val observed=BrowserLoginRoutes.naverReturnPage(saved)
+        if(observed!=null&&(action.tool=="read_app_browser_page"||
+            action.tool=="open_app_browser_page"&&naverOpen==observed))return ReopenPage(observed,true)
+        if(action.tool=="open_app_browser_page"&&naverOpen!=null)return ReopenPage(naverOpen,true)
+        return ownerLoginPage(steps)?.let { ReopenPage(it,false) }
+    }
 
     fun ownerLoginPage(steps:List<HarnessStep>):String? {
         if(!safeSteps(steps))return null

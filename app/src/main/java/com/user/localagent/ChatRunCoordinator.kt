@@ -2326,7 +2326,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(name in setOf("read_skill","knowledge_capture","analyze_sms","inspect_messenger_sources"))
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"$name · $summary")
     }
-    private suspend fun persistStepEvidence(closedSubagentId: String? = null, verifiedFile:String?=null){
+    private suspend fun persistStepEvidence(closedSubagentId: String? = null, verifiedFile:String?=null, naverReturnPage:String?=null){
         val request=activeRequest?:return
         val run=app.repository.chat.run(request.runId)?:return
         if(run.status in com.user.localagent.data.ChatStore.TERMINAL||run.contextJson.isBlank())return
@@ -2341,7 +2341,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }}.toMap()
         requestReadbackObligations=com.user.localagent.core.RequiredReadbackObligations.capture(selected,context,requestSteps,evidence.mutations,evidence.reads,evidence.aligned,signatures)
         val updated=stored.copy(previousSteps=requestSteps.toList(),readbackObligations=requestReadbackObligations)
-        val base=original+Json.parseToJsonElement(updated.toJson()).jsonObject
+        val updatedContext=original+Json.parseToJsonElement(updated.toJson()).jsonObject
+        val base=if(naverReturnPage==null)updatedContext else
+            updatedContext+(BrowserAuthContinuation.NAVER_RETURN_PAGE_KEY to JsonPrimitive(naverReturnPage))
         val merged=if(verifiedFile==null)JsonObject(base) else {
             val prior=(original["verifiedChatFiles"] as? JsonArray).orEmpty()
             JsonObject(base+("verifiedChatFiles" to JsonArray((prior+JsonPrimitive(verifiedFile)).distinct().take(16))))
@@ -3345,8 +3347,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     ordinaryBrowserAuth=true)
                 val store=app.goalWaits.store
                 if(store.replace(record,null)){
+                    val returnPage=browser.waitingNaverReturnPage(request.runId)
                     answer("휴대폰에서 사이트 로그인을 완료하면 지금 맡은 일을 이어갈게요.")
-                    persistStepEvidence()
+                    persistStepEvidence(naverReturnPage=returnPage)
                     app.repository.chat.updateRun(request.runId,"paused",errorCode="waiting_browser_auth")
                     app.goalWaits.arm(record)
                     if(browser.authAlreadyConfirmed(binding))app.goalWaits.confirmAuth(binding)
@@ -3596,8 +3599,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val work=com.user.localagent.integrations.AppWebAgent.WorkBinding(runId,threadId,branchId)
             val retained=browser.ownerLoginCard.value?.takeIf{browser.ownerWorkBinding.value==work}
             val binding=if(retained!=null)browser.waitingAuthBinding(runId) else {
-                val url=BrowserAuthContinuation.ownerLoginPage(original.previousSteps)?:return@withLock false
-                browser.reopenOwnerLogin(work,url)
+                val page=BrowserAuthContinuation.reopenPage(parent.contextJson)?:return@withLock false
+                browser.reopenOwnerLogin(work,page.url,page.naver)
             }
             if(binding==null)return@withLock false
             val record=GoalWaitRecord(UUID.randomUUID().toString(),runId,threadId,branchId,runId,original.externalAgentRevision,

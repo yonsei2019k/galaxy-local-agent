@@ -4,7 +4,10 @@ import com.user.localagent.compute.BrowserAgentTools
 import com.user.localagent.core.HarnessStep
 import com.user.localagent.core.StepEvidence
 import com.user.localagent.core.VerificationState
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -37,6 +40,25 @@ class BrowserAuthContinuationTest {
         assertNull(BrowserAuthContinuation.ownerLoginPage(listOf(open("https://user@example.org/private"))))
         assertNull(BrowserAuthContinuation.ownerLoginPage(listOf(open("http://example.org/"))))
         assertNull(BrowserAuthContinuation.ownerLoginPage(listOf(login,step("read_app_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED))))
+    }
+
+    @Test fun reopenedNaverAuthUsesTheBoundServicePathWithFreshSignIn() {
+        val page="https://booking.naver.com/my/reservations"
+        val open=auth.copy(arguments=JsonObject(mapOf("url" to JsonPrimitive("$page?session=old#fragment"))))
+        val request=QueuedChatRequest("run","thread","branch",null,"fixture","model",false,emptyList(),"user",
+            previousSteps=listOf(open))
+        val saved=Json.parseToJsonElement(request.toJson()).jsonObject
+        fun context(observed:String)=JsonObject(saved+(BrowserAuthContinuation.NAVER_RETURN_PAGE_KEY to JsonPrimitive(observed))).toString()
+        val expected=BrowserAuthContinuation.ReopenPage(page,true)
+        assertEquals(expected,BrowserAuthContinuation.reopenPage(request.toJson()))
+        assertEquals(expected,BrowserAuthContinuation.reopenPage(context("$page?state=discarded")))
+        assertEquals(expected,BrowserAuthContinuation.reopenPage(context("https://mail.naver.com/")))
+
+        val read=step("read_app_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        val readOnly=Json.parseToJsonElement(request.copy(previousSteps=listOf(read)).toJson()).jsonObject
+        fun readContext(observed:String)=JsonObject(readOnly+(BrowserAuthContinuation.NAVER_RETURN_PAGE_KEY to JsonPrimitive(observed))).toString()
+        assertEquals(expected,BrowserAuthContinuation.reopenPage(readContext(page)))
+        assertNull(BrowserAuthContinuation.reopenPage(readContext("https://booking.naver.com.example.org/my/reservations")))
     }
 
     @Test fun mutationAndUnknownReadCannotBeRetriedThroughLogin() {

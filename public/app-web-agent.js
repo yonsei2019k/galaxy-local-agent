@@ -41,15 +41,15 @@ function (request) {
     return false;
   };
 
-  const protectedKind = (doc = ownerDocument) => {
-    const controls = doc.querySelectorAll('input:not([type=hidden]),select,textarea');
+  const protectedKind = (root = ownerDocument) => {
+    const controls = root.querySelectorAll('input:not([type=hidden]),select,textarea');
     if (controls.length > maxScanned) return 'unreadable';
     let login = false;
     for (const field of controls) {
       if (!field.getClientRects().length) continue;
       const labelIds = (field.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0, 12);
       const name = [field.name, field.id, field.placeholder, field.getAttribute('aria-label'),
-        ...labelIds.map(id => doc.getElementById(id)?.textContent),
+        ...labelIds.map(id => root.getElementById(id)?.textContent),
         ...Array.from(field.labels || [], label => label.textContent || label.innerText)].join(' ');
       if (/(?:^|\s)cc-[a-z-]+(?:\s|$)/i.test(field.autocomplete || '') ||
           /card[\s_.-]*(?:number|no|num|expiry|expiration|cvc|cvv|pin)|(?:^|\W)(?:cvv|cvc|csc)(?:$|\W)|카드[\s_-]*(?:번호|비밀번호)|카드.+유효기간/i.test(name) ||
@@ -58,8 +58,9 @@ function (request) {
           /(?:^|\s)(?:current-password|new-password|one-time-code)(?:\s|$)/i.test(field.autocomplete || '') ||
           /\b(?:otp|mfa|2fa)[a-z0-9_-]*|(?:auth(?:entication)?|verification|one[ -]?time|security)[\s_.-]*code|인증[\s_.-]*(?:번호|코드)|보안[\s_.-]*코드|일회용[\s_.-]*(?:번호|코드)/i.test(name)) login = true;
     }
-    const url = doc === ownerDocument ? location.href : doc.URL || '';
-    if (containsPan(url) || containsPan(doc.body?.innerText || '')) return 'payment';
+    const url = root === ownerDocument ? location.href : root.URL || '';
+    const text = root.body?.innerText || (root.host ? root.textContent : '') || '';
+    if (containsPan(url) || containsPan(text)) return 'payment';
     return login ? 'login' : null;
   };
 
@@ -158,14 +159,27 @@ function (request) {
     a.options.length === b.options.length && a.options.every((node, i) => node === b.options[i]);
 
   const safeForExport = () => {
-    const documents = [ownerDocument];
-    for (const doc of documents) {
-      if (protectedKind(doc) !== null) return false;
-      for (const frame of doc.querySelectorAll('iframe,frame')) {
-        const child = frame.contentDocument;
-        if (documents.length >= 32 || !child?.defaultView || child.readyState !== 'complete') return false;
-        documents.push(child);
+    const roots = [ownerDocument];
+    let inspected = 0;
+    for (const root of roots) {
+      if (protectedKind(root) !== null) return false;
+      const elements = root.querySelectorAll('*');
+      inspected += elements.length;
+      if (inspected > 4 * maxScanned) return false;
+      for (const element of elements) {
+        if (element.shadowRoot) {
+          roots.push(element.shadowRoot);
+        } else if (element.localName?.includes('-') || element.hasAttribute('is')) {
+          // An uninspectable custom component can contain a closed credential form.
+          return false;
+        }
       }
+      for (const frame of root.querySelectorAll('iframe,frame')) {
+        const child = frame.contentDocument;
+        if (!child?.defaultView || child.readyState !== 'complete') return false;
+        roots.push(child);
+      }
+      if (roots.length > 32) return false;
     }
     return true;
   };

@@ -26,6 +26,14 @@ internal object BrowserLoginRoutes {
         origin.scheme == "https" && origin.rawUserInfo == null && origin.port in setOf(-1,443) &&
             origin.host in setOf("nid.naver.com", "www.naver.com", "m.naver.com")
 
+    const val NAVER_LOGIN_ORIGIN = "https://nid.naver.com"
+
+    fun naverReturnPage(raw: String?): String? {
+        val url = https(raw)?.takeIf { it.host in naverServices } ?: return null
+        // Start a fresh service-side sign-in instead of saving a redirect query or OAuth state.
+        return "https://"+url.host+url.rawPath.ifEmpty { "/" }
+    }
+
     fun isNaverLoginFrom(requested: URI, actual: String?): Boolean {
         val login = https(actual) ?: return false
         return requested.host in naverServices && login.host == "nid.naver.com" &&
