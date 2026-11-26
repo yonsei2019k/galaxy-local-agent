@@ -90,6 +90,21 @@ import kotlinx.coroutines.launch
     var printError by remember(initialAddress){mutableStateOf(false)}
     val keyboard=LocalSoftwareKeyboardController.current
     val scope=rememberCoroutineScope()
+    var pendingPdf by remember {mutableStateOf<String?>(null)}
+    var exportingPdf by remember {mutableStateOf(false)}
+    val savePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){destination->
+        val text=pendingPdf
+        pendingPdf=null
+        if(destination==null||text==null)exportingPdf=false
+        else scope.launch {
+            try{
+                com.user.localagent.skills.BuiltinSkills(context).writePdf(destination,text,"ZipHap 화면 텍스트")
+                printError=false
+            }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+            catch(_:Exception){printError=true}
+            finally{exportingPdf=false}
+        }
+    }
     var address by remember(initialAddress){mutableStateOf(initialAddress)}
     fun openAddress(){
         if(busy||address.isBlank())return
@@ -123,7 +138,23 @@ import kotlinx.coroutines.launch
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
                     if(!busy && !credentialPage && !paymentPage && ownerLogin==null && !navigation.loading && navigation.error==null)
-                        TextButton(onClick={ scope.launch {printError=!agent.openPrintPreview(context)} }){Text("화면 PDF 저장")}
+                        TextButton(enabled=!exportingPdf,onClick={
+                            exportingPdf=true
+                            printError=false
+                            scope.launch {
+                                val text=agent.browserPdfText()
+                                if(text==null){printError=true;exportingPdf=false}
+                                else{
+                                    pendingPdf=text
+                                    try{savePdf.launch("ZipHap 화면 텍스트.pdf")}
+                                    catch(_:android.content.ActivityNotFoundException){
+                                        pendingPdf=null
+                                        printError=true
+                                        exportingPdf=false
+                                    }
+                                }
+                            }
+                        }){Text("화면 텍스트 PDF 저장")}
                     val loginId=ownerLogin
                     if(loginId!=null)Button(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
                     else if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
@@ -135,7 +166,7 @@ import kotlinx.coroutines.launch
                     }
                     if(paymentError)Text("결제 화면에서 카드사를 선택한 뒤 다시 눌러 주세요. 모니모 앱이 설치되어 있어야 해요.")
                 }
-                if(printError)Text("현재 페이지의 PDF 저장 창을 열지 못했어요.",color=MaterialTheme.colorScheme.error)
+                if(printError)Text("현재 페이지에서 확인한 내용을 PDF로 저장하지 못했어요.",color=MaterialTheme.colorScheme.error)
                 if(ownerLogin!=null)Text("사이트에서 직접 로그인한 다음 ‘로그인했어요’를 눌러 주세요.",
                     style=MaterialTheme.typography.bodyMedium)
                 Box(Modifier.weight(1f).fillMaxWidth()){

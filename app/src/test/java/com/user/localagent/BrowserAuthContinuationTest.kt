@@ -44,12 +44,13 @@ class BrowserAuthContinuationTest {
 
     @Test fun reopenedNaverAuthUsesTheBoundServicePathWithFreshSignIn() {
         val page="https://booking.naver.com/my/reservations"
-        val open=HarnessStep(auth.tool,JsonObject(mapOf("url" to JsonPrimitive("$page?session=old#fragment"))),auth.evidence)
+        val task="$page?reservationId=fixture&date=2026-11-26"
+        val open=HarnessStep(auth.tool,JsonObject(mapOf("url" to JsonPrimitive("$task&session=old#fragment"))),auth.evidence)
         val request=QueuedChatRequest("run","thread","branch",null,"fixture","model",false,emptyList(),"user",
             previousSteps=listOf(open))
         val saved=Json.parseToJsonElement(request.toJson()).jsonObject
         fun context(observed:String)=JsonObject(saved+(BrowserAuthContinuation.NAVER_RETURN_PAGE_KEY to JsonPrimitive(observed))).toString()
-        val expected=BrowserAuthContinuation.ReopenPage(page,true)
+        val expected=BrowserAuthContinuation.ReopenPage(page,true,task)
         assertEquals(expected,BrowserAuthContinuation.reopenPage(request.toJson()))
         assertEquals(expected,BrowserAuthContinuation.reopenPage(context("$page?state=discarded")))
         assertEquals(expected,BrowserAuthContinuation.reopenPage(context("https://mail.naver.com/")))
@@ -57,7 +58,8 @@ class BrowserAuthContinuationTest {
         val read=step("read_app_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
         val readOnly=Json.parseToJsonElement(request.copy(previousSteps=listOf(read)).toJson()).jsonObject
         fun readContext(observed:String)=JsonObject(readOnly+(BrowserAuthContinuation.NAVER_RETURN_PAGE_KEY to JsonPrimitive(observed))).toString()
-        assertEquals(expected,BrowserAuthContinuation.reopenPage(readContext(page)))
+        assertEquals(expected,BrowserAuthContinuation.reopenPage(readContext("$task&access%5Ftoken=discarded")))
+        assertEquals(BrowserAuthContinuation.ReopenPage(page,true),BrowserAuthContinuation.reopenPage(readContext(page)))
         assertNull(BrowserAuthContinuation.reopenPage(readContext("https://booking.naver.com.example.org/my/reservations")))
     }
 

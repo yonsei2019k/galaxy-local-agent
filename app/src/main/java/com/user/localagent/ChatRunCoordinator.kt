@@ -3600,7 +3600,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val retained=browser.ownerLoginCard.value?.takeIf{browser.ownerWorkBinding.value==work}
             val binding=if(retained!=null)browser.waitingAuthBinding(runId) else {
                 val page=BrowserAuthContinuation.reopenPage(parent.contextJson)?:return@withLock false
-                browser.reopenOwnerLogin(work,page.url,page.naver)
+                browser.reopenOwnerLogin(work,page.url,page.naver,page.taskUrl)
             }
             if(binding==null)return@withLock false
             val record=GoalWaitRecord(UUID.randomUUID().toString(),runId,threadId,branchId,runId,original.externalAgentRevision,

@@ -118,6 +118,26 @@ test('printing refuses an opaque frame in Chromium', async()=>{
     await page.evaluate(()=>{
       document.querySelector('verification-widget').attachShadow({mode:'closed'}).innerHTML='<p>Private component</p>'
     })
-    assert.equal((await protectedExport()).safe,false)
+    assert.equal((await protectedExport()).safe,true)
+  } finally {await browser.close()}
+})
+
+test('screen PDF uses inert readable text independent of live components', async()=>{
+  const browser=await chromium.launch({headless:true})
+  try {
+    const page=await browser.newPage()
+    const source=readFileSync(require('node:path').join(__dirname,'../../public/app-web-agent.js'),'utf8')
+    await page.setContent('<main><h1>Receipt</h1><p>Booking confirmed</p><div id="widget"></div><toast-announcer>Notification</toast-announcer><iframe srcdoc="<p>Embedded page</p>"></iframe></main>')
+    await page.evaluate(()=>{
+      const root=document.getElementById('widget').attachShadow({mode:'closed'})
+      root.innerHTML='<p>Personal verification</p><input autocomplete="one-time-code" value="123456">'
+    })
+    const snapshot=await page.evaluate('('+source+')({action:"printSnapshot"})')
+    assert.match(snapshot.text,/Receipt/)
+    assert.match(snapshot.text,/Booking confirmed/)
+    assert.doesNotMatch(snapshot.text,/verification|123456|Notification|Embedded page/)
+    await page.setContent('<label for="otp">인증번호</label><input id="otp">')
+    const protectedSnapshot=await page.evaluate('('+source+')({action:"printSnapshot"})')
+    assert.equal(protectedSnapshot.error,'PAGE_SECURITY_CHECK_INCOMPLETE')
   } finally {await browser.close()}
 })

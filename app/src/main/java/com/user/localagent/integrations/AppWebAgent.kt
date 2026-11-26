@@ -213,6 +213,8 @@ class AppWebAgent private constructor(private val context:Context) {
     val ownerLoginFolded:StateFlow<Boolean> get()=loginFolded
     private var loginReturnOrigin:URI?=null
     private var observedNaverReturnPage:String?=null
+    private var reopenedNaverTaskPage:String?=null
+    private var naverTaskReadbackAttempted:Long?=null
     private var websiteDisplayedId:Long?=null
     private var websiteFormObservedId:Long?=null
     private var cardOrigin:URI?=null
@@ -291,9 +293,11 @@ class AppWebAgent private constructor(private val context:Context) {
         loginStatus.value="사이트 로그인 화면을 채팅 안에 열고 있어요."
     }
 
-    internal fun reopenOwnerLogin(binding:WorkBinding,url:String,naver:Boolean):String? {
+    internal fun reopenOwnerLogin(binding:WorkBinding,url:String,naver:Boolean,taskUrl:String?):String? {
         val origin=secureOrigin(url)?:return null
         if(naver&&BrowserLoginRoutes.naverReturnPage(url)!=url)return null
+        if(taskUrl!=null&&(!naver||BrowserLoginRoutes.naverTaskPage(taskUrl)!=taskUrl||
+            BrowserLoginRoutes.naverReturnPage(taskUrl)!=url))return null
         if(agentActive.value||loginSubmitting||loginCard.value!=null||pendingPcLogin!=null)return null
         browserWorkBinding.value=binding
         confirmedPcLogin=null
@@ -307,6 +311,7 @@ class AppWebAgent private constructor(private val context:Context) {
         loginFolded.value=false
         loginReturnOrigin=origin.takeIf{naver}
         observedNaverReturnPage=null
+        reopenedNaverTaskPage=taskUrl
         loginCard.value=card
         switchToWebsiteLogin(card.id)
         return expiredLoginBinding
@@ -335,6 +340,7 @@ class AppWebAgent private constructor(private val context:Context) {
     suspend fun loadWebsiteLogin(id:Long,retry:Boolean=false):Boolean{
         val request=websiteLogin.value?.takeIf{it.card.id==id}?:return false
         if(!loginNavigationAllowed(request.url))return false
+        if(retry&&naverTaskReadbackAttempted==id)naverTaskReadbackAttempted=null
         val browser=view()
         val wasPresented=websiteDisplayedId==id||browser.url==request.url
         websiteDisplayedId=id
@@ -459,10 +465,14 @@ class AppWebAgent private constructor(private val context:Context) {
             }
             val page=webView?:return false
             val address=page.url
-            val revision=navigationRevision
+            val revision=paymentDocumentRevision
             persistWebsiteSession()
             if(websiteLogin.value!=request||webView!==page||page.url!=address||loading||
-                navigationRevision!=revision||navigation.value.error!=null)return false
+                paymentDocumentRevision!=revision||navigation.value.error!=null)return false
+            val originalPage=reopenedNaverTaskPage.takeIf {request.card.host=="nid.naver.com"&&loginReturnOrigin!=null}
+            if(originalPage!=null&&BrowserLoginRoutes.naverTaskPage(address)!=originalPage&&
+                !restoreAuthenticatedNaverPage(request,page,originalPage))return false
+            reopenedNaverTaskPage=null
             val continues=loginCompletion?.complete(true)==true
             showWebsiteWork(request.card.host,waiting=!continues)
             val queued=notifyGoalAuth(id)
@@ -474,6 +484,28 @@ class AppWebAgent private constructor(private val context:Context) {
             capturedLoginUrl=null
             return true
         }finally{loginSubmitting=false}
+    }
+
+    private suspend fun restoreAuthenticatedNaverPage(request:WebsiteLogin,page:WebView,target:String):Boolean {
+        if(naverTaskReadbackAttempted==request.card.id){
+            loginStatus.value="원래 조회 화면을 아직 확인하지 못했어요. 이 카드에서 다시 열 수 있어요."
+            return false
+        }
+        naverTaskReadbackAttempted=request.card.id
+        loginStatus.value="로그인을 확인했어요. 원래 요청의 조회 화면을 열고 있어요."
+        val revision=beginNavigation(target)
+        val loaded=withTimeoutOrNull(20_000){navigation.first{!it.loading}}
+        if(loaded==null&&revision==navigationRevision&&navigation.value.loading){
+            navigationFailed("PAGE_TIMEOUT")
+            page.stopLoading()
+        }
+        val ready=loaded!=null&&loaded.error==null&&websiteLogin.value==request&&webView===page&&
+            !loading&&secureOrigin(page.url)==loginReturnOrigin&&BrowserLoginRoutes.naverTaskPage(page.url)==target
+        if(!ready){
+            loginStatus.value="원래 조회 화면을 아직 확인하지 못했어요. 이 카드에서 다시 열 수 있어요."
+            return false
+        }
+        return websiteLoginFormPresent(request.card.id)==false
     }
 
     internal suspend fun websiteLoginFormPresent(id:Long):Boolean? {
@@ -780,23 +812,23 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     fun showBrowser(address:String=""){presentation.value=address}
-    /** Android's public print flow. The owner chooses Save as PDF and its destination. */
-    suspend fun openPrintPreview(owner:Context):Boolean {
-        val activity=owner as? android.app.Activity ?: return false
-        val page=webView ?: return false
-        if(!RuntimeGate.foreground.get() || presentation.value==null || agentActive.value ||
-            credentialScreen.value || OwnerPaymentAppPolicy.trustedCheckout(page.url) || loginCard.value!=null || websiteLogin.value!=null ||
-            loading || navigation.value.error!=null || secureOrigin(page.url)==null || !page.isShown ||
-            loginEcho?.origin==secureOrigin(page.url))return false
-        val currentUrl=page.url
-        val version=paymentDocumentRevision
-        if(!safeBrowserDocument()||version!=paymentDocumentRevision||page.url!=currentUrl||agentActive.value||presentation.value==null)return false
-        return runCatching {
-            val name="ZipHap 화면 사본"
-            activity.getSystemService(android.print.PrintManager::class.java)
-                .print(name,page.createPrintDocumentAdapter(name),android.print.PrintAttributes.Builder()
-                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4).build())
-        }.getOrNull()!=null
+    /** Freeze only readable page text before the owner chooses the PDF destination. */
+    internal suspend fun browserPdfText():String? {
+        val page=webView?:return null
+        val address=page.url
+        val revision=paymentDocumentRevision
+        fun canExport()=RuntimeGate.foreground.get()&&presentation.value!=null&&!agentActive.value&&
+            !credentialScreen.value&&!OwnerPaymentAppPolicy.trustedCheckout(address)&&loginCard.value==null&&websiteLogin.value==null&&
+            !loading&&navigation.value.error==null&&webView===page&&page.url==address&&paymentDocumentRevision==revision&&
+            secureOrigin(address)!=null&&page.isShown&&loginEcho?.origin!=secureOrigin(address)
+        if(!canExport())return null
+        val snapshot=try{dom(buildJsonObject{put("key",domKey);put("action","printSnapshot")})}
+            catch(_:TimeoutCancellationException){null}
+            catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){null}
+        if(!canExport())return null
+        return (snapshot?.get("text") as? JsonPrimitive)?.takeIf{it.isString}?.content
+            ?.takeIf{it.isNotBlank()&&it.length<=12_000&&'\u0000' !in it}
     }
 
     fun closeBrowser(){
@@ -983,13 +1015,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private suspend fun dom(request:JsonObject):JsonObject? = eval("($domScript)($request)") as? JsonObject
 
-    private suspend fun safeBrowserDocument()=try {
-        dom(buildJsonObject{put("key",domKey);put("action","securityCheck")})?.get("safe")==JsonPrimitive(true)
-    }catch(_:TimeoutCancellationException){false}
-     catch(cancel:CancellationException){throw cancel}
-     catch(_:Exception){false}
-
-    private suspend fun readPage(observeMedia:Boolean=false):JsonObject {
+     private suspend fun readPage(observeMedia:Boolean=false):JsonObject {
         snapshot=null
         if(OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return paymentHandoff()
         val id=token()
@@ -1219,7 +1245,8 @@ class AppWebAgent private constructor(private val context:Context) {
             if((requiredOrigin==loginOrigin||naverHandoff) && (nativeForm || loginFormPresent()==true) && secureOrigin(view().url)==loginOrigin){
                 loginFolded.value=false
                 loginReturnOrigin=requiredOrigin.takeIf{naverHandoff}
-                observedNaverReturnPage=BrowserLoginRoutes.naverReturnPage(requestedUrl).takeIf{naverHandoff}
+                observedNaverReturnPage=BrowserLoginRoutes.naverTaskPage(requestedUrl).takeIf{naverHandoff}
+                reopenedNaverTaskPage=null
                 cardOrigin=loginOrigin
                 capturedLoginUrl=view().url?.takeIf{secureOrigin(it)==loginOrigin}
                 presentation.value=null

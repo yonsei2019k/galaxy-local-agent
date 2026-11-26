@@ -167,12 +167,7 @@ function (request) {
       inspected += elements.length;
       if (inspected > 4 * maxScanned) return false;
       for (const element of elements) {
-        if (element.shadowRoot) {
-          roots.push(element.shadowRoot);
-        } else if (element.localName?.includes('-') || element.hasAttribute('is')) {
-          // An uninspectable custom component can contain a closed credential form.
-          return false;
-        }
+        if (element.shadowRoot) roots.push(element.shadowRoot);
       }
       for (const frame of root.querySelectorAll('iframe,frame')) {
         const child = frame.contentDocument;
@@ -184,6 +179,40 @@ function (request) {
     return true;
   };
 
+  if (request.action === 'printSnapshot') {
+    if (!ownerDocument.body || ownerDocument.readyState !== 'complete' || protectedKind() !== null)
+      return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
+
+    // Build an independent text document. A closed component has no reachable text nodes
+    // in this projection; the live WebView and its controls are never sent to the PDF writer.
+    const block = /^(?:address|article|aside|blockquote|caption|dd|div|dl|dt|figcaption|figure|footer|h[1-6]|header|li|main|nav|ol|p|pre|section|table|tbody|tfoot|thead|tr|ul)$/;
+    const inline = /^(?:a|abbr|b|bdi|bdo|br|cite|code|del|em|i|ins|kbd|mark|q|s|samp|small|span|strong|sub|sup|td|th|time|u|var|wbr)$/;
+    const range = ownerDocument.createRange();
+    let text = '';
+    let count = 0;
+    function append(node, depth) {
+      if (++count > 4 * maxScanned || depth > 64 || text.length > maxText) return false;
+      if (node.nodeType === 3) {
+        range.selectNodeContents(node);
+        if (range.getClientRects().length) text += node.textContent.replace(/\s+/g,' ');
+        return true;
+      }
+      const tag = node.localName;
+      if (!tag || !block.test(tag) && !inline.test(tag) || node.shadowRoot || node.hasAttribute('is') ||
+          node.hasAttribute('contenteditable') || node.closest('[hidden],[aria-hidden=true],[inert]') ||
+          !node.getClientRects().length || ownerDocument.defaultView.getComputedStyle(node).visibility !== 'visible') return true;
+      if (block.test(tag) || tag === 'br') text += '\n';
+      for (const child of node.childNodes) if (!append(child, depth + 1)) return false;
+      if (block.test(tag)) text += '\n';
+      else if (tag === 'td' || tag === 'th') text += '  ';
+      return true;
+    }
+    for (const child of ownerDocument.body.childNodes)
+      if (!append(child, 1)) return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
+    text = text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+    if (!text || text.length > maxText || containsPan(text)) return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
+    return {text};
+  }
   if (request.action === 'securityCheck') return {safe: safeForExport()};
   if (!Object.prototype.hasOwnProperty.call(ownerDocument, request.key)) {
     if (request.action !== 'observe') return fail('SNAPSHOT_STALE');

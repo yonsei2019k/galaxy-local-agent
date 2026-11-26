@@ -34,6 +34,22 @@ internal object BrowserLoginRoutes {
         return "https://"+url.host+url.rawPath.ifEmpty { "/" }
     }
 
+    private val authQueryNames=setOf("accesstoken","refreshtoken","idtoken","token","session","sessionid",
+        "code","authcode","authorizationcode","state","nonce","oauth","oauthtoken","oauthverifier",
+        "redirecturi","redirecturl","returnurl","callback","codechallenge","codeverifier","password","passwd","otp")
+
+    fun naverTaskPage(raw:String?):String? {
+        val start=naverReturnPage(raw)?:return null
+        val query=https(raw)?.rawQuery ?: return start
+        if(query.length>4096)return null
+        val taskQuery=query.split('&').filter {parameter->
+            val name=runCatching { java.net.URLDecoder.decode(parameter.substringBefore('='),"UTF-8") }.getOrNull()
+            val normalized=name?.lowercase()?.filter(Char::isLetterOrDigit)
+            !normalized.isNullOrEmpty()&&normalized !in authQueryNames
+        }.joinToString("&")
+        return if(taskQuery.isEmpty())start else "$start?$taskQuery"
+    }
+
     fun isNaverLoginFrom(requested: URI, actual: String?): Boolean {
         val login = https(actual) ?: return false
         return requested.host in naverServices && login.host == "nid.naver.com" &&

@@ -16,19 +16,21 @@ internal object BrowserAuthContinuation {
     fun childId(parent:String):String = UUID.nameUUIDFromBytes("ziphap-browser-auth:$parent".toByteArray(Charsets.UTF_8)).toString()
 
     const val NAVER_RETURN_PAGE_KEY = "hostNaverAuthReturnPage"
-    data class ReopenPage(val url:String,val naver:Boolean)
+    data class ReopenPage(val url:String,val naver:Boolean,val taskUrl:String?=null)
 
     fun reopenPage(contextJson:String):ReopenPage? {
         val steps=QueuedChatRequest.fromJson(contextJson).previousSteps
         if(!safeSteps(steps))return null
         val action=steps.last()
         val originalUrl=(action.arguments["url"] as? JsonPrimitive)?.content
-        val naverOpen=BrowserLoginRoutes.naverReturnPage(originalUrl)
         val saved=(Json.parseToJsonElement(contextJson).jsonObject[NAVER_RETURN_PAGE_KEY] as? JsonPrimitive)?.content
-        val observed=BrowserLoginRoutes.naverReturnPage(saved)
-        if(observed!=null&&(action.tool=="read_app_browser_page"||
-            action.tool=="open_app_browser_page"&&naverOpen==observed))return ReopenPage(observed,true)
-        if(action.tool=="open_app_browser_page"&&naverOpen!=null)return ReopenPage(naverOpen,true)
+        val taskUrl=when(action.tool){
+            "open_app_browser_page"->BrowserLoginRoutes.naverTaskPage(originalUrl)
+            "read_app_browser_page"->BrowserLoginRoutes.naverTaskPage(saved)
+            else->null
+        }
+        val loginStart=BrowserLoginRoutes.naverReturnPage(taskUrl)
+        if(loginStart!=null)return ReopenPage(loginStart,true,taskUrl?.takeUnless{it==loginStart})
         return ownerLoginPage(steps)?.let { ReopenPage(it,false) }
     }
 
