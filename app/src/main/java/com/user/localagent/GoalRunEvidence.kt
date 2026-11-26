@@ -200,7 +200,8 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
         val all=completedGoalLedger(request)
         check(all.none {goalUnverifiedEffect(it.step)||PreparedHandoff.pendingEffect(it.step)||
             goalUncertainFailure(it.step)}){"목표의 미확인 효과·실패·외부 확인 대기를 버리고 새 실행을 예약하지 않았습니다."}
-        if(!sameGoalWork(goal,checkNotNull(request.goal)))continue
+        val captured=checkNotNull(request.goal)
+        if(captured.outcome!=goal.outcome||captured.constraints!=goal.constraints)continue
         check(request.allowTools&&request.mode in setOf("act","debug")&&request.workspaceBinding==workspaceBinding)
         request.goalSegment?.let {check(it.scopeKey==scopeKey)}
         val context=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)

@@ -64,6 +64,20 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 delay(500)
             }
         }
+        internal suspend fun readPairedPdf(context:Context,key:String,snapshot:String,ref:String):ByteArray {
+            check(BrowserAgentSettings.pc(context).enabled())
+            val transport=PcTransport(context)
+            val connection=transport.available()?:throw PcUnavailable()
+            val (status,response)=transport.jsonWithStatus(connection,"/v1/browser/save-pdf",buildJsonObject {
+                put("work",key);put("snapshotId",snapshot);put("ref",ref)
+            },30_000,maxResponseBytes=3*1024*1024)
+            check(status==200){"PC에서 확인한 PDF 링크를 다시 읽어 주세요."}
+            val value=response["pdfBase64"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            check(value.length in 8..2_796_204)
+            return java.util.Base64.getDecoder().decode(value).also {
+                check(it.size<=com.user.localagent.web.PublicWebClient.MAX_BYTES)
+            }
+        }
         internal suspend fun samplePairedMedia(context:Context,workKey:String):
             com.user.localagent.integrations.MediaEndWatcher.Observation? {
             if(!BrowserAgentSettings.pc(context).enabled())return null
@@ -75,12 +89,19 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 (page["media"] as? JsonObject)?.let(BrowserMediaSample::from))
         }
         fun pc(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?,
-                session:suspend ()->String?)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+                session:suspend ()->String?,recoverAuth:suspend ()->Boolean)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
             val transport=PcTransport(context)
             val config=transport.available(waitForRestart=true)?:throw PcUnavailable()
             val workKey=checkNotNull(session()){"PC 브라우저 작업을 확인할 수 없어요."}
-            val result=transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
-            val url=body["url"]?.jsonPrimitive?.contentOrNull
+            var result=transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
+            val restartRead=operation=="read"&&result["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE")&&recoverAuth()
+            val reopened=PairedWebsiteLogin.ORIGIN+"/member/"
+            if(restartRead)result=transport.jsonWithStatus(config,"/v1/browser/open",buildJsonObject {
+                put("work",workKey);put("url",reopened)
+            },28_000).second
+            if(restartRead&&result["loginRequired"]!=JsonPrimitive(true))
+                return@BrowserAgentTools buildJsonObject {put("error","OWNER_LOGIN_PAGE_CHANGED")}
+            val url=if(restartRead)reopened else body["url"]?.jsonPrimitive?.contentOrNull
             val binding=work()
             val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
             if(binding!=null && observedUrl?.startsWith(PairedWebsiteLogin.ORIGIN+"/")==true &&
@@ -97,7 +118,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 }
                 com.user.localagent.integrations.AppWebAgent.get(context).recordPcWork(binding,stage,stage)
             }
-            if(operation=="read" && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            if(operation=="read" && !restartRead && result["loginRequired"]!=JsonPrimitive(true) && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 com.user.localagent.integrations.AppWebAgent.get(context).expectsPcReadback(binding)
             } && (result["loginRequired"]!=JsonPrimitive(false) ||
                 result["url"]?.jsonPrimitive?.contentOrNull?.startsWith(PairedWebsiteLogin.ORIGIN+"/")!=true))
@@ -621,8 +642,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
         listOf("verifiedCompletedCourseTitle","playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","pageChanged","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
             .forEach{key->result[key]?.let{put(key,it)}}
-        if(catalog==AppBrowserToolCatalog && browser==where && rulePage(result) && result["elements"] is JsonArray){
-            val eligible=ruleElements(result).take(120).count{it["sessionPdf"]==JsonPrimitive(true)}
+        if(browser==where && rulePage(result) && result["elements"] is JsonArray){
+            val eligible=ruleElements(result).take(120).count {
+                it["sessionPdf"]==JsonPrimitive(true)||it["sameSessionPdf"]==JsonPrimitive(true)
+            }
             put("sameSessionPdfCount",eligible)
         }
         put("browser",browser)
@@ -630,7 +653,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         put("elements",JsonArray(result["elements"]?.jsonArray.orEmpty().take(120).mapNotNull{item->runCatching{
             val e=item.jsonObject
             val flags=listOfNotNull(e["type"]?.jsonPrimitive?.content?.takeIf{it.isNotBlank()},
-                "same-session-pdf".takeIf{e["sessionPdf"]==JsonPrimitive(true)},
+                "same-session-pdf".takeIf{e["sessionPdf"]==JsonPrimitive(true)||e["sameSessionPdf"]==JsonPrimitive(true)},
                 "needs-owner-approval".takeIf{e["needsApproval"]?.jsonPrimitive?.booleanOrNull==true},
                 "owner-only-field".takeIf{e["sensitive"]?.jsonPrimitive?.booleanOrNull==true},
                 "disabled".takeIf{e["disabled"]?.jsonPrimitive?.booleanOrNull==true},

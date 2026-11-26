@@ -170,7 +170,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onBookingPayment, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onGoalAnswer, onBookingPayment, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -186,12 +186,14 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onStayPhoto?: (messageId: string, index: number, kind?: 'map') => boolean
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
+  onGoalAnswer?(runId: string, text: string): boolean
   onBookingPayment?(action: BookingPaymentAction, id: string): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
 }) {
   const view = useRef<HTMLElement>(null)
   const [sentChoice, setSentChoice] = useState<string | null>(null)
+  const [goalReply, setGoalReply] = useState<{ runId: string; text: string } | null>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [openWorkId, setOpenWorkId] = useState<string | null>(null)
@@ -348,6 +350,17 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             </section>}
             {waitingInput && !liveTasks.length && <div className="reply-needed">
               <div role="status">{waitingInput.detail || waitingInput.label}</div>
+              {waitingInput.goalOwnerReply && onGoalAnswer && <form className="reply-options" onSubmit={event => {
+                event.preventDefault()
+                if (goalReply?.runId === waitingInput.id && onGoalAnswer(waitingInput.id, goalReply.text.trim())) setSentChoice(waitingInput.id)
+              }}>
+                <input aria-label="이어갈 작업에 답변" placeholder="이 작업에 답변" maxLength={4000}
+                  value={goalReply?.runId === waitingInput.id ? goalReply.text : ''}
+                  disabled={!enabled || sentChoice === waitingInput.id}
+                  onChange={event => setGoalReply({ runId: waitingInput.id, text: event.target.value })} />
+                <button type="submit" disabled={!enabled || sentChoice === waitingInput.id ||
+                  goalReply?.runId !== waitingInput.id || !goalReply.text.trim()}>답변하고 계속</button>
+              </form>}
               {waitingInput.choices && onChooseReply && <div className="reply-options" role="group" aria-label="답변 선택지">
                 {waitingInput.choices.map((choice, index) => <button key={choice.label} type="button"
                   disabled={!enabled || hasDraft || !!snapshot?.attachments?.length || sentChoice === waitingInput.id}

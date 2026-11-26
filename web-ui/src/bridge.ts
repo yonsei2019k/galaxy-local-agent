@@ -54,6 +54,7 @@ export interface Task {
   messageId?: string
   evidence?: Evidence[]
   choices?: ReplyChoice[]
+  goalOwnerReply?: boolean
   startedAt?: number
   finishedAt?: number
 }
@@ -170,6 +171,7 @@ export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'pro
 
 type Intent =
   | { action: 'chooseReply'; payload: { runId: string; index: number } }
+  | { action: 'answerGoalQuestion'; payload: { runId: string; text: string } }
   | { action: BookingPaymentAction; payload: { id: string } }
   | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
@@ -394,6 +396,8 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   }
   if (intent.action === 'chooseReply' && !scope?.tasks.some(task => task.id === intent.payload.runId &&
     task.phase === 'waiting_input' && task.choices?.[intent.payload.index])) return false
+  if (intent.action === 'answerGoalQuestion' && (!intent.payload.text.trim() || intent.payload.text.length > 4000 ||
+    !scope?.tasks.some(task => task.id === intent.payload.runId && task.phase === 'waiting_input' && task.goalOwnerReply))) return false
   if (intent.action === 'setCharacter' && (!scope?.character ||
     !isCharacterChoice({ ...scope.character, [intent.payload.field]: intent.payload.value }))) return false
   if (intent.action === 'selectThread' && !scope?.threads.some(thread => thread.id === intent.payload.id)) return false

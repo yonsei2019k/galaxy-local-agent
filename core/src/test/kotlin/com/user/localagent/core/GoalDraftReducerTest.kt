@@ -35,7 +35,8 @@ class GoalDraftReducerTest {
         val updated=GoalDraftReducer.update(old,GoalWorkUpdate(criteria=listOf(GoalCriterionEdit("id-0","수정한 조건"))))
         assertEquals(40,updated.criteria.size);assertEquals("원래 조건 39",updated.criteria.last().text)
         assertEquals("id-39",updated.criteria.last().id)
-        assertTrue(updated.criteria.all {it.status==GoalCriterionStatus.PENDING})
+        assertEquals(GoalCriterionStatus.PENDING,updated.criteria.first().status)
+        assertEquals(old.criteria.drop(1),updated.criteria.drop(1))
     }
     @Test fun removalIsExplicitAndCannotNameForeignOrDuplicateIds() {
         val old=previous()

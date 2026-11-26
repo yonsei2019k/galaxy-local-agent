@@ -696,6 +696,7 @@ class MainActivity : ComponentActivity() {
                                     else->activity.status
                                 }
                                 put("id",activity.runId);put("phase",phase)
+                                if(latestQuestion&&activity.goalOwnerReply)put("goalOwnerReply",true)
                                 if(latestQuestion&&activity.replyChoices.isNotEmpty())
                                     put("choices",JsonArray(activity.replyChoices.map{it.toJson()}))
                                 activity.userMessageId?.let{put("messageId",it)}
@@ -728,6 +729,10 @@ class MainActivity : ComponentActivity() {
                                 else webAgent.checkOwnerPayment(id,composerThreadId,currentBranchId)
                                 if(!opened)android.widget.Toast.makeText(this@MainActivity,
                                     "현재 결제 화면을 열 수 없어요. 예약 사이트의 결제 화면을 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            "answerGoalQuestion"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()){
+                                chat.sendGoalOwnerAnswer(payload.getValue("runId").jsonPrimitive.content,
+                                    payload.getValue("text").jsonPrimitive.content,composerThreadId,currentBranchId)
                             }
                             "chooseReply"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()&&chat.draft.value.isBlank()){
                                 chat.sendOwnerChoice(payload.getValue("runId").jsonPrimitive.content,

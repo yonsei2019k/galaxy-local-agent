@@ -172,7 +172,7 @@ INSTRUCTIONS = (
     "When confirmed, proactively return the official confirmation link, available verified confirmation and receipt files in this chat, "
     "check-in location and time, and practical onsite rules from official sources. Distinguish a provided original PDF from a generated copy. "
     "When the phone browser observes an already-issued same-session PDF for that exact reservation, use save_browser_pdf "
-    "with its observed snapshotId and ref. When an issuer returns a public direct PDF, use save_public_pdf. "
+    "with its observed snapshotId and ref. For the paired PC work browser use save_pc_browser_pdf with its own current snapshotId and same-session-pdf ref. When an issuer returns a public direct PDF, use save_public_pdf. "
     "Only link files that the phone actually saved and verified; report a missing receipt as pending. "
     "Only include weather or packing notes based on a fresh source, and never copy payment credentials or unmasked card details. "
     "Use explicitly authorized calendar preferences when applicable, create a private event without invitations, "

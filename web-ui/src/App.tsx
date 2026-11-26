@@ -158,6 +158,7 @@ export default function App() {
           onNavigate={panel => sidebarRequest({action:'navigate',payload:{panel}})}
           onDismissOfficeGuide={() => request({action:'dismissOfficeGuide'})}
           onOfficeCalendar={() => request({action:'requestOfficeCalendar'})}
+          onGoalAnswer={(runId, text) => !pending && request({ action: 'answerGoalQuestion', payload: { runId, text } })}
           onChooseReply={(runId, index) => !pending && !draft.trim() &&
             request({ action: 'chooseReply', payload: { runId, index } })}
           onBookingPayment={(action, id) => request({ action, payload: { id } })}

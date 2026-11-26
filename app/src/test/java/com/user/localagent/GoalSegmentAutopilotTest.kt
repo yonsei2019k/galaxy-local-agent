@@ -222,6 +222,20 @@ class GoalSegmentAutopilotTest {
         assertNull(goalOutcomeProof(call,result("https://example.org/status",title)))
     }
 
+    @Test fun completedBrowserGoalGetsOneRestrictedArtifactPass() {
+        val done=goal().let { it.copy(criteria=it.criteria.map { c->c.copy(status=GoalCriterionStatus.USER_CONFIRMED) }) }
+        val observation=HarnessStep(PcBrowserToolCatalog.READ,buildJsonObject {},
+            StepEvidence(PcBrowserToolCatalog.READ,VerificationState.VERIFIED,"Observed official page"))
+        val source=request(listOf(observation),binding=segment(done)).copy(goal=done)
+        val next=goalSegmentDecision(row(source),done,"scope",started+100L,false) as GoalSegmentDecision.Continue
+        assertTrue(next.binding.artifactWrapUp)
+        assertTrue("save_pc_browser_pdf" in goalArtifactWrapUpTools)
+        assertFalse("act_on_pc_browser_page" in goalArtifactWrapUpTools)
+        val wrapped=child(source,next).copy(goal=done.copy(linkedRunIds=listOf("run-a","run-b")))
+        assertTrue(QueuedChatRequest.fromJson(wrapped.toJson()).goalSegment!!.artifactWrapUp)
+        assertEquals(GoalSegmentDecision.Complete,goalSegmentDecision(row(wrapped),checkNotNull(wrapped.goal),"scope",started+200L,false))
+    }
+
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {
         val eighth=segment().copy(rootRunId="root-run",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
         pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(emptyList(),binding=eighth)))

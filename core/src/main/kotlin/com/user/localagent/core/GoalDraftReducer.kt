@@ -41,7 +41,11 @@ object GoalDraftReducer {
         val changed=candidate.outcome!=previous.outcome||candidate.constraints!=previous.constraints||
             candidate.criteria.map {it.id to it.text}!=previous.criteria.map {it.id to it.text}
         val result=if(changed)candidate.copy(status=GoalStatus.DRAFT,
-            criteria=candidate.criteria.map {it.copy(status=GoalCriterionStatus.PENDING,evidence=emptyList())})else previous
+            criteria=candidate.criteria.map { criterion->
+                if(candidate.outcome==previous.outcome&&candidate.constraints==previous.constraints&&
+                    known[criterion.id]==criterion)criterion
+                else criterion.copy(status=GoalCriterionStatus.PENDING,evidence=emptyList())
+            })else previous
         return result.validate().also(::bounded)
     }
 

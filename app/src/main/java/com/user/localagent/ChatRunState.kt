@@ -32,6 +32,7 @@ data class QueuedChatRequest(
     val screenVisualBinding: String? = null,
     val browserAuthParentRunId: String? = null,
     val goalReadbackSeedCount:Int=0,
+    val browserWorkRootRunId:String?=null,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -79,6 +80,7 @@ data class QueuedChatRequest(
             require(goalLedger.all {it.sourceRunId in goal.linkedRunIds})
         }
         require(goalSegment!=null||goalLedger.isEmpty())
+        browserWorkRootRunId?.let { require(goalSegment!=null&&it in checkNotNull(goal).linkedRunIds) }
         require(goalReadbackSeedCount in 0..minOf(6,previousSteps.size))
         require(goalReadbackSeedCount==0||goalSegment?.parentRunId!=null&&readbackObligations!=null&&continuation==null)
     }
@@ -100,6 +102,7 @@ data class QueuedChatRequest(
         screenVisualBinding?.let {put("screenVisualBinding",it)}
         browserAuthParentRunId?.let {put("browserAuthParentRunId",it)}
         if(goalReadbackSeedCount!=0)put("goalReadbackSeedCount",goalReadbackSeedCount)
+        browserWorkRootRunId?.let {put("browserWorkRootRunId",it)}
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)};step.evidence.progressDigest?.let {put("progressDigest",it)};step.evidence.auditId?.let {put("auditId",it)};step.evidence.outcomeProof?.let {put("outcomeProof",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -140,7 +143,8 @@ data class QueuedChatRequest(
                 o["scheduledClockReceiptOnly"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean} ?: false,
                 o["screenVisualBinding"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["browserAuthParentRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
-                o["goalReadbackSeedCount"]?.let {require(it is JsonPrimitive&&!it.isString);it.int}?:0)
+                o["goalReadbackSeedCount"]?.let {require(it is JsonPrimitive&&!it.isString);it.int}?:0,
+                o["browserWorkRootRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
         }
     }
 }

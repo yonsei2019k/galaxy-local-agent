@@ -110,7 +110,21 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         connectionRunId?.let { repository.chat.run(it) }?.takeIf {it.threadId==connectionThreadId}?.let {
             com.user.localagent.pcBrowserWorkKey(com.user.localagent.QueuedChatRequest.fromJson(it.contextJson))
         }
-    private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding,::pcBrowserSession)}
+    private suspend fun mayRestorePcAuthSession():Boolean {
+        val row=connectionRunId?.let {repository.chat.run(it)}?:return false
+        val request=com.user.localagent.QueuedChatRequest.fromJson(row.contextJson)
+        val parentId=request.goalSegment?.parentRunId?:request.browserAuthParentRunId?:return false
+        val original=repository.chat.run(parentId)?:return false
+        if(original.threadId!=row.threadId||original.branchId!=row.branchId||original.projectId!=row.projectId)return false
+        val checkpoint=Json.parseToJsonElement(original.contextJson).jsonObject
+        val wake=checkpoint["hostGoalWake"] as? JsonObject
+        if(request.goalSegment!=null&&wake?.get("event")!=JsonPrimitive(com.user.localagent.core.WakeEvent.OWNER_AUTH_DONE.name))return false
+        val last=com.user.localagent.QueuedChatRequest.fromJson(original.contextJson).previousSteps.lastOrNull()?:return false
+        return last.tool in setOf("open_pc_browser_page","read_pc_browser_page")&&last.evidence.effectNotApplied&&
+            last.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED&&connectionIsRunLive()
+    }
+    private val pcBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding,
+        ::pcBrowserSession,::mayRestorePcAuthSession)}
     internal var deferBrowserLogin:()->Boolean={false}
     private val appBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.app(context,::browserWorkBinding){deferBrowserLogin()}}
     private fun browserFor(name:String)=when(name){
@@ -284,12 +298,25 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                     check(result["success"]?.jsonPrimitive?.booleanOrNull==true){"읽을 수 있는 공개 검색 결과를 확인하지 못했습니다."}
                     result.toString()
                 }
-                "save_browser_pdf","save_public_pdf" -> {
+                "save_browser_pdf","save_pc_browser_pdf","save_public_pdf" -> {
                     val progress=PdfSaveProgress()
                     return@withContext progress.execute(call.id) {
                         if(call.name=="save_public_pdf")
                             PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),call.s("url"),progress=progress)
-                        else {
+                        else if(call.name=="save_pc_browser_pdf") {
+                            suspend fun current() {
+                                check(connectionRunId!=null&&connectionIsRunLive()&&call.name in capturedAvailableTools)
+                                verifyGrant()
+                                connectionVerifyAccess()
+                            }
+                            current()
+                            val key=checkNotNull(pcBrowserSession())
+                            progress.stage=PdfSaveStage.FETCH
+                            val bytes=com.user.localagent.compute.BrowserAgentTools.readPairedPdf(context,key,
+                                call.s("snapshotId"),call.s("ref"))
+                            PublicPdfArtifact.saveBytes(java.io.File(context.filesDir,"exports"),bytes,
+                                com.user.localagent.web.PublicWebClient.MAX_BYTES,progress,{commit->current();commit()})
+                        } else {
                             val id=call.s("snapshotId");val ref=call.s("ref")
                             val web=com.user.localagent.integrations.AppWebAgent.get(context)
                             val work=checkNotNull(browserWorkBinding())

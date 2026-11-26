@@ -102,6 +102,39 @@ class OwnerLogin(unittest.TestCase):
         finally:
             agent.dispose()
 
+    def test_pc_pdf_reads_only_a_same_session_observed_document(self):
+        from concurrent.futures import ThreadPoolExecutor
+        origin = 'https://example.org'
+        agent = browser.BrowserAgent()
+        try:
+            agent._ensure()
+            with sync_playwright() as pw:
+                chrome = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{agent._port()}')
+                context = chrome.contexts[0]
+                def route(request):
+                    if request.request.url.endswith('/receipt.pdf'):
+                        request.fulfill(content_type='application/pdf', body='%PDF-1.7 fixture')
+                    else:
+                        request.fulfill(content_type='text/html', body=
+                            '<a href="/receipt.pdf">Receipt</a><a href="https://invalid.example/receipt.pdf">External</a>')
+                context.route(origin+'/**',route)
+
+                def observe():
+                    observed=agent.open({'url':origin+'/'})
+                    eligible=[item for item in observed['elements'] if item.get('sameSessionPdf')]
+                    self.assertEqual([item['label'] for item in eligible],['Receipt'])
+                    return agent.save_pdf({'snapshotId':observed['snapshotId'],'ref':eligible[0]['ref']})
+
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    task=executor.submit(observe)
+                    for _ in range(160):
+                        if task.done(): break
+                        context.pages[0].wait_for_timeout(100)
+                    result=task.result(timeout=2)
+                self.assertEqual(browser.base64.b64decode(result['pdfBase64']), b'%PDF-1.7 fixture')
+        finally:
+            agent.dispose()
+
     def test_worker_reads_through_the_result_alert(self):
         origin = 'https://www.kairb.org'
         agent = browser.BrowserAgent()

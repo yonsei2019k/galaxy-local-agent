@@ -6,6 +6,7 @@ import com.user.localagent.automation.GoalLifecycleRequest
 import com.user.localagent.core.ConversationSubmissionPolicy
 import com.user.localagent.core.GoalDefinition
 import com.user.localagent.core.GoalStatus
+import com.user.localagent.core.GoalWaitPolicy
 import com.user.localagent.data.ChatAccessScope
 import com.user.localagent.data.ChatRunRecord
 import kotlinx.coroutines.Job
@@ -61,7 +62,8 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
     capturedPcDataBinding:String?=capturePcDataBindingForNewRun(access.threadId),capturedPcRevision:Long?=null,allowCloudText:Boolean=false,
     capturedAllowExternalAgent:Boolean=false,capturedExternalAgentRevision:Long?=null,
     capturedKakaoReadBinding:String?=null,capturedPcImageRecoveryAllowed:Boolean=false,
-    nextSegment:GoalSegmentDecision.Continue?=null,capturedPcTextDefault:String?=null):GoalLifecycleReceipt {
+    nextSegment:GoalSegmentDecision.Continue?=null,capturedPcTextDefault:String?=null,
+    ownerReplyTo:String?=null):GoalLifecycleReceipt {
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
     val ownedContexts=linkedSetOf<String>()
@@ -87,7 +89,15 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             val queuedIds=app.repository.chat.queuedRuns().map {it.id}.toSet()
             check(goal.linkedRunIds.none {it in queuedIds}){"같은 목표의 이어쓰기 요청이 아직 대기 중입니다."}
             check(capturedAllowTools&&capturedMode in setOf("act","debug")){"읽기 전용·도구 미허용 요청에서 새 목표 실행 권한을 만들지 않았습니다."}
-            val entryBudget=if(nextSegment==null)goalEntryBudget(goal,sources,System.currentTimeMillis())else null
+            val now=System.currentTimeMillis()
+            val answered=ownerReplyTo?.let {id->
+                check(nextSegment==null&&goal.linkedRunIds.lastOrNull()==id)
+                checkNotNull(app.repository.chat.run(id)).also {
+                    check(it.status=="paused"&&it.errorCode==GOAL_OWNER_INPUT&&it.branchId==branchId)
+                }
+            }
+            val idle=answered?.let {(now-it.updatedAt).coerceIn(0L,GoalWaitPolicy.MAX_DAYS*86_400_000L)}?:0
+            val entryBudget=if(nextSegment==null)goalEntryBudget(goal,sources,now,idle)else null
             val parent=nextSegment?.let {next->
                 check(parentGoalStartRunId==null)
                 val row=checkNotNull(app.repository.chat.run(checkNotNull(next.binding.parentRunId)))
@@ -109,6 +119,9 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding
+            val browserRoot=sources.lastOrNull()?.let {QueuedChatRequest.fromJson(it.contextJson)}?.takeIf {
+                it.goal?.let { capturedGoal->sameGoalWork(capturedGoal,goal) }==true
+            }?.let {it.browserWorkRootRunId?:it.goalSegment?.rootRunId}
             val readback=nextSegment?.readback
             var captured:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
@@ -118,7 +131,8 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText,
                     allowExternalAgent=capturedAllowExternalAgent,externalAgentRevision=capturedExternalAgentRevision,
                     kakaoReadBinding=capturedKakaoReadBinding,pcImageRecoveryAllowed=capturedPcImageRecoveryAllowed,
-                    goalSegment=segment,goalLedger=priorLedger,capturedPcTextDefault=capturedPcTextDefault).also {request->
+                    goalSegment=segment,goalLedger=priorLedger,capturedPcTextDefault=capturedPcTextDefault,
+                    browserWorkRootRunId=browserRoot?.takeUnless {it==segment.rootRunId}).also {request->
                         parent?.let {requireSameGoalAuthority(QueuedChatRequest.fromJson(it.contextJson),request)}
                         // Historical data cannot cross a changed cloud consent/model/branch boundary.
                         sources.forEach {

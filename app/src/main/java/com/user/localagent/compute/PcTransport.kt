@@ -83,11 +83,12 @@ class PcTransport(context:Context) {
         }finally{connection.disconnect();if(current===connection)current=null}
     }
     /** Like [json] but a 4xx answer with an error code is returned (status, body) for tools that explain refusals to the model. */
-    fun jsonWithStatus(config:PcConnection,path:String,body:JsonObject,timeout:Int):Pair<Int,JsonObject> {
+    fun jsonWithStatus(config:PcConnection,path:String,body:JsonObject,timeout:Int,
+        maxResponseBytes:Int=1024*1024):Pair<Int,JsonObject> {
         val connection=open(config,path,"POST",body,timeout,null)
         try {
             val status=connection.responseCode
-            if(status in 200..299)return status to Json.parseToJsonElement(String(read(connection,1024*1024),Charsets.UTF_8)).jsonObject
+            if(status in 200..299)return status to Json.parseToJsonElement(String(read(connection,maxResponseBytes),Charsets.UTF_8)).jsonObject
             val error=runCatching{Json.parseToJsonElement(connection.errorStream.bufferedReader().use{it.readText().take(4096)}).jsonObject}.getOrNull()
             if(status !in 400..499||error?.get("error")==null){com.user.localagent.FailureLog.record(context,"pc_http $path",null,"$status");throw PcUnavailable()}
             return status to error
