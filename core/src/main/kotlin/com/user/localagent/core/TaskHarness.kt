@@ -16,11 +16,12 @@ class TaskGoal(ownerRequest:String,successCriteria:List<String>,val stepBudget:I
     init {require(stepBudget in 1..WorkSegments.STEP_BUDGET);require(this.successCriteria.isNotEmpty()&&this.successCriteria.size<=12);require(this.requiredTools.size<=12);require(this.requiredArtifactFormats.size<=5&&this.requiredArtifactFormats.all {it in setOf("docx","xlsx","pdf","txt","csv")})}
 }
 data class StepEvidence(val tool:String,val state:VerificationState,val summary:String,val continuationId:String?=null,
-    val effectNotApplied:Boolean=false,val progressDigest:String?=null,val auditId:String?=null) {
+    val effectNotApplied:Boolean=false,val progressDigest:String?=null,val auditId:String?=null,val outcomeProof:String?=null) {
     init {
         require(tool.isNotBlank()&&tool.length<=100);require(summary.length<=4000)
         require(progressDigest==null||state==VerificationState.VERIFIED&&!effectNotApplied&&progressDigest.matches(Regex("[a-f0-9]{64}")))
         require(auditId==null||state==VerificationState.VERIFIED&&!effectNotApplied&&auditId.matches(Regex("[a-zA-Z0-9:_-]{1,100}")))
+        require(outcomeProof==null||auditId!=null&&outcomeProof.matches(Regex("[a-f0-9]{64}")))
         val idPattern="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
         require(continuationId==null||
             (tool in PrivateAnalysisToolCatalog.analysisNames&&continuationId.matches(Regex(idPattern)))||

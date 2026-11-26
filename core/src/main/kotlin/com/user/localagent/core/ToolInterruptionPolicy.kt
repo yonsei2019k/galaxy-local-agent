@@ -7,7 +7,7 @@ package com.user.localagent.core
 object ToolInterruptionPolicy {
     private val noMutationOnTimeout=setOf(
         "get_current_datetime","calculate","search_web","search_shopping","read_webpage",
-        "search_notes","read_note",
+        "search_notes","read_note","read_project_file","list_reminders","read_app_browser_page","read_pc_browser_page",
     )
 
     fun hasNoMutation(name:String):Boolean =

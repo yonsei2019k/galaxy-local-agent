@@ -31,6 +31,7 @@ data class QueuedChatRequest(
     val scheduledClockReceiptOnly: Boolean = false,
     val screenVisualBinding: String? = null,
     val browserAuthParentRunId: String? = null,
+    val goalReadbackSeedCount:Int=0,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -78,6 +79,8 @@ data class QueuedChatRequest(
             require(goalLedger.all {it.sourceRunId in goal.linkedRunIds})
         }
         require(goalSegment!=null||goalLedger.isEmpty())
+        require(goalReadbackSeedCount in 0..minOf(6,previousSteps.size))
+        require(goalReadbackSeedCount==0||goalSegment?.parentRunId!=null&&readbackObligations!=null&&continuation==null)
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
@@ -96,7 +99,8 @@ data class QueuedChatRequest(
         if (scheduledClockReceiptOnly) put("scheduledClockReceiptOnly", true)
         screenVisualBinding?.let {put("screenVisualBinding",it)}
         browserAuthParentRunId?.let {put("browserAuthParentRunId",it)}
-        put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)};step.evidence.progressDigest?.let {put("progressDigest",it)};step.evidence.auditId?.let {put("auditId",it)}})}})
+        if(goalReadbackSeedCount!=0)put("goalReadbackSeedCount",goalReadbackSeedCount)
+        put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)};step.evidence.progressDigest?.let {put("progressDigest",it)};step.evidence.auditId?.let {put("auditId",it)};step.evidence.outcomeProof?.let {put("outcomeProof",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
         goal?.let {put("goal",it.toJson())}
@@ -115,7 +119,7 @@ data class QueuedChatRequest(
                 o["attachments"]?.jsonArray.orEmpty().map {v->val a=v.jsonObject;ChatAttachment(a.getValue("id").jsonPrimitive.content,a.getValue("name").jsonPrimitive.content,a.getValue("mimeType").jsonPrimitive.content,a.getValue("bytes").jsonPrimitive.long)},s("userMessageId"),
                 o["continuation"]?.jsonObject?.let(ContinuationSnapshot::parse),o["allowTools"]?.jsonPrimitive?.booleanOrNull?:true,
                 o["mode"]?.jsonPrimitive?.content?:"act",
-                o["previousSteps"]?.jsonArray.orEmpty().map {element->val step=element.jsonObject;val tool=step.getValue("tool").jsonPrimitive.content;require(tool in ToolRegistry.definitions){"등록되지 않은 도구의 실행 근거는 복원할 수 없습니다."};val args=step.getValue("arguments").jsonObject;val state=VerificationState.valueOf(step.getValue("state").jsonPrimitive.content);if(state==VerificationState.FAILED)require(args.keys.all{it in ToolRegistry.definitions.getValue(tool).arguments.keys}){"허용되지 않은 도구 인자입니다."} else ToolRegistry.validate(ToolCall(java.util.UUID.randomUUID().toString(),tool,args));HarnessStep(tool,args,StepEvidence(tool,state,step.getValue("summary").jsonPrimitive.content,step["continuationId"]?.jsonPrimitive?.contentOrNull,step["effectNotApplied"]?.jsonPrimitive?.boolean?:false,step["progressDigest"]?.jsonPrimitive?.contentOrNull,step["auditId"]?.jsonPrimitive?.contentOrNull))},
+                o["previousSteps"]?.jsonArray.orEmpty().map {element->val step=element.jsonObject;val tool=step.getValue("tool").jsonPrimitive.content;require(tool in ToolRegistry.definitions){"등록되지 않은 도구의 실행 근거는 복원할 수 없습니다."};val args=step.getValue("arguments").jsonObject;val state=VerificationState.valueOf(step.getValue("state").jsonPrimitive.content);if(state==VerificationState.FAILED)require(args.keys.all{it in ToolRegistry.definitions.getValue(tool).arguments.keys}){"허용되지 않은 도구 인자입니다."} else ToolRegistry.validate(ToolCall(java.util.UUID.randomUUID().toString(),tool,args));HarnessStep(tool,args,StepEvidence(tool,state,step.getValue("summary").jsonPrimitive.content,step["continuationId"]?.jsonPrimitive?.contentOrNull,step["effectNotApplied"]?.jsonPrimitive?.boolean?:false,step["progressDigest"]?.jsonPrimitive?.contentOrNull,step["auditId"]?.jsonPrimitive?.contentOrNull,step["outcomeProof"]?.jsonPrimitive?.contentOrNull))},
                 o["queueOrder"]?.jsonPrimitive?.longOrNull?:0,o["workspaceBinding"]?.jsonPrimitive?.contentOrNull,
                 o["goal"]?.takeUnless {it is JsonNull}?.jsonObject?.let(GoalDefinition::parse),
                 o["parentGoalStartRunId"]?.jsonPrimitive?.contentOrNull,
@@ -135,7 +139,8 @@ data class QueuedChatRequest(
                 o["officeParentId"]?.jsonPrimitive?.content,
                 o["scheduledClockReceiptOnly"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean} ?: false,
                 o["screenVisualBinding"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
-                o["browserAuthParentRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
+                o["browserAuthParentRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
+                o["goalReadbackSeedCount"]?.let {require(it is JsonPrimitive&&!it.isString);it.int}?:0)
         }
     }
 }

@@ -12,7 +12,8 @@ import java.util.Locale
 /** Scoped effects only. The host supplies currently validated owner-request tool authorization. */
 class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalToolStore,
     private val authorizedTools:()->Set<String>,private val callerRunId:String?,private val lifecycle:GoalToolLifecycle,
-    private val editReadGuard:(ToolCall,GoalDefinition)->Unit={_,_->error("실제 읽은 목표 본문 근거가 필요합니다.")}) {
+    private val editReadGuard:(ToolCall,GoalDefinition)->Unit={_,_->error("실제 읽은 목표 본문 근거가 필요합니다.")},
+    private val ownerInstruction:String="") {
     private val mutation=Mutex()
 
     suspend fun execute(call:ToolCall):ToolResult? {
@@ -35,7 +36,12 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                 val draft=GoalDraftReducer.create(scope.threadId,scope.projectId,call.arguments.getValue("outcome").jsonPrimitive.content,
                     strings(call,"criteria")!!,strings(call,"constraints").orEmpty())
                 authorize(call.name)
-                val saved=store.save(scope,draft).also(::scoped)
+                val proofs=GoalToolCatalog.parseProofTargets(call).filterValues {proof->
+                    // A generated alternate target must not stand in for the owner's expected result.
+                    proof.target in ownerInstruction
+                }
+                val typed=draft.copy(criteria=draft.criteria.mapIndexed {index,criterion->criterion.copy(proofTarget=proofs[index])})
+                val saved=store.save(scope,typed).also(::scoped)
                 check(saved.id==draft.id&&saved.status==GoalStatus.DRAFT&&saved.criteria.all {it.status==GoalCriterionStatus.PENDING&&it.evidence.isEmpty()}&&saved.linkedRunIds.isEmpty())
                 check(store.load(scope)==saved){"저장한 목표 초안을 다시 확인하지 못했습니다."}
                 return@withLock result(call,"goal_created",saved)
@@ -175,7 +181,7 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
         check(receipt.quiesced&&!receipt.queuedOneBoundedRun&&receipt.queuedRunId==null){"목표에 연결된 실행을 정지했는지 확인하지 못했습니다."}
         if(receipt.deferredCallerStop)check(callerRunId!=null&&callerRunId in goal.linkedRunIds){"현재 실행을 나중에 멈출 목표 연결 근거가 없습니다."}
     }
-    private fun sameWork(a:GoalDefinition,b:GoalDefinition)=a.id==b.id&&a.threadId==b.threadId&&a.projectId==b.projectId&&a.outcome==b.outcome&&a.constraints==b.constraints&&a.criteria.map {it.id to it.text}==b.criteria.map {it.id to it.text}
+    private fun sameWork(a:GoalDefinition,b:GoalDefinition)=a.id==b.id&&a.threadId==b.threadId&&a.projectId==b.projectId&&a.outcome==b.outcome&&a.constraints==b.constraints&&a.criteria.map {Triple(it.id,it.text,it.proofTarget)}==b.criteria.map {Triple(it.id,it.text,it.proofTarget)}
 
     private fun result(call:ToolCall,status:String,goal:GoalDefinition?,offset:Int=0,limit:Int=8,
         receipt:GoalLifecycleReceipt?=null,clearedId:String?=null):ToolResult {
@@ -195,6 +201,7 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                 put("nextCriteriaOffset",if(offset+selected.size<goal.criteria.size)JsonPrimitive(offset+selected.size)else JsonNull)
                 put("criteria",buildJsonArray {selected.forEach {criterion->add(buildJsonObject {
                     put("id",criterion.id);put("text",criterion.text);put("status",criterion.status.name.lowercase(Locale.ROOT));put("evidenceCount",criterion.evidence.size)
+                    criterion.proofTarget?.let { proof->put("proofTarget",buildJsonObject {put("kind",proof.kind.name);put("target",proof.target)}) }
                 })}})
             }else clearedId?.let {put("goalId",it)}
             receipt?.let {

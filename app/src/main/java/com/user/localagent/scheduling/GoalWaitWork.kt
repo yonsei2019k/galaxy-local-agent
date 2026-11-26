@@ -106,8 +106,9 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
     private suspend fun watchMedia(record: GoalWaitRecord,condition: WaitCondition.MediaEnd):WakeEvent {
         val app=(applicationContext as LocalAgentApplication).container
         val web=AppWebAgent.get(applicationContext)
+        val work=AppWebAgent.WorkBinding(record.parentRunId,record.threadId,record.branchId)
         fun active()=app.goalWaits.store.get(record.goalId)==record
-        val observation=web.sampleGoalMedia() ?: return WakeEvent.PLAYER_GONE
+        val observation=web.sampleGoalMedia(work) ?: return WakeEvent.PLAYER_GONE
         if(observation.loginRequired)return WakeEvent.LOGIN_EXPIRED
         val player=observation.player ?: return WakeEvent.PLAYER_GONE
         if(observation.pageUrl!=condition.pageUrl || player.playerId+":"+player.epoch!=condition.playerSignature)
@@ -118,7 +119,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         try { setForeground(mediaNotification()) }
         catch(cancel:CancellationException){ throw cancel }
         catch(_:Exception){
-            withTimeoutOrNull(3_000){web.stopGoalMedia(condition)}
+            withTimeoutOrNull(3_000){web.stopGoalMedia(condition,work)}
             return WakeEvent.CONDITIONS_UNMET
         }
         val wakeLock=applicationContext.getSystemService(PowerManager::class.java)
@@ -126,13 +127,13 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         wakeLock.acquire(GoalWaitPolicy.MEDIA_MAX_MS)
         var ended=false
         return try {
-            val watcher=MediaEndWatcher({ if(app.runs.isGoalWaitReady(record)) web.sampleGoalMedia() else null },
+            val watcher=MediaEndWatcher({ if(app.runs.isGoalWaitReady(record)) web.sampleGoalMedia(work) else null },
                 ::active,SystemClock::elapsedRealtime,::delay)
             watcher.watch(condition.pageUrl,player).also { ended=it==WakeEvent.MEDIA_ENDED }
         } finally {
             if(wakeLock.isHeld)wakeLock.release()
             if(!ended)withContext(NonCancellable) {
-                withTimeoutOrNull(3_000){web.stopGoalMedia(condition)}
+                withTimeoutOrNull(3_000){web.stopGoalMedia(condition,work)}
             }
         }
     }

@@ -16,10 +16,11 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
         step.evidence.continuationId?.let {put("continuationId",it)}
         step.evidence.progressDigest?.let {put("progressDigest",it)}
         step.evidence.auditId?.let {put("auditId",it)}
+        step.evidence.outcomeProof?.let {put("outcomeProof",it)}
     }
     companion object {
         internal fun parse(o:JsonObject):GoalLedgerEntry {
-            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId","progressDigest","auditId")})
+            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId","progressDigest","auditId","outcomeProof")})
             fun s(key:String)=o.getValue(key).jsonPrimitive.let {require(it.isString);it.content}
             val tool=s("tool");val args=o.getValue("arguments").jsonObject
             val state=VerificationState.valueOf(s("state"))
@@ -31,7 +32,8 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
             return GoalLedgerEntry(s("sourceRunId"),index,HarnessStep(tool,args,StepEvidence(tool,state,s("summary"),
                 o["continuationId"]?.jsonPrimitive?.let {require(it.isString);it.content},noEffect,
                 o["progressDigest"]?.jsonPrimitive?.let {require(it.isString);it.content},
-                o["auditId"]?.jsonPrimitive?.let {require(it.isString);it.content})))
+                o["auditId"]?.jsonPrimitive?.let {require(it.isString);it.content},
+                o["outcomeProof"]?.jsonPrimitive?.let {require(it.isString);it.content})))
         }
     }
 }
@@ -93,15 +95,55 @@ internal fun goalProgressKey(step:HarnessStep):String? {
     return if(step.tool in goalBrowserTools||step.tool==GoalProgressToolCatalog.UPDATE)null else goalCallDigest(step)
 }
 
-internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool !in AgentWorkModePolicy.contextReadTools&&
-    tool !in setOf(AppBrowserToolCatalog.OPEN,AppBrowserToolCatalog.ACTION,PcBrowserToolCatalog.OPEN,
-        PcBrowserToolCatalog.ACTION,ScreenControlToolCatalog.ACTION)&&
-    tool !in GoalToolCatalog.names&&tool !in GoalProgressToolCatalog.names&&tool!=GoalWaitToolCatalog.WAIT&&tool !in SkillToolCatalog.names
+internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
+    if(!result.success||result.effectNotApplied||result.verification!=VerificationState.VERIFIED)return null
+    if(call.name !in setOf("save_public_pdf","write_project_file")||result.content.length>40_000)return null
+    val actual=runCatching {Json.parseToJsonElement(result.content).jsonObject}.getOrNull()?:return null
+    val sha=actual["sha256"]?.jsonPrimitive?.contentOrNull
+    if(sha==null||!sha.matches(Regex("[a-f0-9]{64}")))return null
+    val proof=when(call.name) {
+        "save_public_pdf"-> {
+            if(actual["mimeType"]!=JsonPrimitive("application/pdf")||
+                (actual["pages"]?.jsonPrimitive?.intOrNull?:0)<1||actual["fileName"]?.jsonPrimitive?.contentOrNull.isNullOrBlank())return null
+            GoalProofTarget(GoalProofKind.PUBLIC_PDF_SOURCE,call.arguments.getValue("url").jsonPrimitive.content)
+        }
+        "write_project_file"-> {
+            val path=actual["path"]?.jsonPrimitive?.contentOrNull?:return null
+            if(actual["verified"]!=JsonPrimitive(true)||path!=call.arguments["path"]?.jsonPrimitive?.contentOrNull)return null
+            GoalProofTarget(GoalProofKind.PROJECT_FILE,path)
+        }
+        else->return null
+    }
+    return runCatching {proof.validate();goalOutcomeDigest(proof)}.getOrNull()
+}
+
+internal fun goalOutcomeDigest(proof:GoalProofTarget):String=goalDigest(proof.kind.name+"\n"+proof.target)
+
+internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep):Boolean =
+    criterion.proofTarget?.let {goalOutcomeDigest(it)==step.evidence.outcomeProof}==true
+
+internal fun goalMilestoneKey(step:HarnessStep):String? =
+    if(step.tool in goalBrowserTools) null
+    else if(step.evidence.outcomeProof!=null ||
+        step.tool in setOf(GoalProgressToolCatalog.UPDATE,"search_notes","read_project_file","list_calendar_events","search_web","search_shopping"))
+        goalProgressKey(step)
+    else null
+
+internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","write_project_file")
 
 internal fun goalCriterionEvidence(request:QueuedChatRequest,current:List<HarnessStep>):Map<String,HarnessStep> =
     (request.goalLedger.map {it.step}+current).mapNotNull {step->
-        step.evidence.auditId?.takeIf {goalCriterionEvidenceTool(step.tool)}?.let {it to step}
+        step.evidence.auditId?.takeIf {goalCriterionEvidenceTool(step.tool)&&step.evidence.outcomeProof!=null}?.let {it to step}
     }.toMap()
+
+internal fun goalCompletionProofsMatch(request:QueuedChatRequest,goal:GoalDefinition):Boolean {
+    if(!goal.completionReady)return false
+    val audits=goalCriterionEvidence(request,request.previousSteps)
+    return goal.criteria.all {criterion->
+        criterion.status==GoalCriterionStatus.USER_CONFIRMED||
+            criterion.evidence.any {ref->audits[ref.removePrefix("tool-run:")]?.let {goalCriterionMatches(criterion,it)}==true}
+    }
+}
 
 internal fun goalCheckpointSummary(request:QueuedChatRequest):JsonArray=buildJsonArray {
     request.goalLedger.takeLast(8).forEach {entry->
@@ -122,12 +164,13 @@ internal fun goalUncertainFailure(step:HarnessStep):Boolean=step.evidence.state=
 internal fun goalWorkDigest(goal:GoalDefinition):String=goalDigest(buildJsonObject {
     put("id",goal.id);put("threadId",goal.threadId);put("projectId",goal.projectId);put("outcome",goal.outcome)
     put("constraints",JsonArray(goal.constraints.map(::JsonPrimitive)))
-    put("criteria",buildJsonArray {goal.criteria.forEach {add(buildJsonObject {put("id",it.id);put("text",it.text)})}})
+    put("criteria",buildJsonArray {goal.criteria.forEach {add(buildJsonObject {put("id",it.id);put("text",it.text)
+        it.proofTarget?.let { proof->put("proof",buildJsonObject {put("kind",proof.kind.name);put("target",proof.target)}) }})}})
 }.toString())
 
 /** All states and positions are retained; no deduplication can erase an uncertain effect. */
 internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry> {
-    val ledger=request.goalLedger+request.previousSteps.mapIndexed {index,step->GoalLedgerEntry(request.runId,index,step)}
+    val ledger=request.goalLedger+request.previousSteps.drop(request.goalReadbackSeedCount).mapIndexed {index,step->GoalLedgerEntry(request.runId,index,step)}
     check(ledger.size<=GoalSegmentBinding.MAX_TOOL_CALLS){"목표의 누적 도구 예산을 초과했습니다."}
     check(ledger.map {it.sourceRunId to it.stepIndex}.distinct().size==ledger.size)
     return ledger
@@ -166,7 +209,7 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
 internal fun requireGoalLedgerAllowsCall(request:QueuedChatRequest,taskGoal:TaskGoal,call:ToolCall,currentSteps:List<HarnessStep>) {
     if(request.goalSegment==null)return
     check(currentSteps.size<=WorkSegments.STEP_BUDGET)
-    check(goalToolRoom(request.goalSegment,currentSteps.size)>0){"목표의 누적 도구 예산에 도달했습니다."}
+    check(goalToolRoom(request.goalSegment,currentSteps.size-request.goalReadbackSeedCount)>0){"목표의 누적 도구 예산에 도달했습니다."}
     val steps=request.goalLedger.map {it.step}
     check(steps.none {PreparedHandoff.pendingEffect(it)||goalUnverifiedEffect(it)||
         goalUncertainFailure(it)}){"이전 목표 구간의 실패·불확실한 효과·외부 확인 대기를 먼저 해결해야 합니다."}
@@ -186,7 +229,7 @@ internal data class GoalRunEvidenceSource(val runId:String,val threadId:String,v
 internal fun sameGoalWork(left:GoalDefinition,right:GoalDefinition):Boolean =
     left.id==right.id&&left.threadId==right.threadId&&left.projectId==right.projectId&&
         left.outcome==right.outcome&&left.constraints==right.constraints&&
-        left.criteria.map {it.id to it.text}==right.criteria.map {it.id to it.text}
+        left.criteria.map {Triple(it.id,it.text,it.proofTarget)}==right.criteria.map {Triple(it.id,it.text,it.proofTarget)}
 
 /** Only same-work, same-scope host-verified steps can suppress a repeated write. */
 internal fun inheritVerifiedGoalSteps(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,workspaceBinding:String):List<HarnessStep> =

@@ -71,11 +71,27 @@ enum class GoalStatus {
     @SerialName("complete") COMPLETE,
 }
 
+@Serializable
+enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE }
+
+@Serializable
+data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
+    fun validate():GoalProofTarget {
+        when(kind) {
+            GoalProofKind.PUBLIC_PDF_SOURCE->require(WebAgentPolicy.urlAllowed(target)&&target.startsWith("https://")&&'#' !in target)
+            GoalProofKind.PROJECT_FILE->require(ProjectPaths.segments(target).joinToString("/")==target)
+        }
+        require(target.length in 1..500)
+        return this
+    }
+}
+
 /** VERIFIED evidence entries are tool-run audit IDs, not model-written claims of success. */
 @Serializable
 data class GoalCriterion(
     val id:String=UUID.randomUUID().toString(),val text:String,
     val status:GoalCriterionStatus=GoalCriterionStatus.PENDING,val evidence:List<String> = emptyList(),
+    val proofTarget:GoalProofTarget?=null,
 )
 
 /** updatedAt=0 means unsaved. Saving a loaded goal preserves its timestamp for conflict checks. */
@@ -93,6 +109,7 @@ data class GoalDefinition(
         require(outcome.isNotBlank()&&outcome.length<=12000&&'\u0000' !in outcome){"목표 내용을 입력하고 12,000자 이내로 작성해주세요."}
         require(criteria.isNotEmpty()&&criteria.map{it.id}.distinct().size==criteria.size){"완료 기준을 하나 이상 입력하고 중복 식별자를 제거해주세요."}
         criteria.forEach{criterion->
+            criterion.proofTarget?.validate()
             require(validId(criterion.id)&&criterion.text.isNotBlank()&&criterion.text.length<=12000&&'\u0000' !in criterion.text){"완료 기준 내용이 올바르지 않습니다."}
             require(criterion.evidence.distinct().size==criterion.evidence.size&&criterion.evidence.all{it.isNotBlank()&&it.length<=1000&&'\u0000' !in it}){"완료 기준의 근거가 올바르지 않습니다."}
             require(criterion.status!=GoalCriterionStatus.VERIFIED||criterion.evidence.isNotEmpty()){"검증됨 상태에는 실제 실행 근거가 필요합니다."}

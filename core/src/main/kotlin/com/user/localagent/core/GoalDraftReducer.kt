@@ -33,7 +33,7 @@ object GoalDraftReducer {
         require(edits.none {it.id in patch.removeCriterionIds}){"같은 완료 기준을 동시에 수정·삭제할 수 없습니다."}
         val byId=edits.filter {it.id!=null}.associateBy {it.id!!}
         val criteria=previous.criteria.filterNot {it.id in patch.removeCriterionIds}.map {criterion->
-            byId[criterion.id]?.let {criterion.copy(text=it.text)}?:criterion
+            byId[criterion.id]?.let {criterion.copy(text=it.text,proofTarget=criterion.proofTarget.takeIf {_ -> it.text==criterion.text})}?:criterion
         }+edits.filter {it.id==null}.map {GoalCriterion(id=newId(),text=it.text)}
         require(criteria.isNotEmpty()){"완료 기준을 하나 이상 남겨주세요."}
         val constraints=patch.constraints?:previous.constraints.mapIndexed {index,old->patch.constraintEdits[index]?:old}

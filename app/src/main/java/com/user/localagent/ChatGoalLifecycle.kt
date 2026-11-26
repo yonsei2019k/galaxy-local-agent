@@ -41,6 +41,7 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
             GoalLifecycleAction.START,GoalLifecycleAction.RESUME -> {
                 if(req.action==GoalLifecycleAction.RESUME)check(req.goal.status==GoalStatus.PAUSED){"일시 정지한 목표만 재개할 수 있습니다."}
                 queueBoundedGoalRun(req.scope,req.goal,caller.branchId,caller.modelId,caller.thinking,caller.workspaceBinding,callerJob,caller.runId,
+                    ownerInstruction=if(req.goal.linkedRunIds.isEmpty()&&caller.text.length<=6000)caller.text else req.goal.outcome,
                     capturedAllowTools=caller.allowTools,capturedMode=caller.mode,capturedPcDataBinding=caller.pcDataBinding,
                     capturedPcRevision=caller.capturedPcRevision,allowCloudText=caller.allowCloudText,
                     capturedAllowExternalAgent=caller.allowExternalAgent,capturedExternalAgentRevision=caller.externalAgentRevision,
@@ -108,10 +109,12 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding
+            val readback=nextSegment?.readback
             var captured:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
-                    allowTools=capturedAllowTools,mode=capturedMode,previousSteps=emptyList(),
+                    allowTools=capturedAllowTools,mode=capturedMode,previousSteps=readback?.steps.orEmpty(),
+                    readbackObligations=readback?.forRun(runId),goalReadbackSeedCount=readback?.steps?.size?:0,
                     workspaceBinding=binding,goal=pendingGoal,parentGoalStartRunId=parentGoalStartRunId,pcDataBinding=pcBinding,capturedPcRevision=capturedPcRevision,allowCloudText=allowCloudText,
                     allowExternalAgent=capturedAllowExternalAgent,externalAgentRevision=capturedExternalAgentRevision,
                     kakaoReadBinding=capturedKakaoReadBinding,pcImageRecoveryAllowed=capturedPcImageRecoveryAllowed,

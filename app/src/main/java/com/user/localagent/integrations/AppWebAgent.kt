@@ -91,7 +91,9 @@ class AppWebAgent private constructor(private val context:Context) {
             prior?.anchorRunId?:binding.runId))
     }
     data class WebsiteLogin(val card:LoginCard,val url:String,val nolGuide:Boolean=false,val vaultSaveFailed:Boolean=false)
-    data class WorkBinding(val runId:String,val threadId:String,val branchId:String)
+    data class WorkBinding(val runId:String,val threadId:String,val branchId:String) {
+        fun sameConversation(other:WorkBinding)=threadId==other.threadId&&branchId==other.branchId
+    }
     data class WebsiteWork(val host:String,val status:String,val steps:List<String>,val working:Boolean=false,
         val binding:WorkBinding?=null,val anchorRunId:String?=binding?.runId,val anchorMessageId:String?=null)
     private val browserWorkBinding=MutableStateFlow<WorkBinding?>(null)
@@ -300,6 +302,7 @@ class AppWebAgent private constructor(private val context:Context) {
             BrowserLoginRoutes.naverReturnPage(taskUrl)!=url))return null
         if(agentActive.value||loginSubmitting||loginCard.value!=null||pendingPcLogin!=null)return null
         browserWorkBinding.value=binding
+        browserNavigationWork=binding
         confirmedPcLogin=null
         lastConfirmedCard=null
         lastConfirmedOrigin=null
@@ -399,9 +402,9 @@ class AppWebAgent private constructor(private val context:Context) {
         return app.goalWaits.confirmAuth("$loginProcess:$id")
     }
 
-    internal suspend fun sampleGoalMedia():MediaEndWatcher.Observation? = mutex.withLock {
+    internal suspend fun sampleGoalMedia(work:WorkBinding):MediaEndWatcher.Observation? = mutex.withLock {
         withContext(Dispatchers.Main.immediate) {
-            if (webView==null || loading || navigation.value.error!=null) return@withContext null
+            if (browserNavigationWork!=work || webView==null || loading || navigation.value.error!=null) return@withContext null
             val page=dom(buildJsonObject{put("key",domKey);put("action","observeBoundMedia");put("snapshotId",token())})
                 ?: return@withContext null
             MediaEndWatcher.Observation(page.s("url"),(page["media"] as? JsonObject)
@@ -409,9 +412,9 @@ class AppWebAgent private constructor(private val context:Context) {
         }
     }
 
-    internal suspend fun stopGoalMedia(condition:com.user.localagent.core.WaitCondition.MediaEnd) = mutex.withLock {
+    internal suspend fun stopGoalMedia(condition:com.user.localagent.core.WaitCondition.MediaEnd,work:WorkBinding) = mutex.withLock {
         withContext(Dispatchers.Main.immediate) {
-            if(webView?.url==condition.pageUrl&&!loading){
+            if(browserNavigationWork==work&&webView?.url==condition.pageUrl&&!loading){
                 dom(buildJsonObject{put("key",domKey);put("action","pauseBoundMedia");put("snapshotId",token())
                     put("pageUrl",condition.pageUrl);put("playerSignature",condition.playerSignature)})
             }
@@ -420,9 +423,22 @@ class AppWebAgent private constructor(private val context:Context) {
 
     fun dismissWebsiteWork(){websiteWorks.value=websiteWorks.value.filterNot{it.binding==browserWorkBinding.value}}
 
+    internal suspend fun inheritGoalPage(parent:WorkBinding,child:WorkBinding) = mutex.withLock {
+        withContext(Dispatchers.Main.immediate) {
+            if(canInheritBrowserPage(browserNavigationWork,parent,child)) {
+                browserNavigationWork=child
+                snapshot=null
+            }
+        }
+    }
+
     internal fun bindResumedWork(originalRunId:String,binding:WorkBinding) {
         if(browserWorkBinding.value?.runId!=originalRunId)return
         browserWorkBinding.value=binding
+        if(browserNavigationWork?.let {it.runId==originalRunId&&it.threadId==binding.threadId&&it.branchId==binding.branchId}==true) {
+            browserNavigationWork=binding
+            snapshot=null
+        }
         val prior=websiteWorkFor(binding)?.takeIf{it.binding?.runId==originalRunId} ?: return
         putWebsiteWork(prior.copy(binding=binding,status="로그인 확인 · 원래 작업 이어가는 중",
             steps=(prior.steps+"원래 요청 재개").takeLast(4),working=true))
@@ -1003,17 +1019,17 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     /** Sends a public URL entered by the owner to the same WebView the assistant observes. */
-    suspend fun openFromAddress(input:String) {
-        if(agentActive.value||loginCard.value!=null)return
+    suspend fun openFromAddress(input:String):Unit = mutex.withLock {
+        if(agentActive.value||loginCard.value!=null)return@withLock
         val text=input.trim()
         val url=if(text.contains("://"))text else "https://$text"
         if(!WebAgentPolicy.urlAllowed(url)){
             navigationFailed("URL_NOT_ALLOWED")
-            return
+            return@withLock
         }
         if(url.startsWith("http://",ignoreCase=true)){
             navigationFailed("HTTPS_REQUIRED")
-            return
+            return@withLock
         }
         browserNavigationWork=null
         browserPublicSearchUrl=null
@@ -1148,8 +1164,9 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private fun fail(code:String)=buildJsonObject{put("error",code)}
 
-    internal suspend fun saveObservedPdf(id:String,ref:String,progress:com.user.localagent.tools.PdfSaveProgress,verifyRun:suspend ()->Unit):String=mutex.withLock {
+    internal suspend fun saveObservedPdf(id:String,ref:String,progress:com.user.localagent.tools.PdfSaveProgress,work:WorkBinding,verifyRun:suspend ()->Unit):String=mutex.withLock {
         val document=withContext(Dispatchers.Main.immediate) {
+            check(browserNavigationWork==work){"이 작업의 PDF 페이지를 다시 열어 주세요."}
             checkNotNull(pdfDocument?.takeIf{it.snapshotId==id}){"PDF가 있던 페이지를 다시 확인해 주세요."}
         }
         val target=withContext(Dispatchers.Main.immediate) {
@@ -1505,6 +1522,8 @@ class AppWebAgent private constructor(private val context:Context) {
     /** Serialises agent access on the main thread and marks the browser as agent-driven meanwhile. */
     private suspend fun guarded(label:String,targetUrl:String?=null,work:WorkBinding?=null,block:suspend()->JsonObject):JsonObject = mutex.withLock{
         withContext(Dispatchers.Main){
+            if(targetUrl==null&&loginCard.value==null&&!ownsBrowserPage(browserNavigationWork,work))
+                return@withContext fail("BROWSER_WORK_PAGE_CHANGED")
             agentActive.value=true
             if(loginCard.value==null&&work!=null)browserWorkBinding.value=work
             val requestedHost=secureOrigin(targetUrl?:webView?.url)?.host

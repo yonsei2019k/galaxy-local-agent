@@ -140,7 +140,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
         val goalReadAuthority=com.user.localagent.automation.GoalReadAuthority()
         val goalTools=goalLifecycle?.let {lifecycle->com.user.localagent.automation.ScopedGoalTools(capturedAccess,
             com.user.localagent.automation.GuardedChatGoalStore(goalStore),authorizedGoalTools,requestRunId,lifecycle,
-            editReadGuard=goalReadAuthority::requireEdit)}
+            editReadGuard=goalReadAuthority::requireEdit,ownerInstruction=ownerRequest)}
         return ToolExecutor(appContext,scoped,scheduler,imports,phoneRecords,
             createDocument={call->fileTools.createDocument(call.arguments.getValue("format").jsonPrimitive.content,call.arguments.getValue("title").jsonPrimitive.content,call.arguments.getValue("content").jsonPrimitive.content).toolResult()},
             researchWeb={call->com.user.localagent.web.WebResearchController(appContext,scoped).research(call.arguments.getValue("query").jsonPrimitive.content,call.name=="search_shopping",call.arguments["store"]?.jsonPrimitive?.content).toolResult()},

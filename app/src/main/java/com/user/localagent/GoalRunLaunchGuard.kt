@@ -89,7 +89,7 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
     }
 }
 internal sealed interface GoalSegmentDecision {
-    data class Continue(val binding:GoalSegmentBinding,val ledger:List<GoalLedgerEntry>):GoalSegmentDecision
+    data class Continue(val binding:GoalSegmentBinding,val ledger:List<GoalLedgerEntry>,val readback:GoalReadbackSeed?=null):GoalSegmentDecision
     data object Complete:GoalSegmentDecision
     data class Pause(val reason:GoalAutopilotPauseReason):GoalSegmentDecision
 }
@@ -117,13 +117,13 @@ internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSou
 
 private fun hasNewGoalProgress(request:QueuedChatRequest,goal:GoalDefinition):Boolean {
     val seen=request.goalLedger.mapNotNull {goalProgressKey(it.step)}.toSet()
-    return request.previousSteps.mapNotNull(::goalProgressKey).any {it !in seen} ||
+    return request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalProgressKey).any {it !in seen} ||
         goal.criteria.any {now->now.status==GoalCriterionStatus.VERIFIED &&
             checkNotNull(request.goal).criteria.none {it.id==now.id&&it.status==GoalCriterionStatus.VERIFIED}}
 }
 
-internal val goalRecoverablePauseCodes=setOf("reasoning_budget_exhausted","partial_verified_browser_reads",
-    "partial_verified_sources","partial_verified_tool_budget","partial_recoverable_provider",
+internal val goalRecoverablePauseCodes=setOf("reasoning_budget_exhausted","final_synthesis_needs_action","partial_verified_browser_reads",
+    "partial_verified_sources","partial_verified_tool_budget","partial_recoverable_provider","goal_readback_retry",
     GoalAutopilotPauseReason.TOOL_BUDGET.code,GoalAutopilotPauseReason.TIME_BUDGET.code)
 
 internal fun goalMayResumeFrom(row:ChatRunRecord):Boolean =
@@ -156,7 +156,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         val parkedAt=wake["parkedAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
         val wokeAt=wake["wokeAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
         val finalStep=request.previousSteps.lastOrNull()
-        val authReady=wake["event"]==JsonPrimitive(WakeEvent.OWNER_AUTH_DONE.name) &&
+        val authReady=wake["event"] in setOf(JsonPrimitive(WakeEvent.OWNER_AUTH_DONE.name),JsonPrimitive(WakeEvent.TIME_REACHED.name)) &&
             finalStep?.tool in setOf("read_app_browser_page","open_app_browser_page") &&
             finalStep?.evidence?.effectNotApplied==true &&
             finalStep.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED
@@ -175,29 +175,36 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         }
         wokeAt-parkedAt
     } else {
-        if(!goalMayResumeFrom(parent))return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
+        if(!goalMayResumeFrom(parent)&&parent.errorCode!="execution_not_verified")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
         0L
     }
     val readbackContext=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)
     val assessment=RequiredReadbackObligations.assess(request.readbackObligations,readbackContext,request.previousSteps,
         request.previousSteps.size,ToolRegistry.definitions.keys,1,1)
-    if(assessment.pending.isNotEmpty()||assessment.blockers.isNotEmpty())return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
-    if(goal.completionReady)return GoalSegmentDecision.Complete
-    val progressed=completedMedia||hasNewGoalProgress(request,goal)
+    val recovery=if(assessment.pending.isEmpty())null else GoalReadbackSeed.from(request,assessment)
+    if(assessment.blockers.isNotEmpty()||assessment.pending.isNotEmpty()&&recovery==null)
+        return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
+    if(goalCompletionProofsMatch(request,goal)&&recovery==null)return GoalSegmentDecision.Complete
+    if(parent.errorCode=="execution_not_verified"&&recovery==null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
+    val progressed=completedMedia||recovery==null&&hasNewGoalProgress(request,goal)
     val noProgress=if(progressed)0 else segment.noProgressSegments+1
     val budget=segment.copy(startedAtMs=segment.startedAtMs+clockShift)
     if(segment.totalSegments>=GoalSegmentBinding.MAX_SEGMENTS)return pause(GoalAutopilotPauseReason.SEGMENT_BUDGET)
     if(ledger.size>=GoalSegmentBinding.MAX_TOOL_CALLS||!goalLedgerFits(ledger))return pause(GoalAutopilotPauseReason.TOOL_BUDGET)
     val limit=goalBudgetStop(budget,ledger.size,nowMs,noProgress,useNativeBudget)
+    val observedMilestones=request.goalLedger.mapNotNull {goalMilestoneKey(it.step)}.toSet()
+    val earnedPhase=completedMedia || goal.criteria.any {criterion->
+        criterion.status==GoalCriterionStatus.VERIFIED&&request.goal.criteria.none {it.id==criterion.id&&it.status==GoalCriterionStatus.VERIFIED}
+    } || request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalMilestoneKey).any {it !in observedMilestones}
     val renew=limit in setOf(GoalAutopilotPauseReason.SEGMENT_BUDGET,GoalAutopilotPauseReason.TOOL_BUDGET,GoalAutopilotPauseReason.TIME_BUDGET) &&
-        progressed && nowMs>=budget.startedAtMs
+        earnedPhase && recovery==null && nowMs>=budget.startedAtMs
     if(limit!=null&&!renew)return pause(limit)
     val nextStart=if(renew)maxOf(budget.startedAtMs,parent.finishedAt?:parent.updatedAt) else budget.startedAtMs
     if(nextStart>nowMs)return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
     return GoalSegmentDecision.Continue(budget.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
         segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress,
         startedAtMs=nextStart,phaseStartSegments=if(renew)segment.totalSegments else segment.phaseStartSegments,
-        phaseStartCalls=if(renew)ledger.size else segment.phaseStartCalls),ledger)
+        phaseStartCalls=if(renew)ledger.size else segment.phaseStartCalls),ledger,recovery)
 }
 
 internal fun goalToolRoom(segment:GoalSegmentBinding,steps:Int):Int =
@@ -284,7 +291,10 @@ internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefi
         requireSameGoalAuthority(original,request)
         val decision=goalSegmentDecision(row,goal,segment.scopeKey,nowMs,unknownEffects=false,useNativeBudget=useNativeBudget)
         check(decision is GoalSegmentDecision.Continue&&decision.binding==segment&&
-            decision.ledger.map {it.json()}==request.goalLedger.map {it.json()}) {"실제 부모 체크포인트에서 이 다음 구간을 재검증하지 못했습니다."}
+            decision.ledger==request.goalLedger&&request.goalReadbackSeedCount==(decision.readback?.steps?.size?:0)&&
+            request.readbackObligations==decision.readback?.forRun(request.runId)&&
+            request.previousSteps.size==(decision.readback?.steps?.size?:0)&&
+            request.previousSteps.zip(decision.readback?.steps.orEmpty()).all {(a,b)->a.tool==b.tool&&a.arguments==b.arguments&&a.evidence==b.evidence}) {"실제 부모 체크포인트에서 이 다음 구간을 재검증하지 못했습니다."}
         return
     }
     val parentId=request.parentGoalStartRunId?:return // Existing explicit GUI submissions retain their old captured mode.

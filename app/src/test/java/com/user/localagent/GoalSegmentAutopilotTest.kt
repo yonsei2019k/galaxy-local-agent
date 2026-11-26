@@ -103,12 +103,57 @@ class GoalSegmentAutopilotTest {
 
     @Test fun criterionEvidenceIsBoundToRealCurrentOrInheritedAuditSteps() {
         val original=step()
-        val verified=HarnessStep(original.tool,original.arguments,original.evidence.copy(auditId="real-proof"))
+        val call=ToolCall("test-file","write_project_file",buildJsonObject {put("path","result.txt");put("content","QA")})
+        val result=ToolResult(call.id,true,buildJsonObject {
+            put("verified",true);put("path","result.txt");put("sha256","a".repeat(64))
+        }.toString(),VerificationState.VERIFIED,"Saved and checked")
+        val verified=HarnessStep(call,StepEvidence(call.name,result.verification,result.verificationSummary,
+            auditId="real-proof",outcomeProof=goalOutcomeProof(call,result)))
         val checkpoint=request(listOf(original),segment().copy(consumedToolCalls=1),listOf(GoalLedgerEntry("past",0,verified)))
         assertEquals(setOf("real-proof"),goalCriterionEvidence(checkpoint,checkpoint.previousSteps).keys)
-        assertTrue(goalCriterionEvidence(request(),listOf(original)).isEmpty())
+        val expected=GoalCriterion("artifact","Requested file",proofTarget=GoalProofTarget(GoalProofKind.PROJECT_FILE,"result.txt"))
+        assertTrue(goalCriterionMatches(expected,verified))
+        assertFalse(goalCriterionMatches(expected,original))
+        assertFalse(goalCriterionMatches(expected.copy(proofTarget=GoalProofTarget(GoalProofKind.PROJECT_FILE,"other.txt")),verified))
+        assertFalse(goalCriterionMatches(expected.copy(proofTarget=null),verified))
         assertEquals(checkpoint.toJson(),QueuedChatRequest.fromJson(checkpoint.toJson()).toJson())
         assertFalse(goalCriterionEvidenceTool(GoalProgressToolCatalog.VERIFY))
+    }
+
+    @Test fun knownPendingFileReadbackQueuesOnlyTheBoundReadWithoutDroppingPriorMutation() {
+        val mutation=HarnessStep("write_project_file",buildJsonObject {put("path","result.txt");put("content","QA")},
+            StepEvidence("write_project_file",VerificationState.VERIFIED,"Saved file"))
+        val original=request(listOf(mutation))
+        val scope=RequiredReadbackObligations.Context(original.runId,original.threadId,original.projectId,"scope",original.workspaceBinding)
+        val selected=RequiredReadbackObligations.select(null,scope,setOf("write_project_file","read_project_file"))
+        val expected=RequiredReadbackPolicy.Snapshot(RequiredReadbackPolicy.Resource("project_file","result.txt"),"r1","a".repeat(64))
+        val applied=RequiredReadbackPolicy.Mutation(scope.proofBinding(),0,mutation.tool,expected)
+        val state=RequiredReadbackObligations.capture(selected,scope,listOf(mutation),listOf(applied),emptyList(),true)
+        val parent=original.copy(readbackObligations=state)
+        val decision=decide(parent,errorCode="execution_not_verified") as GoalSegmentDecision.Continue
+        val seed=checkNotNull(decision.readback)
+        val queued=child(parent,decision).copy(previousSteps=seed.steps,readbackObligations=seed.forRun("run-b"),goalReadbackSeedCount=1)
+        requireGoalLaunchBinding(queued,queued.goal,row(parent,errorCode="execution_not_verified"),false,started+200)
+        val pending=RequiredReadbackObligations.assess(queued.readbackObligations,scope.copy(runId="run-b"),
+            queued.previousSteps,1,setOf("read_project_file"),6,1).pending
+        val read=checkNotNull(goalReadbackCalls(queued.previousSteps,pending)).single()
+        assertEquals("read_project_file",read.name)
+        assertEquals("result.txt",read.arguments.getValue("path").jsonPrimitive.content)
+        assertEquals(1,completedGoalLedger(queued).size) // the inherited write stays in the ledger exactly once
+        assertThrows(IllegalStateException::class.java) {
+            requireGoalLaunchBinding(queued.copy(previousSteps=emptyList(),goalReadbackSeedCount=0,readbackObligations=null),
+                queued.goal,row(parent,errorCode="execution_not_verified"),false,started+200)
+        }
+    }
+
+    @Test fun anotherTasksBrowserPageCannotBeReadOrInherited() {
+        val parent=com.user.localagent.integrations.AppWebAgent.WorkBinding("parent","thread","branch")
+        val child=parent.copy(runId="child")
+        val concurrent=parent.copy(runId="other",threadId="different")
+        assertFalse(com.user.localagent.integrations.ownsBrowserPage(concurrent,parent))
+        assertTrue(com.user.localagent.integrations.canInheritBrowserPage(parent,parent,child))
+        assertFalse(com.user.localagent.integrations.canInheritBrowserPage(concurrent,parent,child))
+        assertFalse(com.user.localagent.integrations.canInheritBrowserPage(parent,parent,child.copy(branchId="different")))
     }
 
     @Test fun timedWaitExcludesOnlyHostRecordedIdleTimeAndStillRequiresVerifiedCheckpoint() {

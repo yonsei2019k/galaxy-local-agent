@@ -288,7 +288,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                         else {
                             val id=call.s("snapshotId");val ref=call.s("ref")
                             val web=com.user.localagent.integrations.AppWebAgent.get(context)
-                            web.saveObservedPdf(id,ref,progress) {
+                            val work=checkNotNull(browserWorkBinding())
+                            web.saveObservedPdf(id,ref,progress,work) {
                                 verifyGrant()
                                 check(connectionRunId!=null && connectionIsRunLive() && call.name in capturedAvailableTools)
                                 connectionVerifyAccess()

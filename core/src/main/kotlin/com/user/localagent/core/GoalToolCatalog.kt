@@ -25,12 +25,12 @@ object GoalToolCatalog {
         ToolDefinition(GET,Risk.LOW,mapOf("criteriaOffset" to Argument("integer",false),"criteriaLimit" to Argument("integer",false),"goalId" to text(false,100),"expectedUpdatedAt" to text(false,19),
             "textField" to text(false,10),"criterionId" to text(false,100),"constraintIndex" to Argument("integer",false),"textOffset" to Argument("integer",false),"textLimit" to Argument("integer",false)),
             "Read this conversation's goal and criteria page (offset0/limit8, limit1..16), or one exact text fragment using textField=outcome|criterion|constraint. Field reads require copied goalId/expectedUpdatedAt; criterion requires criterionId, constraint requires constraintIndex0..12000 and the host checks the actual list. textOffset0..12000/default0, textLimit1..900/default900 is an upper bound; follow the actual returned next offset if fewer exact characters fit the context. Field reads cannot mix criteriaOffset/criteriaLimit. Read continuations for hidden text; a preview does not authorize a whole-field replacement. Private context only, never goal completion evidence."),
-        ToolDefinition(CREATE,Risk.LOW,mapOf("outcome" to text(),"criteria" to Argument("array"),"constraints" to Argument("array",false)),
-            "Create a DRAFT goal only when the owner explicitly requested persistent goal tracking. Requires no existing goal. Criteria are draft text, not verified/confirmed. Never starts work, schedules work, changes scope, or grants permissions."),
+        ToolDefinition(CREATE,Risk.LOW,mapOf("outcome" to text(),"criteria" to Argument("array"),"constraints" to Argument("array",false),"proofTargets" to Argument("array",false)),
+            "Create a draft goal when the owner asks for a result requiring multiple dependent steps or an automatic wait. Preserve the exact requested scope. No existing goal may be replaced. Optional proofTargets link a zero-based criterion index to a known exact PUBLIC_PDF_SOURCE HTTPS URL or PROJECT_FILE relative path. Use only an exact target from the request or observed sources. This grants no new permissions."),
         ToolDefinition(UPDATE,Risk.LOW,version+mapOf("outcome" to text(false),"criteria" to Argument("array",false),"removeCriterionIds" to Argument("array",false),"constraints" to Argument("array",false),"textEdits" to Argument("array",false)),
             "Edit the actual goal using copied goalId/expectedUpdatedAt. For partial changes use textEdits1..8: {field,criterionId? only criterion,constraintIndex? only constraint,oldText1..900,newText0..2000}. One edit per actual field identity; oldText must match uniquely in that field and occur in its actual model-delivered fragment. Preserve all other text. textEdits cannot mix outcome/criteria/constraints/removeCriterionIds. Whole-field replacements additionally require host proof of the actual complete field delivered to this model; previews are insufficient. criteria patches preserve omitted IDs; missing id adds a criterion. Changed work quiesces linked runs and resets proof/status, identical work preserves real evidence. No status/evidence/run links accepted."),
         ToolDefinition(START,Risk.LOW,version,
-            "Only on an explicit owner request to start a goal: queue one bounded run through the host lifecycle. Once the host confirms it is queued, finish this dispatch. Carry out the actual work in the separate goal run. A queued run is not goal completion and grants no permissions."),
+            "For the owner's current instruction to carry out the saved goal, including when a fresh draft was made for this same multi-step request: queue one bounded run through the host lifecycle. Once the host confirms it is queued, finish this dispatch. Carry out the actual work in the separate goal run. A queued run is not goal completion and grants no permissions."),
         ToolDefinition(PAUSE,Risk.LOW,version,
             "Only on an explicit pause request: quiesce this goal's linked runs, then save PAUSED. If stopping the caller must wait until its receipt is durable, report PREPARED/deferredCallerStop instead of claiming it already stopped."),
         ToolDefinition(RESUME,Risk.LOW,version,
@@ -44,7 +44,7 @@ object GoalToolCatalog {
     private val byName=definitions.associateBy {it.name}
 
     fun isArrayArgument(tool:String,key:String)=when(tool) {
-        CREATE->key in setOf("criteria","constraints")
+        CREATE->key in setOf("criteria","constraints","proofTargets")
         UPDATE->key in setOf("criteria","constraints","removeCriterionIds","textEdits")
         else->false
     }
@@ -64,6 +64,7 @@ object GoalToolCatalog {
                 else->error("지원하지 않는 목표 인자 형식입니다.")
             }
         }
+        if(call.name==CREATE&&"proofTargets" in call.arguments)parseProofTargets(call)
         if(call.name in mutationNames-CREATE) {
             id(call.arguments.getValue("goalId"));revision(call.arguments.getValue("expectedUpdatedAt"))
         }
@@ -108,6 +109,10 @@ object GoalToolCatalog {
         }
         require(isArrayArgument(tool,key)&&value is JsonArray&&value.size<=16){"목표 배열은16개 이하여야 합니다."}
         val array=value as JsonArray
+        if(tool==CREATE&&key=="proofTargets"){
+            require(array.map {readProofTarget(it).first}.distinct().size==array.size)
+            return
+        }
         if(tool==CREATE&&key=="criteria")require(array.isNotEmpty()){"완료 기준을 하나 이상 작성해주세요."}
         if(tool==UPDATE&&key=="criteria") {
             val ids=mutableSetOf<String>()
@@ -120,6 +125,22 @@ object GoalToolCatalog {
             val ids=array.map(::id)
             require(ids.distinct().size==ids.size){"삭제할 완료 기준 식별자가 중복됐습니다."}
         } else array.forEach {string(it,2000)}
+    }
+
+    fun parseProofTargets(call:ToolCall):Map<Int,GoalProofTarget> {
+        require(call.name==CREATE)
+        val criteria=call.arguments.getValue("criteria").jsonArray
+        val targets=(call.arguments["proofTargets"] as? JsonArray).orEmpty().map(::readProofTarget)
+        require(targets.all {it.first in criteria.indices}&&targets.map {it.first}.distinct().size==targets.size)
+        return targets.toMap()
+    }
+
+    private fun readProofTarget(value:JsonElement):Pair<Int,GoalProofTarget> {
+        require(value is JsonObject&&value.keys==setOf("criterionIndex","kind","target"))
+        val i=value.getValue("criterionIndex").jsonPrimitive.let {require(!it.isString);it.int}
+        require(i in 0..15)
+        return i to GoalProofTarget(GoalProofKind.valueOf(string(value.getValue("kind"),32)),
+            string(value.getValue("target"),500)).validate()
     }
 
     private fun fieldIdentity(field:String,arguments:JsonObject):String {
@@ -171,6 +192,18 @@ object GoalToolCatalog {
                     })
                     put("required",buildJsonArray {add("field");add("oldText");add("newText");if(field=="criterion")add("criterionId");if(field=="constraint")add("constraintIndex")})
                 })}})})
+            }
+            tool==CREATE&&key=="proofTargets"->buildJsonObject {
+                put("type","array");put("maxItems",16)
+                put("items",buildJsonObject {
+                    put("type","object");put("additionalProperties",false)
+                    put("properties",buildJsonObject {
+                        put("criterionIndex",buildJsonObject {put("type","integer");put("minimum",0);put("maximum",15)})
+                        put("kind",buildJsonObject {put("type","string");put("enum",JsonArray(GoalProofKind.entries.map {JsonPrimitive(it.name)}))})
+                        put("target",textSchema(500))
+                    })
+                    put("required",JsonArray(listOf("criterionIndex","kind","target").map(::JsonPrimitive)))
+                })
             }
             isArrayArgument(tool,key)->buildJsonObject {
                 put("type","array");put("maxItems",16);put("minItems",if(tool==CREATE&&key=="criteria")1 else 0)

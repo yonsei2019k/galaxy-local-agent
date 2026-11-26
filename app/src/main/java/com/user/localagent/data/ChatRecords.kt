@@ -824,6 +824,15 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     internal suspend fun awaitOfficeRun(id: String): ChatRunRecord? =
         dao.observeRun(id).first { it == null || it.status !in setOf("queued", "running", "waiting_approval") }
 
+    internal suspend fun writeGoalWaitOutcome(runId:String,text:String,errorCode:String)=database.withTransaction {
+        val run=validRun(runId)
+        if(run.status!="paused"||run.errorCode!="waiting_goal_condition")return@withTransaction
+        check(com.user.localagent.QueuedChatRequest.fromJson(run.contextJson).goalSegment!=null)
+        require(text.isNotBlank()&&text.length<=1000&&errorCode.startsWith("goal_"))
+        insertMessage(MessageRecord(role="assistant",text=text,threadId=run.threadId,branchId=run.branchId),run.userMessageId)
+        dao.run(run.copy(errorCode=errorCode,updatedAt=now()))
+    }
+
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)
         val run=validRun(runId);check(run.status in setOf("running","waiting_approval")){"시작된 작업의 답변만 저장합니다."}

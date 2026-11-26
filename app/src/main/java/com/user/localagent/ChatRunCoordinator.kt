@@ -108,7 +108,8 @@ internal fun goalNativeEffectsUnresolved(row:com.user.localagent.data.ChatRunRec
     val raw=context["sharedEngineState"]
     check(context[LOCAL_SUBAGENT_IN_FLIGHT]==null)
     if(raw==null||raw is JsonNull) {
-        context["localGoalJournal"]!=localGoalJournal(scopeKey,false,false)||ExternalAgentSettings.isCloud(request.modelId)
+        context["localGoalJournal"]!=localGoalJournal(scopeKey,false,false)||
+            ExternalAgentSettings.isCloud(request.modelId)&&request.goalReadbackSeedCount==0
     } else {
         val native=raw.jsonObject
         check(native.keys==setOf("binding","calls","inFlight","inFlightTool","uncertain","closed","budget","startedAtMs","deadlineAtMs","events"))
@@ -744,6 +745,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 if(candidate.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,candidate.goalSegment.scopeKey,true)) {"이전 구간의 공통 실행 기록이 불확실해 다시 실행하지 않았습니다."}
                                 requireGoalLaunchBinding(candidate,actual,parent,goalRunCallerJobs[candidate.runId]?.isCancelled==true)
                             }
+                            candidate.goalSegment?.parentRunId?.let {parentId->
+                                val browser=com.user.localagent.integrations.AppWebAgent.get(context)
+                                browser.inheritGoalPage(
+                                    com.user.localagent.integrations.AppWebAgent.WorkBinding(parentId,candidate.threadId,candidate.branchId),
+                                    com.user.localagent.integrations.AppWebAgent.WorkBinding(candidate.runId,candidate.threadId,candidate.branchId))
+                            }
                             if(candidate.continuation!=null)app.repository.chat.resumeRun(candidate.runId)else app.repository.chat.startRun(candidate.runId)
                             goalRunCallerJobs.remove(candidate.runId)
                             goalQueuedEpochs.remove(candidate.runId)
@@ -873,7 +880,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val access=chat.accessScope(thread.id)
                     val goal=goals.loadGuarded(access)?.takeIf {it.status==GoalStatus.ACTIVE}?:return@withLock
                     val parent=goal.linkedRunIds.lastOrNull()?.let {chat.run(it)}?:return@withLock
-                    if(!goalMayResumeFrom(parent)||thread.activeBranchId!=parent.branchId)return@withLock
+                    val interruptedWake=parent.status=="paused"&&parent.errorCode=="waiting_goal_condition"&&
+                        Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
+                    val unfinishedReadback=parent.status=="paused"&&parent.errorCode=="execution_not_verified"&&
+                        Json.parseToJsonElement(parent.contextJson).jsonObject["readbackObligations"] is JsonObject
+                    if((!goalMayResumeFrom(parent)&&!interruptedWake&&!unfinishedReadback)||thread.activeBranchId!=parent.branchId)return@withLock
                     val request=requireGoalRunBinding(goal,parent)
                     if(request.goalSegment==null)return@withLock
                     requireGoalSegmentScope(request,access)
@@ -1083,8 +1094,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.RUN_STARTED,
                     request.goal?.outcome,if(request.goal==null)com.user.localagent.data.WorkSummarySource.HOST else com.user.localagent.data.WorkSummarySource.USER_GOAL)
                 if(!prepareGoalAutopilotHold(request))return@launch
-                if(request.goalSegment!=null&&request.continuation==null&&!ExternalAgentSettings.isCloud(request.modelId))
+                if(request.goalSegment!=null&&request.continuation==null&&
+                    (!ExternalAgentSettings.isCloud(request.modelId)||request.goalReadbackSeedCount>0))
                     saveLocalGoalJournal(request,pending=false,initialize=true)
+                if(request.goalReadbackSeedCount>0) {
+                    prepareRequestTools(request,makeRequestProgress(request,workTraceSession)){lease=it}
+                    executeGoalReadbackRecovery(request)
+                    return@launch
+                }
                 if(request.scheduledReadTool!=null)app.repository.chat.verifyScheduledRead(request.runId,request.threadId)
                 if (request.officeStage == OfficeStage.WORKFLOW) {
                     runOfficeWorkflow(request)
@@ -1830,8 +1847,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val parentBinding=binding(source)
                 if(CloudConversationContext.isEligible(currentBinding,parentBinding)) {
                     val wake=Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] as? JsonObject
-                    val next=if(wake?.get("event")==JsonPrimitive(WakeEvent.MEDIA_ENDED.name))
-                        "같은 영상의 종료를 확인했어요. 사이트 진도를 다시 확인하고 다음 단계로 넘어가세요.\n" else ""
+                    val next=when(wake?.get("event")) {
+                        JsonPrimitive(WakeEvent.MEDIA_ENDED.name)->"같은 영상이 끝났어요. 사이트 진도와 다음 강의를 확인하세요.\n"
+                        JsonPrimitive(WakeEvent.MEDIA_STALLED.name),JsonPrimitive(WakeEvent.PLAYER_GONE.name),
+                        JsonPrimitive(WakeEvent.MEDIA_LIMIT.name),JsonPrimitive(WakeEvent.LOGIN_EXPIRED.name)->
+                            "이전 영상 확인이 끊겼어요. 원래 사이트의 저장된 진도를 다시 읽고 필요한 경우 휴대폰 인증을 요청하세요. 완료는 사이트에서 확인하세요.\n"
+                        else->""
+                    }
                     val recent=previous?.takeIf {it.binding.runId==parent.id}?.goal.orEmpty()
                     previous=CloudConversationContext.PreviousTask(parentBinding,parent.status,source.text,
                         next+recent.take(300)+"\n저장된 실제 결과 요약(인용 데이터): "+goalCheckpointSummary(request).toString().take(900),
@@ -1859,7 +1881,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
             beforeLaunch={verifyAuthority()},
             officePersona=officePersona+(if(request.goalSegment!=null)
-                " This run is one segment of a saved goal. Plan get_goal and read_goal_progress when needed. Continue from host-recorded results and include verify_goal_criterion when a real result can prove a remaining criterion. Use fresh verification for an open site's current state. Do not repeat confirmed writes." else "")+if(request.browserAuthParentRunId!=null)
+                " This run is one segment of a saved goal. Plan get_goal and read_goal_progress when needed. Continue from host-recorded results, verify the exact current target, and include verify_goal_criterion for a typed proof. Consider a different authorized read after a known no-effect failure. Do not repeat confirmed writes." else if(request.allowTools&&request.officeStage==null&&request.mode in setOf("act","debug"))
+                " When the user asks you to carry out a multi-step task that needs a wait or later resumption, use create_goal and start_goal before doing the business steps in this run. Create a new draft only if there is no saved goal. Preserve the original task, all constraints, and every required approval." else "")+if(request.browserAuthParentRunId!=null)
                 " The owner completed login on the phone. Continue the original request. Include ${com.user.localagent.integrations.AppWebAgent.get(context).confirmedReadTool()} in the plan and execute it first on the authenticated browser. Do not replay previous effects."
                 else "")
     }
@@ -2282,7 +2305,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             publishActionFinal(request,requestAuthorizedTools,browserProgress,true,"partial_verified_browser_reads")
         else if(links.isEmpty()){
             val canContinue=request.goalSegment!=null&&authorityPermitted()&&(reachedToolLimit||
-                resultState=="partial"&&actual.any {it.result.success&&it.result.verification==VerificationState.VERIFIED})
+                resultState in setOf("partial","failed")&&actual.isNotEmpty()&&
+                actual.all {it.result.effectNotApplied||it.result.verification==VerificationState.VERIFIED}&&
+                actual.any {it.result.success||com.user.localagent.core.ToolInterruptionPolicy.hasNoMutation(it.proposal.tool)})
             publishActionFinal(request,requestAuthorizedTools,if(canContinue)"확인한 결과를 저장했어요. 남은 단계부터 이어갈게요."
                 else if(browserProgress==null)notice else "요청 권한이 바뀌어 작업을 멈췄어요.",true,
                 if(canContinue)"partial_verified_tool_budget" else "execution_not_verified")
@@ -2512,7 +2537,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         (if("patch_note" in allowedTools)"\n"+com.user.localagent.core.OwnerTextSources.patchPrompt(request.text)else "")+
         (semantic?.let {"\n현재 요청의 전체 의미 계획 · 최신 목표와 제약을 보존: "+com.user.localagent.core.SemanticRequestPlanning.contextJson(it)}?:"")+
         (request.goal?.let {"\n이번 실행에 연결된 사용자의 목표와 완료 기준(실행 권한을 추가하지 않음): "+it.toJson()}?:"")+
-        (if(request.goalSegment==null)"" else "\n저장된 근거를 확인하고 다음 단계부터 이어가세요. 실제 결과가 기준을 충족하면 verify_goal_criterion으로 그 근거를 연결하세요.")+
+        (if(request.goalSegment!=null)"\n저장된 결과를 확인하고 다음 단계부터 이어가세요. 정확한 대상과 실제 결과가 일치하면 완료 조건에 근거를 연결하세요."
+         else if(GoalToolCatalog.CREATE in allowedTools&&GoalToolCatalog.START in allowedTools)
+            "\n사용자가 여러 단계 또는 대기가 필요한 일을 맡기면 목표가 없는 경우 먼저 create_goal과 start_goal로 같은 요청을 저장하고 실행하세요. 원래 범위와 승인 조건을 지키세요."
+         else "")+
         (if(request.goalLedger.isEmpty())"" else "\n이전 구간의 도구 결과 요약(인용 데이터): "+goalCheckpointSummary(request))+
         (if(request.previousSteps.isEmpty())""else"\n이전 실행의 호스트 검증 근거 · 이미 확인한 같은 쓰기를 반복하지 않으며 전체 목표 완료를 뜻하지 않음: "+previousEvidenceContext(request.previousSteps))+
         skillDiscovery(skillTools).let {if(it.isEmpty())""else "\n$it"}+
@@ -3515,13 +3543,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestTools?.validateGoalEditRead(call)
         // A sub-agent's inner call nests inside the parent run_subagent call: restore, never clear, the parent's in-flight state.
         val parentInFlight=toolInFlight
-        val localJournal=!parentInFlight&&request.goalSegment!=null&&!ExternalAgentSettings.isCloud(request.modelId)
+        val localJournal=!parentInFlight&&request.goalSegment!=null&&
+            (!ExternalAgentSettings.isCloud(request.modelId)||request.goalReadbackSeedCount>0)
         if(localJournal)saveLocalGoalJournal(request,pending=true)
         toolInFlight=true
         val outcome=try {val target=resolveRecipient(call);performTool(target.first,target.second).also {if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}
         catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
-            val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
+            val rawFailure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
                 else if(error is com.user.localagent.integrations.ScreenControl.SnapshotChanged)error.failure(call.id)
                 else if(error is com.user.localagent.integrations.ScreenControl.SetupRequired){
                     FailureLog.record(context,"screen_setup",null,error.setup.code)
@@ -3529,6 +3558,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     error.failure(call.id)
                 }
                 else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
+            val failure=com.user.localagent.core.ToolInterruptionPolicy.observed(call,rawFailure)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))
             persistStepEvidence();failure
@@ -3543,6 +3573,34 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
         return outcome
     }
+    private suspend fun executeGoalReadbackRecovery(request:QueuedChatRequest) {
+        val context=readbackContext(request)
+        val declared=checkNotNull(request.readbackObligations)
+        val tools=declared.selected.map {it.read}.toSet()
+        val disabled=request.projectId?.let {app.repository.chat.project(it)?.settings?.disabledTools}.orEmpty()
+        fun assess()=com.user.localagent.core.RequiredReadbackObligations.assess(
+            requestReadbackObligations,context,requestSteps,request.goalReadbackSeedCount,tools-disabled,6,1)
+        val initial=assess()
+        val calls=goalReadbackCalls(requestSteps,initial.pending)
+        if(initial.blockers.isNotEmpty()||calls==null) {
+            publishActionFinal(request,emptySet(),GoalAutopilotPauseReason.REQUIRED_READBACK.description,true,
+                GoalAutopilotPauseReason.REQUIRED_READBACK.code)
+            return
+        }
+        requestAuthorizedTools=tools-disabled
+        checkNotNull(requestTools).bindAvailableTools(requestAuthorizedTools)
+        val task=TaskHarness.inferGoal("이미 변경한 같은 대상의 상태를 조회하고 검증합니다.")
+        for(call in calls) {
+            check(call.name in requestAuthorizedTools)
+            runGoalBoundTool(call,task)
+        }
+        val result=assess()
+        if(result.pending.isEmpty()&&result.blockers.isEmpty()) {
+            answer("앞 단계에서 변경한 대상을 다시 조회했어요.")
+            app.repository.chat.updateRun(request.runId,"completed")
+        } else publishActionFinal(request,emptySet(),"앞 단계의 변경은 남겨뒀어요. 같은 대상의 결과를 다시 확인하고 있어요.",true,"goal_readback_retry")
+    }
+
     private suspend fun runGoalBoundTool(call:ToolCall,goal:com.user.localagent.core.TaskGoal):ToolResult {
         requestTaskGoalForLedger=goal
         return runTool(call)
@@ -3551,7 +3609,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val segment=request.goalSegment?:return null
         val now=System.currentTimeMillis()
         return when {
-            goalToolRoom(segment,requestSteps.size)<=0->GoalAutopilotPauseReason.TOOL_BUDGET
+            goalToolRoom(segment,requestSteps.size-request.goalReadbackSeedCount)<=0->GoalAutopilotPauseReason.TOOL_BUDGET
             now<segment.startedAtMs||now-segment.startedAtMs>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
             else->requestAutopilotPauseReason
         }
@@ -3592,7 +3650,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val criterion=live.criteria.single {it.id==criterionId}
                 require(criterion.status !in setOf(GoalCriterionStatus.USER_CONFIRMED,GoalCriterionStatus.VERIFIED))
                 val auditId=call.arguments.getValue("auditId").jsonPrimitive.content
-                require(auditId in goalCriterionEvidence(request,requestSteps)) {"이 목표의 실제 결과에서 가져온 근거가 필요해요."}
+                val observed=goalCriterionEvidence(request,requestSteps)[auditId]
+                require(observed!=null&&goalCriterionMatches(criterion,observed)) {
+                    "이 완료 조건의 원래 주소나 파일과 일치하는 실제 결과가 필요해요."
+                }
                 val saved=goals.saveGuarded(access,live.copy(criteria=live.criteria.map {
                     if(it.id==criterionId)it.copy(status=GoalCriterionStatus.VERIFIED,evidence=listOf("tool-run:$auditId")) else it
                 }))
@@ -3835,11 +3896,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 requireGoalSegmentScope(original,access)
                 requireCapturedGoalAuthority(original)
                 check(!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
-                check(record.resumedOnceFor!=record.id)
-                check(event in setOf(WakeEvent.TIME_REACHED,WakeEvent.MEDIA_ENDED,WakeEvent.OWNER_AUTH_DONE))
+                check(event!=WakeEvent.CONDITIONS_UNMET) {"재생 확인에 필요한 실행 조건이 없습니다."}
+                val acceptedRecord=if(record.resumedOnceFor==record.id&&
+                    Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject)
+                    record.copy(resumedOnceFor=null) else record
                 val pcNeeded=ExternalAgentSettings.isCloud(original.modelId) || original.capturedPcTextDefault!=null
                 val pcAvailable=!pcNeeded || com.user.localagent.compute.PcTransport(context).available()!=null
-                when (val outcome=GoalWaitPolicy.onWake(record,event,System.currentTimeMillis(),ZoneId.systemDefault(),pcAvailable)) {
+                when (val outcome=GoalWaitPolicy.onWake(acceptedRecord,event,System.currentTimeMillis(),ZoneId.systemDefault(),pcAvailable)) {
                     is WaitDecision.RetryLater -> {
                         val retry=outcome.record.copy(id=UUID.randomUUID().toString(),
                             condition=WaitCondition.AtTime(outcome.atEpochMillis,false),observedEvent=event)
@@ -3864,12 +3927,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         }
                         if(next is GoalSegmentDecision.Pause)throw GoalAutopilotPaused(next.reason)
                         check(next is GoalSegmentDecision.Continue)
-                        check(app.goalWaits.store.replace(outcome.record,record))
                         savedActive=goals.saveGuarded(access,active)
                         check((goalStopEpochs[record.threadId]?:0L)==epoch)
                         val queued=queueNextGoalSegment(access,savedActive,row,next,checkNotNull(scope.coroutineContext[Job]))
                         val queuedRunId=checkNotNull(queued.queuedRunId)
                         goalQueuedEpochs[queuedRunId]=epoch
+                        app.goalWaits.store.replace(outcome.record,record)
                         if(event==WakeEvent.OWNER_AUTH_DONE){
                             com.user.localagent.integrations.AppWebAgent.get(context).bindResumedWork(parent.id,
                                 com.user.localagent.integrations.AppWebAgent.WorkBinding(queuedRunId,record.threadId,record.branchId))
@@ -3885,8 +3948,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if (current!=null && (current==goal || current==savedActive)) {
                     val paused=goals.saveGuarded(access,current.copy(status=GoalStatus.PAUSED))
                     if (selectedThreadId.value==record.threadId)goalState.value=paused
-                    answerWaitingOutcome(parent.id,event)
-                    app.repository.chat.updateRun(parent.id,"paused",errorCode=(error as? GoalAutopilotPaused)?.reason?.code?:"goal_wait_resume_unavailable")
+                    answerWaitingOutcome(parent.id,event,(error as? GoalAutopilotPaused)?.reason)
                 }
                 return@withLock true
             }
@@ -3895,8 +3957,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
-    private suspend fun answerWaitingOutcome(runId:String,event:WakeEvent) {
-        val message=when(event) {
+    private suspend fun answerWaitingOutcome(runId:String,event:WakeEvent,reason:GoalAutopilotPauseReason?=null) {
+        val message=reason?.description?:when(event) {
             WakeEvent.MEDIA_STALLED -> "영상 재생 시간이 더 이상 늘지 않아 멈췄어요. 재생 상태를 확인해 주세요."
             WakeEvent.PLAYER_GONE -> "기존 플레이어를 찾지 못했어요. 실제 수강 진도부터 확인해야 해요."
             WakeEvent.LOGIN_EXPIRED, WakeEvent.OWNER_AUTH_TIMEOUT -> "사이트 인증을 확인하지 못했어요. 휴대폰에서 로그인해 주세요."
@@ -3904,7 +3966,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             WakeEvent.CONDITIONS_UNMET -> "휴대폰에서 백그라운드 재생 확인을 시작하지 못했어요. 마지막으로 확인한 영상은 남겨뒀어요."
             else -> "기존 작업을 저장했어요. 재개 조건이나 권한을 확인해 주세요."
         }
-        app.repository.chat.writeRunAnswer(runId,message)
+        app.repository.chat.writeGoalWaitOutcome(runId,message,reason?.code?:"goal_wait_resume_unavailable")
     }
 
     private suspend fun enforceGoalToolFence(request:QueuedChatRequest,call:ToolCall) {
@@ -4097,7 +4159,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     !observed.effectNotApplied&&goalCriterionEvidenceTool(call.name)
             }
             requestSteps+=HarnessStep(call,if(activeRequest?.goalSegment!=null)
-                evidence.copy(progressDigest=observedGoalProgress(call,observed),auditId=auditId) else evidence)
+                evidence.copy(progressDigest=observedGoalProgress(call,observed),auditId=auditId,
+                    outcomeProof=auditId?.let {goalOutcomeProof(call,observed)}) else evidence)
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
             if (recorded && observed.success && !observed.effectNotApplied &&
                 observed.verification==VerificationState.VERIFIED &&
