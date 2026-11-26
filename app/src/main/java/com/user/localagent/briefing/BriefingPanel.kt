@@ -11,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
+import com.user.localagent.ui.ZipOutlinedButton
+import com.user.localagent.ui.ZipFilledButton
 
 @Composable fun BriefingPanel(app:AppContainer) {
     val context=LocalContext.current;val archive=remember {BriefingArchive(context)};val scope=rememberCoroutineScope()
@@ -23,10 +25,10 @@ import kotlinx.serialization.json.*
             Text("${if(status["enabled"]?.jsonPrimitive?.boolean==true)"수집 켜짐"else"수집 꺼짐"} · 미분석 ${status["pending"]} · 처리 ${status["completed"]}")
             Text("30분마다 AI를 호출하지 않습니다. 새 자료를 모아서 분석하며 메시지나 서류를 전송하지 않습니다.",style=MaterialTheme.typography.bodySmall)
             Text("처음에는 최근 30일 문자·통화기록부터 확인합니다. 과거 전체 이력을 분석한 것으로 표시하지 않습니다.",style=MaterialTheme.typography.bodySmall)
-            Button(onClick={context.startActivity(android.content.Intent(context,BriefingReviewActivity::class.java))}){Text("일정·업무 확인 및 캘린더 선택")}
+            ZipFilledButton(onClick={context.startActivity(android.content.Intent(context,BriefingReviewActivity::class.java))}){Text("일정·업무 확인 및 캘린더 선택")}
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                if(status["enabled"]?.jsonPrimitive?.boolean==true)OutlinedButton(onClick={archive.setEnabled(false);status=archive.status()}){Text("수집 중지")}
-                else Button(onClick={confirm=true}){Text("수집·Codex 전달 허용")}
+                if(status["enabled"]?.jsonPrimitive?.boolean==true)ZipOutlinedButton(onClick={archive.setEnabled(false);status=archive.status()}){Text("수집 중지")}
+                else ZipFilledButton(onClick={confirm=true}){Text("수집·Codex 전달 허용")}
                 TextButton(onClick={status=archive.status()}){Text("새로고침")}
                 TextButton(onClick={archive.clear();status=archive.status()}){Text("보관함 삭제·중지")}
             }

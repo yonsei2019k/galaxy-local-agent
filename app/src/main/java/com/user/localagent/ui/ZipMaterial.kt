@@ -41,6 +41,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -357,4 +359,22 @@ fun Modifier.zipGroupItem(index: Int, count: Int, color: Color = ZipHapColors.Su
     val bottom = if (index == count - 1) radius else 0.dp
     val shape = RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom)
     return clip(shape).background(color)
+}
+
+/** Feature section header: icon tile, title (20/700, heading) and an optional grey description. */
+@Composable
+fun ZipFeatureHeader(
+    @DrawableRes icon: Int,
+    title: String,
+    body: String? = null,
+    tone: ZipTone = ZipTone.Cobalt,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        ZipIconTile(icon, tone = tone)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge, color = ZipHapColors.TextPrimary)
+            body?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary) }
+        }
+    }
 }
