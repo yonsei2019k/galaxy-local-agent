@@ -594,7 +594,7 @@ fun ZipSheet(
 // Empty state
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Empty screen or section: a spot illustration (decorative), display-font title, grey body and an optional action. */
+/** Empty screen or section: a spot illustration (decorative), display-font title, grey body (omitted when blank) and an optional action. */
 @Composable
 fun ZipEmptyState(
     @DrawableRes illustration: Int,
@@ -616,8 +616,10 @@ fun ZipEmptyState(
             color = ZipHapColors.TextPrimary,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(6.dp))
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = ZipHapColors.TextSecondary, textAlign = TextAlign.Center)
+        if (body.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = ZipHapColors.TextSecondary, textAlign = TextAlign.Center)
+        }
         action?.let {
             Spacer(Modifier.height(ZipHapTokens.Space5))
             it()

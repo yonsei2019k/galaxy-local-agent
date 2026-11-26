@@ -26,6 +26,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.Role
 
 private data class DirectoryContact(val uri: Uri, val name: String)
 
@@ -87,44 +91,43 @@ internal fun ContactsDirectory(modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { openSystemContact(Intent(Intent.ACTION_INSERT, Contacts.CONTENT_URI)) }) {
-                Text("연락처 추가")
+                ZipIcon(com.user.localagent.runtime.R.drawable.zi_plus, null, tint = ZipHapTokens.CobaltText, size = 20.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("연락처 추가", color = ZipHapTokens.CobaltText)
             }
         }
         status?.let { ZipHapStatusTag(it, MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer) }
         if (!granted) {
-            ZipHapCard {
-                ZipHapSectionTitle("휴대폰 연락처 연결")
-                Text("읽기를 허용하면 이름을 검색할 수 있어요.", style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { permission.launch(Manifest.permission.READ_CONTACTS) }) { Text("연락처 읽기 허용") }
+            ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_contacts, "휴대폰 연락처 연결", "읽기를 허용하면 이름을 검색할 수 있어요.") {
+                ZipPrimaryButton("연락처 읽기 허용", { permission.launch(Manifest.permission.READ_CONTACTS) }, fullWidth = false)
             }
         } else {
-            OutlinedTextField(
+            ZipOutlinedTextField(
                 value = query, onValueChange = { query = it.take(80) }, modifier = Modifier.fillMaxWidth(),
-                label = { Text("이름으로 검색") }, singleLine = true, shape = MaterialTheme.shapes.medium
+                label = { Text("이름으로 검색") }, singleLine = true,
+                leadingIcon = { ZipIcon(com.user.localagent.runtime.R.drawable.zi_search, null, tint = ZipHapColors.TextSecondary, size = 22.dp) },
             )
             val result = contacts
             val rows = result?.getOrNull().orEmpty()
             when {
                 result == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-                result.isFailure -> ZipHapCard { ZipHapSectionTitle("연락처 목록을 불러오지 못했어요.") }
-                rows.isEmpty() -> ZipHapCard {
-                    ZipHapSectionTitle(if (query.isBlank()) "저장된 연락처가 없어요." else "일치하는 이름이 없어요.")
-                }
-                else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp),
+                result.isFailure -> ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_error, "연락처 목록을 불러오지 못했어요.", "")
+                rows.isEmpty() -> ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_contacts,
+                    if (query.isBlank()) "저장된 연락처가 없어요." else "일치하는 이름이 없어요.", "")
+                else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)) {
-                    if (rows.size == 80) item { ZipHapStatusTag("80명까지 표시해요. 이름으로 더 좁힐 수 있어요.") }
-                    items(rows, key = { it.uri.toString() }) { contact ->
-                        OutlinedCard(
-                            onClick = { openSystemContact(Intent(Intent.ACTION_VIEW, contact.uri)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = MaterialTheme.shapes.medium,
+                    if (rows.size == 80) item { ZipHapStatusTag("80명까지 표시해요. 이름으로 더 좁힐 수 있어요."); Spacer(Modifier.height(10.dp)) }
+                    itemsIndexed(rows, key = { _, contact -> contact.uri.toString() }) { index, contact ->
+                        Column(
+                            Modifier.fillMaxWidth().zipGroupItem(index, rows.size)
+                                .clickable(role = Role.Button) { openSystemContact(Intent(Intent.ACTION_VIEW, contact.uri)) },
                         ) {
-                            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
-                                    Box(Modifier.size(34.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+                            if (index > 0) ZipInsetDivider()
+                            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Surface(shape = RoundedCornerShape(ZipHapTokens.RadiusTile), color = ZipTone.entries[index % 5].soft,
+                                    contentColor = ZipTone.entries[index % 5].content) {
+                                    Box(Modifier.size(40.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
                                         Text(contact.name.take(Character.charCount(Character.codePointAt(contact.name, 0))),
                                             style = MaterialTheme.typography.labelLarge)
                                     }

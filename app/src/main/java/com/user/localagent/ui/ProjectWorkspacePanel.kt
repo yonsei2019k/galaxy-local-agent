@@ -15,6 +15,9 @@ import com.user.localagent.workspace.ProjectFile
 import com.user.localagent.workspace.ProjectWorkspace
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.JsonPrimitive
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 
 /** One private project by default; external scope comes only from the owner's SAF tree choice. */
 @Composable fun ProjectWorkspacePanel(app:AppContainer,onStatus:(String)->Unit,onAsk:(String)->Unit){
@@ -84,7 +87,7 @@ import kotlinx.serialization.json.JsonPrimitive
         item {Text(selection.name,style=MaterialTheme.typography.titleLarge)
             Text(if(selection.external)"사용자가 선택한 휴대전화 폴더 · ${if(selection.writable)"읽기·쓰기"else"읽기"}"else"앱 전용 로컬 프로젝트 · PC 연결 없이 읽고 작성",style=MaterialTheme.typography.bodySmall)}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            OutlinedButton(enabled=!working,onClick={if(current()){pickerBinding=binding;choose.launch(null)}}){Text("휴대전화 폴더 선택")}
+            ZipOutlinedButton(enabled=!working,onClick={if(current()){pickerBinding=binding;choose.launch(null)}}){Text("휴대전화 폴더 선택")}
             if(selection.external)TextButton(enabled=!working,onClick={execute(changesBinding=true){workspace.usePrivateProject();if(current()){onStatus("앱 전용 프로젝트로 전환했습니다.");onBindingChanged()}}}){Text("기본 프로젝트")}
         }}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
@@ -92,20 +95,23 @@ import kotlinx.serialization.json.JsonPrimitive
             if(directory.isNotEmpty())TextButton(enabled=!working,onClick={execute {directory=directory.substringBeforeLast('/',"");refresh()}}){Text("상위 폴더")}
             TextButton(enabled=!working,onClick={execute {refresh()}}){Text("새로고침")}
         }}
-        items(files,key={it.path}) {file->OutlinedButton(enabled=!working,onClick={execute {
+        items(files,key={it.path}) {file->ZipRow(title=file.path.substringAfterLast('/')+(file.bytes?.let {" · $it B"}?:""),
+            modifier=Modifier.clip(RoundedCornerShape(ZipHapTokens.RadiusControl)).background(ZipHapColors.Surface),
+            icon=if(file.directory)com.user.localagent.runtime.R.drawable.zi_folder else com.user.localagent.runtime.R.drawable.zi_file,iconTone=if(file.directory)ZipTone.Sun else ZipTone.Cobalt,
+            showChevron=file.directory,enabled=!working,onClick={execute {
             if(file.directory){directory=file.path;refresh()}else{
                 val actual=workspace.read(file.path);ensureCurrent()
                 path=file.path;text=actual;loadedPath=file.path;loadedHash=ProjectWorkspace.sha256(actual)
                 onStatus("프로젝트 텍스트를 읽고 수정 기준 해시를 기록했습니다.")
             }
-        }},modifier=Modifier.fillMaxWidth()) {Text((if(file.directory)"▸ "else"")+file.path.substringAfterLast('/')+(file.bytes?.let {" · $it B"}?:""))}}
-        item {Text("파일 작성·수정",style=MaterialTheme.typography.titleMedium)
-            OutlinedTextField(path,{if(it.length<=240)path=it},label={Text("프로젝트 안의 상대 경로 · 예: notes/plan.md")},modifier=Modifier.fillMaxWidth(),enabled=!working)
+        }})}
+        item {ZipSectionTitle("파일 작성·수정",Modifier.padding(start=4.dp,top=6.dp,bottom=4.dp))
+            ZipOutlinedTextField(path,{if(it.length<=240)path=it},label={Text("프로젝트 안의 상대 경로 · 예: notes/plan.md")},modifier=Modifier.fillMaxWidth(),enabled=!working)
         }
         item {if(text.length>12_000){Text("이 파일은 편집 한도보다 커 읽기 전용으로 일부를 표시합니다.",style=MaterialTheme.typography.bodySmall);Text(text.take(12_000))}
-            else OutlinedTextField(text,{if(it.length<=12_000)text=it},label={Text("UTF-8 파일 내용")},modifier=Modifier.fillMaxWidth().heightIn(min=220.dp),enabled=!working)}
+            else ZipOutlinedTextField(text,{if(it.length<=12_000)text=it},label={Text("UTF-8 파일 내용")},modifier=Modifier.fillMaxWidth().heightIn(min=220.dp),enabled=!working)}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            Button(enabled=!working&&selection.writable&&path.isNotBlank()&&text.length<=12_000,onClick={
+            ZipFilledButton(enabled=!working&&selection.writable&&path.isNotBlank()&&text.length<=12_000,onClick={
                 val target=path;val content=text;val expected=if(path==loadedPath)loadedHash else null
                 execute {
                 workspace.write(target,content,expected)
@@ -113,7 +119,7 @@ import kotlinx.serialization.json.JsonPrimitive
                 loadedPath=target;loadedHash=ProjectWorkspace.sha256(actual);refresh()
                 onStatus("프로젝트 파일 저장과 재읽기 일치를 확인했습니다.")
             }}){Text("파일 저장·검증")}
-            OutlinedButton(enabled=!working&&loadedPath!=null,onClick={val source=loadedPath;execute{ensureCurrent();onAsk("현재 프로젝트의 ${JsonPrimitive(source.orEmpty())} 파일을 읽고 개선할 점과 수정안을 제시해줘.")}}){Text("대화에서 작업")}
+            ZipOutlinedButton(enabled=!working&&loadedPath!=null,onClick={val source=loadedPath;execute{ensureCurrent();onAsk("현재 프로젝트의 ${JsonPrimitive(source.orEmpty())} 파일을 읽고 개선할 점과 수정안을 제시해줘.")}}){Text("대화에서 작업")}
         }}
         item {Text("기존 파일은 읽을 때 확인한 해시가 일치해야 수정됩니다. 파일 저장은 코드를 실행하거나 앱을 설치하는 동작이 아닙니다.",style=MaterialTheme.typography.bodySmall)}
         if(working)item {LinearProgressIndicator(Modifier.fillMaxWidth())}

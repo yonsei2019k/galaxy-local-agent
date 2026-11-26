@@ -39,6 +39,21 @@ private val examples=mapOf(
     "transcribe_recording" to Example("녹음을 글로 바꾸기","내가 고른 녹음 파일을 글로 바꿔 줘.")
 )
 
+/** Icon and tone for a capability card (visual only). */
+private fun capabilityIcon(id:String):Pair<Int,ZipTone> = when(id){
+    "list_calendar_events","prepare_calendar_event"->com.user.localagent.runtime.R.drawable.zi_calendar to ZipTone.Sun
+    "find_free_time"->com.user.localagent.runtime.R.drawable.zi_clock to ZipTone.Sun
+    "search_contacts"->com.user.localagent.runtime.R.drawable.zi_person to ZipTone.Mint
+    "search_web"->com.user.localagent.runtime.R.drawable.zi_globe to ZipTone.Cobalt
+    "search_shopping"->com.user.localagent.runtime.R.drawable.zi_search to ZipTone.Coral
+    "open_map"->com.user.localagent.runtime.R.drawable.zi_compass to ZipTone.Mint
+    "calculate"->com.user.localagent.runtime.R.drawable.zi_tools to ZipTone.Neutral
+    "save_note"->com.user.localagent.runtime.R.drawable.zi_edit to ZipTone.Lilac
+    "generate_image"->com.user.localagent.runtime.R.drawable.zi_image to ZipTone.Lilac
+    "transcribe_recording"->com.user.localagent.runtime.R.drawable.zi_microphone to ZipTone.Cobalt
+    else->com.user.localagent.runtime.R.drawable.zi_sparkle to ZipTone.Neutral
+}
+
 private fun ToolCapability.officeStatus()=when(availability){
     CapabilityAvailability.INSTALLED->"기능 확인됨"
     CapabilityAvailability.REQUIRES_PERMISSION->"연결 또는 접근 허용 필요"
@@ -79,12 +94,13 @@ private fun ToolCapability.officeStatus()=when(availability){
     val accounts = ConnectedService.entries.filter { matches(it.label, it.id) }
     val phoneApps = ConsumerApp.entries.filter { matches(it.label, it.id) }
     Column(modifier.fillMaxWidth().imePadding(),verticalArrangement=Arrangement.spacedBy(10.dp)){
-        OutlinedTextField(query,{query=it.take(100)},Modifier.fillMaxWidth(),
-            label={Text("이름이나 하고 싶은 일 검색")}, singleLine=true, shape = MaterialTheme.shapes.medium)
+        ZipOutlinedTextField(query,{query=it.take(100)},Modifier.fillMaxWidth(),
+            label={Text("이름이나 하고 싶은 일 검색")}, singleLine=true,
+            leadingIcon={ZipIcon(com.user.localagent.runtime.R.drawable.zi_search,null,tint=ZipHapColors.TextSecondary,size=22.dp)})
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            FilterChip(!connectionOnly && !showAll,{connectionOnly=false;showAll=false},{Text("추천")})
-            FilterChip(!connectionOnly && showAll,{connectionOnly=false;showAll=true},{Text("전체 기능")})
-            FilterChip(connectionOnly,{connectionOnly=true},{Text("앱과 연결")})
+            ZipFilterChip(!connectionOnly && !showAll,{connectionOnly=false;showAll=false},{Text("추천")})
+            ZipFilterChip(!connectionOnly && showAll,{connectionOnly=false;showAll=true},{Text("전체 기능")})
+            ZipFilterChip(connectionOnly,{connectionOnly=true},{Text("앱과 연결")})
         }
         if(failure)ZipHapStatusTag("기능 목록을 확인하지 못했어요.", MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer)
         else if(capabilities==null)LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -93,16 +109,19 @@ private fun ToolCapability.officeStatus()=when(availability){
             if(connectionOnly){
                 if(showCalendar)item{
                     ZipHapCard {
-                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                        Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                        ZipIconTile(com.user.localagent.runtime.R.drawable.zi_calendar,tone=ZipTone.Sun)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
                             ZipHapSectionTitle("휴대폰 캘린더")
                             if (calendarReadGranted) ZipHapStatusTag("일정 읽기 허용됨", ZipHapColors.Mint, ZipHapColors.MintSoft)
                             if(!calendarReadGranted)TextButton(onClick=onCalendarRead){Text("일정 읽기 허용")}
+                        }
                         }
                     }
                 }
                 if(showConnections)item{
                     SettingsEntry("앱과 컴퓨터 연결",
-                        if(pc.paired)"등록한 컴퓨터와 사용할 계정을 확인해요." else "계정, 컴퓨터, 메신저를 연결해요.",onOpen=onConnections)
+                        if(pc.paired)"등록한 컴퓨터와 사용할 계정을 확인해요." else "계정, 컴퓨터, 메신저를 연결해요.",com.user.localagent.runtime.R.drawable.zi_link,onOpen=onConnections)
                 }
                 items(accounts,key={"account-"+it.id}){service->
                     val all=accountTools.values.filter{it.service==service}.mapNotNull{byId[it.definition.name]}
@@ -112,22 +131,25 @@ private fun ToolCapability.officeStatus()=when(availability){
                         all.any{it.availability==CapabilityAvailability.REQUIRES_PERMISSION}->"계정 연결 필요"
                         else->"연결 상태 확인 필요"
                     }
-                    SettingsEntry(service.label,status,onOpen=onConnections)
+                    SettingsEntry(service.label,status,com.user.localagent.runtime.R.drawable.zi_mail,ZipTone.Mint,onOpen=onConnections)
                 }
                 items(phoneApps,key={"phone-"+it.id}){item->
                     val all=consumerTools.filterValues{it==item}.keys.mapNotNull(byId::get)
                     val verified=all.any{it.availability==CapabilityAvailability.INSTALLED}
                     ZipHapCard {
-                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                        Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                        ZipIconTile(com.user.localagent.runtime.R.drawable.zi_native,tone=ZipTone.Neutral)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
                             ZipHapSectionTitle(item.label)
                             if(verified)ZipHapStatusTag("사용 가능한 동작 있음", ZipHapColors.Mint, ZipHapColors.MintSoft)
                             else ZipHapStatusTag("휴대폰 앱과 지원 동작 확인 필요")
                             all.forEach{Text(it.description,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                         }
+                        }
                     }
                 }
                 if(!showCalendar && !showConnections && accounts.isEmpty() && phoneApps.isEmpty())item{
-                    ZipHapCard { ZipHapSectionTitle("검색 결과가 없어요.") }
+                    ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_connections,"검색 결과가 없어요.","")
                 }
             }else{
                 val rows=detected.filter{item->matches(examples[item.id]?.title.orEmpty(),item.title,item.description,item.limitation)}
@@ -136,8 +158,11 @@ private fun ToolCapability.officeStatus()=when(availability){
                 val visibleRows = if (browsing) rows.filter { it.id in examples && it.availability != CapabilityAvailability.NOT_IMPLEMENTED } else rows
                 items(visibleRows,key={it.id}){item->
                     val example=examples[item.id]
+                    val (icon,tone)=capabilityIcon(item.id)
                     ZipHapCard {
-                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                        Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){
+                        ZipIconTile(icon,tone=tone)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
                             ZipHapSectionTitle(example?.title?:item.title)
                             when(item.availability){
                                 CapabilityAvailability.INSTALLED -> ZipHapStatusTag(item.officeStatus(), ZipHapColors.Mint, ZipHapColors.MintSoft)
@@ -150,10 +175,11 @@ private fun ToolCapability.officeStatus()=when(availability){
                             if(item.id=="generate_image")TextButton(onClick=onImages){Text("이미지 작업실 열기")}
                             else if(example!=null)TextButton(onClick={draftPreserved=!onDraft(example.request)}){Text("채팅에 예시 넣기")}
                         }
+                        }
                     }
                 }
                 if(visibleRows.isEmpty() && capabilities!=null)item {
-                    ZipHapCard { ZipHapSectionTitle(if(browsing) "전체 기능에서 할 일을 찾아보세요." else "검색 결과가 없어요.") }
+                    ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_web,if(browsing) "전체 기능에서 할 일을 찾아보세요." else "검색 결과가 없어요.","")
                 }
             }
         }

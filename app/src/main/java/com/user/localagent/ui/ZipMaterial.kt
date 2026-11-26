@@ -346,3 +346,15 @@ fun ZipTag(text: String, tone: ZipTone = ZipTone.Neutral, modifier: Modifier = M
 
 /** Gap between a section's free content blocks (used with `ZipSection(contentPadding = PaddingValues(16.dp))`). */
 val ZipBlockGap: Dp = 10.dp
+
+/**
+ * One row of a grouped white list built from LazyColumn items: the first item gets the top card corners, the last
+ * the bottom ones, so consecutive items read as one card. Put [ZipInsetDivider] at the top of items after the first.
+ */
+fun Modifier.zipGroupItem(index: Int, count: Int, color: Color = ZipHapColors.Surface): Modifier {
+    val radius = ZipHapTokens.RadiusCard
+    val top = if (index == 0) radius else 0.dp
+    val bottom = if (index == count - 1) radius else 0.dp
+    val shape = RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom)
+    return clip(shape).background(color)
+}
