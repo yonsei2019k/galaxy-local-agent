@@ -80,6 +80,12 @@ internal object PublicPdfArtifact {
         return JsonObject(saved+source).toString()
     }
 
+    internal fun withBrowserSource(receipt:String,sourceSha256:String?):String {
+        val saved=Json.parseToJsonElement(receipt).jsonObject
+        val fields=saved-"sourceUrl"
+        return JsonObject(if(sourceSha256==null)fields else fields+("sourceSha256" to JsonPrimitive(sourceSha256))).toString()
+    }
+
     internal suspend fun saveBytes(directory:File,bytes:ByteArray,maxBytes:Int,progress:PdfSaveProgress,
         publish:suspend (() -> Unit)->Unit,pageCount:(File)->Int=::inspectPages):String {
         progress.stage=PdfSaveStage.CONTENT

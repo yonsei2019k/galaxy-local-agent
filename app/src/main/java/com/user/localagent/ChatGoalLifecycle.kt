@@ -106,7 +106,11 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     decision.ledger.map {it.json()}==next.ledger.map {it.json()}){"목표의 최종 체크포인트와 누적 실행 기록이 변경되었습니다."}
                 row
             }
-            val priorLedger=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey)
+            val ownerReadback=answered?.let {
+                val original=QueuedChatRequest.fromJson(it.contextJson)
+                GoalReadbackSeed.from(original,assessGoalReadback(original,access.scopeKey))
+            }
+            val priorLedger=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey,answered?.id)
             if(priorLedger.size>=GoalSegmentBinding.MAX_TOOL_CALLS||!goalLedgerFits(priorLedger)||
                 (entryBudget!=null&&priorLedger.size-entryBudget.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS))throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
             val active=withContext(NonCancellable) {
@@ -122,7 +126,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             val browserRoot=sources.lastOrNull()?.let {QueuedChatRequest.fromJson(it.contextJson)}?.takeIf {
                 it.goal?.let { capturedGoal->sameGoalWork(capturedGoal,goal) }==true
             }?.let {it.browserWorkRootRunId?:it.goalSegment?.rootRunId}
-            val readback=nextSegment?.readback
+            val readback=nextSegment?.readback?:ownerReadback
             var captured:QueuedChatRequest?=null
             app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
@@ -132,7 +136,8 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     allowExternalAgent=capturedAllowExternalAgent,externalAgentRevision=capturedExternalAgentRevision,
                     kakaoReadBinding=capturedKakaoReadBinding,pcImageRecoveryAllowed=capturedPcImageRecoveryAllowed,
                     goalSegment=segment,goalLedger=priorLedger,capturedPcTextDefault=capturedPcTextDefault,
-                    browserWorkRootRunId=browserRoot?.takeUnless {it==segment.rootRunId}).also {request->
+                    browserWorkRootRunId=browserRoot?.takeUnless {it==segment.rootRunId},
+                    goalOwnerReplyParentId=answered?.id,goalOwnerReplyParentDigest=answered?.let {goalDigest(it.contextJson)}).also {request->
                         parent?.let {requireSameGoalAuthority(QueuedChatRequest.fromJson(it.contextJson),request)}
                         // Historical data cannot cross a changed cloud consent/model/branch boundary.
                         sources.forEach {
@@ -151,7 +156,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             app.repository.chat.updateRunContext(runId,context)
             val saved=checkNotNull(app.repository.chat.run(runId))
             check(saved.status=="queued"&&saved.startedAt==null&&saved.contextJson==context&&
-                requireGoalRunBinding(linked,saved)==request&&goals.loadGuarded(access)==linked){"목표와 실제 대기 작업의 저장 결과를 확인하지 못했습니다."}
+                requireGoalRunBinding(linked,saved).toJson()==context&&goals.loadGuarded(access)==linked){"목표와 실제 대기 작업의 저장 결과를 확인하지 못했습니다."}
             check(app.repository.chat.accessScope(access.threadId)==access)
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             if(!com.user.localagent.voice.AgentRunService.track(this.context,runId,access.threadId,ownerInstruction)||

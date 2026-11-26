@@ -123,7 +123,13 @@ class OwnerLogin(unittest.TestCase):
                     observed=agent.open({'url':origin+'/'})
                     eligible=[item for item in observed['elements'] if item.get('sameSessionPdf')]
                     self.assertEqual([item['label'] for item in eligible],['Receipt'])
-                    return agent.save_pdf({'snapshotId':observed['snapshotId'],'ref':eligible[0]['ref']})
+                    selection = {'snapshotId': observed['snapshotId'], 'ref': eligible[0]['ref']}
+                    result = agent.save_pdf(selection)
+                    agent.page.evaluate("document.querySelector('a').href = '/new-receipt.pdf'")
+                    with self.assertRaises(browser.BrowserError) as changed:
+                        agent.save_pdf(selection)
+                    self.assertEqual(str(changed.exception), 'SNAPSHOT_STALE')
+                    return result
 
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     task=executor.submit(observe)
@@ -132,6 +138,7 @@ class OwnerLogin(unittest.TestCase):
                         context.pages[0].wait_for_timeout(100)
                     result=task.result(timeout=2)
                 self.assertEqual(browser.base64.b64decode(result['pdfBase64']), b'%PDF-1.7 fixture')
+                self.assertEqual(result['sourceSha256'], browser.hashlib.sha256((origin+'/receipt.pdf').encode()).hexdigest())
         finally:
             agent.dispose()
 

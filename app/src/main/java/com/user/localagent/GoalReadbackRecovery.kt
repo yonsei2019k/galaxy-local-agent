@@ -35,12 +35,35 @@ internal fun goalReadbackCalls(
     }.distinctBy {it.name to it.arguments}
 }
 
+internal fun assessGoalReadback(request:QueuedChatRequest,scopeKey:String):RequiredReadbackPolicy.Assessment {
+    val context=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)
+    return RequiredReadbackObligations.assess(request.readbackObligations,context,request.previousSteps,
+        request.previousSteps.size,ToolRegistry.definitions.keys,1,1)
+}
+
 internal data class GoalReadbackSeed(
     val oldContext:RequiredReadbackObligations.Context,
     val steps:List<HarnessStep>,
     val state:RequiredReadbackObligations.State,
 ) {
     fun forRun(id:String)=state.copy(context=oldContext.copy(runId=id))
+
+    fun matches(request:QueuedChatRequest):Boolean=
+        request.goalReadbackSeedCount==steps.size&&request.readbackObligations==forRun(request.runId)&&
+            matchesSteps(request)
+
+    fun tracksSameMutations(request:QueuedChatRequest):Boolean {
+        val actual=request.readbackObligations?:return false
+        val expected=forRun(request.runId)
+        return matchesSteps(request)&&actual.context==expected.context&&actual.originRunId==expected.originRunId&&
+            actual.selected==expected.selected&&actual.applied.map {it.source to it.after}==
+                expected.applied.map {it.source to it.after}
+    }
+
+    private fun matchesSteps(request:QueuedChatRequest):Boolean=
+        request.goalReadbackSeedCount==steps.size&&request.previousSteps.take(steps.size).zip(steps).all { (a,b)->
+            a.tool==b.tool&&a.arguments==b.arguments&&a.evidence==b.evidence
+        }
 
     companion object {
         fun from(request:QueuedChatRequest,assessment:RequiredReadbackPolicy.Assessment):GoalReadbackSeed? {

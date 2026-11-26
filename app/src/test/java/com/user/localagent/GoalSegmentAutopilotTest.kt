@@ -146,6 +146,44 @@ class GoalSegmentAutopilotTest {
         }
     }
 
+    @Test fun ownerReplyQueuesReadbackOfTheLastSettledWrite() {
+        val mutation=HarnessStep("write_project_file",buildJsonObject {put("path","result.txt");put("content","QA")},
+            StepEvidence("write_project_file",VerificationState.VERIFIED,"Saved file"))
+        val original=request(listOf(mutation))
+        val scope=RequiredReadbackObligations.Context(original.runId,original.threadId,original.projectId,"scope",original.workspaceBinding)
+        val selected=RequiredReadbackObligations.select(null,scope,setOf("write_project_file","read_project_file"))
+        val expected=RequiredReadbackPolicy.Snapshot(RequiredReadbackPolicy.Resource("project_file","result.txt"),"r1","a".repeat(64))
+        val applied=RequiredReadbackPolicy.Mutation(scope.proofBinding(),0,mutation.tool,expected)
+        val state=RequiredReadbackObligations.capture(selected,scope,listOf(mutation),listOf(applied),emptyList(),true)
+        val parent=original.copy(readbackObligations=state)
+        val paused=row(parent,errorCode=GOAL_OWNER_INPUT)
+        val sources=listOf(GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,paused.status,paused.contextJson))
+        val live=goal(listOf("run-a","run-b"))
+        val seed=checkNotNull(GoalReadbackSeed.from(parent,assessGoalReadback(parent,"scope")))
+        assertThrows(IllegalStateException::class.java) {collectGoalLedger(live,sources,"workspace","scope")}
+        val ledger=collectGoalLedger(live,sources,"workspace","scope",parent.runId)
+        val queued=parent.copy(runId="run-b",userMessageId="user-b",goal=live,
+            goalSegment=segment(live).copy(rootRunId="run-b",consumedToolCalls=ledger.size,totalSegments=2),
+            goalLedger=ledger,goalReadbackSeedCount=seed.steps.size,previousSteps=seed.steps,readbackObligations=seed.forRun("run-b"),
+            goalOwnerReplyParentId=parent.runId,goalOwnerReplyParentDigest=goalDigest(paused.contextJson),
+            browserWorkRootRunId=parent.runId)
+        val restored=QueuedChatRequest.fromJson(queued.toJson())
+        requireGoalLaunchBinding(restored,live,paused,false,started+200)
+        assertEquals(1,completedGoalLedger(restored).size)
+        val childScope=scope.copy(runId=restored.runId)
+        val read=HarnessStep("read_project_file",buildJsonObject {put("path","result.txt")},
+            StepEvidence("read_project_file",VerificationState.VERIFIED,"Read the same version"))
+        val verifiedSteps=restored.previousSteps+read
+        val readProof=RequiredReadbackPolicy.Read(childScope.proofBinding(),1,read.tool,listOf(expected))
+        val verified=restored.copy(previousSteps=verifiedSteps,readbackObligations=RequiredReadbackObligations.capture(
+            restored.readbackObligations,childScope,verifiedSteps,emptyList(),listOf(readProof),true))
+        val verifiedSources=sources+GoalRunEvidenceSource(verified.runId,verified.threadId,verified.projectId,"completed",verified.toJson())
+        assertEquals(listOf(mutation.tool,read.tool),collectGoalLedger(live,verifiedSources,"workspace","scope").map{it.step.tool})
+        assertThrows(IllegalStateException::class.java) {
+            requireGoalLaunchBinding(restored,live,paused.copy(errorCode="reasoning_budget_exhausted"),false,started+200)
+        }
+    }
+
     @Test fun anotherTasksBrowserPageCannotBeReadOrInherited() {
         val parent=com.user.localagent.integrations.AppWebAgent.WorkBinding("parent","thread","branch")
         val child=parent.copy(runId="child")
@@ -222,18 +260,57 @@ class GoalSegmentAutopilotTest {
         assertNull(goalOutcomeProof(call,result("https://example.org/status",title)))
     }
 
+    @Test fun browserPdfProofRequiresTheExactSourceAndSavedDocumentReceipt() {
+        val target=GoalProofTarget(GoalProofKind.BROWSER_PDF_SOURCE,"https://example.org/receipt.pdf")
+        val call=ToolCall("pdf","save_browser_pdf",buildJsonObject {put("snapshotId","snapshot");put("ref","e1")})
+        val receipt=buildJsonObject {
+            put("mimeType","application/pdf");put("pages",1);put("fileName","receipt.pdf");put("sha256","b".repeat(64))
+        }
+        fun proof(source:String?)=goalOutcomeProof(call,ToolResult(call.id,true,
+            JsonObject(if(source==null)receipt else receipt+("sourceSha256" to JsonPrimitive(goalDigest(source)))).toString(),
+            VerificationState.VERIFIED,"Saved"))
+        val step=HarnessStep(call,StepEvidence(call.name,VerificationState.VERIFIED,"Saved",auditId="pdf-saved",outcomeProof=proof(target.target)))
+        val criterion=GoalCriterion(text=target.browserPdfCriterion(),proofTarget=target)
+        assertTrue(goalCriterionMatches(criterion,step))
+        assertFalse(goalCriterionMatches(criterion.copy(text="올해 이수증 발급"),step))
+        assertNotEquals(goalOutcomeDigest(target),proof("https://example.org/other.pdf"))
+        assertNull(proof(null))
+    }
+
     @Test fun completedBrowserGoalGetsOneRestrictedArtifactPass() {
         val done=goal().let { it.copy(criteria=it.criteria.map { c->c.copy(status=GoalCriterionStatus.USER_CONFIRMED) }) }
         val observation=HarnessStep(PcBrowserToolCatalog.READ,buildJsonObject {},
             StepEvidence(PcBrowserToolCatalog.READ,VerificationState.VERIFIED,"Observed official page"))
-        val source=request(listOf(observation),binding=segment(done)).copy(goal=done)
-        val next=goalSegmentDecision(row(source),done,"scope",started+100L,false) as GoalSegmentDecision.Continue
+        val earlierPdf=HarnessStep("save_browser_pdf",buildJsonObject {put("snapshotId","observed");put("ref","e1")},
+            StepEvidence("save_browser_pdf",VerificationState.VERIFIED,"Saved another PDF"))
+        val history=listOf(GoalLedgerEntry("earlier",0,observation),GoalLedgerEntry("earlier",1,earlierPdf))
+        val fullGoal=done.copy(linkedRunIds=listOf("earlier","run-a"))
+        val source=request(emptyList(),binding=segment(fullGoal).copy(consumedToolCalls=history.size),ledger=history).copy(goal=fullGoal)
+        val next=goalSegmentDecision(row(source),fullGoal,"scope",started+100L,false) as GoalSegmentDecision.Continue
         assertTrue(next.binding.artifactWrapUp)
         assertTrue("save_browser_pdf" in goalArtifactWrapUpTools)
         assertFalse("act_on_pc_browser_page" in goalArtifactWrapUpTools)
-        val wrapped=child(source,next).copy(goal=done.copy(linkedRunIds=listOf("run-a","run-b")))
+        val linked=fullGoal.copy(linkedRunIds=fullGoal.linkedRunIds+"run-b")
+        val wrapped=source.copy(runId="run-b",userMessageId="user-b",goal=linked,goalSegment=next.binding,goalLedger=next.ledger)
         assertTrue(QueuedChatRequest.fromJson(wrapped.toJson()).goalSegment!!.artifactWrapUp)
-        assertEquals(GoalSegmentDecision.Complete,goalSegmentDecision(row(wrapped),checkNotNull(wrapped.goal),"scope",started+200L,false))
+        assertEquals(GoalSegmentDecision.Complete,goalSegmentDecision(row(wrapped),linked,"scope",started+200L,false))
+        val needsAuth=wrapped.copy(previousSteps=listOf(HarnessStep(PcBrowserToolCatalog.READ,buildJsonObject {},
+            StepEvidence(PcBrowserToolCatalog.READ,VerificationState.FAILED,
+                com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED,effectNotApplied=true))))
+        fun wake(request:QueuedChatRequest):ChatRunRecord {
+            val parked=row(request,errorCode="waiting_goal_condition")
+            return parked.copy(contextJson=JsonObject(Json.parseToJsonElement(parked.contextJson).jsonObject+
+                ("hostGoalWake" to buildJsonObject {
+                    put("parkedAt",started+175);put("wokeAt",started+190);put("event","OWNER_AUTH_DONE")
+                })).toString())
+        }
+        val resumed=goalSegmentDecision(wake(needsAuth),linked,"scope",started+200L,false) as GoalSegmentDecision.Continue
+        assertTrue(resumed.binding.artifactWrapUp)
+        assertTrue(resumed.binding.artifactAuthResumed)
+        val finalGoal=linked.copy(linkedRunIds=linked.linkedRunIds+"run-c")
+        val last=needsAuth.copy(runId="run-c",userMessageId="user-c",goal=finalGoal,
+            goalSegment=resumed.binding,goalLedger=resumed.ledger)
+        assertEquals(GoalSegmentDecision.Complete,goalSegmentDecision(wake(last),finalGoal,"scope",started+210L,false))
     }
 
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {

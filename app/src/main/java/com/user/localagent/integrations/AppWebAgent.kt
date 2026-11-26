@@ -1196,7 +1196,7 @@ class AppWebAgent private constructor(private val context:Context) {
             if(target in document.blobLinks)return@withLock saveBlobPdf(document,ref,target,progress,verifyRun)
             val session=com.user.localagent.web.BoundPdfGet(target,::freshCookie)
             withContext(Dispatchers.IO) {
-                com.user.localagent.tools.PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),target,
+                val saved=com.user.localagent.tools.PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),target,
                     com.user.localagent.web.PinnedPublicHttpsTransport(session),progress=progress,publish={commit->
                         withContext(Dispatchers.Main.immediate) {
                             freshCookie()
@@ -1204,6 +1204,9 @@ class AppWebAgent private constructor(private val context:Context) {
                             commit()
                         }
                     })
+                val source=Json.parseToJsonElement(saved).jsonObject["sourceUrl"]
+                com.user.localagent.tools.PublicPdfArtifact.withBrowserSource(saved,
+                    target.takeIf {source==JsonPrimitive(it)}?.let {com.user.localagent.goalDigest(it)})
             }
         } finally {
             withContext(NonCancellable+Dispatchers.Main.immediate){if(pdfDocument===document)pdfDocument=null}

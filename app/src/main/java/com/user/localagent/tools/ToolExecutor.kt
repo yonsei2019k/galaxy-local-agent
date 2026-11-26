@@ -312,10 +312,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                             current()
                             val key=checkNotNull(pcBrowserSession())
                             progress.stage=PdfSaveStage.FETCH
-                            val bytes=com.user.localagent.compute.BrowserAgentTools.readPairedPdf(context,key,
+                            val pdf=com.user.localagent.compute.BrowserAgentTools.readPairedPdf(context,key,
                                 call.s("snapshotId"),call.s("ref"))
-                            PublicPdfArtifact.saveBytes(java.io.File(context.filesDir,"exports"),bytes,
+                            val saved=PublicPdfArtifact.saveBytes(java.io.File(context.filesDir,"exports"),pdf.bytes,
                                 com.user.localagent.web.PublicWebClient.MAX_BYTES,progress,{commit->current();commit()})
+                            PublicPdfArtifact.withBrowserSource(saved,pdf.sourceSha256)
                         } else {
                             check(call.arguments["browser"] in setOf(null,JsonPrimitive("phone")))
                             val id=call.s("snapshotId");val ref=call.s("ref")

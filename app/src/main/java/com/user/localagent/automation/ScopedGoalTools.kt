@@ -44,6 +44,12 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                                 listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
                                     "$open${proof.target}$close" in ownerInstruction
                                 })
+                    else if(proof.kind==GoalProofKind.BROWSER_PDF_SOURCE)
+                        draft.criteria[index].text==proof.browserPdfCriterion() &&
+                            (ownerInstruction.lineSequence().any {it.trim()==proof.target} ||
+                                listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
+                                    "$open${proof.target}$close" in ownerInstruction
+                                })
                     else proof.target in ownerInstruction
                 }
                 val typed=draft.copy(criteria=draft.criteria.mapIndexed {index,criterion->criterion.copy(proofTarget=proofs[index])})

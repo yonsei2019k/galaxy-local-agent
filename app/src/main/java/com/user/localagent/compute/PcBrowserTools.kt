@@ -64,7 +64,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 delay(500)
             }
         }
-        internal suspend fun readPairedPdf(context:Context,key:String,snapshot:String,ref:String):ByteArray {
+        internal data class PairedPdf(val bytes:ByteArray,val sourceSha256:String?)
+
+        internal suspend fun readPairedPdf(context:Context,key:String,snapshot:String,ref:String):PairedPdf {
             check(BrowserAgentSettings.pc(context).enabled())
             val transport=PcTransport(context)
             val connection=transport.available()?:throw PcUnavailable()
@@ -74,9 +76,11 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             check(status==200){"PC에서 확인한 PDF 링크를 다시 읽어 주세요."}
             val value=response["pdfBase64"]?.jsonPrimitive?.contentOrNull.orEmpty()
             check(value.length in 8..2_796_204)
-            return java.util.Base64.getDecoder().decode(value).also {
+            val bytes=java.util.Base64.getDecoder().decode(value).also {
                 check(it.size<=com.user.localagent.web.PublicWebClient.MAX_BYTES)
             }
+            val source=response["sourceSha256"]?.jsonPrimitive?.contentOrNull?.takeIf {it.matches(Regex("[a-f0-9]{64}"))}
+            return PairedPdf(bytes,source)
         }
         internal suspend fun samplePairedMedia(context:Context,workKey:String):
             com.user.localagent.integrations.MediaEndWatcher.Observation? {

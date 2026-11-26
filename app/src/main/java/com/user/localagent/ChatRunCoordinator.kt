@@ -565,13 +565,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     }
                     val combined=original.text+"\n\n사용자가 이 단계의 추가 질문에 답했습니다.\n"+text.trim()
                     require(combined.length<=12000)
-                    queueBoundedGoalRun(access,goal,branchId,original.modelId,original.thinking,original.workspaceBinding,
+                    val epoch=goalStopEpochs[threadId]?:0L
+                    val receipt=queueBoundedGoalRun(access,goal,branchId,original.modelId,original.thinking,original.workspaceBinding,
                         checkNotNull(currentCoroutineContext()[Job]),ownerInstruction=combined,
                         capturedAllowTools=original.allowTools,capturedMode=original.mode,capturedPcDataBinding=original.pcDataBinding,
                         capturedPcRevision=original.capturedPcRevision,allowCloudText=original.allowCloudText,
                         capturedAllowExternalAgent=original.allowExternalAgent,capturedExternalAgentRevision=original.externalAgentRevision,
                         capturedKakaoReadBinding=original.kakaoReadBinding,capturedPcImageRecoveryAllowed=original.pcImageRecoveryAllowed,
                         capturedPcTextDefault=original.capturedPcTextDefault,ownerReplyTo=runId)
+                    goalQueuedEpochs[checkNotNull(receipt.queuedRunId)]=epoch
                 }
                 drain()
             }catch(cancel:CancellationException){throw cancel}
@@ -780,12 +782,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 val actual=goals.loadGuarded(access)
                                 requireGoalSegmentScope(candidate,access)
                                 requireCapturedGoalAuthority(candidate)
-                                if(candidate.goalSegment?.parentRunId!=null)check((goalQueuedEpochs[candidate.runId]?:0L)==(goalStopEpochs[candidate.threadId]?:0L)){"중지 요청 이후 이전 목표 구간을 시작하지 않았습니다."}
-                                val parent=(candidate.goalSegment?.parentRunId?:candidate.parentGoalStartRunId)?.let {id->app.repository.chat.run(id)}
-                                if(candidate.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,candidate.goalSegment.scopeKey,true)) {"이전 구간의 공통 실행 기록이 불확실해 다시 실행하지 않았습니다."}
+                                val continuationParent=candidate.goalSegment?.parentRunId?:candidate.goalOwnerReplyParentId
+                                if(continuationParent!=null)check((goalQueuedEpochs[candidate.runId]?:0L)==(goalStopEpochs[candidate.threadId]?:0L)){"중지 요청 이후 이전 목표 구간을 시작하지 않았습니다."}
+                                val parent=(continuationParent?:candidate.parentGoalStartRunId)?.let {id->app.repository.chat.run(id)}
+                                if(continuationParent!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,access.scopeKey,true)) {"이전 구간의 공통 실행 기록이 불확실해 다시 실행하지 않았습니다."}
                                 requireGoalLaunchBinding(candidate,actual,parent,goalRunCallerJobs[candidate.runId]?.isCancelled==true)
                             }
-                            candidate.goalSegment?.parentRunId?.let {parentId->
+                            (candidate.goalSegment?.parentRunId?:candidate.goalOwnerReplyParentId)?.let {parentId->
                                 val browser=com.user.localagent.integrations.AppWebAgent.get(context)
                                 browser.inheritGoalPage(
                                     com.user.localagent.integrations.AppWebAgent.WorkBinding(parentId,candidate.threadId,candidate.branchId),
@@ -1062,7 +1065,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     /** goalMutation is held; use the same goal -> queue lock order as explicit lifecycle requests. */
     private suspend fun cancelStoppedGoalContinuationsLocked(threadId:String) {
         val cancelled=queueMutation.withLock {
-            val stale=queued.value.filter {it.threadId==threadId&&it.goalSegment?.parentRunId!=null&&
+            val stale=queued.value.filter {it.threadId==threadId&&(it.goalSegment?.parentRunId!=null||it.goalOwnerReplyParentId!=null)&&
                 (goalQueuedEpochs[it.runId]?:0L)!=(goalStopEpochs[threadId]?:0L)}
             stale.forEach {candidate->
                 app.repository.chat.cancelQueuedRun(candidate.runId)
@@ -1908,7 +1911,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
         }
         if(allowCloudPersonalData&&request.goalLedger.isNotEmpty()) {
-            val parentId=request.goalSegment?.parentRunId
+            val parentId=request.goalSegment?.parentRunId?:request.goalOwnerReplyParentId
             val parent=parentId?.let {chat.run(it)}
             if(parent!=null&&parent.threadId==request.threadId&&parent.projectId==request.projectId&&parent.branchId==request.branchId) {
                 val source=QueuedChatRequest.fromJson(parent.contextJson)
@@ -1975,9 +1978,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(request.goal!=null) {
             val access=app.repository.chat.accessScope(request.threadId)
             requireGoalSegmentScope(request,access);requireCapturedGoalAuthority(request)
-            val parent=(request.goalSegment?.parentRunId?:request.parentGoalStartRunId)?.let {app.repository.chat.run(it)}
+            val parent=(request.goalSegment?.parentRunId?:request.goalOwnerReplyParentId?:request.parentGoalStartRunId)?.let {app.repository.chat.run(it)}
             requireGoalLaunchBinding(request,goals.loadGuarded(access),parent,false)
-            if(request.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
+            if(request.goalSegment?.parentRunId!=null||request.goalOwnerReplyParentId!=null)
+                check(parent!=null&&!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
         }
         if(pauseGoalBudgetIfExhausted(request))return
         val externalSettings=ExternalAgentSettings.get(context,request.modelId)

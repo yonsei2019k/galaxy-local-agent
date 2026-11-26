@@ -23,6 +23,7 @@ data class GoalSegmentBinding(
     val rootRunId:String,val parentRunId:String?,val parentCheckpointDigest:String?,val segmentIndex:Int,
     val startedAtMs:Long,val consumedToolCalls:Int,val noProgressSegments:Int,val totalSegments:Int=segmentIndex,
     val phaseStartSegments:Int=0,val phaseStartCalls:Int=0,val artifactWrapUp:Boolean=false,
+    val artifactAuthResumed:Boolean=false,
 ) {
     init {
         require(listOf(goalId,scopeKey,rootRunId).all {it.isNotBlank()&&it.length<=256&&it.none {c->c.code<32}})
@@ -31,6 +32,7 @@ data class GoalSegmentBinding(
         require(totalSegments in segmentIndex..MAX_SEGMENTS)
         require(phaseStartSegments in 0 until totalSegments && phaseStartCalls in 0..consumedToolCalls)
         require(startedAtMs>=0&&startedAtMs<=Long.MAX_VALUE-MAX_DURATION_MS)
+        require(!artifactAuthResumed||artifactWrapUp)
         require((segmentIndex==1)==(parentRunId==null&&parentCheckpointDigest==null))
         if(segmentIndex>1)require(parentRunId!=null&&parentRunId.isNotBlank()&&parentRunId.length<=100&&
             parentRunId.none {it.code<32}&&parentCheckpointDigest?.matches(Regex("[a-f0-9]{64}"))==true)
@@ -41,6 +43,7 @@ data class GoalSegmentBinding(
         put("rootRunId",rootRunId);put("parentRunId",parentRunId);put("parentCheckpointDigest",parentCheckpointDigest)
         put("segmentIndex",segmentIndex);put("startedAtMs",startedAtMs);put("consumedToolCalls",consumedToolCalls);put("noProgressSegments",noProgressSegments);put("totalSegments",totalSegments)
         if(artifactWrapUp)put("artifactWrapUp",true)
+        if(artifactAuthResumed)put("artifactAuthResumed",true)
         if(phaseStartSegments!=0||phaseStartCalls!=0){put("phaseStartSegments",phaseStartSegments);put("phaseStartCalls",phaseStartCalls)}
     }
     companion object {
@@ -51,7 +54,7 @@ data class GoalSegmentBinding(
         const val MAX_DURATION_MS=30*60*1000L
         const val MAX_NO_PROGRESS=3
         internal fun parse(o:JsonObject):GoalSegmentBinding {
-            require(o.keys-setOf("phaseStartSegments","phaseStartCalls","artifactWrapUp")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
+            require(o.keys-setOf("phaseStartSegments","phaseStartCalls","artifactWrapUp","artifactAuthResumed")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
             fun s(k:String)=o.getValue(k).jsonPrimitive.let {require(it.isString);it.content}
             fun l(k:String)=o.getValue(k).jsonPrimitive.let {require(!it.isString);it.long}
             fun b(k:String)=o.getValue(k).jsonPrimitive.let {require(!it.isString);it.boolean}
@@ -63,7 +66,8 @@ data class GoalSegmentBinding(
                 s("rootRunId"),optional("parentRunId"),optional("parentCheckpointDigest"),index.toInt(),l("startedAtMs"),count.toInt(),progress.toInt(),total.toInt(),
                 if("phaseStartSegments" in o)l("phaseStartSegments").also { require(it in 0 until total) }.toInt() else 0,
                 if("phaseStartCalls" in o)l("phaseStartCalls").also { require(it in 0..count) }.toInt() else 0,
-                o["artifactWrapUp"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false)
+                o["artifactWrapUp"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false,
+                o["artifactAuthResumed"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false)
         }
     }
 }
@@ -153,6 +157,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(ledger.any {PreparedHandoff.pendingEffect(it.step)})return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     if(!goalMayResumeFrom(parent)&&parent.status!="paused")return pause(GoalAutopilotPauseReason.STOPPED)
     var completedMedia=false
+    var resumedArtifactAuth=false
     val clockShift = if (parent.status=="paused" && parent.errorCode=="waiting_goal_condition") {
         val wake = Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] as? JsonObject
             ?: return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
@@ -168,6 +173,8 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
             wokeAt-parkedAt>GoalWaitPolicy.MAX_DAYS*86_400_000L ||
             (!authReady && !waitReady))
             return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+        resumedArtifactAuth=segment.artifactWrapUp&&!segment.artifactAuthResumed&&authReady&&
+            wake["event"]==JsonPrimitive(WakeEvent.OWNER_AUTH_DONE.name)
         if(waitReady && wake["event"]==JsonPrimitive(WakeEvent.MEDIA_ENDED.name)) {
             val condition=finalStep?.arguments?.get("condition") as? JsonObject
             val item=condition?.get("ledgerItemId")?.jsonPrimitive?.contentOrNull
@@ -181,20 +188,17 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         if(!goalMayResumeFrom(parent)&&parent.errorCode!="execution_not_verified")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
         0L
     }
-    val readbackContext=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)
-    val assessment=RequiredReadbackObligations.assess(request.readbackObligations,readbackContext,request.previousSteps,
-        request.previousSteps.size,ToolRegistry.definitions.keys,1,1)
+    val assessment=assessGoalReadback(request,scopeKey)
     val recovery=if(assessment.pending.isEmpty())null else GoalReadbackSeed.from(request,assessment)
     if(assessment.blockers.isNotEmpty()||assessment.pending.isNotEmpty()&&recovery==null)
         return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
     val complete=goalCompletionProofsMatch(request,goal)&&recovery==null
-    val wrapUp=complete&&!segment.artifactWrapUp&&ledger.size<GoalSegmentBinding.MAX_TOOL_CALLS-2&&
-        segment.totalSegments<GoalSegmentBinding.MAX_SEGMENTS&&request.previousSteps.any {
-            it.tool in goalArtifactBrowserReads&&it.evidence.state==VerificationState.VERIFIED
-        }&&ledger.none {it.step.tool in goalArtifactSaveTools&&it.step.evidence.state==VerificationState.VERIFIED}
+    val wrapUp=complete&&(!segment.artifactWrapUp||resumedArtifactAuth)&&
+        ledger.size<GoalSegmentBinding.MAX_TOOL_CALLS-2&&segment.totalSegments<GoalSegmentBinding.MAX_SEGMENTS&&
+        ledger.any {it.step.tool in goalArtifactBrowserReads&&it.step.evidence.state==VerificationState.VERIFIED}
     if(complete&&!wrapUp)return GoalSegmentDecision.Complete
     if(parent.errorCode=="execution_not_verified"&&recovery==null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
-    val progressed=completedMedia||recovery==null&&hasNewGoalProgress(request,goal)
+    val progressed=wrapUp||completedMedia||recovery==null&&hasNewGoalProgress(request,goal)
     val noProgress=if(progressed)0 else segment.noProgressSegments+1
     val budget=segment.copy(startedAtMs=segment.startedAtMs+clockShift)
     if(segment.totalSegments>=GoalSegmentBinding.MAX_SEGMENTS)return pause(GoalAutopilotPauseReason.SEGMENT_BUDGET)
@@ -212,7 +216,8 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     return GoalSegmentDecision.Continue(budget.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
         segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress,
         startedAtMs=nextStart,phaseStartSegments=if(renew)segment.totalSegments else segment.phaseStartSegments,
-        phaseStartCalls=if(renew)ledger.size else segment.phaseStartCalls,artifactWrapUp=wrapUp),ledger,recovery)
+        phaseStartCalls=if(renew)ledger.size else segment.phaseStartCalls,artifactWrapUp=wrapUp,
+        artifactAuthResumed=wrapUp&&resumedArtifactAuth),ledger,recovery)
 }
 
 internal fun goalToolRoom(segment:GoalSegmentBinding,steps:Int):Int =
@@ -304,6 +309,22 @@ internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefi
             request.readbackObligations==decision.readback?.forRun(request.runId)&&
             request.previousSteps.size==(decision.readback?.steps?.size?:0)&&
             request.previousSteps.zip(decision.readback?.steps.orEmpty()).all {(a,b)->a.tool==b.tool&&a.arguments==b.arguments&&a.evidence==b.evidence}) {"실제 부모 체크포인트에서 이 다음 구간을 재검증하지 못했습니다."}
+        return
+    }
+    request.goalOwnerReplyParentId?.let { parentId->
+        val row=checkNotNull(parent)
+        check(row.id==parentId&&goalDigest(row.contextJson)==request.goalOwnerReplyParentDigest&&
+            row.status=="paused"&&row.errorCode==GOAL_OWNER_INPUT)
+        val original=QueuedChatRequest.fromJson(row.contextJson)
+        requireGoalParentRow(original,row)
+        requireSameGoalAuthority(original,request)
+        check(sameGoalWork(checkNotNull(original.goal),goal)&&pcBrowserWorkKey(original)==pcBrowserWorkKey(request))
+        val assessment=assessGoalReadback(original,checkNotNull(request.goalSegment).scopeKey)
+        check(assessment.blockers.isEmpty())
+        if(assessment.pending.isNotEmpty()) {
+            check(GoalReadbackSeed.from(original,assessment)?.matches(request)==true)
+            check(request.previousSteps.size==request.goalReadbackSeedCount)
+        } else check(request.goalReadbackSeedCount==0&&request.readbackObligations==null)
         return
     }
     val parentId=request.parentGoalStartRunId?:return // Existing explicit GUI submissions retain their old captured mode.

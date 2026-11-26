@@ -104,6 +104,13 @@ internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
         if(sha==null||!sha.matches(Regex("[a-f0-9]{64}")))return null
     }
     val proof=when(call.name) {
+        "save_browser_pdf"-> {
+            if(actual["mimeType"]!=JsonPrimitive("application/pdf")||
+                (actual["pages"]?.jsonPrimitive?.intOrNull?:0)<1||actual["fileName"]?.jsonPrimitive?.contentOrNull.isNullOrBlank())return null
+            val source=actual["sourceSha256"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf {it.matches(Regex("[a-f0-9]{64}"))}?:return null
+            return goalBrowserPdfDigest(source)
+        }
         "save_public_pdf"-> {
             if(actual["mimeType"]!=JsonPrimitive("application/pdf")||
                 (actual["pages"]?.jsonPrimitive?.intOrNull?:0)<1||actual["fileName"]?.jsonPrimitive?.contentOrNull.isNullOrBlank())return null
@@ -127,11 +134,16 @@ internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
     return runCatching {proof.validate();goalOutcomeDigest(proof)}.getOrNull()
 }
 
-internal fun goalOutcomeDigest(proof:GoalProofTarget):String=goalDigest(proof.kind.name+"\n"+proof.target)
+private fun goalBrowserPdfDigest(sourceSha256:String):String=goalDigest("BROWSER_PDF_SOURCE\n"+sourceSha256)
+
+internal fun goalOutcomeDigest(proof:GoalProofTarget):String=
+    if(proof.kind==GoalProofKind.BROWSER_PDF_SOURCE)goalBrowserPdfDigest(goalDigest(proof.target))
+    else goalDigest(proof.kind.name+"\n"+proof.target)
 
 internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep):Boolean =
     criterion.proofTarget?.let {
         (it.kind!=GoalProofKind.KAIRB_COMPLETED_COURSE||criterion.text==it.courseListCriterion())&&
+            (it.kind!=GoalProofKind.BROWSER_PDF_SOURCE||criterion.text==it.browserPdfCriterion())&&
             goalOutcomeDigest(it)==step.evidence.outcomeProof
     }==true
 
@@ -142,7 +154,7 @@ internal fun goalMilestoneKey(step:HarnessStep):String? =
         goalProgressKey(step)
     else null
 
-internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","write_project_file",PcBrowserToolCatalog.READ)
+internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","save_browser_pdf","write_project_file",PcBrowserToolCatalog.READ)
 
 internal fun goalCriterionEvidence(request:QueuedChatRequest,current:List<HarnessStep>):Map<String,HarnessStep> =
     (request.goalLedger.map {it.step}+current).mapNotNull {step->
@@ -190,12 +202,29 @@ internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry
 }
 
 /** A fresh explicit start/resume preserves the complete host ledger, including safe failures. */
-internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,workspaceBinding:String,scopeKey:String):List<GoalLedgerEntry> {
+internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,workspaceBinding:String,scopeKey:String,
+    ownerReplyTo:String?=null):List<GoalLedgerEntry> {
     val entries=linkedMapOf<Pair<String,Int>,GoalLedgerEntry>()
+    val checkpoints=sources.associate {it.runId to QueuedChatRequest.fromJson(it.contextJson)}
+    val successors=checkpoints.values.groupBy {it.goalOwnerReplyParentId?:it.goalSegment?.parentRunId}
+    val assessments=checkpoints.mapValues {(_,request)->assessGoalReadback(request,scopeKey)}
+    val settled=mutableSetOf<String>()
+    for(source in sources.asReversed()) {
+        val request=checkpoints.getValue(source.runId)
+        val assessment=assessments.getValue(source.runId)
+        if(assessment.blockers.isNotEmpty())continue
+        if(assessment.pending.isEmpty()||GoalReadbackSeed.from(request,assessment)?.let {seed->
+            val digest=goalDigest(source.contextJson)
+            successors[source.runId].orEmpty().any {next->
+                next.runId in settled&&(next.goalOwnerReplyParentDigest?:next.goalSegment?.parentCheckpointDigest)==digest&&
+                    seed.tracksSameMutations(next)
+            }
+        }==true)settled+=source.runId
+    }
     for(source in sources) {
         check(source.runId in goal.linkedRunIds&&source.threadId==goal.threadId&&source.projectId==goal.projectId)
         check(source.status !in setOf("queued","running","waiting_approval"))
-        val request=QueuedChatRequest.fromJson(source.contextJson)
+        val request=checkpoints.getValue(source.runId)
         check(request.runId==source.runId&&request.threadId==source.threadId&&request.projectId==source.projectId&&request.goal?.id==goal.id)
         val all=completedGoalLedger(request)
         check(all.none {goalUnverifiedEffect(it.step)||PreparedHandoff.pendingEffect(it.step)||
@@ -204,10 +233,9 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
         if(captured.outcome!=goal.outcome||captured.constraints!=goal.constraints)continue
         check(request.allowTools&&request.mode in setOf("act","debug")&&request.workspaceBinding==workspaceBinding)
         request.goalSegment?.let {check(it.scopeKey==scopeKey)}
-        val context=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)
-        val assessment=RequiredReadbackObligations.assess(request.readbackObligations,context,request.previousSteps,
-            request.previousSteps.size,ToolRegistry.definitions.keys,1,1)
-        check(assessment.pending.isEmpty()&&assessment.blockers.isEmpty()){"이전 목표 구간의 실제 변경·재조회 근거를 확인한 뒤 이어갈 수 있습니다."}
+        val assessment=assessments.getValue(source.runId)
+        val answeredPending=source.runId==ownerReplyTo&&GoalReadbackSeed.from(request,assessment)!=null
+        check(source.runId in settled||answeredPending){"이전 목표 구간의 실제 변경·재조회 근거를 확인한 뒤 이어갈 수 있습니다."}
         for(entry in all) {
             val key=entry.sourceRunId to entry.stepIndex
             val previous=entries[key]

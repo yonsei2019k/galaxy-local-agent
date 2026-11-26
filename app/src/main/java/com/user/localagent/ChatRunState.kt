@@ -33,6 +33,8 @@ data class QueuedChatRequest(
     val browserAuthParentRunId: String? = null,
     val goalReadbackSeedCount:Int=0,
     val browserWorkRootRunId:String?=null,
+    val goalOwnerReplyParentId:String?=null,
+    val goalOwnerReplyParentDigest:String?=null,
 ) {
     init {
         AgentWorkMode.parse(mode)
@@ -82,7 +84,12 @@ data class QueuedChatRequest(
         require(goalSegment!=null||goalLedger.isEmpty())
         browserWorkRootRunId?.let { require(goalSegment!=null&&it in checkNotNull(goal).linkedRunIds) }
         require(goalReadbackSeedCount in 0..minOf(6,previousSteps.size))
-        require(goalReadbackSeedCount==0||goalSegment?.parentRunId!=null&&readbackObligations!=null&&continuation==null)
+        require((goalOwnerReplyParentId==null)==(goalOwnerReplyParentDigest==null))
+        goalOwnerReplyParentId?.let {
+            require(goalSegment?.segmentIndex==1&&it!=runId&&it in checkNotNull(goal).linkedRunIds)
+            require(parentGoalStartRunId==null&&goalOwnerReplyParentDigest?.matches(Regex("[a-f0-9]{64}"))==true)
+        }
+        require(goalReadbackSeedCount==0||(goalSegment?.parentRunId!=null||goalOwnerReplyParentId!=null)&&readbackObligations!=null&&continuation==null)
     }
     fun toJson():String=buildJsonObject {
         put("version",1);put("runId",runId);put("threadId",threadId);put("branchId",branchId)
@@ -103,6 +110,7 @@ data class QueuedChatRequest(
         browserAuthParentRunId?.let {put("browserAuthParentRunId",it)}
         if(goalReadbackSeedCount!=0)put("goalReadbackSeedCount",goalReadbackSeedCount)
         browserWorkRootRunId?.let {put("browserWorkRootRunId",it)}
+        goalOwnerReplyParentId?.let {put("goalOwnerReplyParentId",it);put("goalOwnerReplyParentDigest",goalOwnerReplyParentDigest)}
         put("previousSteps",buildJsonArray {previousSteps.forEach {step->add(buildJsonObject {put("tool",step.tool);put("arguments",step.arguments);put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied);step.evidence.continuationId?.let {put("continuationId",it)};step.evidence.progressDigest?.let {put("progressDigest",it)};step.evidence.auditId?.let {put("auditId",it)};step.evidence.outcomeProof?.let {put("outcomeProof",it)}})}})
         put("attachments",buildJsonArray {attachments.forEach {a->add(buildJsonObject {put("id",a.id);put("name",a.name);put("mimeType",a.mimeType);put("bytes",a.bytes)})}})
         continuation?.let {put("continuation",it.json())}
@@ -144,7 +152,9 @@ data class QueuedChatRequest(
                 o["screenVisualBinding"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["browserAuthParentRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["goalReadbackSeedCount"]?.let {require(it is JsonPrimitive&&!it.isString);it.int}?:0,
-                o["browserWorkRootRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
+                o["browserWorkRootRunId"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
+                o["goalOwnerReplyParentId"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
+                o["goalOwnerReplyParentDigest"]?.let {require(it is JsonPrimitive&&it.isString);it.content})
         }
     }
 }
