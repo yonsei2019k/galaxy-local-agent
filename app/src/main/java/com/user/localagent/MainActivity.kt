@@ -67,6 +67,8 @@ import java.io.File
 import java.time.ZonedDateTime
 import java.time.ZoneId
 import java.util.UUID
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.user.localagent.ui.*
 
 private val launchIntroClaimed = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -962,7 +964,8 @@ class MainActivity : ComponentActivity() {
                 }
                 androidx.activity.compose.BackHandler {returnToParent()}
                 Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
-                    TextButton(onClick=::returnToParent,contentPadding=PaddingValues(start=4.dp,end=12.dp)){
+                    TextButton(onClick=::returnToParent,contentPadding=PaddingValues(start=4.dp,end=12.dp),
+                        modifier=Modifier.semantics(mergeDescendants=true){contentDescription=if(returnsToSettings)"설정으로 돌아가기"else"대화로 돌아가기"}){
                         ZipIcon(com.user.localagent.runtime.R.drawable.zi_back,null,tint=ZipHapColors.TextPrimary,size=22.dp)
                         Spacer(Modifier.width(4.dp))
                         Text(if(returnsToSettings)"설정"else"대화",color=ZipHapColors.TextPrimary)

@@ -24,7 +24,7 @@ test('maps common emoji and their variation-selector and skin-tone forms to stic
   expect(stickerFor(CAP)).toBe('gradCap')
   expect(stickerFor(HEART)).toBe('heart')
   expect(stickerFor(HEART + VS16)).toBe('heart')
-  expect(stickerFor('\u{1F44D}\u{1F3FD}')).toBe('check')
+  expect(stickerFor('\u{2705}' + VS16)).toBe('check')
   expect(stickerFor('\u{1F9D1}\u200D\u{1F393}')).toBe('gradCap')
   expect(stickerFor('\u{1F6CF}' + VS16)).toBe('bed')
   expect(stickerFor(UNICORN)).toBeUndefined()
@@ -81,7 +81,7 @@ test('splits ZWJ families, skin tones, flags and keycaps into one sticker each',
   const stickers = nodes.filter(node => typeof node !== 'string') as { props: { emoji: string } }[]
   expect(stickers.map(node => node.props.emoji)).toEqual([family, thumb, flag, keycap, CAP, CAP])
   expect(nodes.filter(node => typeof node === 'string')).toEqual(['가', '나', '다'])
-  expect(stickerFor(thumb)).toBe('check')
+  expect(stickerFor(thumb)).toBeUndefined()
   // A plain digit or hash is text, not a keycap.
   expect(withStickers('1번 #2')).toEqual(['1번 #2'])
 })
@@ -92,4 +92,14 @@ test('StickerText draws stickers for any host text and tooltips drop emoji inste
   expect(html).toContain('data-sticker="heart"')
   expect(withoutEmoji(`${CAP} 졸업식 문자 ${HEART + VS16}`)).toBe('졸업식 문자')
   expect(withoutEmoji('이모티콘 없음')).toBe('이모티콘 없음')
+})
+
+test('emoji whose meaning differs from every sticker stay unmapped and keep their own name', () => {
+  // 비행기·이륙·착륙, 금지·통행금지, 물음표, 신용카드, 엄지·OK, 클립보드, 학교, 나침반, 텐트·캠핑, 리본
+  for (const emoji of ['\u{2708}', '\u{1F6EB}', '\u{1F6EC}', '\u{26D4}', '\u{1F6AB}', '\u{2753}', '\u{1F4B3}',
+    '\u{1F44D}', '\u{1F197}', '\u{1F4CB}', '\u{1F3EB}', '\u{1F9ED}', '\u{26FA}', '\u{1F3D5}', '\u{1F380}']) {
+    expect(stickerFor(emoji)).toBeUndefined()
+  }
+  const html = renderToStaticMarkup(createElement(StickerText, { text: '\u{2708}\u{FE0F} 출발' }))
+  expect(html).not.toContain('data-sticker="train"')
 })

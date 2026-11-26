@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.user.localagent.core.CapabilityPolicy
 import com.user.localagent.ui.ZipFilledButton
+import com.user.localagent.ui.ZipOutlinedButton
 import com.user.localagent.ui.ZipHapColors
 import com.user.localagent.ui.ZipHapTokens
 import com.user.localagent.ui.ZipIconTile
@@ -72,7 +73,7 @@ internal fun ActionApprovalDialog(
         title={Text(approvalTitle(action))},
         text={ApprovalContents(action,review,Modifier.heightIn(max=460.dp))},
         confirmButton={ApprovalConfirm(action,onDecision)},
-        dismissButton={TextButton(onClick={onDecision(false)}){Text("취소")}}
+        dismissButton={ZipOutlinedButton(onClick={onDecision(false)}){Text("취소")}}
     )
 }
 
@@ -91,8 +92,8 @@ internal fun InlineActionApproval(action:PendingAction,review:String,onDecision:
             }
             Spacer(Modifier.height(6.dp))
             ApprovalContents(action,review,Modifier.weight(1f).fillMaxWidth())
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
-                TextButton(onClick={onDecision(false)}){Text("취소")}
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp,Alignment.End)) {
+                ZipOutlinedButton(onClick={onDecision(false)}){Text("취소")}
                 ApprovalConfirm(action,onDecision)
             }
         }
