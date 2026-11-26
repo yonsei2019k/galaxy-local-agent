@@ -31,8 +31,10 @@ function (request) {
     return {form, account: identifiers[0], password, submit, action: action.href, page: location.href};
   }
 
-  if (request.action === 'authenticationState') {
-    if (location.origin !== request.origin || doc.readyState !== 'complete') return 'unverified';
+  if (request.action === 'authenticationState' || request.action === 'authenticatedTaskReady') {
+    const checkingTask = request.action === 'authenticatedTaskReady';
+    const unavailable = checkingTask ? false : 'unverified';
+    if (location.origin !== request.origin || doc.readyState !== 'complete') return unavailable;
     const fields = [...doc.querySelectorAll('input')].filter(visible);
     if (fields.some(field => {
       const labelIds = (field.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0, 12);
@@ -41,7 +43,14 @@ function (request) {
         ...Array.from(field.labels || [], text => text.textContent || text.innerText)].join(' ');
       return field.type === 'password' ||
         /password|\b(?:otp|mfa|2fa)[a-z0-9_-]*|(?:auth(?:entication)?|verification|one[ -]?time|security)[\s_.-]*code|인증[\s_.-]*(?:번호|코드)|보안[\s_.-]*코드|일회용[\s_.-]*(?:번호|코드)/i.test(label);
-    })) return 'unverified';
+    })) return unavailable;
+    if (checkingTask) {
+      const content = doc.querySelector('main,[role=main],article') || doc.body;
+      if (!content || !visible(content) || content.closest('[aria-busy=true]') || !content.innerText.trim()) return false;
+      const notices = content.querySelectorAll('h1,h2,legend,[role=heading],[role=alert]');
+      return !Array.from(notices).some(node => visible(node) &&
+        /로그인\s*(?:필요|해\s*주세요)|다시\s*로그인|^로그인$|^sign in$|sign in to|authentication required|본인\s*확인|추가\s*인증|2\s*단계\s*인증|접근\s*(?:제한|불가)|서비스를 이용하실 수 없|access denied|service unavailable/i.test(node.innerText.trim()));
+    }
     const controls = [...doc.querySelectorAll('a[href],button,[role=button],[role=menuitem]')];
     const name = node => (node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim();
     const isSignOut = node => /^(?:로그아웃|sign out|log out)$/i.test(name(node));

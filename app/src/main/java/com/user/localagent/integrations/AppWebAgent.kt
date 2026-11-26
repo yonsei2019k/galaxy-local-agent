@@ -505,7 +505,13 @@ class AppWebAgent private constructor(private val context:Context) {
             loginStatus.value="원래 조회 화면을 아직 확인하지 못했어요. 이 카드에서 다시 열 수 있어요."
             return false
         }
-        return websiteLoginFormPresent(request.card.id)==false
+        val document=paymentDocumentRevision
+        val origin=secureOrigin(page.url)?:return false
+        val verified=loginDom("authenticatedTaskReady",request.card.id,origin)
+        val current=websiteLogin.value==request&&webView===page&&paymentDocumentRevision==document&&
+            !loading&&navigation.value.error==null&&BrowserLoginRoutes.naverTaskPage(page.url)==target
+        if(!verified||!current)loginStatus.value="로그인은 확인했지만 원래 조회 화면을 아직 읽을 수 없어요. 이 카드에서 다시 열어 주세요."
+        return verified&&current
     }
 
     internal suspend fun websiteLoginFormPresent(id:Long):Boolean? {
@@ -812,8 +818,23 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     fun showBrowser(address:String=""){presentation.value=address}
-    /** Freeze only readable page text before the owner chooses the PDF destination. */
-    internal suspend fun browserPdfText():String? {
+    private var pendingBrowserPdf:Pair<String,String>?=null
+
+    internal fun takeBrowserPdf(ticket:String):String? {
+        val pending=pendingBrowserPdf?.takeIf{it.first==ticket}?:return null
+        pendingBrowserPdf=null
+        return pending.second
+    }
+
+    /** Keep the text in memory and return only an identifier safe for Activity state. */
+    internal suspend fun prepareBrowserPdf():String? {
+        val text=browserPdfText()?:return null
+        val ticket=token()
+        pendingBrowserPdf=ticket to text
+        return ticket
+    }
+
+    private suspend fun browserPdfText():String? {
         val page=webView?:return null
         val address=page.url
         val revision=paymentDocumentRevision
@@ -1015,7 +1036,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private suspend fun dom(request:JsonObject):JsonObject? = eval("($domScript)($request)") as? JsonObject
 
-     private suspend fun readPage(observeMedia:Boolean=false):JsonObject {
+    private suspend fun readPage(observeMedia:Boolean=false):JsonObject {
         snapshot=null
         if(OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return paymentHandoff()
         val id=token()

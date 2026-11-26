@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
@@ -77,6 +78,27 @@ import kotlinx.coroutines.launch
 
 @Composable fun AppBrowserSurface(context:Context){
     val agent=remember(context){AppWebAgent.get(context)}
+    val scope=rememberCoroutineScope()
+    var printError by remember {mutableStateOf(false)}
+    var pdfTicket by rememberSaveable {mutableStateOf<String?>(null)}
+    var exportingPdf by remember {mutableStateOf(false)}
+    val savePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){destination->
+        val text=pdfTicket?.let(agent::takeBrowserPdf)
+        pdfTicket=null
+        if(destination==null)exportingPdf=false
+        else if(text==null){
+            exportingPdf=false
+            printError=true
+            android.widget.Toast.makeText(context,"저장할 화면 내용을 다시 준비해 주세요.",android.widget.Toast.LENGTH_SHORT).show()
+        }else scope.launch {
+            try{
+                com.user.localagent.skills.BuiltinSkills(context).writePdf(destination,text,"ZipHap 화면 텍스트")
+                printError=false
+            }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+            catch(_:Exception){printError=true}
+            finally{exportingPdf=false}
+        }
+    }
     val card by agent.ownerLoginCard.collectAsState()
     if(card!=null)return
     val opened by agent.presentedAddress.collectAsState()
@@ -87,24 +109,7 @@ import kotlinx.coroutines.launch
     val credentialPage by agent.showingCredentialPage.collectAsState()
     val paymentPage by agent.showingPaymentPage.collectAsState()
     var paymentError by remember { mutableStateOf(false) }
-    var printError by remember(initialAddress){mutableStateOf(false)}
     val keyboard=LocalSoftwareKeyboardController.current
-    val scope=rememberCoroutineScope()
-    var pendingPdf by remember {mutableStateOf<String?>(null)}
-    var exportingPdf by remember {mutableStateOf(false)}
-    val savePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){destination->
-        val text=pendingPdf
-        pendingPdf=null
-        if(destination==null||text==null)exportingPdf=false
-        else scope.launch {
-            try{
-                com.user.localagent.skills.BuiltinSkills(context).writePdf(destination,text,"ZipHap 화면 텍스트")
-                printError=false
-            }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
-            catch(_:Exception){printError=true}
-            finally{exportingPdf=false}
-        }
-    }
     var address by remember(initialAddress){mutableStateOf(initialAddress)}
     fun openAddress(){
         if(busy||address.isBlank())return
@@ -138,17 +143,18 @@ import kotlinx.coroutines.launch
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
                     if(!busy && !credentialPage && !paymentPage && ownerLogin==null && !navigation.loading && navigation.error==null)
-                        TextButton(enabled=!exportingPdf,onClick={
+                        TextButton(enabled=!exportingPdf&&pdfTicket==null,onClick={
                             exportingPdf=true
                             printError=false
                             scope.launch {
-                                val text=agent.browserPdfText()
-                                if(text==null){printError=true;exportingPdf=false}
+                                val ticket=agent.prepareBrowserPdf()
+                                if(ticket==null){printError=true;exportingPdf=false}
                                 else{
-                                    pendingPdf=text
+                                    pdfTicket=ticket
                                     try{savePdf.launch("ZipHap 화면 텍스트.pdf")}
                                     catch(_:android.content.ActivityNotFoundException){
-                                        pendingPdf=null
+                                        agent.takeBrowserPdf(ticket)
+                                        pdfTicket=null
                                         printError=true
                                         exportingPdf=false
                                     }

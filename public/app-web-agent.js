@@ -200,7 +200,12 @@ function (request) {
       const tag = node.localName;
       if (!tag || !block.test(tag) && !inline.test(tag) || node.shadowRoot || node.hasAttribute('is') ||
           node.hasAttribute('contenteditable') || node.closest('[hidden],[aria-hidden=true],[inert]') ||
-          !node.getClientRects().length || ownerDocument.defaultView.getComputedStyle(node).visibility !== 'visible') return true;
+          !node.getClientRects().length) return true;
+      const style = ownerDocument.defaultView.getComputedStyle(node);
+      if (style.visibility !== 'visible' || Number(style.opacity) === 0 ||
+          /\bopacity\(\s*(?:0(?:\.0+)?%?)\s*\)/.test(style.filter) ||
+          style.clipPath !== 'none' || style.clip !== 'auto' ||
+          node.checkVisibility?.({opacityProperty:true,visibilityProperty:true,contentVisibilityAuto:true}) === false) return true;
       if (block.test(tag) || tag === 'br') text += '\n';
       for (const child of node.childNodes) if (!append(child, depth + 1)) return false;
       if (block.test(tag)) text += '\n';

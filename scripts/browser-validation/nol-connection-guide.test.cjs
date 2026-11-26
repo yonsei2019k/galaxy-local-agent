@@ -81,6 +81,25 @@ test('account menu guides the owner without confirming login until sign-out is v
   } finally {await browser.close()}
 })
 
+test('bound post-login lookup can be read without a repeated logout control', async()=>{
+  const browser=await chromium.launch({headless:true})
+  try {
+    const page=await browser.newPage()
+    let fixture=''
+    await page.route('https://booking.naver.com/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:fixture}))
+    async function check(html,origin='https://booking.naver.com'){
+      fixture=html
+      await page.goto('https://booking.naver.com/my/reservations?id=fixture',{waitUntil:'load'})
+      return page.evaluate('('+loginScript+')('+JSON.stringify({action:'authenticatedTaskReady',origin})+')')
+    }
+    assert.equal(await check('<main><h1>내 예약</h1><p>예약이 확인됐어요.</p></main>'),true)
+    assert.equal(await check('<main><h1>내 예약</h1></main>','https://mail.naver.com'),false)
+    assert.equal(await check('<main><h1>로그인해 주세요</h1></main>'),false)
+    assert.equal(await check('<main><h1>내 예약</h1><label for="code">인증번호</label><input id="code"></main>'),false)
+    assert.equal(await check('<main aria-busy="true"><h1>내 예약</h1></main>'),false)
+  } finally {await browser.close()}
+})
+
 test('printing refuses an opaque frame in Chromium', async()=>{
   const browser=await chromium.launch({headless:true})
   try {
@@ -132,10 +151,22 @@ test('screen PDF uses inert readable text independent of live components', async
       const root=document.getElementById('widget').attachShadow({mode:'closed'})
       root.innerHTML='<p>Personal verification</p><input autocomplete="one-time-code" value="123456">'
     })
+    await page.evaluate(()=>{
+      const invisible=document.createElement('div')
+      invisible.style.opacity='0'
+      invisible.innerHTML='<span>NONPUBLIC_FIXTURE</span>'
+      const filtered=document.createElement('p')
+      filtered.style.filter='opacity(0)'
+      filtered.textContent='FILTERED_FIXTURE'
+      const clipped=document.createElement('p')
+      clipped.style.clipPath='inset(100%)'
+      clipped.textContent='CLIPPED_FIXTURE'
+      document.querySelector('main').append(invisible,filtered,clipped)
+    })
     const snapshot=await page.evaluate('('+source+')({action:"printSnapshot"})')
     assert.match(snapshot.text,/Receipt/)
     assert.match(snapshot.text,/Booking confirmed/)
-    assert.doesNotMatch(snapshot.text,/verification|123456|Notification|Embedded page/)
+    assert.doesNotMatch(snapshot.text,/verification|123456|Notification|Embedded page|NONPUBLIC_FIXTURE|FILTERED_FIXTURE|CLIPPED_FIXTURE/)
     await page.setContent('<label for="otp">인증번호</label><input id="otp">')
     const protectedSnapshot=await page.evaluate('('+source+')({action:"printSnapshot"})')
     assert.equal(protectedSnapshot.error,'PAGE_SECURITY_CHECK_INCOMPLETE')
