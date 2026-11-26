@@ -1,10 +1,9 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import { useVisibleMotion } from './motion'
+import { MotionField } from './MotionField'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
 import { Illustration } from './icons/Illustration'
-import { withStickers } from './icons/Sticker'
+import { StickerText, withStickers } from './icons/Sticker'
 import { RichAnswer } from './RichAnswer'
 import type { BookingPaymentAction, ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { BookingPaymentCard } from './BookingPaymentCard'
@@ -17,12 +16,6 @@ import { websiteWorkFor, workHistory } from './work/workHistory'
 import { taskPhase, workPresentation } from './work/workPresentation'
 
 export { taskPhase }
-
-/** A wrapper whose decorative animations pause while it is off screen (and never run under reduced motion). */
-function MotionField({ className, children }: { className: string; children: ReactNode }) {
-  const { ref, reduced, visible } = useVisibleMotion<HTMLDivElement>()
-  return <div ref={ref} className={className} data-motion={reduced ? 'off' : 'on'} data-paused={!visible}>{children}</div>
-}
 
 const exampleRequests: { label: string; text: string; icon: IconName; needsCalendar?: boolean; needsFile?: boolean }[] = [
   { label: '오늘 일정 확인', text: '오늘 남은 일정을 시간순으로 알려줘.', icon: 'calendar', needsCalendar: true },
@@ -153,7 +146,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
           {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
         </button>}
         {previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}
-      </div> : <div className="message-text" dir="auto">{message.text}</div>}
+      </div> : <div className="message-text" dir="auto"><StickerText text={message.text} /></div>}
       {(assistant || user) && (
         <div className="message-actions">
           {assistant
@@ -367,7 +360,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
               {unplacedTasks.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
             </section>}
             {waitingInput && !liveTasks.length && <div className="reply-needed">
-              <div role="status">{waitingInput.detail || waitingInput.label}</div>
+              <div role="status"><StickerText text={waitingInput.detail || waitingInput.label} /></div>
               {waitingInput.choices && onChooseReply && <div className="reply-options" role="group" aria-label="답변 선택지">
                 {waitingInput.choices.map((choice, index) => <button key={choice.label} type="button"
                   disabled={!enabled || hasDraft || !!snapshot?.attachments?.length || sentChoice === waitingInput.id}

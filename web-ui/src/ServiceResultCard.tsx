@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { StayPhotoRequest } from './StayComparison'
+import { StickerText } from './icons/Sticker'
 
 const templates = {
   order_review: { label: '주문 전 확인', fields: { seller: '판매처', option: '옵션', quantity: '수량', delivery: '배송·배달비', discount: '적용 할인', total: '총액', paymentMethods: '결제 방법', checkedAt: '확인 시각' } },
@@ -159,10 +160,10 @@ function CampMapPreview({ map, title, photo, onAsk }: {
       '지도에서 위치를 확인한 빈자리가 없어요. 목록에서 자리 번호를 확인해 주세요.'}</figcaption>
     {map.sites.length > 0 && <div className="stay-actions" role="group" aria-label="빈자리 번호 목록">
       {map.sites.map(site => <button key={site} type="button" aria-pressed={selectedSite === site}
-        onClick={() => setSelectedSite(site)}>{site}</button>)}
+        onClick={() => setSelectedSite(site)}><StickerText text={site} /></button>)}
     </div>}
     {selectedSite && <div className="stay-actions">
-      <span aria-live="polite">{selectedSite} 선택</span>
+      <span aria-live="polite"><StickerText text={selectedSite} /> 선택</span>
       {onAsk && <button type="button" onClick={() => onAsk([
         `${title}의 자리 ${selectedSite}를 다시 확인해줘. ${map.dates}, ${map.party} 기준이야.`,
         '공식 예약 페이지에서 자리와 최종 금액을 확인하고 예약이나 결제는 확정하지 마.',
@@ -179,10 +180,10 @@ export function ServiceResultCard({ result, photo, onAsk }: {
   return <section className="service-result" aria-label={label + ' 결과'}>
     <header><strong>{label}</strong><span>{result.rows.length}건</span></header>
     <ul>{result.rows.map(({ title, summary, fields, mapUrl, inventoryUrl, map, booking }, index) => <li key={index}>
-      <h3>{title}</h3>
-      {summary && <p>{summary}</p>}
+      <h3><StickerText text={title} /></h3>
+      {summary && <p><StickerText text={summary} /></p>}
       {fields.length > 0 && <dl>{fields.map(([name, value]) => <div key={name}>
-        <dt>{name}</dt><dd>{value}</dd>
+        <dt><StickerText text={name} /></dt><dd><StickerText text={value} /></dd>
       </div>)}</dl>}
       {(mapUrl || inventoryUrl) && <div className="stay-actions">
         {mapUrl && <a href={mapUrl} rel="noreferrer noopener" referrerPolicy="no-referrer">전체 배치도</a>}

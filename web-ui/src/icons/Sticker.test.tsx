@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, test } from 'vitest'
 import { RichAnswer } from '../RichAnswer'
 import { WorkCard } from '../work/WorkCard'
-import { stickerFor, withStickers } from './Sticker'
+import { StickerText, stickerFor, withStickers, withoutEmoji } from './Sticker'
 import { STICKERS } from './generated'
 
 // 이모티콘은 이스케이프로 적는다(소스 검사에서 이모티콘 글자 0개를 유지).
@@ -25,7 +25,7 @@ test('maps common emoji and their variation-selector and skin-tone forms to stic
   expect(stickerFor(HEART)).toBe('heart')
   expect(stickerFor(HEART + VS16)).toBe('heart')
   expect(stickerFor('\u{1F44D}\u{1F3FD}')).toBe('check')
-  expect(stickerFor('\u{1F9D1}‍\u{1F393}')).toBe('gradCap')
+  expect(stickerFor('\u{1F9D1}\u200D\u{1F393}')).toBe('gradCap')
   expect(stickerFor('\u{1F6CF}' + VS16)).toBe('bed')
   expect(stickerFor(UNICORN)).toBeUndefined()
   for (const name of ['calendar', 'check', 'sparkle', 'house', 'mapPin', 'money', 'warning', 'clock', 'phone', 'mail',
@@ -73,4 +73,23 @@ test('work card titles draw stickers but keep the task label as their text', () 
   const { container } = render(createElement(WorkCard, { task, onOpen: () => {} }))
   expect(container.querySelector('.work-title .sticker[aria-label="졸업"]')).not.toBeNull()
   expect(container.querySelector('.work-title')?.textContent).toBe(`${CAP} 졸업식 문자`)
+})
+
+test('splits ZWJ families, skin tones, flags and keycaps into one sticker each', () => {
+  const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}', thumb = '\u{1F44D}\u{1F3FD}', flag = '\u{1F1F0}\u{1F1F7}', keycap = '1\uFE0F\u20E3'
+  const nodes = withStickers(`가${family}나${thumb}${flag}다${keycap}${CAP}${CAP}`)
+  const stickers = nodes.filter(node => typeof node !== 'string') as { props: { emoji: string } }[]
+  expect(stickers.map(node => node.props.emoji)).toEqual([family, thumb, flag, keycap, CAP, CAP])
+  expect(nodes.filter(node => typeof node === 'string')).toEqual(['가', '나', '다'])
+  expect(stickerFor(thumb)).toBe('check')
+  // A plain digit or hash is text, not a keycap.
+  expect(withStickers('1번 #2')).toEqual(['1번 #2'])
+})
+
+test('StickerText draws stickers for any host text and tooltips drop emoji instead of showing system glyphs', () => {
+  const html = renderToStaticMarkup(createElement(StickerText, { text: `${CAL} 회의 ${HEART + VS16}` }))
+  expect(html).toContain('data-sticker="calendar"')
+  expect(html).toContain('data-sticker="heart"')
+  expect(withoutEmoji(`${CAP} 졸업식 문자 ${HEART + VS16}`)).toBe('졸업식 문자')
+  expect(withoutEmoji('이모티콘 없음')).toBe('이모티콘 없음')
 })

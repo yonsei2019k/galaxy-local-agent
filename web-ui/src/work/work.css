@@ -77,7 +77,6 @@
   align-items: center; gap: var(--space-3); width: 100%; min-height: var(--row-min-height); padding: var(--space-3) var(--space-4);
   border: 0; border-radius: 0;
   background: transparent; color: var(--color-text); font: inherit; text-align: start; cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease-out);
 }
 .work-history-row:hover { background: rgba(23, 27, 51, .03); }
 .work-history-row .work-icon { background: var(--color-surface); }

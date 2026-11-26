@@ -91,8 +91,8 @@ function camping() {
 // 되묻기 선택지와 답변 속 이모티콘(스티커로 바뀌어 그려진다). 이모티콘은 이스케이프로 적는다.
 function choices() {
   const cap = '\u{1F393}', cal = '\u{1F4C5}', spark = '\u2728', pin = '\u{1F4CD}', party = '\u{1F389}', heart = '\u2764\uFE0F';
-  return { ...base, messages: [
-    user('c1', '졸업식 일정 찾아서 가족한테 보낼 문자도 써 줘'),
+  return { ...base, threads: [{ id: 'thread-a', title: `${cap} 졸업식 준비`, selected: true }], messages: [
+    user('c1', `졸업식 일정 찾아서 가족한테 보낼 문자도 써 줘 ${heart}`),
     assistant('c2', `${cap} 졸업식 일정을 찾았어요 ${spark}\n\n- ${cal} **12월 20일(토) 오전 11시** 본식\n- ${pin} 대강당, 주차는 정문 쪽이 편해요\n\n문자 초안도 준비했어요 ${party} 마음에 들면 보내기 전에 한 번 확인해 주세요 ${heart}`),
   ], tasks: [{ ...task('c-ask', 'waiting_input', '졸업식 문자', '어느 날짜 기준으로 문자를 쓸까요?'), messageId: 'c1',
     choices: [{ label: `12월 20일 본식 ${cap}`, recommended: true }, { label: '12월 19일 예행연습', recommended: false }, { label: '둘 다 넣어 줘', recommended: false }] }] };

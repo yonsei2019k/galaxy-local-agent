@@ -45,7 +45,7 @@ for (const [name, list] of groups) for (const emoji of list) byEmoji.set(base(em
 /** Which sticker draws this emoji, or `undefined` when it has none (it is then drawn as a neutral sparkle). */
 export function stickerFor(emoji: string): StickerName | undefined {
   const key = base(emoji)
-  return byEmoji.get(key) ?? byEmoji.get(key.split('‍')[0])
+  return byEmoji.get(key) ?? byEmoji.get(key.split('\u200D')[0])
 }
 
 // 이모티콘 표시가 기본인 글자, 또는 FE0F가 붙은 그림 글자. 이어 붙인 ZWJ 묶음, 피부색, 국기, 키캡을 한 덩어리로 잡는다.
@@ -99,5 +99,12 @@ export function withStickers(text: string, keyPrefix: string | number = 's'): Re
   return nodes
 }
 
-/** True when the text holds an emoji that `withStickers` would replace. */
-export const hasEmoji = (text: string) => { emojiPattern.lastIndex = 0; return emojiPattern.test(text) }
+/** Model, owner or host text shown on screen: every emoji becomes a sticker, the text itself is unchanged. */
+export function StickerText({ text }: { text: string }) {
+  return <>{withStickers(text)}</>
+}
+
+/** Text for places that cannot hold a sticker (tooltips): emoji are removed so no system emoji is drawn. */
+export function withoutEmoji(text: string): string {
+  return text.replace(emojiPattern, ' ').replace(/[ 	]{2,}/g, ' ').trim()
+}

@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const roots = process.argv.slice(2).length ? process.argv.slice(2) : [path.join(__dirname, '../../web-ui/src')];
-const pictographic = /[\p{Extended_Pictographic}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2460}-\u{24FF}\u{25A0}-\u{27BF}\u{2900}-\u{297F}\u{2B00}-\u{2BFF}\u{2039}\u{203A}\u{2022}\u{2713}-\u{2718}\u{FE0F}\u{20E3}\u{1F1E6}-\u{1F1FF}]/u;
+const pictographic = /[\p{Extended_Pictographic}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2460}-\u{24FF}\u{25A0}-\u{27BF}\u{2900}-\u{297F}\u{2B00}-\u{2BFF}\u{2039}\u{203A}\u{2022}\u{2713}-\u{2718}\u{FE0F}\u{200D}\u{20E3}\u{1F1E6}-\u{1F1FF}]/u;
 const dotsOnly = /(['">`]|content:\s*")\s*[\u00B7\u2022.]{3}\s*(['"<`])/;
 const hits = [];
 const walk = dir => {

@@ -10,6 +10,7 @@ import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 import { ComposerSheet } from './ComposerSheet'
 import { HeaderWorkLine } from './work/HeaderWorkLine'
+import { StickerText, withoutEmoji } from './icons/Sticker'
 
 const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'capabilities', label: '할 수 있는 일', icon: 'activity' },
@@ -68,7 +69,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
           <li key={thread.id}>
             <button type="button" className="sidebar-row" aria-current={thread.selected && !collaborationOpen ? 'page' : undefined}
               disabled={!enabled} onClick={() => onSelect(thread.id)}>
-              <Icon name="chat" /><span>{thread.title || '제목 없는 대화'}</span>
+              <Icon name="chat" /><span><StickerText text={thread.title || '제목 없는 대화'} /></span>
               {thread.working && <span className="room-working" role="status" aria-label="작업 중" title="작업 중" />}
               <Icon name="chevronRight" className="row-chevron" />
             </button>
@@ -137,7 +138,7 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
           <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={() => setPickerOpen(false)} />
         </>}
         <div className="topbar-heading">
-          <span className="topbar-title" title={currentThread?.title}>{currentThread?.title || '집순이'}</span>
+          <span className="topbar-title" title={currentThread?.title ? withoutEmoji(currentThread.title) : undefined}><StickerText text={currentThread?.title || '집순이'} /></span>
           <HeaderWorkLine snapshot={snapshot} onOpen={onOpenWork} />
         </div>
         {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
@@ -225,15 +226,15 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
   return (
     <footer className="composer-footer">
       <div className="composer-width">
-        <div className="composer-status" id={statusId} role="status">{note}</div>
+        <div className="composer-status" id={statusId} role="status"><StickerText text={note} /></div>
         {enabled && snapshot?.otherApprovalPending && <button type="button" className="text-button" onClick={onOpenWaitingApproval}>확인이 필요한 대화 열기</button>}
         <form className={`composer ${attachments.length || canStop || canSteer || voiceBusy || snapshot?.canCancelPreparation ? '' : 'composer--compact'}`} aria-label="메시지 작성" onSubmit={event => {
           event.preventDefault()
           if (sendReady) onSubmit('send')
         }}>
           {attachments.length > 0 && <div className="attachments" aria-label="첨부 파일">
-            {attachments.map(attachment => <span className="attachment" key={attachment.id} title={attachment.name}>
-              <Icon name="file" /><span>{attachment.name}</span>
+            {attachments.map(attachment => <span className="attachment" key={attachment.id} title={withoutEmoji(attachment.name)}>
+              <Icon name="file" /><span><StickerText text={attachment.name} /></span>
               <button type="button" className="icon-button icon-button--compact" aria-label={`${attachment.name} 빼기`}
                 disabled={!enabled || pending} onClick={() => onRemoveAttachment(attachment.id)}><Icon name="close" /></button>
             </span>)}

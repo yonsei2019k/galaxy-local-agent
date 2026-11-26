@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import './sheet.css'
 import './composer-sheet.css'
 import { Icon } from './Icon'
+import { StickerText } from './icons/Sticker'
 import type { Snapshot } from './bridge'
 
 export function ComposerSheet({ open, enabled, snapshot, activeLabel, onAttach, onSelectModel, onClose }: {
@@ -42,7 +43,7 @@ export function ComposerSheet({ open, enabled, snapshot, activeLabel, onAttach, 
         {models.map(model => <label key={model.id} className="model-choice">
           <input type="radio" name="answer-model" value={model.id} checked={model.id === snapshot?.modelId}
             onChange={() => onSelectModel(model.id)} />
-          <span>{model.id === snapshot?.modelId ? selectedLabel : model.label}</span>
+          <span><StickerText text={model.id === snapshot?.modelId ? selectedLabel : model.label} /></span>
         </label>)}
       </fieldset>
       {activeLabel && <p className="active-model-note">실행 중: {activeLabel}</p>}

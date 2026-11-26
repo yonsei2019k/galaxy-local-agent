@@ -1,6 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { Illustration } from './icons/Illustration'
+import { MotionField } from './MotionField'
+import { StickerText } from './icons/Sticker'
 import { MAX_COLLAB_TEXT, isRecipient } from './bridge'
 import type { CollaborationMessage, CollaborationSnapshot, Recipient } from './bridge'
 
@@ -44,7 +46,7 @@ function Message({ message }: { message: CollaborationMessage }) {
         <span>받는 사람 {isRecipient(message.recipient) ? names[message.recipient] : message.recipient}</span>
         {validDate && <time dateTime={message.createdAt}>{dayAndTime.format(date)}</time>}
       </div>
-      <div className="message-text" dir="auto">{message.text}</div>
+      <div className="message-text" dir="auto"><StickerText text={message.text} /></div>
     </article>
   )
 }
@@ -146,7 +148,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
         {messages.length ? <div className="transcript collab-messages" role="log" aria-label="협업 메시지">
           {messages.map(message => <Message key={message.messageId} message={message} />)}
         </div> : <div className="collab-empty">
-          <Illustration name={available && !room?.loading ? 'emptyChat' : 'connections'} className="empty-art art-float" />
+          <MotionField className="empty-art-wrap"><Illustration name={available && !room?.loading ? 'emptyChat' : 'connections'} className="empty-art art-float" /></MotionField>
           <h2>사용자, Codex, Claude</h2>
           <p>{available && !room?.loading ? '협업 메시지가 없습니다.' : '협력사 핫라인 연결을 확인해 주세요.'}</p>
         </div>}
@@ -154,7 +156,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
       <footer className="composer-footer">
         <div className="composer-width">
           <div className="collab-policy"><Icon name="shield" /> 협업 내용은 실행 승인을 대신하지 않습니다.</div>
-          <div className="composer-status" id={statusId} role="status">{open && status}</div>
+          <div className="composer-status" id={statusId} role="status">{open && <StickerText text={status} />}</div>
           <form className="composer" aria-label="협업 메시지 작성" onSubmit={event => { event.preventDefault(); send() }}>
             <div className="editor">
               <div aria-hidden="true" className="editor-size">{text}{'\n'}</div>

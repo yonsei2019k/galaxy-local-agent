@@ -103,14 +103,28 @@
   .reply-options button:nth-child(3) { animation-delay: 80ms; }
   .reply-options button:nth-child(n+4) { animation-delay: 120ms; }
   .messages > .message:last-child .sticker-art { animation: pop-in 420ms var(--ease-spring) backwards; animation-delay: 120ms; }
-  .work-icon svg { transition: transform var(--motion-base) var(--ease-spring); }
   .work-card:active { transform: scale(.985); }
   .work-card { transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out); }
   .voice-avatar[data-stage="listening"]::after { animation: listen-ring 1.6s ease-out infinite; }
   .voice-avatar[data-stage="speaking"] > .character { animation: mood-think 1.4s ease-in-out infinite; transform-origin: 50% 90%; }
+  /* Press and open feedback: only when motion is welcome. */
+  .reply-options button { transition: background-color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out); }
+  .reply-options button:not(:disabled):active, .stay-actions a:active, .stay-actions button:not(:disabled):active { transform: scale(.97); }
+  .stay-actions a, .stay-actions button { transition: transform var(--motion-fast) var(--ease-out); }
+  .stay-chevron { transition: transform var(--motion-base) var(--ease-out); }
+  .work-history-row { transition: background-color var(--motion-fast) var(--ease-out); }
 }
 @media (prefers-reduced-motion: reduce) {
   .character-burst { display: none; }
+  /* Safety net: decorative motion stays still even if a rule above slips out of the no-preference gate.
+     Focus rings are outlines and never transition, so they are unaffected. */
+  :is(.character, .character *, .character-thinking, .character-thinking i, .twinkle, .art-float, .skeleton > span,
+      .sheet, .sheet-body, .reply-options button, .sticker-art, .work-card, .work-icon, .work-progress span, .messages > .message,
+      .stay-chevron, .stay-actions a, .stay-actions button, .voice-avatar, .office-guide-steps span, .work-history-row),
+  .skeleton > span::after, .voice-avatar::after, .sheet::backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 @keyframes mood-bounce { 30% { transform: translateY(-5px) scale(1.04, .97); } 60% { transform: translateY(0) scale(.98, 1.02); } }
