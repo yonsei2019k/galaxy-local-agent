@@ -97,20 +97,30 @@ internal fun goalProgressKey(step:HarnessStep):String? {
 
 internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
     if(!result.success||result.effectNotApplied||result.verification!=VerificationState.VERIFIED)return null
-    if(call.name !in setOf("save_public_pdf","write_project_file")||result.content.length>40_000)return null
+    if(!goalCriterionEvidenceTool(call.name)||result.content.length>40_000)return null
     val actual=runCatching {Json.parseToJsonElement(result.content).jsonObject}.getOrNull()?:return null
-    val sha=actual["sha256"]?.jsonPrimitive?.contentOrNull
-    if(sha==null||!sha.matches(Regex("[a-f0-9]{64}")))return null
+    if(call.name!=PcBrowserToolCatalog.READ) {
+        val sha=actual["sha256"]?.jsonPrimitive?.contentOrNull
+        if(sha==null||!sha.matches(Regex("[a-f0-9]{64}")))return null
+    }
     val proof=when(call.name) {
         "save_public_pdf"-> {
             if(actual["mimeType"]!=JsonPrimitive("application/pdf")||
                 (actual["pages"]?.jsonPrimitive?.intOrNull?:0)<1||actual["fileName"]?.jsonPrimitive?.contentOrNull.isNullOrBlank())return null
-            GoalProofTarget(GoalProofKind.PUBLIC_PDF_SOURCE,call.arguments.getValue("url").jsonPrimitive.content)
+            val target=call.arguments.getValue("url").jsonPrimitive.content
+            if(actual["sourceUrl"]!=JsonPrimitive(target))return null
+            GoalProofTarget(GoalProofKind.PUBLIC_PDF_SOURCE,target)
         }
         "write_project_file"-> {
             val path=actual["path"]?.jsonPrimitive?.contentOrNull?:return null
             if(actual["verified"]!=JsonPrimitive(true)||path!=call.arguments["path"]?.jsonPrimitive?.contentOrNull)return null
             GoalProofTarget(GoalProofKind.PROJECT_FILE,path)
+        }
+        PcBrowserToolCatalog.READ-> {
+            val title=call.arguments[PcBrowserToolCatalog.COURSE_TITLE]?.jsonPrimitive?.contentOrNull?:return null
+            if(actual["verifiedCompletedCourseTitle"]!=JsonPrimitive(title)||
+                actual["url"]?.jsonPrimitive?.contentOrNull?.substringBefore('?')!=PcBrowserToolCatalog.KAIRB_COMPLETED_URL)return null
+            GoalProofTarget(GoalProofKind.KAIRB_COMPLETED_COURSE,title)
         }
         else->return null
     }
@@ -120,7 +130,10 @@ internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
 internal fun goalOutcomeDigest(proof:GoalProofTarget):String=goalDigest(proof.kind.name+"\n"+proof.target)
 
 internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep):Boolean =
-    criterion.proofTarget?.let {goalOutcomeDigest(it)==step.evidence.outcomeProof}==true
+    criterion.proofTarget?.let {
+        (it.kind!=GoalProofKind.KAIRB_COMPLETED_COURSE||criterion.text==it.courseListCriterion())&&
+            goalOutcomeDigest(it)==step.evidence.outcomeProof
+    }==true
 
 internal fun goalMilestoneKey(step:HarnessStep):String? =
     if(step.tool in goalBrowserTools) null
@@ -129,7 +142,7 @@ internal fun goalMilestoneKey(step:HarnessStep):String? =
         goalProgressKey(step)
     else null
 
-internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","write_project_file")
+internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","write_project_file",PcBrowserToolCatalog.READ)
 
 internal fun goalCriterionEvidence(request:QueuedChatRequest,current:List<HarnessStep>):Map<String,HarnessStep> =
     (request.goalLedger.map {it.step}+current).mapNotNull {step->

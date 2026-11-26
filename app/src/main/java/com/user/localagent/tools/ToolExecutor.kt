@@ -106,7 +106,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             connectionRunId?.let { repository.chat.run(it) }?.takeIf { it.threadId==connectionThreadId }?.let {
                 com.user.localagent.integrations.AppWebAgent.WorkBinding(it.id,it.threadId,it.branchId)
             }
-    private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding)}
+    private suspend fun pcBrowserSession():String? =
+        connectionRunId?.let { repository.chat.run(it) }?.takeIf {it.threadId==connectionThreadId}?.let {
+            com.user.localagent.pcBrowserWorkKey(com.user.localagent.QueuedChatRequest.fromJson(it.contextJson))
+        }
+    private val pcBrowser by lazy{com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding,::pcBrowserSession)}
     internal var deferBrowserLogin:()->Boolean={false}
     private val appBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.app(context,::browserWorkBinding){deferBrowserLogin()}}
     private fun browserFor(name:String)=when(name){

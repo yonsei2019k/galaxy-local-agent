@@ -11,6 +11,10 @@ import com.user.localagent.web.PublicWebSafety
 import com.user.localagent.web.PublicWebTransport
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
@@ -69,7 +73,11 @@ internal object PublicPdfArtifact {
         progress.stage = PdfSaveStage.CONTENT
         val type = response.contentType.substringBefore(';').trim().lowercase()
         require(type in setOf("application/pdf","application/octet-stream")) { "다운로드 응답이 PDF 파일이 아니에요." }
-        return saveBytes(directory,response.body,PublicWebClient.MAX_BYTES,progress,publish,pageCount)
+        val saved=Json.parseToJsonElement(saveBytes(directory,response.body,PublicWebClient.MAX_BYTES,
+            progress,publish,pageCount)).jsonObject
+        val source=if(response.finalUrl==url)mapOf("sourceUrl" to JsonPrimitive(url))
+            else mapOf("sourceRedirected" to JsonPrimitive(true))
+        return JsonObject(saved+source).toString()
     }
 
     internal suspend fun saveBytes(directory:File,bytes:ByteArray,maxBytes:Int,progress:PdfSaveProgress,

@@ -176,6 +176,52 @@ class GoalSegmentAutopilotTest {
         pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decideParked(woken,true))
     }
 
+    @Test fun parkedPcAuthenticationContinuesWithTheOriginalWorkIdentity() {
+        val request=request(listOf(HarnessStep("open_pc_browser_page",buildJsonObject {
+            put("url","https://www.kairb.org/cme/cme_ing.php")
+        },StepEvidence("open_pc_browser_page",VerificationState.FAILED,"PHONE_BROWSER_AUTH_REQUIRED",effectNotApplied=true))))
+        val now=started+5_000L
+        val row=row(request,errorCode="waiting_goal_condition")
+        val woken=row.copy(contextJson=JsonObject(Json.parseToJsonElement(row.contextJson).jsonObject+
+            ("hostGoalWake" to buildJsonObject {
+                put("event",WakeEvent.OWNER_AUTH_DONE.name);put("parkedAt",started+1_000L);put("wokeAt",now)
+            })).toString())
+        val decision=goalSegmentDecision(woken,checkNotNull(request.goal),"scope",now,false) as GoalSegmentDecision.Continue
+        val resumed=child(request,decision)
+        assertEquals(pcBrowserWorkKey(request),pcBrowserWorkKey(resumed))
+        assertNotEquals(pcBrowserWorkKey(request),pcBrowserWorkKey(resumed.copy(branchId="other")))
+    }
+
+    @Test fun aRedirectedPdfIsNotProofOfTheRequestedDocument() {
+        val original="https://example.org/current.pdf"
+        val call=ToolCall("pdf","save_public_pdf",buildJsonObject {put("url",original)})
+        fun result(actual:String)=ToolResult(call.id,true,buildJsonObject {
+            put("mimeType","application/pdf");put("pages",1);put("fileName","result.pdf")
+            put("sourceUrl",actual);put("sha256","a".repeat(64))
+        }.toString(),VerificationState.VERIFIED,"saved")
+        assertNotNull(goalOutcomeProof(call,result(original)))
+        assertNull(goalOutcomeProof(call,result("https://example.org/another.pdf")))
+    }
+
+    @Test fun completedCourseReadMatchesOnlyTheExactOfficialCourseListCriterion() {
+        val title="Synthetic IRB Course"
+        val proof=GoalProofTarget(GoalProofKind.KAIRB_COMPLETED_COURSE,title)
+        val call=ToolCall("course",PcBrowserToolCatalog.READ,buildJsonObject {
+            put(PcBrowserToolCatalog.COURSE_TITLE,title)
+        })
+        fun result(source:String,matched:String)=ToolResult(call.id,true,buildJsonObject {
+            put("url",source);put("verifiedCompletedCourseTitle",matched)
+        }.toString(),VerificationState.VERIFIED,"Observed course row")
+        val official=result(PcBrowserToolCatalog.KAIRB_COMPLETED_URL,title)
+        val step=HarnessStep(call,StepEvidence(call.name,official.verification,official.verificationSummary,
+            outcomeProof=goalOutcomeProof(call,official)))
+        val criterion=GoalCriterion(text=proof.courseListCriterion(),proofTarget=proof)
+        assertTrue(goalCriterionMatches(criterion,step))
+        assertFalse(goalCriterionMatches(criterion.copy(text="올해 이수증 발급"),step))
+        assertNull(goalOutcomeProof(call,result(PcBrowserToolCatalog.KAIRB_COMPLETED_URL,"Different title")))
+        assertNull(goalOutcomeProof(call,result("https://example.org/status",title)))
+    }
+
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {
         val eighth=segment().copy(rootRunId="root-run",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
         pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(emptyList(),binding=eighth)))

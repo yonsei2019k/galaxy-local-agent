@@ -72,14 +72,16 @@ enum class GoalStatus {
 }
 
 @Serializable
-enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE }
+enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE }
 
 @Serializable
 data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
+    fun courseListCriterion():String="KAIRB 수강완료 목록에서 「$target」 확인"
     fun validate():GoalProofTarget {
         when(kind) {
             GoalProofKind.PUBLIC_PDF_SOURCE->require(WebAgentPolicy.urlAllowed(target)&&target.startsWith("https://")&&'#' !in target)
             GoalProofKind.PROJECT_FILE->require(ProjectPaths.segments(target).joinToString("/")==target)
+            GoalProofKind.KAIRB_COMPLETED_COURSE->require(target.length in 1..240&&target==target.trim()&&target.none(Char::isISOControl))
         }
         require(target.length in 1..500)
         return this

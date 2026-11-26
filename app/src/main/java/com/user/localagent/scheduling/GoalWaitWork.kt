@@ -33,7 +33,7 @@ internal class GoalWaitWork(private val context: Context) {
         val time = when(val condition=record.condition) {
             is WaitCondition.AtTime -> condition.atEpochMillis
             is WaitCondition.OwnerAuth -> if(record.observedEvent!=null) 0L else record.deadlineAt
-            is WaitCondition.MediaEnd -> 0L
+            is WaitCondition.MediaEnd -> record.mediaPollAt?:0L
         }
         val request = OneTimeWorkRequestBuilder<GoalWaitWorker>()
             .setInputData(workDataOf("goalId" to record.goalId, "waitId" to record.id))
@@ -88,6 +88,10 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         if(!ready)
             return if(runAttemptCount<5 && app.runs.isRunLive(record.parentRunId))Result.retry() else Result.success()
         val existing=record.observedEvent
+        val media=record.condition as? WaitCondition.MediaEnd
+        if(existing==null && record.pcMedia && media!=null) {
+            return pollPcMedia(app,record,media)
+        }
         val event = existing ?: when (val condition=record.condition) {
             is WaitCondition.AtTime -> WakeEvent.TIME_REACHED
             is WaitCondition.OwnerAuth -> WakeEvent.OWNER_AUTH_TIMEOUT
@@ -101,6 +105,48 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
         return if (app.runs.wakeGoal(record,event)) Result.success()
             else if (runAttemptCount < 5) Result.retry() else Result.failure()
+    }
+
+    private suspend fun pollPcMedia(app:com.user.localagent.AppContainer,record:GoalWaitRecord,
+        condition:WaitCondition.MediaEnd):Result {
+        val now=System.currentTimeMillis()
+        val parent=app.repository.chat.run(record.parentRunId)?:return Result.success()
+        val request=com.user.localagent.QueuedChatRequest.fromJson(parent.contextJson)
+        var transportFailed=false
+        val observation=try {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.user.localagent.compute.BrowserAgentTools.samplePairedMedia(applicationContext,
+                    com.user.localagent.pcBrowserWorkKey(request))
+            }
+        } catch(cancel:CancellationException){throw cancel}
+          catch(_:Exception){transportFailed=true;null}
+        if(!app.runs.isGoalWaitReady(record)||app.goalWaits.store.get(record.goalId)!=record)return Result.success()
+        val player=observation?.player
+        val moved=player!=null&&record.playingPositionMs?.let { player.positionMs>=it+100 }==true
+        val lastProgress=record.lastMediaProgressAt?:record.createdAt
+        val event=when {
+            now-record.createdAt !in 0 until GoalWaitPolicy.MEDIA_MAX_MS -> WakeEvent.MEDIA_LIMIT
+            transportFailed -> if(now-lastProgress>=GoalWaitPolicy.MEDIA_STALL_MS)WakeEvent.MEDIA_STALLED else null
+            observation?.loginRequired==true -> WakeEvent.LOGIN_EXPIRED
+            observation==null||player==null||observation.pageUrl!=condition.pageUrl||
+                player.playerId+":"+player.epoch!=condition.playerSignature -> WakeEvent.PLAYER_GONE
+            MediaEndWatcher.endedDuringHandoff(player,record.playingPositionMs,record.playingDurationMs,
+                now-(record.lastMediaSampleAt?:record.createdAt)) -> WakeEvent.MEDIA_ENDED
+            player.ended -> WakeEvent.PLAYER_GONE
+            !moved&&now-lastProgress>=GoalWaitPolicy.MEDIA_STALL_MS -> WakeEvent.MEDIA_STALLED
+            else -> null
+        }
+        if(event!=null) {
+            val observed=record.copy(observedEvent=event)
+            if(!app.goalWaits.store.replace(observed,record))return Result.success()
+            return if(app.runs.wakeGoal(observed,event))Result.success() else Result.retry()
+        }
+        val next=record.copy(id=java.util.UUID.randomUUID().toString(),
+            mediaPollAt=now+GoalWaitPolicy.MEDIA_POLL_MS,lastMediaProgressAt=if(moved)now else lastProgress,
+            playingPositionMs=player?.positionMs?:record.playingPositionMs,
+            lastMediaSampleAt=if(player==null)record.lastMediaSampleAt else now)
+        if(app.goalWaits.store.replace(next,record))app.goalWaits.arm(next)
+        return Result.success()
     }
 
     private suspend fun watchMedia(record: GoalWaitRecord,condition: WaitCondition.MediaEnd):WakeEvent {

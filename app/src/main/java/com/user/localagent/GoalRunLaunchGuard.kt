@@ -157,7 +157,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         val wokeAt=wake["wokeAt"]?.jsonPrimitive?.longOrNull ?: return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
         val finalStep=request.previousSteps.lastOrNull()
         val authReady=wake["event"] in setOf(JsonPrimitive(WakeEvent.OWNER_AUTH_DONE.name),JsonPrimitive(WakeEvent.TIME_REACHED.name)) &&
-            finalStep?.tool in setOf("read_app_browser_page","open_app_browser_page") &&
+            finalStep?.tool in goalAuthReadTools &&
             finalStep?.evidence?.effectNotApplied==true &&
             finalStep.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED
         val waitReady=finalStep?.tool==GoalWaitToolCatalog.WAIT && finalStep.evidence.state==VerificationState.VERIFIED
@@ -311,4 +311,12 @@ internal fun requireGoalLaunchBinding(request:QueuedChatRequest,current:GoalDefi
         step.tool in goalLaunchTools&&step.evidence.state==VerificationState.VERIFIED&&
             step.arguments["goalId"]?.jsonPrimitive?.content==goal.id&&step.evidence.continuationId=="goal-run:${request.runId}"
     }){"이 목표 실행 한 건에 연결된 실제 시작·재개 영수증이 없습니다."}
+}
+
+
+internal val goalAuthReadTools = setOf("read_app_browser_page","open_app_browser_page","read_pc_browser_page","open_pc_browser_page")
+
+internal fun pcBrowserWorkKey(request:QueuedChatRequest):String {
+    val scope=request.goalSegment?.rootRunId?:request.browserAuthParentRunId?:request.runId
+    return goalDigest(listOf(request.threadId,request.branchId,request.projectId.orEmpty(),scope).joinToString("\n"))
 }

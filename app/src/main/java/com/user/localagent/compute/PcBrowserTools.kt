@@ -52,10 +52,34 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val config=transport.available(waitForRestart=true)?:error("PC에 연결하지 못했습니다. 집 밖이면 휴대폰의 Tailscale을 켜주세요.")
             return transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
         }
-        fun pc(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null})=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+        internal suspend fun releasePairedWork(context:Context,workKey:String,revision:Long?) {
+            val settings=PcComputeSettings.get(context)
+            if(revision==null||settings.captureTextAuthority().revision!=revision)return
+            val transport=PcTransport(context)
+            val config=transport.available()?:return
+            repeat(3) {
+                if(settings.captureTextAuthority().revision!=revision)return
+                val reply=transport.jsonWithStatus(config,"/v1/browser/release",buildJsonObject {put("work",workKey)},4_000)
+                if(reply.second["error"]!=JsonPrimitive("BROWSER_WORK_BUSY"))return
+                delay(500)
+            }
+        }
+        internal suspend fun samplePairedMedia(context:Context,workKey:String):
+            com.user.localagent.integrations.MediaEndWatcher.Observation? {
+            if(!BrowserAgentSettings.pc(context).enabled())return null
+            val page=pcRequest(context,"read",buildJsonObject {put("work",workKey);put("observeMedia",true)})
+            if(page["loginRequired"]==JsonPrimitive(true))
+                return com.user.localagent.integrations.MediaEndWatcher.Observation("",null,loginRequired=true)
+            val url=page["url"]?.jsonPrimitive?.contentOrNull?:return null
+            return com.user.localagent.integrations.MediaEndWatcher.Observation(url,
+                (page["media"] as? JsonObject)?.let(BrowserMediaSample::from))
+        }
+        fun pc(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?,
+                session:suspend ()->String?)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
             val transport=PcTransport(context)
             val config=transport.available(waitForRestart=true)?:throw PcUnavailable()
-            val result=transport.jsonWithStatus(config,"/v1/browser/$operation",body,85_000).second
+            val workKey=checkNotNull(session()){"PC 브라우저 작업을 확인할 수 없어요."}
+            val result=transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
             val url=body["url"]?.jsonPrimitive?.contentOrNull
             val binding=work()
             val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
@@ -78,9 +102,9 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             } && (result["loginRequired"]!=JsonPrimitive(false) ||
                 result["url"]?.jsonPrimitive?.contentOrNull?.startsWith(PairedWebsiteLogin.ORIGIN+"/")!=true))
                 return@BrowserAgentTools buildJsonObject { put("error","OWNER_LOGIN_PAGE_CHANGED") }
-            val offer=if(operation=="open" && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
-                url!=null && url.startsWith(PairedWebsiteLogin.ORIGIN+"/")) try {
-                PairedWebsiteLogin.prepare(context,config)
+            val offer=if(operation in setOf("open","read") && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
+                (observedUrl?.startsWith(PairedWebsiteLogin.ORIGIN+"/")==true||result["loginOrigin"]==JsonPrimitive(PairedWebsiteLogin.ORIGIN))) try {
+                PairedWebsiteLogin.prepare(context,config,workKey)
             } catch(cancel:CancellationException){throw cancel}
               catch(_:Exception){null}
             else null
@@ -167,7 +191,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
         if(call.name==catalog.read) {
-            BrowserMediaRule.from(call)?.let { rule->
+            catalog.mediaRule(call)?.let { rule->
                 if(recoveredTarget!=null)return refused(call,"RULE_SOURCE_CHANGED")
                 return observeMedia(call,rule,verifyRuleAccess,pcFallback!=null)
             }
@@ -267,6 +291,12 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             if(error in setOf("SNAPSHOT_STALE","ELEMENT_OBSCURED")){last=null;lastPage=null}
             return refused(call,error,(result["phoneBrowserVisible"] as? JsonPrimitive)?.booleanOrNull,attemptedControl)
         }
+        val course=call.arguments[PcBrowserToolCatalog.COURSE_TITLE]?.jsonPrimitive?.contentOrNull
+        if(catalog==PcBrowserToolCatalog&&operation=="read"&&course!=null&&
+            result.string("url")?.substringBefore('?')==PcBrowserToolCatalog.KAIRB_COMPLETED_URL&&
+            result["loginRequired"]==JsonPrimitive(false)&&rulePage(result)&&
+            (result["completedCourseTitles"] as? JsonArray)?.count {it==JsonPrimitive(course)}==1)
+            result=JsonObject(result+("verifiedCompletedCourseTitle" to JsonPrimitive(course)))
         remember(result)
         return ToolResult(call.id,true,compact(result),VerificationState.VERIFIED,
             when {
@@ -397,7 +427,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             }?:return mediaResult(call,null,"observation_timeout")
             verifyAccess()
             if(!enabled())return refused(call,"RULE_SOURCE_CHANGED")
-            if(page["loginRequired"]==JsonPrimitive(true))return authenticationRequired(call)
+            if(page["loginRequired"]==JsonPrimitive(true))return authenticationRequired(call,
+                pcSession=catalog==PcBrowserToolCatalog && page["nativeOwnerCard"]!=JsonPrimitive(true))
             if(!rulePage(page))return mediaResult(call,null,"page_unavailable")
             val media=page["media"] as? JsonObject
             val sample=media?.let(BrowserMediaSample::from)
@@ -448,7 +479,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             put("mediaRuleResult",ruleResult.name.lowercase(Locale.ROOT))
             reading?.let {
                 put("positionMs",it.sample.positionMs)
-                if(catalog==AppBrowserToolCatalog)put("playerSignature",it.sample.playerId+":"+it.sample.epoch)
+                put("playerSignature",it.sample.playerId+":"+it.sample.epoch)
                 it.sample.durationMs?.let {duration->put("durationMs",duration)}
                 it.remainingSeconds?.let {seconds->
                     put("remainingPlaybackSeconds",seconds)
@@ -588,7 +619,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
 
     /** Bounded model view: page text plus one line per element. */
     private fun compact(result:JsonObject,browser:String=where):String=buildJsonObject{
-        listOf("playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","pageChanged","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
+        listOf("verifiedCompletedCourseTitle","playbackEvidence","snapshotId","url","title","loginRequired","phoneBrowserVisible","truncated","note","evidence","performed","pageChanged","externalHandoffBlocked","handoffNote","pcHandoffUrl","blocked","message","navigationRuleStatus","navigation")
             .forEach{key->result[key]?.let{put(key,it)}}
         if(catalog==AppBrowserToolCatalog && browser==where && rulePage(result) && result["elements"] is JsonArray){
             val eligible=ruleElements(result).take(120).count{it["sessionPdf"]==JsonPrimitive(true)}

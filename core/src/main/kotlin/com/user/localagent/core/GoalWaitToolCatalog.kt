@@ -9,7 +9,7 @@ object GoalWaitToolCatalog {
         ToolDefinition(WAIT, Risk.LOW,
             mapOf("goalId" to Argument("string", true, 100), "expectedUpdatedAt" to Argument("string", true, 19),
                 "condition" to Argument("object", true, 2000)),
-            "Park an active persistent goal until a future time or the end of a currently observed phone player. Copy goalId and goalRevision from read_goal_progress (send goalRevision as expectedUpdatedAt). Use condition={kind:at_time,atEpochMillis:future epoch milliseconds,needsPlayback:false}. For media, copy the exact observed pageUrl and playerSignature from the phone read, and the ledger item id: condition={kind:media_end,pageUrl,playerSignature,ledgerItemId}. Waiting adds no permissions and is not completion evidence."))
+            "Park an active persistent goal until a future time or the end of a currently observed PC or phone player. Copy goalId and goalRevision from read_goal_progress (send goalRevision as expectedUpdatedAt). Use condition={kind:at_time,atEpochMillis:future epoch milliseconds,needsPlayback:false}. For media, copy the exact observed pageUrl and playerSignature from the current browser read, and the ledger item id: condition={kind:media_end,pageUrl,playerSignature,ledgerItemId}. Waiting adds no permissions and is not completion evidence."))
 
     private val kinds = mapOf(
         "media_end" to setOf("kind", "pageUrl", "playerSignature", "ledgerItemId"),

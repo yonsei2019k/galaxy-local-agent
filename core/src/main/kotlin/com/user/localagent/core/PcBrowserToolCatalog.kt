@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 open class BrowserToolCatalog(val open:String,val read:String,val action:String,where:String,
     private val navigationRule:Boolean=false,private val mediaRead:Boolean=navigationRule,
-    private val phonePresentation:Boolean=false) {
+    private val phonePresentation:Boolean=false,private val courseCompletion:Boolean=false) {
     val actions=setOf("click","type","select","press_enter","scroll","back")
     val definitions=listOf(
         ToolDefinition(open,Risk.LOW,mapOf("url" to Argument("string",true,2048,"Public http(s) page to open."))+
@@ -21,7 +21,9 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
             "Infer the deliverable and verify its requirements on the source; carry out clear reversible prerequisites without asking the owner to choose clicks. "+
             "Read the result after actions, and treat completion as verified only when the site or an actual saved artifact supports it."+
                 if(phonePresentation) " For an explicit request to open a page for the owner, use this tool with showOnPhone=true. Claim the phone screen was shown only if phoneBrowserVisible is true. Prefer the authorized direct or paired PC route for ordinary research." else "",90_000),
-        ToolDefinition(read,Risk.LOW,if(mediaRead)BrowserMediaRule.arguments else emptyMap(),
+        ToolDefinition(read,Risk.LOW,(if(mediaRead)BrowserMediaRule.arguments else emptyMap())+
+            if(courseCompletion)mapOf(PcBrowserToolCatalog.COURSE_TITLE to Argument("string",false,240,
+                "Exact owner-provided course title to verify on the KAIRB completed-course list. Checks the matching row only.")) else emptyMap(),
             "Read the current page of $where again. Call when the last observation is missing required evidence, when the page may have changed, "+
             "or to inspect playback. A successful open already observes the page; do not repeat that read just to confirm identical data. "+
             "When a control or player is missing and navigation.canScrollDown is true, scroll and inspect the fresh snapshot. "+
@@ -40,12 +42,21 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
             if(navigationRule) " Use expectedLinkLabel and verifyPageText only for a recoverable-link when you already have evidence of the exact new destination title or line. Never guess it. Otherwise use an ordinary click on the observed ref, then inspect the returned page and choose your next step. The phone may refresh the same link and verifies the new page. On an uncertain outcome only read again." else "",90_000))
     val names=definitions.map{it.name}.toSet()
 
+    fun mediaRule(call:ToolCall):BrowserMediaRule? {
+        if(PcBrowserToolCatalog.COURSE_TITLE !in call.arguments)return BrowserMediaRule.from(call)
+        require(courseCompletion&&call.arguments.keys==setOf(PcBrowserToolCatalog.COURSE_TITLE))
+        val title=call.arguments.getValue(PcBrowserToolCatalog.COURSE_TITLE) as? JsonPrimitive
+        require(title!=null&&title.isString&&title.content.length in 1..240&&
+            title.content==title.content.trim()&&title.content.none(Char::isISOControl))
+        return null
+    }
+
     fun validate(call:ToolCall){
         if(call.name==open&&"showOnPhone" in call.arguments){
             val value=call.arguments["showOnPhone"]
             require(phonePresentation&&(value==JsonPrimitive(true)||value==JsonPrimitive(false)))
         }
-        if(call.name==read&&mediaRead)BrowserMediaRule.from(call)
+        if(call.name==read&&mediaRead)mediaRule(call)
         if(call.name!=action)return
         val kind=call.arguments.getValue("action").jsonPrimitive.content
         require(kind in actions){"지원하지 않는 브라우저 동작입니다."}
@@ -61,7 +72,9 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
 
 /** Headless Chrome on the owner's paired PC. Authentication stays on the phone. */
 object PcBrowserToolCatalog:BrowserToolCatalog("open_pc_browser_page","read_pc_browser_page","act_on_pc_browser_page",
-    "the preferred paired PC background browser for site workflows (no PC window; works while the PC is on)",mediaRead=true) {
+    "the preferred paired PC background browser for site workflows (no PC window; works while the PC is on)",mediaRead=true,courseCompletion=true) {
+    const val COURSE_TITLE="completedCourseTitle"
+    const val KAIRB_COMPLETED_URL="https://www.kairb.org/cme/cme_complete.php"
     const val OPEN="open_pc_browser_page";const val READ="read_pc_browser_page";const val ACTION="act_on_pc_browser_page" // "pc_" names are reserved for PC-side tools in the cloud bridge
 }
 

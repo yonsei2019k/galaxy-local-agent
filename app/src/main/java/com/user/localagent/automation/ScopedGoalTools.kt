@@ -36,9 +36,15 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                 val draft=GoalDraftReducer.create(scope.threadId,scope.projectId,call.arguments.getValue("outcome").jsonPrimitive.content,
                     strings(call,"criteria")!!,strings(call,"constraints").orEmpty())
                 authorize(call.name)
-                val proofs=GoalToolCatalog.parseProofTargets(call).filterValues {proof->
+                val proofs=GoalToolCatalog.parseProofTargets(call).filter { (index,proof)->
                     // A generated alternate target must not stand in for the owner's expected result.
-                    proof.target in ownerInstruction
+                    if(proof.kind==GoalProofKind.KAIRB_COMPLETED_COURSE)
+                        draft.criteria[index].text==proof.courseListCriterion() &&
+                            (ownerInstruction.lineSequence().any {it.trim()==proof.target} ||
+                                listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
+                                    "$open${proof.target}$close" in ownerInstruction
+                                })
+                    else proof.target in ownerInstruction
                 }
                 val typed=draft.copy(criteria=draft.criteria.mapIndexed {index,criterion->criterion.copy(proofTarget=proofs[index])})
                 val saved=store.save(scope,typed).also(::scoped)

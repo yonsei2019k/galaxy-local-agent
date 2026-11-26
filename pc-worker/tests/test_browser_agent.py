@@ -5,6 +5,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deployed'))
 import browser_agent as b
 
 
+class WorkSessions(unittest.TestCase):
+    def test_same_work_restores_page_without_observing_other_work_or_owner(self):
+        class Browser:
+            def __init__(self):
+                self.page = None
+                self.closed = False
+
+            def dispose(self):
+                self.closed = True
+
+        sessions = b.BrowserWorkSessions(factory=Browser, limit=2)
+        first, second = 'a' * 64, 'b' * 64
+        with sessions.borrow('owner', first, create=True) as original:
+            original.page = 'course'
+            with sessions.borrow('owner', second, create=True) as other:
+                other.page = 'search'
+                with self.assertRaises(b.BrowserError):
+                    sessions.release('owner', first)
+        with self.assertRaises(b.BrowserError):
+            with sessions.borrow('other-owner', first, create=False):
+                self.fail('Work from another owner was exposed')
+        with sessions.borrow('owner', first, create=False) as reopened:
+            self.assertIs(reopened, original)
+            self.assertEqual(reopened.page, 'course')
+        self.assertEqual(sessions.release('owner', second), {'closed': True})
+        self.assertTrue(other.closed)
+        self.assertFalse(original.closed)
+        sessions.dispose()
+
+
 class Policy(unittest.TestCase):
     def test_display_label_does_not_invalidate_the_observed_action_target(self):
         agent = b.BrowserAgent(profile='unused')

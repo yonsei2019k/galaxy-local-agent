@@ -23,7 +23,7 @@ from recovery_engines import RecoveryEngines
 from overlay_endpoint import overlay_endpoint
 from remote_test import RemoteTestQueue,RemoteTestError
 REMOTE_TESTS=RemoteTestQueue()
-from browser_agent import BrowserAgent,BrowserError
+from browser_agent import BrowserAgent,BrowserError,BrowserWorkSessions
 import naver_search
 import kopis_search
 import travel_public_search
@@ -31,6 +31,7 @@ PUBLIC_SEARCH = {"/v1/public-search/naver": naver_search.search, "/v1/public-sea
                  "/v1/public-search/tago_flights": travel_public_search.flights,
                  "/v1/public-search/seoul_reservations": travel_public_search.seoul}
 BROWSER=BrowserAgent()
+BROWSER_WORK=BrowserWorkSessions()
 def overlay():
  return overlay_endpoint(CONFIG['port'])
 LOG=r'D:\ZipHap\Compute\requests.log';LOG_LIMIT=2*1024*1024
@@ -197,14 +198,24 @@ class Handler(BaseHTTPRequestHandler):
   if path.startswith('/v1/browser/'):
    # Paired phone or loopback. Policy (public pages only, no sensitive typing, approval for irreversible clicks) lives in BrowserAgent.
    operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close,
-     '/v1/browser/public-read':BROWSER.public_read}.get(path)
+     '/v1/browser/public-read':BROWSER.public_read,'/v1/browser/release':BROWSER_WORK.release}.get(path)
    if path in ('/v1/browser/owner-login-form','/v1/browser/owner-login-submit'):
     if self.client_address[0]=='127.0.0.1':self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
     operation=BROWSER.owner_login_form if path.endswith('-form') else BROWSER.owner_login_submit
    if self.command!='POST' or operation is None:raise ValueError('BROWSER_ROUTE')
    self.connection.settimeout(90)
    request=self.body(8192)
-   try:self.reply(operation(request))
+   try:
+    work=request.pop('work',None)
+    if path=='/v1/browser/release':
+     if request or not isinstance(work,str) or not re.fullmatch(r'[a-f0-9]{64}',work):raise BrowserError('BROWSER_WORK_SHAPE')
+     self.reply(BROWSER_WORK.release(owner,work))
+    elif work is None or path=='/v1/browser/public-read':
+     if work is not None:raise BrowserError('BROWSER_WORK_SHAPE')
+     self.reply(operation(request))
+    else:
+     with BROWSER_WORK.borrow(owner,work,create=path=='/v1/browser/open') as browser:
+      self.reply(getattr(browser,operation.__name__)(request))
    except BrowserError as error:self.reply({'error':error.code},error.status)
    return
   if path.startswith('/v1/agent/'):
@@ -403,4 +414,6 @@ if __name__=='__main__':
  try:server.serve_forever(poll_interval=.5)
  finally:
   try:server.server_close();ENGINE.close()
-  finally:BROWSER.dispose()
+  finally:
+   BROWSER_WORK.dispose()
+   BROWSER.dispose()

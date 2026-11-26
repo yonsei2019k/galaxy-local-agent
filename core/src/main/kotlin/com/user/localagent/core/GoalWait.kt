@@ -41,6 +41,10 @@ data class GoalWaitRecord(
     val ordinaryBrowserAuth: Boolean = false,
     val playingPositionMs: Long? = null,
     val playingDurationMs: Long? = null,
+    val pcMedia: Boolean = false,
+    val mediaPollAt: Long? = null,
+    val lastMediaProgressAt: Long? = null,
+    val lastMediaSampleAt: Long? = null,
 ) {
     init {
         require(id.isNotBlank() && goalId.isNotBlank()) { "대기 기록에는 식별자가 필요합니다." }

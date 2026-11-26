@@ -9,6 +9,7 @@ Rules enforced here, independent of the caller:
 - every action targets the snapshot the caller read; if the page changed, it must read again.
 Page text is untrusted data, never instructions. Nothing is written to logs.
 """
+from contextlib import contextmanager
 import base64, hashlib, hmac, ipaddress, json, os, re, secrets, socket, struct, subprocess, tempfile, threading, time
 import urllib.parse, urllib.request
 from pathlib import Path
@@ -278,6 +279,25 @@ KAIRB_LOGIN_FORM = r"""(args => {
 })"""
 
 KAIRB_COURSE_LIST = "https://www.kairb.org/cme/cme_ing.php"
+KAIRB_COMPLETED = "https://www.kairb.org/cme/cme_complete.php"
+KAIRB_COMPLETED_ROWS = r"""(() => {
+  if (location.origin + location.pathname !== 'https://www.kairb.org/cme/cme_complete.php') return [];
+  const visible = node => node.getClientRects().length > 0 && getComputedStyle(node).visibility === 'visible';
+  const clean = node => node.innerText.replace(/\s+/g, ' ').trim();
+  const titles = [];
+  for (const table of document.querySelectorAll('table.bbs')) {
+    if (!visible(table)) continue;
+    const header = table.rows[0];
+    if (!header || [...header.cells].map(clean).join('|') !== '번호|강의 제목|이수 교시|재수강') continue;
+    for (const row of [...table.rows].slice(1,101)) {
+      if (!visible(row) || row.cells.length !== 4) continue;
+      const [order,title,units] = [...row.cells].map(clean);
+      if (/^\d+$/.test(order) && /^(?:[1-9]\d{0,3})(?:\s*교시)?$/.test(units) && title.length > 0 && title.length <= 240)
+        titles.push(title);
+    }
+  }
+  return titles.slice(0,100);
+})()"""
 KAIRB_SIGNED_IN = r"""(() => location.origin === 'https://www.kairb.org' &&
     !document.querySelector('input[type=password]') &&
     [...document.querySelectorAll('a')].some(a => a.getClientRects().length &&
@@ -462,7 +482,11 @@ class BrowserAgent:
             e.get('editable') and sensitive_field(e) for e in elements
         ):
             self.snapshot = None
-            return {'loginRequired': True, 'dataOnly': True}
+            result = {'loginRequired': True, 'dataOnly': True}
+            location = urllib.parse.urlsplit(value['url'])
+            if location.scheme == 'https' and location.netloc == 'www.kairb.org':
+                result['loginOrigin'] = 'https://www.kairb.org'
+            return result
         # Compare renderer observations on both sides. Display-only labels must not change the fingerprint.
         snapshot_id = signature(value['url'], elements, approval_context(value))
         for e in elements:
@@ -511,6 +535,10 @@ class BrowserAgent:
         with self.lock:
             self._ensure()
             result = self._read()
+            if not request and result.get('snapshotId') and result.get('url', '').split('?', 1)[0] == KAIRB_COMPLETED:
+                titles = self.page.evaluate(KAIRB_COMPLETED_ROWS, timeout=3)
+                if isinstance(titles, list):
+                    result['completedCourseTitles'] = [title for title in titles if isinstance(title, str) and 0 < len(title) <= 240][:100]
             if request and result.get('snapshotId') and not result.get('loginRequired'):
                 args = json.dumps({'key': self.media_key, 'seed': secrets.token_hex(16)})
                 media = self.page.evaluate(MEDIA_JS + '(' + args + ')', timeout=3)
@@ -658,3 +686,61 @@ class BrowserAgent:
                     self.process.wait(timeout=3)
             if self._isolated_profile:
                 self._isolated_profile.cleanup()
+
+
+class BrowserWorkSessions:
+    """Keep each host-issued work identity in a separate Chromium profile and page."""
+    def __init__(self, factory=BrowserAgent, clock=time.monotonic, limit=16, idle_seconds=86_400):
+        self.factory = factory
+        self.clock = clock
+        self.limit = limit
+        self.idle_seconds = idle_seconds
+        self.lock = threading.Lock()
+        self.sessions = {}
+
+    @contextmanager
+    def borrow(self, owner, work, *, create):
+        if not isinstance(work, str) or not re.fullmatch(r'[a-f0-9]{64}', work):
+            raise BrowserError('BROWSER_WORK_SHAPE')
+        key = (owner, work)
+        with self.lock:
+            now = self.clock()
+            for stale, (browser, users, used) in list(self.sessions.items()):
+                if not users and now - used >= self.idle_seconds:
+                    del self.sessions[stale]
+                    browser.dispose()
+            current = self.sessions.get(key)
+            if current is None:
+                if not create:
+                    raise BrowserError('BROWSER_WORK_SESSION_GONE', 409)
+                if len(self.sessions) >= self.limit:
+                    raise BrowserError('BROWSER_WORK_CAPACITY', 429)
+                current = (self.factory(), 0, now)
+            browser, users, _ = current
+            self.sessions[key] = (browser, users + 1, now)
+        try:
+            yield browser
+        finally:
+            with self.lock:
+                current = self.sessions.get(key)
+                if current is not None:
+                    self.sessions[key] = (browser, current[1] - 1, self.clock())
+
+    def release(self, owner, work):
+        key = (owner, work)
+        with self.lock:
+            session = self.sessions.get(key)
+            if session is None:
+                return {'closed': True}
+            browser, users, _ = session
+            if users:
+                raise BrowserError('BROWSER_WORK_BUSY', 409)
+            del self.sessions[key]
+            browser.dispose()
+            return {'closed': True}
+
+    def dispose(self):
+        with self.lock:
+            for browser, _, _ in self.sessions.values():
+                browser.dispose()
+            self.sessions.clear()

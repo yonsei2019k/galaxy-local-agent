@@ -746,6 +746,15 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val finalError=scheduledStop?:errorCode
         r.copy(status=finalStatus,errorCode=finalError,contextJson=contextJson?:r.contextJson,updatedAt=now(),finishedAt=if(finalStatus in TERMINAL)now()else null).also {dao.run(it)}
     }
+    /** A persisted parked goal can survive the gap between its checkpoint and the chat run transition. */
+    internal suspend fun restoreInterruptedGoalWait(expected:ChatRunRecord):Boolean=database.withTransaction {
+        val row=dao.run(expected.id)?:return@withTransaction false
+        if(row!=expected||row.status!="interrupted"||row.errorCode!="process_restarted")return@withTransaction false
+        checkBinding(row)
+        dao.run(row.copy(status="paused",errorCode="waiting_goal_condition",updatedAt=now(),finishedAt=null))
+        true
+    }
+
     suspend fun updateRunContext(runId:String,contextJson:String):ChatRunRecord=database.withTransaction {
         require(contextJson.length<=2_000_000);val r=validRun(runId);r.copy(contextJson=contextJson,updatedAt=now()).also {dao.run(it)}
     }

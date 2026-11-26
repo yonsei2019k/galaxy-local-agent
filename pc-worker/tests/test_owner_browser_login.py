@@ -66,6 +66,42 @@ class OwnerLogin(unittest.TestCase):
                 self.assertIn('동영상 재생', [e['label'] for e in result['elements']])
         finally:
             agent.dispose()
+    def test_completed_course_proof_requires_a_visible_row_on_the_official_list(self):
+        from concurrent.futures import ThreadPoolExecutor
+        origin = 'https://www.kairb.org'
+        rows = """<table class="bbs">
+          <tr><th>번호</th><th>강의 제목</th><th>이수 교시</th><th>재수강</th></tr>
+          <tr><td>1</td><td>Verified Fixture</td><td>3교시</td><td></td></tr>
+          <tr hidden><td>2</td><td>Hidden Fixture</td><td>3</td><td></td></tr>
+          <tr><td>3</td><td>Pending Fixture</td><td>0</td><td></td></tr>
+        </table>"""
+        agent = browser.BrowserAgent()
+        try:
+            agent._ensure()
+            with sync_playwright() as pw:
+                chrome = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{agent._port()}')
+                context = chrome.contexts[0]
+                context.route(origin + '/**', lambda route: route.fulfill(
+                    content_type='text/html; charset=utf-8', body=rows))
+
+                def observe():
+                    agent.open({'url': browser.KAIRB_COMPLETED})
+                    official = agent.read({})
+                    agent.open({'url': origin + '/faq/'})
+                    return official, agent.read({})
+
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(observe)
+                    for _ in range(160):
+                        if future.done():
+                            break
+                        context.pages[0].wait_for_timeout(100)
+                    official, unrelated = future.result(timeout=2)
+                self.assertEqual(official['completedCourseTitles'], ['Verified Fixture'])
+                self.assertNotIn('completedCourseTitles', unrelated)
+        finally:
+            agent.dispose()
+
     def test_worker_reads_through_the_result_alert(self):
         origin = 'https://www.kairb.org'
         agent = browser.BrowserAgent()
