@@ -13,7 +13,7 @@
   --color-cobalt-text: #2E4BE0;
   --color-cobalt-soft: #E6EBFF;
   --color-coral: #C9401F;
-  --color-coral-text: #C2401F;
+  --color-coral-text: #B83C1D;
   --color-coral-soft: #FFE9E2;
   --color-mint: #0B7F5D;
   --color-mint-text: #0B7A5B;
@@ -27,7 +27,7 @@
   --shadow-card: 0 1px 2px rgba(23,27,51,0.04), 0 6px 20px rgba(23,27,51,0.05);
   --shadow-sheet: 0 -8px 32px rgba(23,27,51,0.12);
   --shadow-float: 0 4px 14px rgba(23,27,51,0.16), 0 1px 3px rgba(23,27,51,0.08);
-  --font-ui: 'SUIT Variable', 'SUIT', system-ui, sans-serif;
+  --font-ui: 'SUIT Variable', 'SUIT', 'Pretendard', system-ui, sans-serif;
   --font-display: 'Jua', 'SUIT Variable', sans-serif;
   --space-1: 4px;
   --space-2: 8px;

@@ -84,12 +84,11 @@ import kotlin.math.pow
 
 /**
  * Role tone for icon tiles and soft chips: [soft] is the tile background and [content] the icon/text color on it.
- * Every pair is at least 4.5:1 so the same pair can carry text. Coral uses #B83C1D because token coral-text
- * #C2401F measures only 4.45:1 on coral-soft.
+ * Every pair is at least 4.5:1 so the same pair can carry text (token coral-text is #B83C1D for that reason).
  */
 enum class ZipTone(val soft: Color, val content: Color) {
     Cobalt(ZipHapTokens.CobaltSoft, ZipHapTokens.CobaltText),
-    Coral(ZipHapTokens.CoralSoft, Color(0xFFB83C1D)),
+    Coral(ZipHapTokens.CoralSoft, ZipHapTokens.CoralText),
     Mint(ZipHapTokens.MintSoft, ZipHapTokens.MintText),
     Sun(ZipHapTokens.SunSoft, ZipHapTokens.SunText),
     Lilac(ZipHapTokens.LilacSoft, ZipHapTokens.LilacText),

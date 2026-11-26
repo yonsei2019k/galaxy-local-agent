@@ -23,7 +23,7 @@ object ZipHapTokens {
     val CobaltText = Color(0xFF2E4BE0)
     val CobaltSoft = Color(0xFFE6EBFF)
     val Coral = Color(0xFFC9401F)
-    val CoralText = Color(0xFFC2401F)
+    val CoralText = Color(0xFFB83C1D)
     val CoralSoft = Color(0xFFFFE9E2)
     val Mint = Color(0xFF0B7F5D)
     val MintText = Color(0xFF0B7A5B)
