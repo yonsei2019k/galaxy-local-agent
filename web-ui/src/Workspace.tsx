@@ -2,7 +2,6 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
-import { BrandMark } from './Conversation'
 import { Character } from './character/Character'
 import { CharacterPicker } from './character/CharacterPicker'
 import { useCharacter } from './character/useCharacter'
@@ -45,13 +44,14 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
   onNavigate(panel: Panel): void
   onClose?(): void
 }) {
+  const [character] = useCharacter()
   const staff = snapshot?.staffRooms
   const threads = staff ?? snapshot?.threads ?? []
   const single = snapshot?.singleConversation === true
   return (
     <div className="sidebar-content">
       <div className="sidebar-brand">
-        <span className="wordmark"><BrandMark /> {single ? <span className="wordmark-display">집순이</span> : <>ZipHap<span className="wordmark-sub">.Agent</span></>}</span>
+        <span className="wordmark"><Character choice={character} size={32} decorative /> {single ? <span className="wordmark-display">집순이</span> : <>ZipHap<span className="wordmark-sub">.Agent</span></>}</span>
         {single && <button type="button" className="icon-button sidebar-search" aria-label="대화 검색" disabled={!enabled}
           onClick={() => onNavigate('historySearch')}><Icon name="search" /></button>}
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}

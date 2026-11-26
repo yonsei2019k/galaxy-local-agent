@@ -18,10 +18,6 @@ import { taskPhase, workPresentation } from './work/workPresentation'
 
 export { taskPhase }
 
-export function BrandMark({ className }: { className?: string }) {
-  return <span className={`brand-mark ${className ?? ''}`} aria-hidden="true" />
-}
-
 /** A wrapper whose decorative animations pause while it is off screen (and never run under reduced motion). */
 function MotionField({ className, children }: { className: string; children: ReactNode }) {
   const { ref, reduced, visible } = useVisibleMotion<HTMLDivElement>()

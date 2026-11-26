@@ -136,17 +136,6 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
   color: var(--accent-ink);
 }
 
-.brand-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  flex: none;
-  border-radius: var(--radius-tile);
-  background: var(--accent) url("/brand/ziphap-clasp-mark.svg") center / contain no-repeat;
-  color: var(--accent-ink);
-}
-.brand-mark--small { width: 26px; height: 26px; border-radius: 8px; }
 
 /* Top bar --------------------------------------------------------------------------------------------- */
 .topbar {
@@ -721,7 +710,7 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
 
 /* Forced colors (Windows high contrast) drops shadows and fills, so give surfaces a system outline there only. */
 @media (forced-colors: active) {
-  .work-icon, .send-button, .brand-mark { forced-color-adjust: auto; border: 1px solid CanvasText; }
+  .work-icon, .send-button { forced-color-adjust: auto; border: 1px solid CanvasText; }
   .composer, .work-card, .office-guide, .shared-rooms, .thread-nav ul, .utility-nav, .destination-nav, .answer-menu-list, .collab-message { outline: 1px solid CanvasText; }
 }
 
