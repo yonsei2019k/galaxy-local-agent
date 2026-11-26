@@ -53,11 +53,21 @@ function (request) {
         .filter(visible).map(node => node.innerText).join('\n');
       const failed = /로그인\s*(?:필요|해\s*주세요)|다시\s*로그인|^로그인$|^sign in$|sign in to|authentication required|본인\s*확인|추가\s*인증|2\s*단계\s*인증|접근\s*(?:제한|불가)|서비스를 이용하실 수 없|찾을\s*수\s*없|조회.{0,12}(?:실패|오류|불가)|다시\s*시도|access denied|service unavailable|not found|try again/im;
       if (failed.test(text) || failed.test(alerts)) return false;
-      const explicitResult = /(?:예약|주문|결제|배송)(?:\s*번호(?:\s*[:：]\s*|\s+)[A-Z0-9-]+|\s*확정|\s*완료|이\s*확인)|(?:예약|주문|결제|받은\s*메일)(?:\s*(?:내역|목록))?(?:이|가)?\s*(?:없습니다|없어요|0\s*건)|no\s+(?:reservations|bookings|orders|messages)(?:\s+found)?/i;
-      if (explicitResult.test(text)) return true;
-      const result = content.querySelectorAll('tbody tr,[role=row],ul > li,ol > li,[role=listitem]');
-      return Array.from(result).some(node => visible(node) && !node.closest('nav,[role=navigation],[aria-busy=true]') &&
-        node.innerText.trim() && !node.querySelector('th,[role=columnheader]'));
+      const loading = /불러\s*오는\s*중|로딩\s*중|잠시\s*기다려|\bloading\b/i;
+      if (loading.test(text) || loading.test(alerts)) return false;
+      const explicitResult = /^(?:(?:예약|주문|결제)이\s*확인됐어요|(?:예약|주문|결제|받은\s*메일)(?:\s*(?:내역|목록))?(?:이|가)?\s*(?:없습니다|없어요|0\s*건)|no\s+(?:reservations|bookings|orders|messages)(?:\s+found)?)[.!]?$/i;
+      const status = /(?:예약|주문|배송|결제)\s*(?:확정|완료|취소|준비\s*중|대기|중)/;
+      const reference = /(?:예약|주문|결제|배송)\s*번호(?:\s*[:：]\s*|\s+)(?=[A-Z0-9-]*\d)[A-Z0-9-]{3,}\b/i;
+      const date = /\b\d{4}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{1,2}\b/;
+      const nonResult = 'nav,aside,header,footer,form,button,a,[role=navigation],[role=button],[aria-busy=true],[hidden],[aria-hidden=true],[inert]';
+      const result = content.querySelectorAll('div,p,dd,li,tr,[role=row],[role=listitem],[role=status]');
+      return Array.from(result).some(node => {
+        if (!visible(node) || node.closest(nonResult) || node.querySelector('th,[role=columnheader]')) return false;
+        const value = node.innerText.trim().replace(/\s+/g, ' ');
+        if (explicitResult.test(value) && !node.querySelector(nonResult)) return true;
+        return node.matches('dd,li,tr,[role=row],[role=listitem]') &&
+          status.test(value) && (reference.test(value) || date.test(value));
+      });
     }
     const controls = [...doc.querySelectorAll('a[href],button,[role=button],[role=menuitem]')];
     const name = node => (node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim();

@@ -193,7 +193,10 @@ function (request) {
     function clipToElement(clip,node,style) {
       const rootScroller = node === ownerDocument.body || node === ownerDocument.documentElement;
       const clips = value => rootScroller ? value === 'hidden' || value === 'clip' : boundedOverflow.test(value);
-      const x = clips(style.overflowX), y = clips(style.overflowY);
+      const paintContained = /(?:^|\s)(?:paint|content|strict)(?:\s|$)/.test(style.contain) ||
+        style.contentVisibility === 'auto';
+      const x = paintContained || clips(style.overflowX);
+      const y = paintContained || clips(style.overflowY);
       if (!x && !y) return clip;
       const rect = node.getBoundingClientRect();
       // Client boxes and text ranges share units only on unscaled clipping containers.
