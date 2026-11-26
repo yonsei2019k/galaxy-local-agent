@@ -64,10 +64,10 @@ object ZipHapColors {
     // 2.0 additions.
     val SurfaceSunken = ZipHapTokens.SurfaceSunken
     val Divider = ZipHapTokens.Divider
-    /** Disabled text and decorative glyphs only (3.47 to 3.86:1); never information the user must read. */
+    /** Disabled text, placeholders and decorative glyphs (4.61:1 on sunken since the D1 text-faint change). */
     val TextFaint = ZipHapTokens.TextFaint
-    /** Placeholder text: 4.68:1 on sunken #F1F3F7, 5.19:1 on white (AA); token text-faint fails AA there. */
-    val Placeholder = Color(0xFF666C84)
+    /** Placeholder text: token text-faint #676D85, 4.61:1 on sunken #F1F3F7 and 5.1:1 on white (AA). */
+    val Placeholder = ZipHapTokens.TextFaint
 
     val Cobalt = ZipHapTokens.Cobalt
     val CobaltSoft = ZipHapTokens.CobaltSoft

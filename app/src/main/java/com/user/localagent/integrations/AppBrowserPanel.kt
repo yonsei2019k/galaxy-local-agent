@@ -34,6 +34,16 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.user.localagent.compute.BrowserAgentSettings
 import kotlinx.coroutines.launch
+import com.user.localagent.ui.ZipOutlinedButton
+import com.user.localagent.ui.ZipOutlinedTextField
+import com.user.localagent.ui.ZipFilledButton
+import com.user.localagent.ui.zipSwitchColors
+import com.user.localagent.ui.ZipHapColors
+import com.user.localagent.ui.ZipHapTokens
+import com.user.localagent.ui.ZipIconTile
+import com.user.localagent.ui.ZipTone
+import com.user.localagent.ui.ZipBulletText
+import com.user.localagent.ui.zipShadow
 
 /** Settings for the in-app browser agent plus a full-screen view where the owner logs in or watches the agent. */
 @Composable fun AppBrowserPanel(context:Context){
@@ -53,18 +63,20 @@ import kotlinx.coroutines.launch
     Column(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
         Text("앱 브라우저 에이전트",style=MaterialTheme.typography.titleMedium)
         Text("에이전트가 ZipHap 앱 안의 브라우저에서 웹페이지를 열고 읽고 누를 수 있습니다(예약·장바구니·조회). 사이트 로그인은 아래 '앱 브라우저 열기'에서 직접 해 두세요. 로그인 정보와 쿠키는 이 휴대폰에만 남습니다. 비밀번호·카드·인증번호 칸은 에이전트가 입력하지 않고, 결제·주문·예약 확정·전송 버튼과 검색칸 밖 입력은 승인해야 실행됩니다. 결제 앱으로 넘어가는 단계는 직접 진행하세요.",style=MaterialTheme.typography.bodySmall)
-        Row{Text("앱 브라우저 에이전트 사용",Modifier.weight(1f));Switch(enabled,onCheckedChange={value->settings.setEnabled(value);enabled=settings.enabled()},modifier=Modifier.testTag("app_browser_agent"))}
-        OutlinedButton(onClick={browser.showBrowser()}){Text("앱 브라우저 열기 · 로그인")}
+        Row{Text("앱 브라우저 에이전트 사용",Modifier.weight(1f));Switch(enabled,colors=zipSwitchColors(),onCheckedChange={value->settings.setEnabled(value);enabled=settings.enabled()},modifier=Modifier.testTag("app_browser_agent"))}
+        ZipOutlinedButton(onClick={browser.showBrowser()}){Text("앱 브라우저 열기 · 로그인")}
         TextButton(onClick={vaultOpen=!vaultOpen;if(vaultOpen)loadVault()}){Text(if(vaultOpen)"저장한 로그인 닫기" else "저장한 로그인")}
         if(vaultOpen){
             if(savedSites.isEmpty()&&vaultStatus==null)Text("이 휴대폰에 저장한 로그인이 없어요.")
-            for(site in savedSites)Row(horizontalArrangement=Arrangement.SpaceBetween,modifier=Modifier.fillMaxWidth()){
+            for(site in savedSites)Row(horizontalArrangement=Arrangement.spacedBy(12.dp),modifier=Modifier.fillMaxWidth(),
+                verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                ZipIconTile(com.user.localagent.runtime.R.drawable.zi_lock,tone=ZipTone.Neutral,size=36.dp,iconSize=20.dp)
                 Text(site.host,Modifier.weight(1f))
                 TextButton(onClick={scope.launch {
                     try{browser.removeSavedWebsite(site);savedSites=browser.savedWebsiteOrigins();vaultStatus=null}
                     catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
                     catch(_:Exception){vaultStatus="저장한 로그인을 지우지 못했어요."}
-                }}){Text("삭제")}
+                }}){Text("삭제",color=ZipTone.Coral.content)}
             }
             if(accessHistory.isNotEmpty()){
                 Text("최근 로그인 사용 시도",style=MaterialTheme.typography.titleSmall)
@@ -133,13 +145,13 @@ import kotlinx.coroutines.launch
     Dialog(onDismissRequest=agent::closeBrowser,properties=DialogProperties(
         usePlatformDefaultWidth=false,
         securePolicy=SecureFlagPolicy.SecureOn)){
-        Surface(Modifier.fillMaxSize()){
-            Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+        Surface(Modifier.fillMaxSize(),color=ZipHapColors.Background){
+            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
                 if(!paymentPage)Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    OutlinedTextField(address,{address=it},Modifier.weight(1f),singleLine=true,label={Text("주소")},
+                    ZipOutlinedTextField(address,{address=it},Modifier.weight(1f),singleLine=true,label={Text("주소")},
                         keyboardOptions=KeyboardOptions(imeAction=ImeAction.Go),
                         keyboardActions=KeyboardActions(onGo={openAddress()}))
-                    Button(enabled=!busy&&address.isNotBlank(),onClick={openAddress()}){Text("열기")}
+                    ZipFilledButton(enabled=!busy&&address.isNotBlank(),onClick={openAddress()}){Text("열기")}
                 }
                 if(navigation.loading)LinearProgressIndicator(Modifier.fillMaxWidth())
                 navigation.error?.let { code->
@@ -154,7 +166,7 @@ import kotlinx.coroutines.launch
                     },color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)
                 }
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
+                    ZipOutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
                     if(!busy && !credentialPage && !paymentPage && ownerLogin==null && !navigation.loading && navigation.error==null)
                         TextButton(enabled=!exportingPdf&&pdfTicket==null&&pdfWrite?.phase!=AppWebAgent.PdfWritePhase.WRITING,onClick={
@@ -176,12 +188,12 @@ import kotlinx.coroutines.launch
                             }
                         }){Text("화면 텍스트 PDF 저장")}
                     val loginId=ownerLogin
-                    if(loginId!=null)Button(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
+                    if(loginId!=null)ZipFilledButton(onClick={agent.ownerFinishedBrowserLogin(loginId)}){Text("로그인했어요")}
                     else if(busy)Text("에이전트 작업 중 · 보기만 가능",style=MaterialTheme.typography.labelMedium)
                 }
                 if(paymentPage&&!busy){
                     val activity=context as? android.app.Activity
-                    if(activity!=null)OutlinedButton(onClick={paymentError=!agent.openOwnerPayment(activity,null,null,null)}){
+                    if(activity!=null)ZipOutlinedButton(onClick={paymentError=!agent.openOwnerPayment(activity,null,null,null)}){
                         Text("공식 결제 앱 열기")
                     }
                     if(paymentError)Text("결제 화면에서 카드사를 선택한 뒤 다시 눌러 주세요. 모니모 앱이 설치되어 있어야 해요.")
@@ -257,22 +269,27 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             }
         }
     }
-    Surface(modifier.onSizeChanged {cardHeight=it.height},shape=MaterialTheme.shapes.large,
-        color=MaterialTheme.colorScheme.surfaceContainerHigh){
+    Surface(modifier.onSizeChanged {cardHeight=it.height}.zipShadow(ZipHapTokens.ShadowCard,MaterialTheme.shapes.large),
+        shape=MaterialTheme.shapes.large,color=ZipHapColors.Surface){
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal=12.dp,vertical=8.dp),
                 verticalArrangement=Arrangement.spacedBy(3.dp)){
-                Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
-                Text(login.host,style=MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                    ZipIconTile(com.user.localagent.runtime.R.drawable.zi_lock,size=36.dp,iconSize=20.dp)
+                    Column(Modifier.weight(1f)){
+                        Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
+                        Text(login.host,style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
+                    }
+                }
                 if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
                 loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
-                if(hasSaved&&keyguard?.isDeviceSecure==true)OutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
+                if(hasSaved&&keyguard?.isDeviceSecure==true)ZipOutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
                     Text("저장된 로그인 사용")
                 }
-                OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
+                ZipOutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
                     .bringIntoViewRequester(accountTarget).onFocusChanged { if(it.isFocused)focusedField=1 },singleLine=true,
                     enabled=!submitting,label={Text("아이디")},
                     keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
-                OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth()
+                ZipOutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth()
                     .bringIntoViewRequester(passwordTarget).onFocusChanged { if(it.isFocused)focusedField=2 },singleLine=true,
                     enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
@@ -281,7 +298,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                     Checkbox(checked=saveOnPhone,onCheckedChange={saveOnPhone=it},enabled=!submitting&&!authPending)
                     Text("이 휴대폰에 로그인 저장")
                 }
-                Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=ready){
+                ZipFilledButton(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=ready){
                     Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
@@ -338,7 +355,7 @@ internal fun InlineWebsiteLogin(agent:AppWebAgent,request:AppWebAgent.WebsiteLog
         scope.launch {agent.returnToLoginCard(request.card.id)}
     }
     androidx.activity.compose.BackHandler {agent.foldOwnerLogin(request.card.id)}
-    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+    Surface(modifier.zipShadow(ZipHapTokens.ShadowCard,MaterialTheme.shapes.large),shape=MaterialTheme.shapes.large,color=ZipHapColors.Surface){
         Column(Modifier.fillMaxSize().padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text(request.card.host,style=MaterialTheme.typography.titleSmall)
             naverGuide?.let{NaverLoginHelp(it)}?:loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
@@ -407,9 +424,12 @@ internal fun InlineNolConnection(
         }
     }
     val failed=navigation.error!=null||guide?.key=="error"
-    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+    Surface(modifier.zipShadow(ZipHapTokens.ShadowCard,MaterialTheme.shapes.large),shape=MaterialTheme.shapes.large,color=ZipHapColors.Surface){
         Column(Modifier.fillMaxSize().padding(10.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
-            Text("NOL 계정 연결",style=MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                ZipIconTile(com.user.localagent.runtime.R.drawable.zi_home,tone=ZipTone.Coral,size=36.dp,iconSize=20.dp)
+                Text("NOL 계정 연결",style=MaterialTheme.typography.titleMedium)
+            }
             val showingNaver=!failed&&!resetting&&!navigation.loading&&NolConnectionGuide.isNaverApproval(guide?.key)
             if(showingNaver)guide?.let{NaverLoginHelp(it)}
             else Text(when {
@@ -480,7 +500,7 @@ private fun SecureBrowserWindow(window:Window){
 
 @Composable
 internal fun InlineWebsiteWorkCard(agent:AppWebAgent,work:AppWebAgent.WebsiteWork,modifier:Modifier=Modifier){
-    Surface(modifier,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh){
+    Surface(modifier.zipShadow(ZipHapTokens.ShadowCard,MaterialTheme.shapes.large),shape=MaterialTheme.shapes.large,color=ZipHapColors.Surface){
         Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),
             verticalArrangement=Arrangement.spacedBy(4.dp)){
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,
@@ -492,7 +512,7 @@ internal fun InlineWebsiteWorkCard(agent:AppWebAgent,work:AppWebAgent.WebsiteWor
             Text(work.status,style=MaterialTheme.typography.bodyMedium)
             if(work.working)LinearProgressIndicator(Modifier.fillMaxWidth())
             work.steps.filter {it!=work.status}.takeLast(2).forEach {step->
-                Text("• "+step,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                ZipBulletText(step,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

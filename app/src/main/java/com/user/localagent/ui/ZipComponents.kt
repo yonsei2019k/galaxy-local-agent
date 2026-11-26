@@ -460,7 +460,7 @@ fun ZipTextButton(
 
 /**
  * Filled input: sunken fill, no border or indicator line, radius 16; focus draws a 2dp cobalt ring (error: 2dp red).
- * Placeholder uses [ZipHapColors.Placeholder] (4.68:1 on the fill). [label] floats inside the field.
+ * Placeholder uses [ZipHapColors.Placeholder] (4.61:1 on the fill). [label] floats inside the field.
  */
 @Composable
 fun ZipTextField(
@@ -544,6 +544,7 @@ fun ZipTextField(
  * [title] is 20/700; [actions] render as a full-width row under the content (put ZipSecondaryButton/ZipPrimaryButton
  * with `Modifier.weight(1f)` and `fullWidth = false`). To animate closing from a button, call
  * `scope.launch { sheetState.hide() }.invokeOnCompletion { onDismissRequest() }` with the passed [sheetState].
+ * The body scrolls when it is taller than the sheet; pass `scrollable = false` when the content hosts a LazyColumn.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -553,6 +554,7 @@ fun ZipSheet(
     title: String? = null,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     actions: (@Composable RowScope.() -> Unit)? = null,
+    scrollable: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ModalBottomSheet(
@@ -566,8 +568,10 @@ fun ZipSheet(
         scrimColor = ZipHapColors.TextPrimary.copy(alpha = 0.32f),
         dragHandle = { BottomSheetDefaults.DragHandle(color = ZipHapTokens.Line) },
     ) {
+        val body = Modifier.fillMaxWidth()
         Column(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = ZipHapTokens.Space6),
+            (if (scrollable) body.verticalScroll(rememberScrollState()) else body)
+                .padding(start = 20.dp, end = 20.dp, bottom = ZipHapTokens.Space6),
             verticalArrangement = Arrangement.spacedBy(ZipHapTokens.Space4),
         ) {
             title?.let {

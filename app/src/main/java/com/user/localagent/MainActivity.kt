@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.user.localagent
 
 import android.Manifest
@@ -26,6 +28,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -552,10 +555,12 @@ class MainActivity : ComponentActivity() {
         Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
             if(tab==0&&chatScreenUnavailable){
                 Column(Modifier.fillMaxSize().padding(padding).padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){
-                    Text("대화를 열지 못했어요.",style=MaterialTheme.typography.titleMedium)
-                    Text("다시 열어 보고, 계속 안 되면 앱을 종료한 뒤 다시 실행해 주세요.")
-                    TextButton(onClick={chatScreenAttempt++;chatScreenUnavailable=false}){Text("다시 열기")}
-                    TextButton(onClick={openPanel(4)}){Text("설정")}
+                    ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_error,"대화를 열지 못했어요.","다시 열어 보고, 계속 안 되면 앱을 종료한 뒤 다시 실행해 주세요."){
+                        Column(horizontalAlignment=Alignment.CenterHorizontally){
+                            ZipPrimaryButton("다시 열기",{chatScreenAttempt++;chatScreenUnavailable=false},fullWidth=false)
+                            ZipTextButton("설정",{openPanel(4)})
+                        }
+                    }
                 }
             }else if(tab==0){
                 val runForRoom=steerRunId?.takeIf{steerThreadId==composerThreadId}
@@ -904,7 +909,7 @@ class MainActivity : ComponentActivity() {
                 val pausedLogin=activitiesByRun.values.filter{it.canOpenOwnerLogin}.maxByOrNull{it.startedAt}
                 if(pausedLogin!=null&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null){
                     var loginNotice by remember(pausedLogin.runId){mutableStateOf<String?>(null)}
-                    OutlinedButton(onClick={lifecycleScope.launch {
+                    ZipOutlinedButton(onClick={lifecycleScope.launch {
                         val opened=try {chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId)}
                             catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
                             catch(_:Exception){false}
@@ -957,12 +962,19 @@ class MainActivity : ComponentActivity() {
                 }
                 androidx.activity.compose.BackHandler {returnToParent()}
                 Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
-                    TextButton(onClick=::returnToParent){Text(if(returnsToSettings)"‹ 설정"else"‹ 대화")}
+                    TextButton(onClick=::returnToParent,contentPadding=PaddingValues(start=4.dp,end=12.dp)){
+                        ZipIcon(com.user.localagent.runtime.R.drawable.zi_back,null,tint=ZipHapColors.TextPrimary,size=22.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if(returnsToSettings)"설정"else"대화",color=ZipHapColors.TextPrimary)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if(tab==4 && !manualSettings) TextButton(onClick={showManual(SettingsLink.MANUAL)}){Text("수동 설정",color=ZipHapTokens.CobaltText)}
+                }
+                run {
                     val title=if(tab==4&&settingsPage==SettingsPage.HOME&&!manualSettings)"나의 집순이"
                         else if(tab==4)settingsPage.title
                         else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","보관함","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트","연락처","둘러보기","대화 검색")[tab]
-                    ZipHapSectionTitle(title,Modifier.weight(1f))
-                    if(tab==4 && !manualSettings) TextButton(onClick={showManual(SettingsLink.MANUAL)}){Text("수동 설정")}
+                    ZipScreenTitle(title,Modifier.padding(start=4.dp,top=2.dp,bottom=12.dp))
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state
                 if(panelStatus.isNotBlank() && (tab!=4 || manualSettings))Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
@@ -991,13 +1003,17 @@ class MainActivity : ComponentActivity() {
                         },modifier=Modifier.weight(1f))
                 }
                 if(tab in setOf(6,DISCOVER_TAB,CONTACTS_TAB) || tab==4&&!manualSettings){
-                    HorizontalDivider()
-                    Row(Modifier.fillMaxWidth().selectableGroup()){
-                        listOf(0 to "기본 채팅", DISCOVER_TAB to "둘러보기", 6 to "보관함", 4 to "나의 집순이").forEach { (destination, label) ->
+                    val barShape=RoundedCornerShape(ZipHapTokens.RadiusCard)
+                    Row(Modifier.fillMaxWidth().padding(top=8.dp,bottom=8.dp).zipShadow(ZipHapTokens.ShadowCard,barShape)
+                        .clip(barShape).background(ZipHapColors.Surface).selectableGroup()){
+                        listOf(Triple(0,"기본 채팅",com.user.localagent.runtime.R.drawable.zi_chat), Triple(DISCOVER_TAB,"둘러보기",com.user.localagent.runtime.R.drawable.zi_compass),
+                            Triple(6,"보관함",com.user.localagent.runtime.R.drawable.zi_archive), Triple(4,"나의 집순이",com.user.localagent.runtime.R.drawable.zi_person)).forEach { (destination, label, icon) ->
                             val selected = tab == destination
                             Tab(selected=selected, onClick={ if (!selected) openPanel(destination) },
-                                modifier=Modifier.weight(1f).heightIn(min=48.dp)) {
-                                Text(label, modifier=Modifier.padding(horizontal=2.dp, vertical=8.dp),
+                                modifier=Modifier.weight(1f).heightIn(min=56.dp)) {
+                                ZipIcon(icon,null,Modifier.padding(top=6.dp),
+                                    tint=if(selected) MaterialTheme.colorScheme.primary else ZipHapColors.TextFaint,size=22.dp)
+                                Text(label, modifier=Modifier.padding(start=2.dp, end=2.dp, top=2.dp, bottom=6.dp),
                                     textAlign=TextAlign.Center, style=MaterialTheme.typography.labelMedium,
                                     color=if(selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -1025,9 +1041,10 @@ class MainActivity : ComponentActivity() {
                     status.value="이 휴대폰에서 선택한 첨부 방법을 열 수 없어요."
                 }
             }
-            AlertDialog(onDismissRequest=::closeAttachmentPicker,title={Text("첨부 추가")},text={
+            ZipSheet(onDismissRequest=::closeAttachmentPicker,title="첨부 추가",
+                actions={ZipSecondaryButton("취소",::closeAttachmentPicker)}){
                 Column{
-                    TextButton(onClick={chooseAttachment{
+                    ZipMenuRow("카메라",com.user.localagent.runtime.R.drawable.zi_image,tone=ZipTone.Coral,onClick={chooseAttachment{
                         val directory=File(cacheDir,"camera_attachments")
                         check(directory.isDirectory||directory.mkdirs())
                         val cutoff=System.currentTimeMillis()-24*60*60*1000L
@@ -1035,46 +1052,52 @@ class MainActivity : ComponentActivity() {
                         val file=File.createTempFile("camera-",".jpg",directory)
                         cameraAttachmentName=file.name
                         attachCamera.launch(cameraAttachmentUri(file))
-                    }}){Text("카메라")}
-                    TextButton(onClick={chooseAttachment{
+                    }})
+                    ZipMenuRow("사진",com.user.localagent.runtime.R.drawable.zi_image,tone=ZipTone.Lilac,onClick={chooseAttachment{
                         attachPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }}){Text("사진")}
-                    TextButton(onClick={chooseAttachment{attachFiles.launch(arrayOf("*/*"))}}){Text("파일")}
+                    }})
+                    ZipMenuRow("파일",com.user.localagent.runtime.R.drawable.zi_file,onClick={chooseAttachment{attachFiles.launch(arrayOf("*/*"))}})
                 }
-            },confirmButton={TextButton(onClick=::closeAttachmentPicker){Text("취소")}})
-        }
-        if(chatManagerOpen) AlertDialog(onDismissRequest={chatManagerOpen=false},title={Text("대화 도구")},text={
-            Column {
-                TextButton(onClick={chatManagerOpen=false;openPanel(6)}){Text("대화 기록")}
-                TextButton(onClick={chatManagerOpen=false;queueOpen=true}){Text("대기 중인 요청")}
-                TextButton(onClick={chatManagerOpen=false;goalEditorThreadId=composerThreadId}){Text("대화의 목표")}
-                TextButton(onClick={chatManagerOpen=false;skillLibraryOpen=true}){Text("도움 기능")}
             }
-        },confirmButton={TextButton(onClick={chatManagerOpen=false}){Text("닫기")}})
+        }
+        if(chatManagerOpen) ZipSheet(onDismissRequest={chatManagerOpen=false},title="대화 도구",
+            actions={ZipSecondaryButton("닫기",{chatManagerOpen=false})}){
+            Column {
+                ZipMenuRow("대화 기록",com.user.localagent.runtime.R.drawable.zi_history,tone=ZipTone.Neutral,onClick={chatManagerOpen=false;openPanel(6)})
+                ZipMenuRow("대기 중인 요청",com.user.localagent.runtime.R.drawable.zi_clock,tone=ZipTone.Sun,onClick={chatManagerOpen=false;queueOpen=true})
+                ZipMenuRow("대화의 목표",com.user.localagent.runtime.R.drawable.zi_compass,tone=ZipTone.Mint,onClick={chatManagerOpen=false;goalEditorThreadId=composerThreadId})
+                ZipMenuRow("도움 기능",com.user.localagent.runtime.R.drawable.zi_tools,tone=ZipTone.Lilac,onClick={chatManagerOpen=false;skillLibraryOpen=true})
+            }
+        }
         verifiedFiles[fileMessageId]?.let {files->
-            AlertDialog(onDismissRequest={fileMessageId=null},title={Text("답변에 담긴 파일")},text={
-                Column(Modifier.verticalScroll(rememberScrollState())) { FileArtifactChatPreview(files.joinToString("\n") { "[[file:$it]]" }) }
-            },confirmButton={TextButton(onClick={fileMessageId=null}){Text("닫기")}})
+            ZipSheet(onDismissRequest={fileMessageId=null},title="답변에 담긴 파일",
+                actions={ZipSecondaryButton("닫기",{fileMessageId=null})}){
+                Column { FileArtifactChatPreview(files.joinToString("\n") { "[[file:$it]]" }) }
+            }
         }
         messages.firstOrNull{it.id==messageMenuId}?.let {message->
             fun closeMenu(){messageMenuId=null;messageEdit=null}
-            AlertDialog(onDismissRequest=::closeMenu,title={Text(if(message.role=="assistant")"답변 메뉴"else"메시지 메뉴")},text={
+            ZipSheet(onDismissRequest=::closeMenu,title=if(message.role=="assistant")"답변 메뉴"else"메시지 메뉴",actions={
                 val editing=messageEdit
-                if(editing!=null)OutlinedTextField(editing,{messageEdit=it},label={Text("메시지")},maxLines=6)
+                if(editing==null)ZipSecondaryButton("닫기",::closeMenu)
+                else {
+                    ZipSecondaryButton("취소",{messageEdit=null},Modifier.weight(1f),fullWidth=false)
+                    ZipPrimaryButton("보내기",{closeMenu();chat.editMessage(message.id,editing)},Modifier.weight(1f),
+                        enabled=editing.isNotBlank()&&editing.length<=12000,fullWidth=false)
+                }
+            }){
+                val editing=messageEdit
+                if(editing!=null)ZipOutlinedTextField(editing,{messageEdit=it},Modifier.fillMaxWidth(),label={Text("메시지")},maxLines=6)
                 else Column {
-                    if(message.role=="user")TextButton(onClick={messageEdit=message.text}){Text("수정해서 보내기")}
+                    if(message.role=="user")ZipMenuRow("수정해서 보내기",com.user.localagent.runtime.R.drawable.zi_edit,onClick={messageEdit=message.text})
                     else {
                         GeneratedImageChatPreview(message.text)
-                        if(answerStates[message.id]?.canContinue==true)TextButton(onClick={closeMenu();chat.continueAnswer(message.id)}){Text("답변 이어받기")}
-                        TextButton(onClick={closeMenu();chat.regenerate(message.id)}){Text("다시 답변 받기")}
-                        TextButton(onClick={closeMenu();chat.exportMessage(message.id)}){Text("답변 저장")}
+                        if(answerStates[message.id]?.canContinue==true)ZipMenuRow("답변 이어받기",com.user.localagent.runtime.R.drawable.zi_arrow,tone=ZipTone.Mint,onClick={closeMenu();chat.continueAnswer(message.id)})
+                        ZipMenuRow("다시 답변 받기",com.user.localagent.runtime.R.drawable.zi_refresh,onClick={closeMenu();chat.regenerate(message.id)})
+                        ZipMenuRow("답변 저장",com.user.localagent.runtime.R.drawable.zi_download,tone=ZipTone.Neutral,onClick={closeMenu();chat.exportMessage(message.id)})
                     }
                 }
-            },confirmButton={
-                val editing=messageEdit
-                if(editing==null)TextButton(onClick=::closeMenu){Text("닫기")}
-                else TextButton(enabled=editing.isNotBlank()&&editing.length<=12000,onClick={closeMenu();chat.editMessage(message.id,editing)}){Text("보내기")}
-            },dismissButton={if(messageEdit!=null)TextButton(onClick={messageEdit=null}){Text("취소")}})
+            }
         }
         if(queueOpen)RunQueueDialog(
             items=queuedRequests.map{request->UiQueuedRun(request.runId,request.threadId,request.text.lineSequence().firstOrNull().orEmpty().take(100),request.text,
@@ -1125,30 +1148,30 @@ class MainActivity : ComponentActivity() {
             item {InfoCard("녹음에서 글 만들기", "이 휴대폰에서 음성을 글로 바꿀 때 쓸 언어와 인식 방법을 고를 수 있어요.")}
             item {Text("녹음 언어",style=MaterialTheme.typography.titleSmall);Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 listOf("ko" to "한국어", "en" to "영어", "auto" to "자동 감지").forEach {(code,label)->
-                    FilterChip(selected=asr.language==code,enabled=code!="auto"||asr.modelId!=com.user.localagent.models.AsrCatalog.DEVICE_MODEL,onClick={scope.launch {app.models.selectAsrLanguage(code)}},label={Text(label)})
+                    ZipFilterChip(selected=asr.language==code,enabled=code!="auto"||asr.modelId!=com.user.localagent.models.AsrCatalog.DEVICE_MODEL,onClick={scope.launch {app.models.selectAsrLanguage(code)}},label={Text(label)})
                 }
             }}
             item {
                 val deviceAsr by app.models.deviceAsrStatus.collectAsState()
-                Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
+                ZipCard(Modifier.fillMaxWidth()){Column(Modifier.fillMaxWidth().padding(16.dp)){
                     Text("휴대폰 기본 음성 인식",fontWeight=FontWeight.Bold)
                     Text("한국어와 영어를 지원해요. 이 휴대폰에서 사용할 수 있는지 확인하세요.",style=MaterialTheme.typography.bodySmall)
                     Text(deviceAsr.message,style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         TextButton(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.prepareDeviceAsr(deviceAsr.downloadable)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"기기 내 AI 확인 실패"}}}){Text(if(deviceAsr.downloadable)"음성 인식 준비"else"지원 확인")}
-                        FilterChip(selected=asr.modelId==com.user.localagent.models.AsrCatalog.DEVICE_MODEL,enabled=deviceAsr.available&&asr.language!="auto",onClick={scope.launch {app.models.selectAsr(com.user.localagent.models.AsrCatalog.DEVICE_MODEL)}},label={Text("사용하기")})
+                        ZipFilterChip(selected=asr.modelId==com.user.localagent.models.AsrCatalog.DEVICE_MODEL,enabled=deviceAsr.available&&asr.language!="auto",onClick={scope.launch {app.models.selectAsr(com.user.localagent.models.AsrCatalog.DEVICE_MODEL)}},label={Text("사용하기")})
                     }
                 }}
             }
             items(app.models.candidates.filter {it.id in com.user.localagent.models.AsrCatalog.modelIds}) {candidate->
-                Surface(color=Panel,shape=RoundedCornerShape(16.dp)){Column(Modifier.fillMaxWidth().padding(16.dp)){
+                ZipCard(Modifier.fillMaxWidth()){Column(Modifier.fillMaxWidth().padding(16.dp)){
                     val accuracyFirst=candidate.id=="asr-qwen-17b"
                     Text(if(accuracyFirst)"정확도 우선"else"저장 공간 절약",fontWeight=FontWeight.Bold)
                     Text(if(accuracyFirst)"약 2.8GB 다운로드"else"약 1.2GB 다운로드",style=MaterialTheme.typography.bodySmall)
                     Text("휴대폰에서 처리 · 공식 배포 파일",style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        Button(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.downloadBundle(candidate);status.value="음성 인식 파일 검증 완료"}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"}}}){Text("다운로드")}
-                        FilterChip(selected=asr.modelId==candidate.id,enabled=app.models.asrReady(candidate.id),onClick={scope.launch {app.models.selectAsr(candidate.id)}},label={Text("사용하기")})
+                        ZipFilledButton(enabled=progress==null,onClick={downloadJob=scope.launch {try{app.models.downloadBundle(candidate);status.value="음성 인식 파일 검증 완료"}catch(cancel:CancellationException){throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"}}}){Text("다운로드")}
+                        ZipFilterChip(selected=asr.modelId==candidate.id,enabled=app.models.asrReady(candidate.id),onClick={scope.launch {app.models.selectAsr(candidate.id)}},label={Text("사용하기")})
                     }
                 }}
             }
@@ -1156,21 +1179,21 @@ class MainActivity : ComponentActivity() {
             if(advancedModels){
                 item { InfoCard("PC와 휴대폰에서 나누어 계산","연결한 PC가 계산 중이면 다른 대화의 작업 하나를 휴대폰에서 진행할 수 있습니다. 휴대폰에는 모델 하나씩만 올립니다. 모델 파일은 APK와 별도로 내려받습니다.") }
                 item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
-                item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {FilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});FilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});FilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
-                item {Row {FilterChip(selected=options.contextSize==4096,onClick={modelOptions.value=options.copy(contextSize=4096)},label={Text("4K 문맥")});Spacer(Modifier.width(8.dp));FilterChip(selected=options.contextSize==8192,onClick={modelOptions.value=options.copy(contextSize=8192)},label={Text("8K 문맥")})}}
+                item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {ZipFilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});ZipFilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});ZipFilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
+                item {Row {ZipFilterChip(selected=options.contextSize==4096,onClick={modelOptions.value=options.copy(contextSize=4096)},label={Text("4K 문맥")});Spacer(Modifier.width(8.dp));ZipFilterChip(selected=options.contextSize==8192,onClick={modelOptions.value=options.copy(contextSize=8192)},label={Text("8K 문맥")})}}
                 item {Text("CPU/GPU와 4K/8K는 아래 성능 측정에 사용합니다. 깊게 생각 요청은 현재 대화에 저장되며, 실제 모델·설정은 기기의 검증 결과와 자원 상태에 따라 선택됩니다.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                 item {Row {Checkbox(endurance,onCheckedChange={endurance=it});Text("10분 연속 안정성 측정")}}
                 item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick={importModel.launch(arrayOf("application/octet-stream","*/*"))}) { Text("파일 가져오기") }
-                    OutlinedButton(onClick={scope.launch {maintainModelFiles {status.value="휴대폰 모델 메모리를 해제했습니다."}}}) {Text("메모리 해제")}
+                    ZipOutlinedButton(onClick={importModel.launch(arrayOf("application/octet-stream","*/*"))}) { Text("파일 가져오기") }
+                    ZipOutlinedButton(onClick={scope.launch {maintainModelFiles {status.value="휴대폰 모델 메모리를 해제했습니다."}}}) {Text("메모리 해제")}
                 } }
-                items(app.models.candidates.filterNot {it.id=="gemma-e2b"||com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { candidate -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                items(app.models.candidates.filterNot {it.id=="gemma-e2b"||com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { candidate -> ZipCard(Modifier.fillMaxWidth()) { Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(candidate.title,fontWeight=FontWeight.Bold)
                     Text("공식 메타데이터에서 버전·해시를 확인한 뒤 다운로드",style=MaterialTheme.typography.bodySmall)
-                    Button(enabled=progress==null,onClick={downloadJob=scope.launch { status.value="모델 출처 확인 중";try{app.models.downloadBundle(candidate);status.value="다운로드·해시 검증 완료"}catch(cancel:CancellationException){status.value="중단했습니다. 받은 부분은 이어받기에 사용합니다.";throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"} }}) {Text("다운로드")}
+                    ZipFilledButton(enabled=progress==null,onClick={downloadJob=scope.launch { status.value="모델 출처 확인 중";try{app.models.downloadBundle(candidate);status.value="다운로드·해시 검증 완료"}catch(cancel:CancellationException){status.value="중단했습니다. 받은 부분은 이어받기에 사용합니다.";throw cancel}catch(error:Exception){status.value=error.message?:"다운로드 실패"} }}) {Text("다운로드")}
                 } } }
-                item {Text("설치한 모델",style=MaterialTheme.typography.titleMedium)}
-                items(installed.filterNot {it.id=="gemma-e2b"||com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { model -> Surface(color=Panel,shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                item {ZipSectionTitle("설치한 모델",Modifier.padding(start=4.dp,top=4.dp))}
+                items(installed.filterNot {it.id=="gemma-e2b"||com.user.localagent.models.GemmaMediaCatalog.auxiliary(it.id)}) { model -> ZipCard(Modifier.fillMaxWidth()) {Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(model.title,fontWeight=FontWeight.Bold)
                     val imageOnly=com.user.localagent.models.GemmaMediaCatalog.imageOnly(model.id,model.sha256)
                     Text(if(imageOnly) "이미지 전용" else if(selectedId==model.id) "이 대화에서 선택됨" else "선택 가능",color=Mint)
@@ -1178,8 +1201,8 @@ class MainActivity : ComponentActivity() {
                         val ready=app.models.mediaReady(model)
                         Text(if(ready)"사진 분석 지원"else"사진 분석 지원 파일 다운로드 필요",style=MaterialTheme.typography.bodySmall)
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            if(!imageOnly)FilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
-                            FilterChip(selected=media.vision==model.id,enabled=ready,onClick={scope.launch {app.models.selectMedia("vision",model.id)}},label={Text("사진용")})
+                            if(!imageOnly)ZipFilterChip(selected=selectedId==model.id,enabled=model.verified&&thinkingReady,onClick={chooseConversationModel(model.id,thinkingThreadId)},label={Text("이 대화에서 사용")})
+                            ZipFilterChip(selected=media.vision==model.id,enabled=ready,onClick={scope.launch {app.models.selectMedia("vision",model.id)}},label={Text("사진용")})
                         }
                         if(model.id=="gemma-e4b")Text("사진은 CPU 2스레드·입력량 제한으로 부하를 낮춥니다. 메모리 부족·과열 시 작업을 보류합니다.",style=MaterialTheme.typography.bodySmall)
                     }
@@ -1192,7 +1215,7 @@ class MainActivity : ComponentActivity() {
                 } } }
             }
         }
-        hashTarget?.let {id->AlertDialog(onDismissRequest={hashTarget=null},title={Text("파일 확인")},text={Column{Text("배포처가 알려준 64자리 확인 코드를 입력해 주세요.");OutlinedTextField(value=expectedHash,onValueChange={expectedHash=it.trim()},label={Text("확인 코드")})}},confirmButton={TextButton(enabled=expectedHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={scope.launch {runCatching {app.models.verifyImported(id,expectedHash)}.onSuccess{status.value="파일이 배포처의 원본과 일치해요.";hashTarget=null}.onFailure{status.value=it.message?:"검증 실패"}}}){Text("파일 검증")}},dismissButton={TextButton(onClick={hashTarget=null}){Text("취소")}})}
+        hashTarget?.let {id->AlertDialog(onDismissRequest={hashTarget=null},title={Text("파일 확인")},text={Column{Text("배포처가 알려준 64자리 확인 코드를 입력해 주세요.");ZipOutlinedTextField(value=expectedHash,onValueChange={expectedHash=it.trim()},label={Text("확인 코드")})}},confirmButton={TextButton(enabled=expectedHash.matches(Regex("[a-fA-F0-9]{64}")),onClick={scope.launch {runCatching {app.models.verifyImported(id,expectedHash)}.onSuccess{status.value="파일이 배포처의 원본과 일치해요.";hashTarget=null}.onFailure{status.value=it.message?:"검증 실패"}}}){Text("파일 검증")}},dismissButton={TextButton(onClick={hashTarget=null}){Text("취소")}})}
     }
     private suspend fun runBenchmark(path:String,minutes:Int=0) {
         status.value="벤치마크 시작 · 다른 작업은 잠시 기다려주세요"
@@ -1241,71 +1264,78 @@ class MainActivity : ComponentActivity() {
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             when(page){
                 SettingsPage.HOME->{
-                    item {SettingsEntry("앱과 컴퓨터 연결","메일·문서·메신저 또는 내 컴퓨터를 연결해요."){onPage(SettingsPage.CONNECTIONS)}}
-                    item {SettingsEntry("음성을 글로 바꾸기","녹음에 쓸 언어와 휴대폰의 음성 인식을 설정해요."){onOpen(1)}}
-                    item {SettingsEntry("개인정보와 권한","화면 접근이나 전에 허용한 작업을 확인해요."){onPage(SettingsPage.PRIVACY)}}
-                    item {SettingsEntry("자동으로 도와주기","통화 뒤 정리하거나 사용 중에 도움을 받도록 설정해요."){onPage(SettingsPage.AUTOMATION)}}
-                    item {SettingsEntry("앱 업데이트","새 버전을 확인하고 설치해요."){onPage(SettingsPage.UPDATES)}}
-                    if(showChatRecoveryLinks){
-                        item {SettingsEntry("대화 기록","저장한 대화를 찾아요."){onOpen(6)}}
-                    }
+                    item {ZipSection {
+                        SettingsRow("앱과 컴퓨터 연결","메일·문서·메신저 또는 내 컴퓨터를 연결해요.",com.user.localagent.runtime.R.drawable.zi_link){onPage(SettingsPage.CONNECTIONS)}
+                        ZipInsetDivider()
+                        SettingsRow("음성을 글로 바꾸기","녹음에 쓸 언어와 휴대폰의 음성 인식을 설정해요.",com.user.localagent.runtime.R.drawable.zi_microphone,ZipTone.Lilac){onOpen(1)}
+                        ZipInsetDivider()
+                        SettingsRow("개인정보와 권한","화면 접근이나 전에 허용한 작업을 확인해요.",com.user.localagent.runtime.R.drawable.zi_shield,ZipTone.Mint){onPage(SettingsPage.PRIVACY)}
+                        ZipInsetDivider()
+                        SettingsRow("자동으로 도와주기","통화 뒤 정리하거나 사용 중에 도움을 받도록 설정해요.",com.user.localagent.runtime.R.drawable.zi_sparkle,ZipTone.Sun){onPage(SettingsPage.AUTOMATION)}
+                        ZipInsetDivider()
+                        SettingsRow("앱 업데이트","새 버전을 확인하고 설치해요.",com.user.localagent.runtime.R.drawable.zi_download){onPage(SettingsPage.UPDATES)}
+                        if(showChatRecoveryLinks){
+                            ZipInsetDivider()
+                            SettingsRow("대화 기록","저장한 대화를 찾아요.",com.user.localagent.runtime.R.drawable.zi_history,ZipTone.Neutral){onOpen(6)}
+                        }
+                    }}
                     item {
-                        SettingsDisclosure("저장한 자료와 기록","기억, 문자, 일정, 검색 자료를 찾아요."){
-                            TextButton(onClick={onOpen(3)}){Text("파일 작업")}
-                            TextButton(onClick={onOpen(2)}){Text("기억과 할 일")}
-                            TextButton(onClick={onOpen(5)}){Text("연결된 자료")}
-                            TextButton(onClick={onOpen(8)}){Text("문자와 일정")}
-                            TextButton(onClick={onOpen(9)}){Text("검색 기록")}
+                        SettingsDisclosure("저장한 자료와 기록","기억, 문자, 일정, 검색 자료를 찾아요.",com.user.localagent.runtime.R.drawable.zi_archive,ZipTone.Sun,flush=true){
+                            ZipMenuRow("파일 작업",com.user.localagent.runtime.R.drawable.zi_file,{onOpen(3)},Modifier.padding(horizontal=12.dp))
+                            ZipMenuRow("기억과 할 일",com.user.localagent.runtime.R.drawable.zi_heart,{onOpen(2)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Coral)
+                            ZipMenuRow("연결된 자료",com.user.localagent.runtime.R.drawable.zi_link,{onOpen(5)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Mint)
+                            ZipMenuRow("문자와 일정",com.user.localagent.runtime.R.drawable.zi_calendar,{onOpen(8)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Sun)
+                            ZipMenuRow("검색 기록",com.user.localagent.runtime.R.drawable.zi_search,{onOpen(9)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Neutral)
                         }
                     }
                 }
                 SettingsPage.CONNECTIONS->{
-                    item {SettingsEntry("메일·일정·문서 연결","Google 계정으로 사용할 기능을 선택해요."){
+                    item {SettingsEntry("메일·일정·문서 연결","Google 계정으로 사용할 기능을 선택해요.",com.user.localagent.runtime.R.drawable.zi_mail){
                         startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))
                     }}
-                    item {SettingsDisclosure("내 컴퓨터","컴퓨터를 추가하거나 연결 상태를 확인해요."){
+                    item {SettingsDisclosure("내 컴퓨터","컴퓨터를 추가하거나 연결 상태를 확인해요.",com.user.localagent.runtime.R.drawable.zi_chip,ZipTone.Lilac){
                         PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),
                             loadQaLessons=app.repository.chat::remoteQaLessons){status.value=it}
                     }}
-                    item {SettingsDisclosure("메신저","카카오톡 등에서 받아볼 내용을 정해요."){
+                    item {SettingsDisclosure("메신저","카카오톡 등에서 받아볼 내용을 정해요.",com.user.localagent.runtime.R.drawable.zi_chat,ZipTone.Sun){
                         com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}
                     }}
                 }
                 SettingsPage.AUTOMATION->{
-                    item {SettingsDisclosure("통화 뒤 정리","통화 녹음으로 할 일과 메모를 제안받아요."){
+                    item {SettingsDisclosure("통화 뒤 정리","통화 녹음으로 할 일과 메모를 제안받아요.",com.user.localagent.runtime.R.drawable.zi_phone,ZipTone.Mint){
                         CallFollowUpPanel(app,{status.value=it}){onOpen(6)}
                     }}
-                    item {SettingsDisclosure("사용 기록으로 도움 받기","사용 시간과 알림 횟수로 제안을 받아요."){
+                    item {SettingsDisclosure("사용 기록으로 도움 받기","사용 시간과 알림 횟수로 제안을 받아요.",com.user.localagent.runtime.R.drawable.zi_activity,ZipTone.Sun){
                         AutomationPanel(this@MainActivity,app.automation,{startActivity(it)},{status.value=it},{app.repository.discardProposedMemories();Unit})
                     }}
                 }
                 SettingsPage.PRIVACY->{
-                    item {SettingsDisclosure("다른 앱 화면 접근","화면을 읽거나 조작할 수 있는 범위를 정해요."){
+                    item {SettingsDisclosure("다른 앱 화면 접근","화면을 읽거나 조작할 수 있는 범위를 정해요.",com.user.localagent.runtime.R.drawable.zi_native){
                         com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}
                     }}
-                    item {SettingsDisclosure("이전에 허용한 작업","반복 작업에 저장한 허용을 해제할 수 있어요."){
+                    item {SettingsDisclosure("이전에 허용한 작업","반복 작업에 저장한 허용을 해제할 수 있어요.",com.user.localagent.runtime.R.drawable.zi_lock,ZipTone.Neutral){
                         val scope=rememberCoroutineScope()
-                        OutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("반복 작업 허용 해제")}
+                        ZipOutlinedButton(onClick={scope.launch {app.repository.revokeGrant("builtin");status.value="기본 도구의 반복 작업 허용을 해제했습니다."}}){Text("반복 작업 허용 해제")}
                     }}
-                    item {SettingsDisclosure("Codex 연결","이 앱이 Codex를 사용하도록 허용한 상태를 관리해요."){
+                    item {SettingsDisclosure("Codex 연결","이 앱이 Codex를 사용하도록 허용한 상태를 관리해요.",com.user.localagent.runtime.R.drawable.zi_robot,ZipTone.Neutral){
                         TextButton(onClick={
                             com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity).setEnabled(false)
                             status.value="Codex 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
-                        }){Text("Codex 연결 해제")}
+                        }){Text("Codex 연결 해제",color=ZipTone.Coral.content)}
                     }}
-                    item {SettingsDisclosure("Claude 연결","이 앱이 Claude를 사용하도록 허용한 상태를 관리해요."){
+                    item {SettingsDisclosure("Claude 연결","이 앱이 Claude를 사용하도록 허용한 상태를 관리해요.",com.user.localagent.runtime.R.drawable.zi_robot,ZipTone.Lilac){
                         TextButton(onClick={
                             com.user.localagent.externalagent.ExternalAgentSettings.get(this@MainActivity,com.user.localagent.externalagent.ExternalAgentSettings.CLAUDE_MODEL_ID).setEnabled(false)
                             status.value="Claude 연결을 해제했습니다. 기존 요청의 권한도 만료됩니다."
-                        }){Text("Claude 연결 해제")}
+                        }){Text("Claude 연결 해제",color=ZipTone.Coral.content)}
                     }}
                 }
                 SettingsPage.UPDATES->{
                     item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
-                    item {SettingsDisclosure("확장 기능 검사","직접 추가할 확장 파일의 정보를 확인해요."){
+                    item {SettingsDisclosure("확장 기능 검사","직접 추가할 확장 파일의 정보를 확인해요.",com.user.localagent.runtime.R.drawable.zi_tools,ZipTone.Neutral){
                         ExtensionInspectionPanel{status.value=it}
                     }}
-                    item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName}",style=MaterialTheme.typography.bodySmall)}
+                    item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName}",Modifier.padding(start=4.dp),style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)}
                 }
             }
         }

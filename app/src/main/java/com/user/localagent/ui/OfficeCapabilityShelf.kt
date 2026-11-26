@@ -102,7 +102,7 @@ private fun ToolCapability.officeStatus()=when(availability){
                 }
                 if(showConnections)item{
                     SettingsEntry("앱과 컴퓨터 연결",
-                        if(pc.paired)"등록한 컴퓨터와 사용할 계정을 확인해요." else "계정, 컴퓨터, 메신저를 연결해요.",onConnections)
+                        if(pc.paired)"등록한 컴퓨터와 사용할 계정을 확인해요." else "계정, 컴퓨터, 메신저를 연결해요.",onOpen=onConnections)
                 }
                 items(accounts,key={"account-"+it.id}){service->
                     val all=accountTools.values.filter{it.service==service}.mapNotNull{byId[it.definition.name]}
@@ -112,7 +112,7 @@ private fun ToolCapability.officeStatus()=when(availability){
                         all.any{it.availability==CapabilityAvailability.REQUIRES_PERMISSION}->"계정 연결 필요"
                         else->"연결 상태 확인 필요"
                     }
-                    SettingsEntry(service.label,status,onConnections)
+                    SettingsEntry(service.label,status,onOpen=onConnections)
                 }
                 items(phoneApps,key={"phone-"+it.id}){item->
                     val all=consumerTools.filterValues{it==item}.keys.mapNotNull(byId::get)
