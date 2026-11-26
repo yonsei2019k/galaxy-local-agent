@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReviewFinalizationRecoveryTest {
+    @Test fun routeGuidanceNamesHeadlessOnlyWhenOfferedAndCalculationWithoutUi(){
+        val offered=setOf("calculate",PcBrowserToolCatalog.OPEN,AppBrowserToolCatalog.OPEN,"open_tmap_destination")
+        assertTrue(SemanticPlannerInstructions.build(offered).contains("prefer the paired PC headless browser"))
+        assertTrue(SemanticPlannerInstructions.build(offered).contains("arithmetic result without opening a phone app"))
+        assertFalse(SemanticPlannerInstructions.build(setOf("calculate")).contains("prefer the paired PC headless browser"))
+        assertTrue(SemanticPlannerInstructions.build(offered).contains("carrier SMS or opening an actual destination in TMAP"))
+        assertTrue(ToolUsePolicy.promptLines(offered).any {it.contains("PC 백그라운드 브라우저를 우선")})
+    }
+
     @Test fun incompleteOrMalformedReviewIsNeverCompletionOrAnotherAction() {
         val valid="""{"type":"review_complete","summary":"확인됨"}"""
         assertTrue(AutonomousReviewPolicy.forFinalization(valid,emptySet(),false) is AutonomousReviewPolicy.Decision.Unavailable)
