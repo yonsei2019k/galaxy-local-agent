@@ -214,7 +214,7 @@ class GoalSegmentAutopilotTest {
         }.toString(),VerificationState.VERIFIED,"Observed course row")
         val official=result(PcBrowserToolCatalog.KAIRB_COMPLETED_URL,title)
         val step=HarnessStep(call,StepEvidence(call.name,official.verification,official.verificationSummary,
-            outcomeProof=goalOutcomeProof(call,official)))
+            auditId="official-course-read",outcomeProof=goalOutcomeProof(call,official)))
         val criterion=GoalCriterion(text=proof.courseListCriterion(),proofTarget=proof)
         assertTrue(goalCriterionMatches(criterion,step))
         assertFalse(goalCriterionMatches(criterion.copy(text="올해 이수증 발급"),step))
