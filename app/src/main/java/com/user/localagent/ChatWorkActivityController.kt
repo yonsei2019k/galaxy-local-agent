@@ -174,7 +174,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
             userMessageId=run.userMessageId,finishedAt=run.finishedAt,goalOwnerReply=waitingForReply&&run.errorCode==GOAL_OWNER_INPUT,
             canOpenOwnerLogin=run.status=="paused" && run.errorCode in BrowserAuthContinuation.reopenablePauses &&
-                runCatching { BrowserAuthContinuation.reopenPage(run.contextJson)!=null }.getOrDefault(false)))
+                runCatching { BrowserAuthContinuation.canReopenLogin(run.contextJson) }.getOrDefault(false)))
     }
 }
 

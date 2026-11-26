@@ -34,6 +34,9 @@ internal object BrowserAuthContinuation {
         return ownerLoginPage(steps)?.let { ReopenPage(it,false) }
     }
 
+    fun canReopenLogin(contextJson:String):Boolean =
+        canReopenPcLogin(QueuedChatRequest.fromJson(contextJson).previousSteps)||reopenPage(contextJson)!=null
+
     fun canReopenPcLogin(steps:List<HarnessStep>):Boolean {
         if(!safeSteps(steps)||steps.last().tool !in setOf("open_pc_browser_page","read_pc_browser_page"))return false
         val open=steps.lastOrNull {it.tool=="open_pc_browser_page"}?:return false

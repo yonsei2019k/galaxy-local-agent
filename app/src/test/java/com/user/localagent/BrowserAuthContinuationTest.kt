@@ -75,7 +75,11 @@ class BrowserAuthContinuationTest {
         fun open(url:String)=HarnessStep("open_pc_browser_page",buildJsonObject {put("url",url)},
             StepEvidence("open_pc_browser_page",VerificationState.VERIFIED,"Observed"))
         val read=step("read_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
-        assertTrue(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://www.kairb.org/cme/cme_complete.php"),read)))
+        val steps=listOf(open("https://www.kairb.org/cme/cme_complete.php"),read)
+        assertTrue(BrowserAuthContinuation.canReopenPcLogin(steps))
+        val saved=QueuedChatRequest("run","thread","branch",null,"owner query","auto",false,emptyList(),"user",previousSteps=steps)
+        assertTrue(BrowserAuthContinuation.canReopenLogin(saved.toJson()))
+        assertFalse(BrowserAuthContinuation.canReopenLogin(saved.copy(previousSteps=listOf(read)).toJson()))
         assertTrue(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://kairb.org/"),read)))
         assertFalse(BrowserAuthContinuation.canReopenPcLogin(listOf(read)))
         assertFalse(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://www.kairb.org.example.org/"),read)))

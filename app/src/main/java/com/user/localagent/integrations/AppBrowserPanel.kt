@@ -241,9 +241,13 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             if(focusedField==1)accountTarget.bringIntoView() else passwordTarget.bringIntoView()
         }
     }
-    val ready=account.isNotBlank()&&password.isNotEmpty()&&!submitting&&!authPending
+    var checkedFields by remember(login.id){mutableStateOf(false)}
+    val missingAccount=checkedFields&&account.isBlank()
+    val missingPassword=checkedFields&&password.isEmpty()
     fun submit(){
-        if(!ready)return
+        if(submitting||authPending)return
+        checkedFields=true
+        if(account.isBlank()||password.isEmpty())return
         val enteredAccount=account
         val enteredPassword=password
         val keep=saveOnPhone
@@ -262,7 +266,9 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     }
     Surface(modifier.onSizeChanged {cardHeight=it.height},shape=MaterialTheme.shapes.large,
         color=MaterialTheme.colorScheme.surfaceContainerHigh){
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal=12.dp,vertical=8.dp),
+        Column(Modifier.fillMaxSize().padding(horizontal=12.dp,vertical=8.dp),
+            verticalArrangement=Arrangement.spacedBy(3.dp)){
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement=Arrangement.spacedBy(3.dp)){
                 Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
                 Text(login.host,style=MaterialTheme.typography.bodySmall)
@@ -273,25 +279,28 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 }
                 OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
                     .bringIntoViewRequester(accountTarget).onFocusChanged { if(it.isFocused)focusedField=1 },singleLine=true,
-                    enabled=!submitting,label={Text("아이디")},
+                    enabled=!submitting,label={Text("아이디")},isError=missingAccount,
+                    supportingText=if(missingAccount) ({Text("아이디를 입력해 주세요.")}) else null,
                     keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
                 OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth()
                     .bringIntoViewRequester(passwordTarget).onFocusChanged { if(it.isFocused)focusedField=2 },singleLine=true,
                     enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
+                    isError=missingPassword,supportingText=if(missingPassword) ({Text("비밀번호를 입력해 주세요.")}) else null,
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
                     keyboardActions=KeyboardActions(onGo={submit()}))
                 if(!login.pairedPc&&keyguard?.isDeviceSecure==true)Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
                     Checkbox(checked=saveOnPhone,onCheckedChange={saveOnPhone=it},enabled=!submitting&&!authPending)
                     Text("이 휴대폰에 로그인 저장")
                 }
-                Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=ready){
-                    Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
-                }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                     if(!login.pairedPc)TextButton(onClick={keyboard?.hide();agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
                     TextButton(onClick={keyboard?.hide();agent.foldOwnerLogin(login.id)},enabled=!submitting){Text("나중에")}
                 }
             }
+            Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=!submitting&&!authPending){
+                Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
+            }
+        }
     }
 }
 

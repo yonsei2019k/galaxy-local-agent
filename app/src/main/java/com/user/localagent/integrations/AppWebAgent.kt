@@ -677,6 +677,7 @@ class AppWebAgent private constructor(private val context:Context) {
             if(!canSubmit())return false
             pendingPcLogin=pc
             pcLoginNeedsNewForm=true
+            com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_LOGIN_REQUEST_STARTED")
             if(!pc.submit(context,account,password)){
                 if(loginCard.value?.id==id)
                     loginStatus.value="사이트에서 로그인을 확인하지 못했어요. 입력 내용을 확인한 뒤 다시 눌러 주세요."
