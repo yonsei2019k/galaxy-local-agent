@@ -895,7 +895,7 @@ class MainActivity : ComponentActivity() {
                             }})
                         else if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
                         else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,
-                            Modifier.fillMaxSize(),websiteKeyboardOpen)
+                            Modifier.fillMaxSize())
                     }
                 }else if(inlineApproval!=null)key(inlineApproval.presentationId){
                     com.user.localagent.ui.NativeChatOverlay(nativeSlot,false){

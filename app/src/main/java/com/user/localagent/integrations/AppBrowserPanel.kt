@@ -10,8 +10,6 @@ import android.view.Window
 import android.view.WindowManager
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -19,8 +17,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -201,7 +197,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCard,window:Window,
-    modifier:Modifier=Modifier,keyboardOpen:Boolean=false){
+    modifier:Modifier=Modifier){
     SecureBrowserWindow(window)
     androidx.activity.compose.BackHandler(enabled=true){agent.foldOwnerLogin(login.id)}
     val scope=rememberCoroutineScope()
@@ -231,16 +227,8 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
         keyboard?.hide()
         try{ownerAuth.launch(confirmation)}catch(_:android.content.ActivityNotFoundException){authPending=false}
     }
-    val accountTarget=remember {BringIntoViewRequester()}
-    val passwordTarget=remember {BringIntoViewRequester()}
-    var focusedField by remember {mutableIntStateOf(0)}
-    var cardHeight by remember {mutableIntStateOf(0)}
-    LaunchedEffect(keyboardOpen,focusedField,cardHeight){
-        if(keyboardOpen&&focusedField!=0){
-            withFrameNanos { }
-            if(focusedField==1)accountTarget.bringIntoView() else passwordTarget.bringIntoView()
-        }
-    }
+    // The slot is repositioned by the chat when the IME appears. Keep the form
+    // manually scrollable without requesting relocation during that layout pass.
     var checkedFields by remember(login.id){mutableStateOf(false)}
     val missingAccount=checkedFields&&account.isBlank()
     val missingPassword=checkedFields&&password.isEmpty()
@@ -264,7 +252,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             }
         }
     }
-    Surface(modifier.onSizeChanged {cardHeight=it.height},shape=MaterialTheme.shapes.large,
+    Surface(modifier,shape=MaterialTheme.shapes.large,
         color=MaterialTheme.colorScheme.surfaceContainerHigh){
         Column(Modifier.fillMaxSize().padding(horizontal=12.dp,vertical=8.dp),
             verticalArrangement=Arrangement.spacedBy(3.dp)){
@@ -277,13 +265,11 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 if(hasSaved&&keyguard?.isDeviceSecure==true)OutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
                     Text("저장된 로그인 사용")
                 }
-                OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth()
-                    .bringIntoViewRequester(accountTarget).onFocusChanged { if(it.isFocused)focusedField=1 },singleLine=true,
+                OutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
                     enabled=!submitting,label={Text("아이디")},isError=missingAccount,
                     supportingText=if(missingAccount) ({Text("아이디를 입력해 주세요.")}) else null,
                     keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
-                OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth()
-                    .bringIntoViewRequester(passwordTarget).onFocusChanged { if(it.isFocused)focusedField=2 },singleLine=true,
+                OutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth(),singleLine=true,
                     enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
                     isError=missingPassword,supportingText=if(missingPassword) ({Text("비밀번호를 입력해 주세요.")}) else null,
                     keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
