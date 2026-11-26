@@ -563,10 +563,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     if(ExternalAgentSettings.isCloud(original.modelId)&&com.user.localagent.core.ConversationPrivacy.sensitiveText(text)) {
                         check(ExternalAgentSettings.get(context,original.modelId).capture().permitsPersonalData(original.externalAgentRevision))
                     }
-                    val combined=original.text+"
-
-사용자가 이 단계의 추가 질문에 답했습니다.
-"+text.trim()
+                    val combined=original.text+"\n\n사용자가 이 단계의 추가 질문에 답했습니다.\n"+text.trim()
                     require(combined.length<=12000)
                     queueBoundedGoalRun(access,goal,branchId,original.modelId,original.thinking,original.workspaceBinding,
                         checkNotNull(currentCoroutineContext()[Job]),ownerInstruction=combined,
