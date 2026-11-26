@@ -7,6 +7,8 @@ import com.user.localagent.core.VerificationState
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -67,6 +69,19 @@ class BrowserAuthContinuationTest {
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("app_browser_action",VerificationState.VERIFIED),auth)))
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("read_webpage",VerificationState.UNVERIFIED),auth)))
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("open_app_browser_page",VerificationState.FAILED),auth).dropLast(1)))
+    }
+
+    @Test fun reopenUsesTheOriginalOfficialPcSiteAndOnlySettledReads() {
+        fun open(url:String)=HarnessStep("open_pc_browser_page",buildJsonObject {put("url",url)},
+            StepEvidence("open_pc_browser_page",VerificationState.VERIFIED,"Observed"))
+        val read=step("read_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        assertTrue(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://www.kairb.org/cme/cme_complete.php"),read)))
+        assertTrue(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://kairb.org/"),read)))
+        assertFalse(BrowserAuthContinuation.canReopenPcLogin(listOf(read)))
+        assertFalse(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://www.kairb.org.example.org/"),read)))
+        assertFalse(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://www.kairb.org:8443/"),read)))
+        assertFalse(BrowserAuthContinuation.canReopenPcLogin(listOf(open("https://www.kairb.org/"),
+            step("act_on_pc_browser_page",VerificationState.VERIFIED),read)))
     }
 
     @Test fun onlyAnActualOwnerCardCanContinueAPairedOpen() {

@@ -64,6 +64,7 @@ class AppWebAgent private constructor(private val context:Context) {
     private var nextLoginId=0L
     data class LoginCard(val id:Long,val host:String,val pairedPc:Boolean=false,val websiteOnly:Boolean=false)
     private var pendingPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
+    private var pcLoginNeedsNewForm=false
     private var confirmedPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     internal fun offerPcLogin(binding:WorkBinding,login:com.user.localagent.compute.PairedWebsiteLogin):Boolean {
         if(loginCard.value!=null || loginSubmitting || websiteLogin.value!=null || !login.current(context))return false
@@ -73,6 +74,7 @@ class AppWebAgent private constructor(private val context:Context) {
         lastConfirmedCard=null
         cardOrigin=null
         pendingPcLogin=login
+        pcLoginNeedsNewForm=false
         expiredLoginBinding="$loginProcess:$id"
         loginFolded.value=false
         loginReturnOrigin=null
@@ -640,27 +642,45 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private suspend fun submitPcLogin(id:Long,account:String,password:String):Boolean {
-        val pc=pendingPcLogin?:return false
-        val binding=browserWorkBinding.value?:return false
-        if(loginSubmitting || !RuntimeGate.foreground.get() || !pc.current(context) ||
-            account.isBlank() || account.length>320 || password.length !in 1..1024)return false
+        if(loginSubmitting||!RuntimeGate.foreground.get()||loginCard.value?.id!=id)return false
+        val saved=pendingPcLogin
+        val binding=browserWorkBinding.value
+        if(saved==null||binding==null||!saved.current(context)){
+            loginStatus.value="PC 브라우저 연결을 확인하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+            return false
+        }
+        if(account.isBlank()||account.length>320||password.length !in 1..1024){
+            loginStatus.value="아이디와 비밀번호를 모두 입력해 주세요."
+            return false
+        }
         loginSubmitting=true
         try {
             val app=(context as com.user.localagent.LocalAgentApplication).container
-            val run=app.repository.chat.run(binding.runId)?:return false
-            val thread=app.repository.chat.thread(binding.threadId)?:return false
-            if(thread.archived || thread.activeBranchId!=binding.branchId || run.threadId!=binding.threadId ||
-                run.branchId!=binding.branchId || (run.status!="running" && !(run.status=="paused" &&
-                    run.errorCode in setOf("waiting_browser_auth","waiting_goal_condition","browser_auth_on_phone"))) ||
-                loginCard.value?.id!=id || !RuntimeGate.foreground.get())return false
+            suspend fun canSubmit():Boolean {
+                val run=app.repository.chat.run(binding.runId)?:return false
+                val thread=app.repository.chat.thread(binding.threadId)?:return false
+                return !thread.archived&&thread.activeBranchId==binding.branchId&&run.threadId==binding.threadId&&
+                    run.branchId==binding.branchId&&(run.status=="running"||run.status=="paused"&&
+                    run.errorCode in setOf("waiting_browser_auth","waiting_goal_condition","browser_auth_on_phone"))&&
+                    browserWorkBinding.value==binding&&loginCard.value?.id==id&&RuntimeGate.foreground.get()
+            }
+            if(!canSubmit()){
+                if(loginCard.value?.id==id)loginStatus.value="이 작업이 로그인 대기 상태인지 확인하지 못했어요. 원래 채팅에서 다시 열어 주세요."
+                return false
+            }
             loginStatus.value="전용 PC 브라우저의 사이트 로그인 상태를 확인하고 있어요."
+            val pc=if(pcLoginNeedsNewForm)saved.freshForm(context) else saved
+            if(pc==null){
+                loginStatus.value="PC에서 로그인 양식을 다시 열지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+                return false
+            }
+            if(!canSubmit())return false
+            pendingPcLogin=pc
+            pcLoginNeedsNewForm=true
             if(!pc.submit(context,account,password)){
-                val fresh=pc.freshForm(context)
-                if(loginCard.value?.id==id) {
-                    pendingPcLogin=fresh
-                    loginStatus.value=if(fresh!=null)"아직 사이트 로그인 화면이에요. 입력 내용을 확인하고 다시 시도해 주세요."
-                        else "로그인 양식이 바뀌었어요. 취소한 뒤 사이트를 다시 열어 주세요."
-                }
+                if(loginCard.value?.id==id)
+                    loginStatus.value="사이트에서 로그인을 확인하지 못했어요. 입력 내용을 확인한 뒤 다시 눌러 주세요."
+                com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_SIGN_IN_NOT_CONFIRMED")
                 return false
             }
             if(loginCard.value?.id!=id || browserWorkBinding.value!=binding)return false
@@ -672,7 +692,11 @@ class AppWebAgent private constructor(private val context:Context) {
             loginCard.value=null
             return true
         }catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){loginStatus.value="PC 연결이나 로그인 결과를 확인하지 못했어요. 자동으로 다시 제출하지 않아요.";return false}
+        catch(error:Exception){
+            if(loginCard.value?.id==id)loginStatus.value="PC 연결이나 로그인 결과를 확인하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+            com.user.localagent.FailureLog.record(context,"browser_owner_login",error,"PC_LOGIN_RESULT_UNAVAILABLE")
+            return false
+        }
         finally{loginSubmitting=false}
     }
 
@@ -1360,9 +1384,11 @@ class AppWebAgent private constructor(private val context:Context) {
                 }
             return page
         } finally {
-            if(!keepCard){websiteLogin.value=null;loginCard.value=null;cardOrigin=null;capturedLoginUrl=null;loginReturnOrigin=null;loginFolded.value=false}
-            loginCompletion=null
-            loginWait.value=null
+            if(!keepCard&&loginCard.value?.id==id){
+                websiteLogin.value=null;loginCard.value=null;cardOrigin=null;capturedLoginUrl=null;loginReturnOrigin=null;loginFolded.value=false
+            }
+            if(loginCompletion===completion)loginCompletion=null
+            if(loginWait.value==id)loginWait.value=null
         }
     }
 

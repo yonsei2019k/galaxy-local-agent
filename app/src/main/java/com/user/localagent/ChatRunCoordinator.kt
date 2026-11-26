@@ -3884,8 +3884,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val work=com.user.localagent.integrations.AppWebAgent.WorkBinding(runId,threadId,branchId)
             val retained=browser.ownerLoginCard.value?.takeIf{browser.ownerWorkBinding.value==work}
             val binding=if(retained!=null)browser.waitingAuthBinding(runId) else {
-                val page=BrowserAuthContinuation.reopenPage(parent.contextJson)?:return@withLock false
-                browser.reopenOwnerLogin(work,page.url,page.naver,page.taskUrl)
+                if(BrowserAuthContinuation.canReopenPcLogin(original.previousSteps)){
+                    val connection=com.user.localagent.compute.PcTransport(context).available()?:return@withLock false
+                    val login=com.user.localagent.compute.PairedWebsiteLogin.reopen(context,connection,pcBrowserWorkKey(original))
+                        ?:return@withLock false
+                    if(!currentRoom()||!browser.offerPcLogin(work,login))return@withLock false
+                    browser.waitingAuthBinding(runId)
+                }else{
+                    val page=BrowserAuthContinuation.reopenPage(parent.contextJson)?:return@withLock false
+                    browser.reopenOwnerLogin(work,page.url,page.naver,page.taskUrl)
+                }
             }
             if(binding==null)return@withLock false
             val record=GoalWaitRecord(UUID.randomUUID().toString(),runId,threadId,branchId,runId,original.externalAgentRevision,

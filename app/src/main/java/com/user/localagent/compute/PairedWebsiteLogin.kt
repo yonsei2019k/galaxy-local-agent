@@ -11,6 +11,19 @@ internal class PairedWebsiteLogin private constructor(
 ) {
     companion object {
         const val ORIGIN = "https://www.kairb.org"
+
+        suspend fun reopen(context:Context,connection:PcConnection,work:String):PairedWebsiteLogin? {
+            fun stillPaired()=BrowserAgentSettings.pc(context).enabled()&&
+                PcComputeSettings.get(context).snapshot()?.samePair(connection)==true
+            if(!stillPaired())return null
+            prepare(context,connection,work)?.let {return it.takeIf {stillPaired()} }
+            if(!stillPaired())return null
+            val (status,page)=PcTransport(context).jsonWithStatus(connection,"/v1/browser/open",buildJsonObject {
+                put("url","$ORIGIN/member/");put("work",work)
+            },25_000)
+            if(status!=200||page["loginRequired"]!=JsonPrimitive(true)||!stillPaired())return null
+            return prepare(context,connection,work)
+        }
         suspend fun prepare(context: Context, connection: PcConnection, work: String): PairedWebsiteLogin? = withContext(Dispatchers.IO) {
             val (status, result) = PcTransport(context).jsonWithStatus(connection, "/v1/browser/owner-login-form",
                 buildJsonObject { put("origin", ORIGIN); put("work",work) }, 20_000)
@@ -22,7 +35,7 @@ internal class PairedWebsiteLogin private constructor(
     fun current(context: Context) = BrowserAgentSettings.pc(context).enabled() &&
         PcComputeSettings.get(context).snapshot()?.samePair(connection) == true
 
-    suspend fun freshForm(context: Context) = if (current(context)) prepare(context, connection, work) else null
+    suspend fun freshForm(context: Context) = if (current(context)) reopen(context, connection, work) else null
 
     suspend fun submit(context: Context, account: String, password: String): Boolean = withContext(Dispatchers.IO) {
         if (!current(context)) return@withContext false

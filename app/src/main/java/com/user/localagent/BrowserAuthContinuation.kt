@@ -34,6 +34,15 @@ internal object BrowserAuthContinuation {
         return ownerLoginPage(steps)?.let { ReopenPage(it,false) }
     }
 
+    fun canReopenPcLogin(steps:List<HarnessStep>):Boolean {
+        if(!safeSteps(steps)||steps.last().tool !in setOf("open_pc_browser_page","read_pc_browser_page"))return false
+        val open=steps.lastOrNull {it.tool=="open_pc_browser_page"}?:return false
+        val raw=(open.arguments["url"] as? JsonPrimitive)?.content?:return false
+        if(!com.user.localagent.core.WebAgentPolicy.urlAllowed(raw))return false
+        val uri=runCatching {URI(raw)}.getOrNull()?:return false
+        return uri.scheme=="https"&&uri.port in setOf(-1,443)&&uri.host in setOf("kairb.org","www.kairb.org")
+    }
+
     fun ownerLoginPage(steps:List<HarnessStep>):String? {
         if(!safeSteps(steps))return null
         val open=steps.last().takeIf {it.tool=="open_app_browser_page"}?:return null
@@ -51,7 +60,7 @@ internal object BrowserAuthContinuation {
 
     fun safeSteps(steps:List<HarnessStep>):Boolean {
         val auth=steps.lastOrNull() ?: return false
-        if(auth.tool !in setOf("open_app_browser_page","read_app_browser_page","open_pc_browser_page") ||
+        if(auth.tool !in setOf("open_app_browser_page","read_app_browser_page","open_pc_browser_page","read_pc_browser_page") ||
             auth.evidence.state!=VerificationState.FAILED || !auth.evidence.effectNotApplied ||
             auth.evidence.summary!=BrowserAgentTools.PHONE_AUTH_REQUIRED)return false
         return safeBeforeLogin(steps.dropLast(1))

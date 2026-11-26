@@ -909,13 +909,21 @@ class MainActivity : ComponentActivity() {
                 val pausedLogin=activitiesByRun.values.filter{it.canOpenOwnerLogin}.maxByOrNull{it.startedAt}
                 if(pausedLogin!=null&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null){
                     var loginNotice by remember(pausedLogin.runId){mutableStateOf<String?>(null)}
-                    OutlinedButton(onClick={lifecycleScope.launch {
-                        val opened=try {chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId)}
-                            catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
-                            catch(_:Exception){false}
-                        loginNotice=if(opened)null else "이 작업의 로그인 화면을 열 수 없어요. 연결 상태와 대화를 확인해 주세요."
-                    }},modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp)){Text("사이트 로그인 열기")}
-                    loginNotice?.let{Text(it,Modifier.padding(horizontal=12.dp))}
+                    var openingLogin by remember(pausedLogin.runId){mutableStateOf(false)}
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal=12.dp)){
+                        OutlinedButton(onClick={lifecycleScope.launch {
+                            openingLogin=true
+                            try {
+                                loginNotice=if(chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId))null
+                                    else "이 작업의 로그인 화면을 열 수 없어요. PC 연결을 확인해 주세요."
+                            }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+                            catch(_:Exception){loginNotice="로그인 화면을 열지 못했어요. PC 연결을 확인한 뒤 다시 눌러 주세요."}
+                            finally{openingLogin=false}
+                        }},modifier=Modifier.fillMaxWidth(),enabled=!openingLogin){
+                            Text(if(openingLogin)"로그인 화면 확인 중" else "사이트 로그인 다시 열기")
+                        }
+                        loginNotice?.let {Text(it)}
+                    }
                 }
                 if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,

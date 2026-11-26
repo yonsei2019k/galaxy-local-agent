@@ -247,12 +247,15 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
         val enteredAccount=account
         val enteredPassword=password
         val keep=saveOnPhone
-        account=""
-        password=""
         submitting=true
         keyboard?.hide()
         scope.launch {
-            if(!agent.submitLoginCard(login.id,enteredAccount,enteredPassword,keep)){
+            try {
+                if(agent.submitLoginCard(login.id,enteredAccount,enteredPassword,keep)){
+                    account=""
+                    password=""
+                }
+            } finally {
                 submitting=false
             }
         }
