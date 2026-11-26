@@ -47,9 +47,17 @@ function (request) {
     if (checkingTask) {
       const content = doc.querySelector('main,[role=main],article') || doc.body;
       if (!content || !visible(content) || content.closest('[aria-busy=true]') || !content.innerText.trim()) return false;
-      const notices = content.querySelectorAll('h1,h2,legend,[role=heading],[role=alert]');
-      return !Array.from(notices).some(node => visible(node) &&
-        /로그인\s*(?:필요|해\s*주세요)|다시\s*로그인|^로그인$|^sign in$|sign in to|authentication required|본인\s*확인|추가\s*인증|2\s*단계\s*인증|접근\s*(?:제한|불가)|서비스를 이용하실 수 없|access denied|service unavailable/i.test(node.innerText.trim()));
+      const text = content.innerText.trim();
+      if (text.length > 24_000) return false;
+      const alerts = Array.from(doc.querySelectorAll('[role=alert],dialog[open]'))
+        .filter(visible).map(node => node.innerText).join('\n');
+      const failed = /로그인\s*(?:필요|해\s*주세요)|다시\s*로그인|^로그인$|^sign in$|sign in to|authentication required|본인\s*확인|추가\s*인증|2\s*단계\s*인증|접근\s*(?:제한|불가)|서비스를 이용하실 수 없|찾을\s*수\s*없|조회.{0,12}(?:실패|오류|불가)|다시\s*시도|access denied|service unavailable|not found|try again/im;
+      if (failed.test(text) || failed.test(alerts)) return false;
+      const explicitResult = /(?:예약|주문|결제|배송)(?:\s*번호(?:\s*[:：]\s*|\s+)[A-Z0-9-]+|\s*확정|\s*완료|이\s*확인)|(?:예약|주문|결제|받은\s*메일)(?:\s*(?:내역|목록))?(?:이|가)?\s*(?:없습니다|없어요|0\s*건)|no\s+(?:reservations|bookings|orders|messages)(?:\s+found)?/i;
+      if (explicitResult.test(text)) return true;
+      const result = content.querySelectorAll('tbody tr,[role=row],ul > li,ol > li,[role=listitem]');
+      return Array.from(result).some(node => visible(node) && !node.closest('nav,[role=navigation],[aria-busy=true]') &&
+        node.innerText.trim() && !node.querySelector('th,[role=columnheader]'));
     }
     const controls = [...doc.querySelectorAll('a[href],button,[role=button],[role=menuitem]')];
     const name = node => (node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim();

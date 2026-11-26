@@ -188,13 +188,34 @@ function (request) {
     const block = /^(?:address|article|aside|blockquote|caption|dd|div|dl|dt|figcaption|figure|footer|h[1-6]|header|li|main|nav|ol|p|pre|section|table|tbody|tfoot|thead|tr|ul)$/;
     const inline = /^(?:a|abbr|b|bdi|bdo|br|cite|code|del|em|i|ins|kbd|mark|q|s|samp|small|span|strong|sub|sup|td|th|time|u|var|wbr)$/;
     const range = ownerDocument.createRange();
+    const boundedOverflow = /^(?:auto|scroll|hidden|clip)$/;
+    const fullDocument = {left:-Infinity, right:Infinity, top:-Infinity, bottom:Infinity};
+    function clipToElement(clip,node,style) {
+      const rootScroller = node === ownerDocument.body || node === ownerDocument.documentElement;
+      const clips = value => rootScroller ? value === 'hidden' || value === 'clip' : boundedOverflow.test(value);
+      const x = clips(style.overflowX), y = clips(style.overflowY);
+      if (!x && !y) return clip;
+      const rect = node.getBoundingClientRect();
+      // Client boxes and text ranges share units only on unscaled clipping containers.
+      if (style.transform !== 'none' || Math.abs(rect.width - node.offsetWidth) > 1 ||
+          Math.abs(rect.height - node.offsetHeight) > 1) return null;
+      const left = rect.left + node.clientLeft, top = rect.top + node.clientTop;
+      return {
+        left:x ? Math.max(clip.left,left) : clip.left, right:x ? Math.min(clip.right,left + node.clientWidth) : clip.right,
+        top:y ? Math.max(clip.top,top) : clip.top, bottom:y ? Math.min(clip.bottom,top + node.clientHeight) : clip.bottom,
+      };
+    }
     let text = '';
     let count = 0;
-    function append(node, depth) {
+    function append(node, depth, clip) {
       if (++count > 4 * maxScanned || depth > 64 || text.length > maxText) return false;
       if (node.nodeType === 3) {
         range.selectNodeContents(node);
-        if (range.getClientRects().length) text += node.textContent.replace(/\s+/g,' ');
+        const fragments = Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0);
+        // Omit a partially clipped node rather than copying characters that were not visible.
+        if (fragments.length && fragments.every(rect =>
+            rect.left >= clip.left && rect.right <= clip.right && rect.top >= clip.top && rect.bottom <= clip.bottom))
+          text += node.textContent.replace(/\s+/g,' ');
         return true;
       }
       const tag = node.localName;
@@ -206,14 +227,20 @@ function (request) {
           /\bopacity\(\s*(?:0(?:\.0+)?%?)\s*\)/.test(style.filter) ||
           style.clipPath !== 'none' || style.clip !== 'auto' ||
           node.checkVisibility?.({opacityProperty:true,visibilityProperty:true,contentVisibilityAuto:true}) === false) return true;
+      const childClip = clipToElement(clip,node,style);
+      if (!childClip || childClip.left >= childClip.right || childClip.top >= childClip.bottom) return true;
       if (block.test(tag) || tag === 'br') text += '\n';
-      for (const child of node.childNodes) if (!append(child, depth + 1)) return false;
+      for (const child of node.childNodes) if (!append(child, depth + 1, childClip)) return false;
       if (block.test(tag)) text += '\n';
       else if (tag === 'td' || tag === 'th') text += '  ';
       return true;
     }
+    const view = ownerDocument.defaultView;
+    const rootClip = clipToElement(fullDocument,ownerDocument.documentElement,view.getComputedStyle(ownerDocument.documentElement));
+    const bodyClip = rootClip && clipToElement(rootClip,ownerDocument.body,view.getComputedStyle(ownerDocument.body));
+    if (!bodyClip) return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
     for (const child of ownerDocument.body.childNodes)
-      if (!append(child, 1)) return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
+      if (!append(child, 1, bodyClip)) return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
     text = text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
     if (!text || text.length > maxText || containsPan(text)) return fail('PAGE_SECURITY_CHECK_INCOMPLETE');
     return {text};

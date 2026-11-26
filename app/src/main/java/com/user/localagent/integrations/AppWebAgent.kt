@@ -819,15 +819,40 @@ class AppWebAgent private constructor(private val context:Context) {
 
     fun showBrowser(address:String=""){presentation.value=address}
     private var pendingBrowserPdf:Pair<String,String>?=null
+    private val pdfWriteScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+    internal enum class PdfWritePhase { WRITING, SAVED, FAILED }
+    internal data class PdfWrite(val ticket:String,val phase:PdfWritePhase)
+    private val pdfWrite=MutableStateFlow<PdfWrite?>(null)
+    internal val browserPdfWrite:StateFlow<PdfWrite?> get()=pdfWrite
 
-    internal fun takeBrowserPdf(ticket:String):String? {
-        val pending=pendingBrowserPdf?.takeIf{it.first==ticket}?:return null
+    internal fun cancelBrowserPdf(ticket:String){
+        if(pendingBrowserPdf?.first==ticket)pendingBrowserPdf=null
+    }
+
+    internal fun writeBrowserPdf(ticket:String,destination:android.net.Uri):Boolean {
+        val pending=pendingBrowserPdf?.takeIf{it.first==ticket}?:return false
+        if(pdfWrite.value?.phase==PdfWritePhase.WRITING)return false
         pendingBrowserPdf=null
-        return pending.second
+        pdfWrite.value=PdfWrite(ticket,PdfWritePhase.WRITING)
+        pdfWriteScope.launch {
+            val phase=try{
+                com.user.localagent.skills.BuiltinSkills(context).writePdf(destination,pending.second,"ZipHap 화면 텍스트")
+                PdfWritePhase.SAVED
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){PdfWritePhase.FAILED}
+            pdfWrite.value=PdfWrite(ticket,phase)
+        }
+        return true
+    }
+
+    internal fun acknowledgeBrowserPdf(ticket:String){
+        val result=pdfWrite.value?:return
+        if(result.ticket==ticket&&result.phase!=PdfWritePhase.WRITING)pdfWrite.value=null
     }
 
     /** Keep the text in memory and return only an identifier safe for Activity state. */
     internal suspend fun prepareBrowserPdf():String? {
+        if(pdfWrite.value?.phase==PdfWritePhase.WRITING)return null
         val text=browserPdfText()?:return null
         val ticket=token()
         pendingBrowserPdf=ticket to text

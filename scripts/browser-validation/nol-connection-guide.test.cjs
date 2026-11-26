@@ -97,6 +97,11 @@ test('bound post-login lookup can be read without a repeated logout control', as
     assert.equal(await check('<main><h1>로그인해 주세요</h1></main>'),false)
     assert.equal(await check('<main><h1>내 예약</h1><label for="code">인증번호</label><input id="code"></main>'),false)
     assert.equal(await check('<main aria-busy="true"><h1>내 예약</h1></main>'),false)
+    assert.equal(await check('<main><p>예약을 찾을 수 없습니다. 다시 로그인해 주세요.</p></main>'),false)
+    assert.equal(await check('<main><p>예약이 확인됐어요.</p></main><p role="alert">조회 오류. 다시 시도해 주세요.</p>'),false)
+    assert.equal(await check('<main><h1>내 예약</h1><p>예약 내역이 없습니다.</p></main>'),true)
+    assert.equal(await check('<main><h1>내 예약</h1><p>예약번호</p></main>'),false)
+    assert.equal(await check('<main><h1>내 주문</h1><ul><li>정상 조회 항목</li></ul></main>'),true)
   } finally {await browser.close()}
 })
 
@@ -167,6 +172,10 @@ test('screen PDF uses inert readable text independent of live components', async
     assert.match(snapshot.text,/Receipt/)
     assert.match(snapshot.text,/Booking confirmed/)
     assert.doesNotMatch(snapshot.text,/verification|123456|Notification|Embedded page|NONPUBLIC_FIXTURE|FILTERED_FIXTURE|CLIPPED_FIXTURE/)
+    await page.setContent('<main><h1>Receipt</h1><div style="height:0;overflow:hidden"><p>HIDDEN_BY_PARENT</p></div><div style="height:10px;overflow:hidden"><span>PARTIALLY_CLIPPED</span></div><div style="height:40px;overflow:auto"><span>VISIBLE_IN_CONTAINER</span></div></main>')
+    const clipped=await page.evaluate('('+source+')({action:"printSnapshot"})')
+    assert.match(clipped.text,/VISIBLE_IN_CONTAINER/)
+    assert.doesNotMatch(clipped.text,/HIDDEN_BY_PARENT|PARTIALLY_CLIPPED/)
     await page.setContent('<label for="otp">인증번호</label><input id="otp">')
     const protectedSnapshot=await page.evaluate('('+source+')({action:"printSnapshot"})')
     assert.equal(protectedSnapshot.error,'PAGE_SECURITY_CHECK_INCOMPLETE')

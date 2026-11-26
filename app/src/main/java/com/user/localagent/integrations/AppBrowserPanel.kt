@@ -82,22 +82,29 @@ import kotlinx.coroutines.launch
     var printError by remember {mutableStateOf(false)}
     var pdfTicket by rememberSaveable {mutableStateOf<String?>(null)}
     var exportingPdf by remember {mutableStateOf(false)}
+    val pdfWrite by agent.browserPdfWrite.collectAsState()
     val savePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){destination->
-        val text=pdfTicket?.let(agent::takeBrowserPdf)
-        pdfTicket=null
-        if(destination==null)exportingPdf=false
-        else if(text==null){
+        val ticket=pdfTicket
+        if(destination==null){
+            ticket?.let(agent::cancelBrowserPdf)
+            pdfTicket=null
+            exportingPdf=false
+        }else if(ticket==null||!agent.writeBrowserPdf(ticket,destination)){
+            pdfTicket=null
             exportingPdf=false
             printError=true
             android.widget.Toast.makeText(context,"저장할 화면 내용을 다시 준비해 주세요.",android.widget.Toast.LENGTH_SHORT).show()
-        }else scope.launch {
-            try{
-                com.user.localagent.skills.BuiltinSkills(context).writePdf(destination,text,"ZipHap 화면 텍스트")
-                printError=false
-            }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
-            catch(_:Exception){printError=true}
-            finally{exportingPdf=false}
         }
+    }
+    LaunchedEffect(pdfTicket,pdfWrite){
+        val result=pdfWrite?.takeIf{it.ticket==pdfTicket&&it.phase!=AppWebAgent.PdfWritePhase.WRITING}
+            ?:return@LaunchedEffect
+        printError=result.phase==AppWebAgent.PdfWritePhase.FAILED
+        pdfTicket=null
+        exportingPdf=false
+        agent.acknowledgeBrowserPdf(result.ticket)
+        val message=if(printError)"PDF 저장을 완료하지 못했어요." else "화면 PDF를 저장했어요."
+        android.widget.Toast.makeText(context,message,android.widget.Toast.LENGTH_SHORT).show()
     }
     val card by agent.ownerLoginCard.collectAsState()
     if(card!=null)return
@@ -143,7 +150,7 @@ import kotlinx.coroutines.launch
                     OutlinedButton(enabled=!busy,onClick={agent.view().let{if(it.canGoBack())it.goBack()}}){Text("뒤로")}
                     TextButton(onClick=agent::closeBrowser){Text("닫기")}
                     if(!busy && !credentialPage && !paymentPage && ownerLogin==null && !navigation.loading && navigation.error==null)
-                        TextButton(enabled=!exportingPdf&&pdfTicket==null,onClick={
+                        TextButton(enabled=!exportingPdf&&pdfTicket==null&&pdfWrite?.phase!=AppWebAgent.PdfWritePhase.WRITING,onClick={
                             exportingPdf=true
                             printError=false
                             scope.launch {
@@ -153,7 +160,7 @@ import kotlinx.coroutines.launch
                                     pdfTicket=ticket
                                     try{savePdf.launch("ZipHap 화면 텍스트.pdf")}
                                     catch(_:android.content.ActivityNotFoundException){
-                                        agent.takeBrowserPdf(ticket)
+                                        agent.cancelBrowserPdf(ticket)
                                         pdfTicket=null
                                         printError=true
                                         exportingPdf=false
