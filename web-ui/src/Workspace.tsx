@@ -6,6 +6,7 @@ import { BrandMark } from './Conversation'
 import { Character } from './character/Character'
 import { CharacterPicker } from './character/CharacterPicker'
 import { useCharacter } from './character/useCharacter'
+import { useCharacterMood } from './character/useCharacterMood'
 import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 import { ComposerSheet } from './ComposerSheet'
@@ -50,7 +51,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
   return (
     <div className="sidebar-content">
       <div className="sidebar-brand">
-        <span className="wordmark"><BrandMark /> {single ? '집순이' : <>ZipHap<span>.Agent</span></>}</span>
+        <span className="wordmark"><BrandMark /> {single ? <span className="wordmark-display">집순이</span> : <>ZipHap<span className="wordmark-sub">.Agent</span></>}</span>
         {single && <button type="button" className="icon-button sidebar-search" aria-label="대화 검색" disabled={!enabled}
           onClick={() => onNavigate('historySearch')}><Icon name="search" /></button>}
         {onClose && <button type="button" className="icon-button" aria-label="사이드바 닫기" onClick={onClose}><Icon name="close" /></button>}
@@ -58,7 +59,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
       {!single && <><nav className="shared-rooms" aria-label="메인 채팅">
         <button type="button" className="sidebar-row" disabled={!enabled}
           aria-current={snapshot?.officeSelected && !collaborationOpen ? 'page' : undefined} onClick={onOpenOffice}>
-          <Icon name="group" /><span>사무실</span>
+          <Icon name="group" /><span>사무실</span><Icon name="chevronRight" className="row-chevron" />
         </button>
       </nav>
       <nav className={`thread-nav${staff ? ' staff-rooms' : ''}`} aria-label={staff ? '직원 채팅방' : '대화 목록'}>
@@ -69,6 +70,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
               disabled={!enabled} onClick={() => onSelect(thread.id)}>
               <Icon name="chat" /><span>{thread.title || '제목 없는 대화'}</span>
               {thread.working && <span className="room-working" role="status" aria-label="작업 중" title="작업 중" />}
+              <Icon name="chevronRight" className="row-chevron" />
             </button>
           </li>
         ))}</ul> : snapshot?.ready && <p className="no-threads">대화가 없습니다.</p>}
@@ -76,7 +78,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
       <nav className="shared-rooms" aria-label="외부 협업">
         <button type="button" className="sidebar-row" disabled={!enabled}
           aria-current={collaborationOpen ? 'page' : undefined} onClick={() => onNavigate('collab')}>
-          <Icon name="group" /><span>협력사 핫라인</span>
+          <Icon name="group" /><span>협력사 핫라인</span><Icon name="chevronRight" className="row-chevron" />
         </button>
       </nav>
       </>}
@@ -84,7 +86,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
         {(single ? mainDestinations : shortcuts).map(({ panel, label, icon }) => (
           <button key={panel} type="button" className="sidebar-row" disabled={!enabled}
             aria-current={single && panel === 'chat' ? 'page' : undefined} onClick={() => onNavigate(panel)}>
-            <Icon name={icon} /><span>{label}</span>
+            <Icon name={icon} /><span>{label}</span><Icon name="chevronRight" className="row-chevron" />
           </button>
         ))}
       </nav>
@@ -120,14 +122,17 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [character, setCharacter] = useCharacter()
   const [pickerOpen, setPickerOpen] = useState(false)
+  const mood = useCharacterMood(snapshot)
 
   return (
     <header className="topbar">
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
         {snapshot?.singleConversation && <>
-          <button type="button" className="character-button" aria-label="집순이 모습 바꾸기" onClick={() => setPickerOpen(true)}>
+          <button type="button" className="character-button" data-mood={mood} aria-label="집순이 모습 바꾸기" onClick={() => setPickerOpen(true)}>
             <Character choice={character} size={32} decorative />
+            {mood === 'thinking' && <span className="character-thinking" aria-hidden="true"><i /><i /><i /></span>}
+            {mood === 'celebrate' && <span className="character-burst" aria-hidden="true"><i /><i /><i /><i /><i /></span>}
           </button>
           <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={() => setPickerOpen(false)} />
         </>}
@@ -136,9 +141,9 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
           <HeaderWorkLine snapshot={snapshot} onOpen={onOpenWork} />
         </div>
         {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
-          onClick={onOfficeProfile}>직원 정보</button>}
+          onClick={onOfficeProfile}><Icon name="person" /><span className="rename-thread-label">직원 정보</span></button>}
         {snapshot?.singleConversation !== true && currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
-          onClick={() => setTitleDraft(currentThread.title)}>이름 변경</button>}
+          onClick={() => setTitleDraft(currentThread.title)}><Icon name="edit" /><span className="rename-thread-label">이름 변경</span></button>}
         {titleDraft !== null && <form className="rename-thread-form" onSubmit={event => {
           event.preventDefault()
           const title = titleDraft.trim()
@@ -266,7 +271,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
                 aria-label="추가 지시" title={tooLongForSteer ? '추가 지시는 4,000자까지 입력할 수 있어요.' : '실행 중인 작업에 추가 지시'} onClick={() => onSubmit('steer')}>
                 <Icon name="steer" /><span>추가 지시</span>
               </button>}
-              <button type="submit" className="send-button" disabled={!sendReady} title={`${sendLabel} (Ctrl / ⌘ + Enter)`} aria-label={sendLabel}>
+              <button type="submit" className="send-button" disabled={!sendReady} title={`${sendLabel} (Ctrl / Cmd + Enter)`} aria-label={sendLabel}>
                 {busy && <span>{sendLabel}</span>}<Icon name={busy ? 'plus' : 'arrow'} />
               </button>
             </div>

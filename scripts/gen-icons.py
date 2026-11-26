@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Generate ZipHap icons and illustrations from design/icons.json and design/illustrations.json.
+"""Generate ZipHap icons, illustrations and stickers from design/icons.json, design/illustrations.json
+and design/stickers.json.
 
 Outputs:
-  web-ui/src/icons/generated.ts                    path data for the React Icon and Illustration parts
-  app/src/main/res/drawable/zi_<snake>.xml          duotone icon vector drawables (tintable)
+  web-ui/src/icons/generated.ts                    path data for the React Icon, Illustration and Sticker parts
+  app/src/main/res/drawable/zi_<snake>.xml          duotone icon vector drawables (tintable; icons marked "web": true are web only)
   app/src/main/res/drawable/zi_ill_<snake>.xml      full-color illustration vector drawables
+Stickers (24x24 full-color glyphs that replace emoji inside model text) are web only.
 
 Usage: python scripts/gen-icons.py [--check] [--sheet OUT.html]
 --check  exits 1 when a committed output differs from what the sources would generate,
@@ -22,15 +24,18 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ICONS_SRC = ROOT / "design" / "icons.json"
 ILLS_SRC = ROOT / "design" / "illustrations.json"
+STICKERS_SRC = ROOT / "design" / "stickers.json"
 TS_OUT = ROOT / "web-ui" / "src" / "icons" / "generated.ts"
 DRAWABLE = ROOT / "app" / "src" / "main" / "res" / "drawable"
-HEADER = "Generated from design/icons.json and design/illustrations.json by scripts/gen-icons.py. Do not edit."
+HEADER = "Generated from design/icons.json, design/illustrations.json and design/stickers.json by scripts/gen-icons.py. Do not edit."
+# Android drawables come only from icons and illustrations, so their header stays as before.
+DRAWABLE_HEADER = "Generated from design/icons.json and design/illustrations.json by scripts/gen-icons.py. Do not edit."
 
 NAME = re.compile(r"^[a-z][a-zA-Z0-9]*$")
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 TOKEN = re.compile(r"[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")
 ARITY = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4, "Q": 4, "T": 2, "A": 7, "Z": 0}
-ICON_KEYS = {"fill", "line", "note"}
+ICON_KEYS = {"fill", "line", "note", "web"}
 SHAPE_KEYS = {"d", "circle", "rect", "ellipse"}
 
 
@@ -312,7 +317,10 @@ def load_icons(src):
             for px, py in sample_path(d):
                 if not (lo - 1e-6 <= px <= hi + 1e-6 and lo - 1e-6 <= py <= hi + 1e-6):
                     raise ValueError(f"icon {name}: point ({px:.2f}, {py:.2f}) outside live area {lo}-{hi}")
-        icons[name] = {"soft": " ".join(soft_d), "accents": accents, "line": " ".join(line_d), "dots": " ".join(dots_d)}
+        if "web" in spec and spec["web"] is not True:
+            raise ValueError(f"icon {name}: web must be true when present")
+        icons[name] = {"soft": " ".join(soft_d), "accents": accents, "line": " ".join(line_d), "dots": " ".join(dots_d),
+                       "web": spec.get("web") is True}
     if not icons:
         raise ValueError("no icons")
     return {"stroke": stroke, "softOpacity": soft}, icons
@@ -320,21 +328,23 @@ def load_icons(src):
 
 # ---------------------------------------------------------------- illustrations
 
-def load_illustrations(src):
+def load_illustrations(src, group="illustrations", size=(160, 120), extra_keys=frozenset()):
     meta = src.get("meta", {})
     w, h = meta.get("viewBox", [0, 0])
     palette = meta.get("palette", {})
     widths = meta.get("strokeWidths", [])
     max_paths = meta.get("maxPaths", 40)
-    if (w, h) != (160, 120):
-        raise ValueError("illustration viewBox must be 160x120")
+    if (w, h) != size:
+        raise ValueError(f"{group} viewBox must be {size[0]}x{size[1]}")
     for k, v in palette.items():
         if not NAME.fullmatch(k) or not isinstance(v, str) or not HEX.fullmatch(v):
             raise ValueError(f"bad palette entry {k!r}")
     ills = {}
-    for name, spec in src.get("illustrations", {}).items():
+    for name, spec in src.get(group, {}).items():
         if not NAME.fullmatch(name):
-            raise ValueError(f"bad illustration name {name!r}")
+            raise ValueError(f"bad {group} name {name!r}")
+        if isinstance(spec, dict) and set(spec) - {"shapes"} - extra_keys:
+            raise ValueError(f"{group} {name}: unknown keys {sorted(set(spec) - {'shapes'} - extra_keys)}")
         shapes = spec.get("shapes") if isinstance(spec, dict) else None
         if not isinstance(shapes, list) or not shapes:
             raise ValueError(f"illustration {name}: needs shapes")
@@ -377,13 +387,36 @@ def load_illustrations(src):
             out.append(item)
         ills[name] = out
     if not ills:
-        raise ValueError("no illustrations")
+        raise ValueError(f"no {group}")
     return ills
+
+
+def load_stickers(src):
+    stickers = load_illustrations(src, "stickers", (24, 24), frozenset({"label"}))
+    labels = {}
+    for name, spec in src["stickers"].items():
+        label = spec.get("label")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"sticker {name}: needs a Korean label for screen readers")
+        labels[name] = label
+    return {name: {"label": labels[name], "shapes": shapes} for name, shapes in stickers.items()}
 
 
 # ---------------------------------------------------------------- outputs
 
-def gen_ts(meta, icons, ills):
+def _shape_ts(s):
+    fields = [f"d: {json.dumps(s['d'])}"]
+    for k in ("fill", "stroke"):
+        if k in s:
+            fields.append(f"{k}: {json.dumps(s[k])}")
+    if "sw" in s:
+        fields.append(f"sw: {fmt(s['sw'])}")
+    if "opacity" in s:
+        fields.append(f"opacity: {fmt(s['opacity'])}")
+    return "    { " + ", ".join(fields) + " },"
+
+
+def gen_ts(meta, icons, ills, stickers):
     lines = [f"// {HEADER}", "",
              "export interface IconLayers { soft: string; accents: readonly { d: string; color: string }[]; line: string; dots: string }",
              "export interface IllustrationShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }",
@@ -398,25 +431,23 @@ def gen_ts(meta, icons, ills):
     lines += ["} satisfies Record<string, IconLayers>", "", "export const ILLUSTRATIONS = {"]
     for name, shapes in ills.items():
         lines.append(f"  {name}: [")
-        for s in shapes:
-            fields = [f"d: {json.dumps(s['d'])}"]
-            for k in ("fill", "stroke"):
-                if k in s:
-                    fields.append(f"{k}: {json.dumps(s[k])}")
-            if "sw" in s:
-                fields.append(f"sw: {fmt(s['sw'])}")
-            if "opacity" in s:
-                fields.append(f"opacity: {fmt(s['opacity'])}")
-            lines.append("    { " + ", ".join(fields) + " },")
+        lines += [_shape_ts(s) for s in shapes]
         lines.append("  ],")
-    lines += ["} satisfies Record<string, readonly IllustrationShape[]>", ""]
+    lines += ["} satisfies Record<string, readonly IllustrationShape[]>", "",
+              "export interface StickerArt { label: string; shapes: readonly IllustrationShape[] }", "",
+              "export const STICKERS = {"]
+    for name, st in stickers.items():
+        lines.append(f"  {name}: {{ label: {json.dumps(st['label'], ensure_ascii=False)}, shapes: [")
+        lines += ["  " + _shape_ts(s) for s in st["shapes"]]
+        lines.append("  ] },")
+    lines += ["} satisfies Record<string, StickerArt>", ""]
     return "\n".join(lines)
 
 
 def _vector(w, h, body):
     return "\n".join([
         '<?xml version="1.0" encoding="utf-8"?>',
-        f"<!-- {HEADER} -->",
+        f"<!-- {DRAWABLE_HEADER} -->",
         '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
         f'    android:width="{w}dp"',
         f'    android:height="{h}dp"',
@@ -464,12 +495,14 @@ def gen_ill_xml(shapes):
 def build():
     meta, icons = load_icons(json.loads(ICONS_SRC.read_text(encoding="utf-8")))
     ills = load_illustrations(json.loads(ILLS_SRC.read_text(encoding="utf-8")))
-    outputs = {TS_OUT: gen_ts(meta, icons, ills)}
+    stickers = load_stickers(json.loads(STICKERS_SRC.read_text(encoding="utf-8")))
+    outputs = {TS_OUT: gen_ts(meta, icons, ills, stickers)}
     for name, ic in icons.items():
-        outputs[DRAWABLE / f"zi_{snake(name)}.xml"] = gen_icon_xml(meta, ic)
+        if not ic["web"]:
+            outputs[DRAWABLE / f"zi_{snake(name)}.xml"] = gen_icon_xml(meta, ic)
     for name, shapes in ills.items():
         outputs[DRAWABLE / f"zi_ill_{snake(name)}.xml"] = gen_ill_xml(shapes)
-    return meta, icons, ills, outputs
+    return meta, icons, ills, stickers, outputs
 
 
 # ---------------------------------------------------------------- proof sheet
@@ -487,8 +520,8 @@ def icon_svg(meta, ic, size):
     return "".join(parts)
 
 
-def ill_svg(shapes, width):
-    parts = [f'<svg viewBox="0 0 160 120" width="{width}" height="{width * 3 // 4}" aria-hidden="true">']
+def ill_svg(shapes, width, box=(160, 120)):
+    parts = [f'<svg viewBox="0 0 {box[0]} {box[1]}" width="{width}" height="{width * box[1] // box[0]}" aria-hidden="true">']
     for s in shapes:
         a = [f'd="{s["d"]}"', f'fill="{s.get("fill", "none")}"']
         if "stroke" in s:
@@ -500,7 +533,7 @@ def ill_svg(shapes, width):
     return "".join(parts)
 
 
-def gen_sheet(meta, icons, ills):
+def gen_sheet(meta, icons, ills, stickers):
     rows = []
     variants = [("#FFFFFF", "#3B2F3A"), ("#F3F4F8", "#3B2F3A"), ("#FFFFFF", "#3355F0"), ("#F3F4F8", "#3355F0")]
     for name, ic in icons.items():
@@ -521,6 +554,10 @@ def gen_sheet(meta, icons, ills):
             f'<span style="color:#3355F0;background:#E6EBFF">{icon_svg(meta, icons[n], 64)}</span><b>{html.escape(n)}</b></div>'
             for n in part) + "</div>"
         for k, part in enumerate((names[:half], names[half:])))
+    sticker_cells = "".join(
+        f'<figure>{ill_svg(st["shapes"], 64, (24, 24))}<p>글 {ill_svg(st["shapes"], 20, (24, 24))} 글</p>'
+        f'<figcaption>{html.escape(name)} · {html.escape(st["label"])}</figcaption></figure>'
+        for name, st in stickers.items())
     ill_cells = "".join(
         f'<figure>{ill_svg(shapes, 240)}<figcaption>{html.escape(name)} ({len(shapes)})</figcaption></figure>'
         for name, shapes in ills.items())
@@ -542,6 +579,8 @@ h2{{margin:8px 0 12px;font-size:15px}}
 .ills{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}}
 figure{{margin:0;background:#fff;border-radius:20px;padding:12px;text-align:center}}
 figcaption{{margin-top:6px;font-weight:600}}
+.stickers{{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}} .stickers p{{margin:4px 0 0;font-size:15px}}
+.stickers p svg{{vertical-align:-4px}}
 </style></head><body>
 <h2>Icons ({len(icons)}) — 48px ink · 24/20px on white &amp; #F3F4F8 in ink &amp; cobalt</h2>
 <div class="tiles">{tiles}</div>
@@ -549,16 +588,18 @@ figcaption{{margin-top:6px;font-weight:600}}
 {zooms}
 <h2 style="margin-top:24px">Illustrations ({len(ills)})</h2>
 <div class="ills">{ill_cells}</div>
+<h2 style="margin-top:24px">Stickers ({len(stickers)}) — 64px and 20px inside a line of text</h2>
+<div class="stickers">{sticker_cells}</div>
 </body></html>
 """
 
 
 def main(argv):
-    meta, icons, ills, outputs = build()
+    meta, icons, ills, stickers, outputs = build()
     if "--sheet" in argv:
         target = pathlib.Path(argv[argv.index("--sheet") + 1]).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(gen_sheet(meta, icons, ills), encoding="utf-8")
+        target.write_text(gen_sheet(meta, icons, ills, stickers), encoding="utf-8")
         print(f"wrote {target}")
     expected = {p.name for p in outputs if p.parent == DRAWABLE}
     if "--check" in argv:
@@ -578,7 +619,7 @@ def main(argv):
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists() or path.read_bytes() != text.encode("utf-8"):
             path.write_bytes(text.encode("utf-8"))
-    print(f"wrote {len(outputs)} files ({len(icons)} icons, {len(ills)} illustrations)")
+    print(f"wrote {len(outputs)} files ({len(icons)} icons, {len(ills)} illustrations, {len(stickers)} stickers)")
     return 0
 
 

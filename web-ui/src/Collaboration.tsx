@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icon'
+import { Illustration } from './icons/Illustration'
 import { MAX_COLLAB_TEXT, isRecipient } from './bridge'
 import type { CollaborationMessage, CollaborationSnapshot, Recipient } from './bridge'
 
@@ -145,7 +146,7 @@ export function Collaboration({ open, enabled, room, onBack, onMenu, onRefresh, 
         {messages.length ? <div className="transcript collab-messages" role="log" aria-label="협업 메시지">
           {messages.map(message => <Message key={message.messageId} message={message} />)}
         </div> : <div className="collab-empty">
-          <span className="brand-mark"><Icon name="group" /></span>
+          <Illustration name={available && !room?.loading ? 'emptyChat' : 'connections'} className="empty-art art-float" />
           <h2>사용자, Codex, Claude</h2>
           <p>{available && !room?.loading ? '협업 메시지가 없습니다.' : '협력사 핫라인 연결을 확인해 주세요.'}</p>
         </div>}

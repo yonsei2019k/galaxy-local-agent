@@ -1094,6 +1094,16 @@
         }
       ]
     },
+    "more": {
+      "web": true,
+      "note": "web only: answer and message menu trigger (three dots); stroke is a hidden zero-length cap",
+      "line": [
+        { "d": "M12 12 H12" },
+        { "dot": [5.6, 12, 1.7] },
+        { "dot": [12, 12, 1.7] },
+        { "dot": [18.4, 12, 1.7] }
+      ]
+    },
     "trash": {
       "fill": [
         {

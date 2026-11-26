@@ -131,6 +131,8 @@ const expectations = {
   taskFailed: { messages: 1, cards: 1 }, taskCompleted: { messages: 2, cards: 1 }, unanchoredTasks: { messages: 1, cards: 3 },
   mixedLong: { messages: 20, cards: 10 }, twoLiveTasks: { messages: 1, cards: 2 }, websiteCard: { messages: 1, cards: 2 }, files: { messages: 2, cards: 0 },
   camping: { messages: 4, cards: 1 },
+  choices: { messages: 2, cards: 0 }, approval: { messages: 1, cards: 1 },
+  guide: { messages: 0, cards: 0 },
 };
 
 for (const [name, snapshot] of Object.entries(fixtures)) {
@@ -175,6 +177,11 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
         }
         await page.evaluate(async () => {
           await document.fonts.ready;
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+          // 등장 애니메이션(유한)은 끝난 모습으로 찍는다. 반복 애니메이션은 그대로 둔다.
+          for (const animation of document.getAnimations()) {
+            if (animation.effect?.getComputedTiming().iterations !== Infinity) animation.finish();
+          }
           await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         });
         await page.screenshot({ path: path.join(shotDir, `${name}-${width}.png`) });

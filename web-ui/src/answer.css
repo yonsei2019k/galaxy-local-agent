@@ -1,32 +1,40 @@
-.rich-answer { min-width: 0; max-width: 100%; line-height: 1.65; overflow-wrap: anywhere; }
+/* Rich answers: plain text on the page. Code, tables, charts and image errors sit on sunken fills, not boxes;
+   table rows are separated only by the --color-divider hairline. */
+.rich-answer { min-width: 0; max-width: 100%; line-height: var(--lh-body, 1.6); overflow-wrap: anywhere; }
 .rich-answer > * { margin: 0 0 .6rem; }
 .rich-answer > :last-child { margin-bottom: 0; }
-.rich-answer h2, .rich-answer h3, .rich-answer h4, .rich-answer h5, .rich-answer h6 { line-height: 1.3; margin-top: .85em; }
+.rich-answer h2, .rich-answer h3, .rich-answer h4, .rich-answer h5, .rich-answer h6 { line-height: var(--lh-tight, 1.3); margin-top: .85em; letter-spacing: var(--ls-tight); }
 .rich-answer ul, .rich-answer ol { padding-inline-start: 1.4em; }
-.rich-answer a { color: inherit; text-decoration: underline; text-underline-offset: .18em; }
+.rich-answer a { color: var(--color-cobalt-text); text-decoration: underline; text-underline-offset: .18em; }
 .rich-answer code { font-family: ui-monospace, monospace; font-size: .9em; }
+.rich-answer :not(pre) > code { padding: .1em .35em; border-radius: 6px; background: var(--color-surface-sunken); }
 .rich-answer pre, .answer-table { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
-.rich-answer pre { background: #7b83951a; border-radius: .6rem; padding: .65rem; white-space: pre; }
+.rich-answer pre { background: var(--color-surface); border-radius: var(--radius-chip); padding: .75rem .85rem; white-space: pre; box-shadow: var(--shadow-card); }
+.answer-table { border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-card); }
 .answer-table table { border-collapse: collapse; min-width: 100%; }
-.answer-table th, .answer-table td { border: 1px solid #7b83955c; padding: .35rem .65rem; text-align: start; min-width: 7ch; }
-.answer-table th { background: #7b83951a; }
-.rich-answer img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: .6rem; }
-.answer-image-error { display: block; padding: .5rem; border: 1px solid #7b83955c; border-radius: .6rem; }
-.answer-chart { padding: .65rem; border: 1px solid #7b83955c; border-radius: .6rem; }
-.answer-chart figcaption { font-weight: 650; }
+.answer-table th, .answer-table td { padding: .5rem .75rem; text-align: start; min-width: 7ch; }
+.answer-table tr + tr > * { border-top: 1px solid var(--color-divider); }
+.answer-table th { background: var(--color-surface-sunken); color: var(--color-text-sub); font-size: var(--fs-small); font-weight: var(--fw-bold); }
+.rich-answer img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: var(--radius-control); }
+.answer-image-error { display: block; padding: .6rem .8rem; border-radius: var(--radius-chip); background: var(--color-surface-sunken); color: var(--color-text-sub); }
+.answer-chart { padding: .85rem 1rem; border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-card); }
+.answer-chart figcaption { font-weight: var(--fw-bold); }
 .answer-chart ul { list-style: none; padding: 0; margin: .5rem 0 0; }
 .answer-chart li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .5rem; margin-bottom: .35rem; }
 .answer-chart meter { width: 100%; grid-column: 1 / -1; }
 
 .answer-result { margin: .65rem 0; max-width: 100%; }
-.answer-result figcaption { font-weight: 650; margin-bottom: .35rem; }
-.answer-result img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: .6rem; }
+.answer-result figcaption { font-weight: var(--fw-bold); margin-bottom: .35rem; color: var(--color-text-sub); font-size: var(--fs-small); }
+.answer-result img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: var(--radius-control); box-shadow: var(--shadow-card); }
 
+/* Service results: one white card, rows split only by an inset hairline. */
 .service-result {
   margin: .75rem 0;
-  padding: .8rem .95rem;
-  border: 1px solid color-mix(in srgb, currentColor 19%, transparent);
-  border-radius: 1rem;
+  padding: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
   overflow-wrap: anywhere;
 }
 .service-result > header {
@@ -34,10 +42,11 @@
   justify-content: space-between;
   gap: .5rem;
 }
+.service-result > header strong { letter-spacing: var(--ls-tight); }
 .service-result > header span,
 .service-result dt {
-  opacity: .78;
-  font-size: .85em;
+  color: var(--color-text-sub);
+  font-size: var(--fs-small);
 }
 .rich-answer .service-result > ul {
   list-style: none;
@@ -45,9 +54,12 @@
   padding: 0;
 }
 .rich-answer .service-result li {
+  position: relative;
   margin: 0;
-  padding: .6rem 0;
-  border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  padding: .7rem 0;
+}
+.rich-answer .service-result li + li::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; background: var(--color-divider);
 }
 .rich-answer .service-result h3,
 .rich-answer .service-result p {
@@ -65,13 +77,14 @@
   margin: 0;
 }
 .camp-map { margin: var(--space-3) 0 0; }
-.camp-map-scroll { overflow: auto; max-height: min(50vh, 380px); margin-top: var(--space-2); }
+.camp-map-scroll { overflow: auto; max-height: min(50vh, 380px); margin-top: var(--space-2); border-radius: var(--radius-control); }
 .camp-map-picture { position: relative; line-height: 0; }
 .camp-map-picture.is-zoomed { width: 240%; }
 .camp-map-picture img { display: block; width: 100%; height: auto; }
+/* Map pins keep a ring: it is the marker itself, not a decorative border. */
 .camp-map-pin {
   position: absolute; transform: translate(-50%, -50%);
-  width: 20px; height: 20px; border: 2px solid #087a51; outline: 1px solid white;
+  width: 20px; height: 20px; border: 2px solid var(--color-mint); outline: 1px solid white;
   border-radius: 50%; padding: 0; background: #e2fff044; cursor: pointer;
 }
-.camp-map-pin[aria-pressed="true"], .camp-map-pin:focus-visible { background: #d3fbe4; outline: 3px solid #1266bc; z-index: 1; }
+.camp-map-pin[aria-pressed="true"], .camp-map-pin:focus-visible { background: var(--color-mint-soft); outline: 3px solid var(--color-cobalt); z-index: 1; }

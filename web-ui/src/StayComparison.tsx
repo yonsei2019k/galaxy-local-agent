@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import './stays.css'
+import { Icon } from './Icon'
+import { withStickers } from './icons/Sticker'
 
 type Stay = {
   index: number
@@ -210,10 +212,11 @@ export function StayComparison({ data, onPrepare, photo }: {
       <details>
         <summary className="stay-top">
           {image && <img className="stay-thumbnail" src={image.src} alt="" />}
-          <span className="stay-name"><strong>{stay.name}</strong><span>{stay.area} · {stay.room}</span>
+          <span className="stay-name"><strong>{withStickers(stay.name)}</strong><span>{withStickers(`${stay.area} · ${stay.room}`)}</span>
             <span>{[drive, ...amenities].filter(Boolean).join(' · ') || stay.host}</span></span>
           <span className="stay-price"><strong>{stay.total === null ? '총액 미확인' : won(stay.total)}</strong>
             <span>{stay.available === true ? '조회 당시 예약 가능' : stay.available === false ? '조회 당시 예약 불가' : '예약 가능 여부 미확인'}</span></span>
+          <Icon name="down" className="stay-chevron" />
         </summary>
         <div className="stay-facts">
           <span>온라인 {stay.online === null ? '미확인' : won(stay.online)}</span>
@@ -249,7 +252,7 @@ export function StayComparison({ data, onPrepare, photo }: {
       if (group.length === 1) return offer(group[0])
       const comparison = priceComparison(group)
       return <li key={group[0].index} className="stay-offer-group">
-        <h4>{group[0].name} · {group[0].room}</h4>
+        <h4>{withStickers(`${group[0].name} · ${group[0].room}`)}</h4>
         {comparison && <p className="stay-savings">
           <strong>예상 {won(comparison.savings)} 절약</strong>
           <span>{comparison.winner.host} {won(comparison.winner.total)} · 비교 기준 {comparison.baseline.host} {won(comparison.baseline.total)}</span>

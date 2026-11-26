@@ -1,5 +1,10 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { useVisibleMotion } from './motion'
 import { Icon } from './Icon'
+import type { IconName } from './Icon'
+import { Illustration } from './icons/Illustration'
+import { withStickers } from './icons/Sticker'
 import { RichAnswer } from './RichAnswer'
 import type { BookingPaymentAction, ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { BookingPaymentCard } from './BookingPaymentCard'
@@ -17,10 +22,16 @@ export function BrandMark({ className }: { className?: string }) {
   return <span className={`brand-mark ${className ?? ''}`} aria-hidden="true" />
 }
 
-const exampleRequests = [
-  { label: '오늘 일정 확인', text: '오늘 남은 일정을 시간순으로 알려줘.', needsCalendar: true },
-  { label: '웹에서 정보 찾기', text: '이번 주말 서울 날씨를 찾아서 출처와 함께 알려줘.' },
-  { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', needsFile: true },
+/** A wrapper whose decorative animations pause while it is off screen (and never run under reduced motion). */
+function MotionField({ className, children }: { className: string; children: ReactNode }) {
+  const { ref, reduced, visible } = useVisibleMotion<HTMLDivElement>()
+  return <div ref={ref} className={className} data-motion={reduced ? 'off' : 'on'} data-paused={!visible}>{children}</div>
+}
+
+const exampleRequests: { label: string; text: string; icon: IconName; needsCalendar?: boolean; needsFile?: boolean }[] = [
+  { label: '오늘 일정 확인', text: '오늘 남은 일정을 시간순으로 알려줘.', icon: 'calendar', needsCalendar: true },
+  { label: '웹에서 정보 찾기', text: '이번 주말 서울 날씨를 찾아서 출처와 함께 알려줘.', icon: 'globe' },
+  { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', icon: 'file', needsFile: true },
 ]
 
 function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
@@ -38,30 +49,37 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   const [step, setStep] = useState(0)
   return (
     <div className={compact ? "welcome welcome--compact" : "welcome"}>
-      {!compact && <div className="mascot-field"><Character choice={character} size={160} /></div>}
+      {!compact && <MotionField className="mascot-field">
+        <Character choice={character} size={160} />
+        <span className="twinkle twinkle--1" aria-hidden="true" /><span className="twinkle twinkle--2" aria-hidden="true" />
+        <span className="twinkle twinkle--3" aria-hidden="true" />
+      </MotionField>}
       <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
+        <div className="office-guide-steps" aria-hidden="true">{[0, 1, 2].map(index =>
+          <span key={index} className={index === step ? 'is-current' : undefined} />)}</div>
+        {step === 1 && <MotionField className="office-guide-art-wrap"><Illustration name="connections" className="office-guide-art art-float" /></MotionField>}
         <div aria-live="polite">
           {step === 0 && <p>일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
           {step === 1 && <p>일정을 보려면 휴대폰 일정 읽기를 허용해 주세요. Google이나 컴퓨터는 필요할 때 연결해도 돼요.</p>}
           {step === 2 && <p>해볼 일을 고르면 입력창에 문장을 써드릴게요. 고쳐 쓰거나 바로 보내도 돼요. 휴대폰 일정이 연결되지 않았으면 먼저 읽기 권한을 물어볼게요.</p>}
         </div>
-        <div className="office-guide-actions">
-          {step === 0 && <button type="button" onClick={() => setStep(1)}>필요한 설정 보기</button>}
+        <div className={`office-guide-actions${step === 2 ? ' office-guide-actions--examples' : ''}`}>
+          {step === 0 && <button type="button" className="office-guide-next" onClick={() => setStep(1)}>필요한 설정 보기</button>}
           {step === 1 && <>
-            {calendarGranted ? <span role="status">휴대폰 일정 읽기 연결됨</span> :
+            {calendarGranted ? <span role="status" className="office-guide-done"><Icon name="check" />휴대폰 일정 읽기 연결됨</span> :
               <button type="button" onClick={onCalendar}>휴대폰 일정 읽기 허용</button>}
             <button type="button" onClick={() => onNavigate('connections')}>앱과 컴퓨터 연결</button>
-            <button type="button" onClick={() => setStep(2)}>해볼 일 고르기</button>
+            <button type="button" className="office-guide-next" onClick={() => setStep(2)}>해볼 일 고르기</button>
           </>}
           {step === 2 && exampleRequests.map(example =>
-            <button type="button" key={example.label} disabled={hasDraft} onClick={() => {
+            <button type="button" key={example.label} className="example-chip" disabled={hasDraft} onClick={() => {
               onDraftExample(example.text, example.needsFile)
               if (example.needsCalendar && !calendarGranted) onCalendar()
-            }}>{example.label}</button>
+            }}><Icon name={example.icon} />{example.label}</button>
           )}
-          <button type="button" onClick={onDismiss}>바로 대화하기</button>
+          <button type="button" className="office-guide-skip" onClick={onDismiss}>바로 대화하기</button>
         </div>
         {step === 2 && hasDraft && <p>입력창에 작성한 내용을 먼저 확인해 주세요.</p>}
       </section>}
@@ -95,7 +113,7 @@ function AnswerMenu({ messageId, enabled, onCopy, onMessageMenu }: {
     <div className="answer-menu" ref={root} onKeyDown={event => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(true) } }}>
       <button type="button" ref={trigger} className="icon-button icon-button--compact" disabled={!enabled}
         aria-label="답변 메뉴" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
-        onClick={() => setOpen(value => !value)}>···</button>
+        onClick={() => setOpen(value => !value)}><Icon name="more" /></button>
       {open && <div className="answer-menu-list" role="menu" id={menuId} aria-label="답변 동작">
         <button type="button" role="menuitem" ref={first} onClick={() => { close(true); onCopy(messageId) }}>복사</button>
         <button type="button" role="menuitem" onClick={() => { close(true); onMessageMenu(messageId) }}>더 보기</button>
@@ -150,7 +168,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
                 <AnswerMenu messageId={message.id} enabled={enabled} onCopy={onCopy} onMessageMenu={onMessageMenu} />
               </>
             : <button type="button" className="icon-button icon-button--compact" disabled={!enabled}
-              aria-label="메시지 메뉴" onClick={() => onMessageMenu(message.id)}>···</button>}
+              aria-label="메시지 메뉴" onClick={() => onMessageMenu(message.id)}><Icon name="more" /></button>}
         </div>
       )}
     </article>
@@ -310,7 +328,13 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
         pinnedToEnd.current = pinned
         setScrolledUp(!pinned)
       }}>
-        {loading ? <div className="loading" role="status"><Icon name="clock" /> 대화를 불러오는 중</div> : empty ?
+        {loading ? <div className="loading" role="status">
+          <div className="skeleton" aria-hidden="true">
+            <span className="skeleton-bubble skeleton-bubble--mine" />
+            <span className="skeleton-line" /><span className="skeleton-line skeleton-line--wide" /><span className="skeleton-line skeleton-line--short" />
+          </div>
+          <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
+        </div> : empty ?
           <Welcome staff={staff} guide={guide}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
@@ -354,7 +378,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                   onClick={() => {
                     if (onChooseReply(waitingInput.id, index)) setSentChoice(waitingInput.id)
                   }}>
-                  {choice.label}{choice.recommended && <span>추천</span>}
+                  {withStickers(choice.label)}{choice.recommended && <span className="reply-recommended"><Icon name="sparkle" />추천</span>}
                 </button>)}
               </div>}
             </div>}

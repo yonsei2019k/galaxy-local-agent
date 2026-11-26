@@ -4,6 +4,7 @@ import './work.css'
 import { Character } from '../character/Character'
 import { useCharacter } from '../character/useCharacter'
 import { Icon } from '../Icon'
+import { withStickers } from '../icons/Sticker'
 import type { Task } from '../bridge'
 import { detailLine, friendlyStep, taskSteps, verbatimSteps, workPresentation } from './workPresentation'
 import { useWorkDuration } from './workHistory'
@@ -18,10 +19,10 @@ function HistoryRow({ task, onSelect }: { task: Task; onSelect?(id: string): voi
       onClick={() => onSelect?.(task.id)}>
       <span className="work-icon" aria-hidden="true"><Icon name={state.icon} /></span>
       <span className="work-text">
-        <span className="work-title" dir="auto">{task.label || '작업'}</span>
+        <span className="work-title" dir="auto">{withStickers(task.label || '작업')}</span>
         <span className="work-list-state">{[state.title, elapsed, detailLine(task.detail)].filter(Boolean).join(' · ')}</span>
       </span>
-      <span className="work-chevron" aria-hidden="true">›</span>
+      <Icon name="chevronRight" className="work-chevron" />
     </button>
   </li>
 }
@@ -82,12 +83,12 @@ export function WorkSheet({ task, enabled, steps, history, onSelect, onBack, onC
     </div>}
     {task && presentation && <div className="sheet-body">
       {history && <button type="button" className="work-history-back" onClick={onBack}>
-        <span aria-hidden="true">‹</span> 작업 목록
+        <Icon name="back" /> 작업 목록
       </button>}
       <header className={`work-sheet-head work-card--${presentation.tone}`}>
         <Character choice={character} state={presentation.characterState} size={64} decorative />
         <div className="work-text">
-          <h2 className="work-sheet-title" dir="auto">{task.label || '작업'}</h2>
+          <h2 className="work-sheet-title" dir="auto">{withStickers(task.label || '작업')}</h2>
           <p className="work-state">{[presentation.title, elapsed].filter(Boolean).join(' · ')}</p>
         </div>
       </header>

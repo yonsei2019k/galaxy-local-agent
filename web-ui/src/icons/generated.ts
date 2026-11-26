@@ -1,4 +1,4 @@
-// Generated from design/icons.json and design/illustrations.json by scripts/gen-icons.py. Do not edit.
+// Generated from design/icons.json, design/illustrations.json and design/stickers.json by scripts/gen-icons.py. Do not edit.
 
 export interface IconLayers { soft: string; accents: readonly { d: string; color: string }[]; line: string; dots: string }
 export interface IllustrationShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }
@@ -56,6 +56,7 @@ export const ICONS = {
   download: { soft: "", accents: [], line: "M4.5 15 V17 A2.5 2.5 0 0 0 7 19.5 H17 A2.5 2.5 0 0 0 19.5 17 V15 M12 4.5 V14 M8 10.3 L12 14.3 L16 10.3", dots: "" },
   link: { soft: "", accents: [], line: "M9.313 10.727 L6.909 13.131 A2.8 2.8 0 0 0 10.869 17.091 L13.273 14.687 M10.727 9.313 L13.131 6.909 A2.8 2.8 0 0 1 17.091 10.869 L14.687 13.273 M10.444 13.556 L13.556 10.444", dots: "" },
   chevronRight: { soft: "", accents: [], line: "M9.5 6.5 L15 12 L9.5 17.5", dots: "" },
+  more: { soft: "", accents: [], line: "M12 12 H12", dots: "M3.9 12 A1.7 1.7 0 1 0 7.3 12 A1.7 1.7 0 1 0 3.9 12 Z M10.3 12 A1.7 1.7 0 1 0 13.7 12 A1.7 1.7 0 1 0 10.3 12 Z M16.7 12 A1.7 1.7 0 1 0 20.1 12 A1.7 1.7 0 1 0 16.7 12 Z" },
   trash: { soft: "M7.4 8.4 L8.2 19.4 A2.5 2.5 0 0 0 10.7 21.7 H15.7 A2.5 2.5 0 0 0 18.2 19.4 L19 8.4 Z", accents: [], line: "M4.5 7.2 H19.5 M9.5 7.2 V5.6 A1.6 1.6 0 0 1 11.1 4 H12.9 A1.6 1.6 0 0 1 14.5 5.6 V7.2 M6.2 7.2 L7 18.2 A2.5 2.5 0 0 0 9.5 20.5 H14.5 A2.5 2.5 0 0 0 17 18.2 L17.8 7.2 M10.2 11 V16.5 M13.8 11 V16.5", dots: "" },
 } satisfies Record<string, IconLayers>
 
@@ -266,3 +267,135 @@ export const ILLUSTRATIONS = {
     { d: "M22 30 A2 2 0 1 0 26 30 A2 2 0 1 0 22 30 Z M144 40 A2 2 0 1 0 148 40 A2 2 0 1 0 144 40 Z", fill: "#C9952A" },
   ],
 } satisfies Record<string, readonly IllustrationShape[]>
+
+export interface StickerArt { label: string; shapes: readonly IllustrationShape[] }
+
+export const STICKERS = {
+  gradCap: { label: "졸업", shapes: [
+      { d: "M6.5 11.2 L12 13.5 L17.5 11.2 V15.6 C17.5 17.4 15 18.6 12 18.6 C9 18.6 6.5 17.4 6.5 15.6 Z", fill: "#C4E2FF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M12 4.5 L22 9 L12 13.5 L2 9 Z", fill: "#E6F3FF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M19 10.2 V15.2", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M17.8 16.4 A1.2 1.2 0 1 0 20.2 16.4 A1.2 1.2 0 1 0 17.8 16.4 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  calendar: { label: "일정", shapes: [
+      { d: "M6.5 5 H17.5 A3 3 0 0 1 20.5 8 V17.5 A3 3 0 0 1 17.5 20.5 H6.5 A3 3 0 0 1 3.5 17.5 V8 A3 3 0 0 1 6.5 5 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M3.5 8 A3 3 0 0 1 6.5 5 H17.5 A3 3 0 0 1 20.5 8 V10 H3.5 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M8 3 V6.5 M16 3 V6.5", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M14.4 12.6 H16.2 A1.2 1.2 0 0 1 17.4 13.8 V15.6 A1.2 1.2 0 0 1 16.2 16.8 H14.4 A1.2 1.2 0 0 1 13.2 15.6 V13.8 A1.2 1.2 0 0 1 14.4 12.6 Z", fill: "#FFE08A" },
+      { d: "M6.8 14.7 A1 1 0 1 0 8.8 14.7 A1 1 0 1 0 6.8 14.7 Z", fill: "#3B2F3A" },
+      { d: "M10 14.7 A1 1 0 1 0 12 14.7 A1 1 0 1 0 10 14.7 Z", fill: "#3B2F3A" },
+  ] },
+  check: { label: "완료", shapes: [
+      { d: "M8 3 H16 A5 5 0 0 1 21 8 V16 A5 5 0 0 1 16 21 H8 A5 5 0 0 1 3 16 V8 A5 5 0 0 1 8 3 Z", fill: "#D4EAB4", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M5.8 6.8 A1.6 1 0 1 0 9 6.8 A1.6 1 0 1 0 5.8 6.8 Z", fill: "#FFFFFF", opacity: 0.8 },
+      { d: "M7.5 12.3 L10.6 15.3 L16.5 8.8", stroke: "#3B2F3A", sw: 2 },
+  ] },
+  sparkle: { label: "반짝", shapes: [
+      { d: "M11 3 C11.6 7.6 12.4 8.4 17 9 C12.4 9.6 11.6 10.4 11 15 C10.4 10.4 9.6 9.6 5 9 C9.6 8.4 10.4 7.6 11 3 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M17.5 12.5 C17.8 14.9 18.1 15.2 20.5 15.5 C18.1 15.8 17.8 16.1 17.5 18.5 C17.2 16.1 16.9 15.8 14.5 15.5 C16.9 15.2 17.2 14.9 17.5 12.5 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M5.2 18.5 A1.3 1.3 0 1 0 7.8 18.5 A1.3 1.3 0 1 0 5.2 18.5 Z", fill: "#C4E2FF", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  heart: { label: "하트", shapes: [
+      { d: "M12 20 C12 20 3.5 15.2 3.5 9.4 C3.5 6.7 5.6 4.8 8 4.8 C9.8 4.8 11.2 5.8 12 7.3 C12.8 5.8 14.2 4.8 16 4.8 C18.4 4.8 20.5 6.7 20.5 9.4 C20.5 15.2 12 20 12 20 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M6.8 9.2 A2.2 2.2 0 0 1 8.6 7.3", stroke: "#FFFFFF", sw: 1.5 },
+  ] },
+  house: { label: "집", shapes: [
+      { d: "M7.5 10.5 H16.5 A1.5 1.5 0 0 1 18 12 V18.5 A1.5 1.5 0 0 1 16.5 20 H7.5 A1.5 1.5 0 0 1 6 18.5 V12 A1.5 1.5 0 0 1 7.5 10.5 Z", fill: "#FFE8DE", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M3.5 11 L12 4 L20.5 11 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M11.4 14.4 H12.6 A1.2 1.2 0 0 1 13.8 15.6 V18.8 A1.2 1.2 0 0 1 12.6 20 H11.4 A1.2 1.2 0 0 1 10.2 18.8 V15.6 A1.2 1.2 0 0 1 11.4 14.4 Z", fill: "#D2AE93", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M10.9 8.6 A1.1 1.1 0 1 0 13.1 8.6 A1.1 1.1 0 1 0 10.9 8.6 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  bed: { label: "숙소", shapes: [
+      { d: "M4.5 7 H5.5 A1.5 1.5 0 0 1 7 8.5 V17.5 A1.5 1.5 0 0 1 5.5 19 H4.5 A1.5 1.5 0 0 1 3 17.5 V8.5 A1.5 1.5 0 0 1 4.5 7 Z", fill: "#D2AE93", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M7 12 H19 A2 2 0 0 1 21 14 V15 A2 2 0 0 1 19 17 H7 A2 2 0 0 1 5 15 V14 A2 2 0 0 1 7 12 Z", fill: "#E6F3FF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M8.7 9.4 H10.9 A1.2 1.2 0 0 1 12.1 10.6 V11 A1.2 1.2 0 0 1 10.9 12.2 H8.7 A1.2 1.2 0 0 1 7.5 11 V10.6 A1.2 1.2 0 0 1 8.7 9.4 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M12.5 12 H19 A2 2 0 0 1 21 14 V17 H12.5 Z", fill: "#C4E2FF", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M19.5 17 V20 M5 19 V20", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M15.5 4 H18.5 L15.5 7.5 H18.5", stroke: "#5B93CC", sw: 1.2 },
+  ] },
+  mapPin: { label: "위치", shapes: [
+      { d: "M8 21.2 A4 1 0 1 0 16 21.2 A4 1 0 1 0 8 21.2 Z", fill: "#3B2F3A", opacity: 0.12 },
+      { d: "M12 21 C12 21 5.5 14.6 5.5 9.6 A6.5 6.5 0 0 1 18.5 9.6 C18.5 14.6 12 21 12 21 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M9.6 9.6 A2.4 2.4 0 1 0 14.4 9.6 A2.4 2.4 0 1 0 9.6 9.6 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  money: { label: "돈", shapes: [
+      { d: "M5 6 H15 A2.5 2.5 0 0 1 17.5 8.5 V13.5 A2.5 2.5 0 0 1 15 16 H5 A2.5 2.5 0 0 1 2.5 13.5 V8.5 A2.5 2.5 0 0 1 5 6 Z", fill: "#D4EAB4", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M7.8 11 A2.2 2.2 0 1 0 12.2 11 A2.2 2.2 0 1 0 7.8 11 Z", fill: "#EEF7E2", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M12.5 15.5 A4.5 4.5 0 1 0 21.5 15.5 A4.5 4.5 0 1 0 12.5 15.5 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M17 13.3 V17.7", stroke: "#C9952A", sw: 1.5 },
+  ] },
+  warning: { label: "주의", shapes: [
+      { d: "M10.7 4.6 A1.5 1.5 0 0 1 13.3 4.6 L21.1 18.3 A1.5 1.5 0 0 1 19.8 20.5 H4.2 A1.5 1.5 0 0 1 2.9 18.3 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M12 9.5 V14", stroke: "#3B2F3A", sw: 2 },
+      { d: "M10.8 17 A1.2 1.2 0 1 0 13.2 17 A1.2 1.2 0 1 0 10.8 17 Z", fill: "#3B2F3A" },
+  ] },
+  clock: { label: "시간", shapes: [
+      { d: "M3.8 5.6 A2.2 2.2 0 1 0 8.2 5.6 A2.2 2.2 0 1 0 3.8 5.6 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M15.8 5.6 A2.2 2.2 0 1 0 20.2 5.6 A2.2 2.2 0 1 0 15.8 5.6 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M7 19.5 L5.8 21 M17 19.5 L18.2 21", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M4.5 13 A7.5 7.5 0 1 0 19.5 13 A7.5 7.5 0 1 0 4.5 13 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M12 9.5 V13 L14.6 14.6", stroke: "#3B2F3A", sw: 1.5 },
+  ] },
+  phone: { label: "전화", shapes: [
+      { d: "M9.5 2.5 H14.5 A3 3 0 0 1 17.5 5.5 V18.5 A3 3 0 0 1 14.5 21.5 H9.5 A3 3 0 0 1 6.5 18.5 V5.5 A3 3 0 0 1 9.5 2.5 Z", fill: "#C4E2FF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M9.8 5 H14.2 A1.5 1.5 0 0 1 15.7 6.5 V15.7 A1.5 1.5 0 0 1 14.2 17.2 H9.8 A1.5 1.5 0 0 1 8.3 15.7 V6.5 A1.5 1.5 0 0 1 9.8 5 Z", fill: "#E6F3FF" },
+      { d: "M11.1 19.3 A0.9 0.9 0 1 0 12.9 19.3 A0.9 0.9 0 1 0 11.1 19.3 Z", fill: "#3B2F3A" },
+  ] },
+  mail: { label: "메일", shapes: [
+      { d: "M5.5 5.5 H18.5 A2.5 2.5 0 0 1 21 8 V16 A2.5 2.5 0 0 1 18.5 18.5 H5.5 A2.5 2.5 0 0 1 3 16 V8 A2.5 2.5 0 0 1 5.5 5.5 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M3.8 7.2 L12 13 L20.2 7.2", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M10.1 13 A1.9 1.9 0 1 0 13.9 13 A1.9 1.9 0 1 0 10.1 13 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  gift: { label: "선물", shapes: [
+      { d: "M6 10 H18 A2 2 0 0 1 20 12 V18.5 A2 2 0 0 1 18 20.5 H6 A2 2 0 0 1 4 18.5 V12 A2 2 0 0 1 6 10 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M4.5 7 H19.5 A1.5 1.5 0 0 1 21 8.5 V9.3 A1.5 1.5 0 0 1 19.5 10.8 H4.5 A1.5 1.5 0 0 1 3 9.3 V8.5 A1.5 1.5 0 0 1 4.5 7 Z", fill: "#FFE8F0", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M10.5 7 H13.5 V20.5 H10.5 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M12 7 C9.5 3 6.5 4.2 7.6 6.2 C8.2 7 10 7 12 7 C14 7 15.8 7 16.4 6.2 C17.5 4.2 14.5 3 12 7 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  food: { label: "음식", shapes: [
+      { d: "M10 2.8 Q9 4 10 5.2 M14 2.8 Q13 4 14 5.2", stroke: "#3B2F3A", sw: 1.2, opacity: 0.5 },
+      { d: "M5.5 12 C5.5 8.5 8.5 6.8 12 6.8 C15.5 6.8 18.5 8.5 18.5 12 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M3.5 12 H20.5 C20.5 16.8 16.8 20 12 20 C7.2 20 3.5 16.8 3.5 12 Z", fill: "#FFC6AE", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M8.5 15.5 Q12 17 15.5 15.5", stroke: "#FFFFFF", sw: 1.2 },
+  ] },
+  car: { label: "자동차", shapes: [
+      { d: "M3.5 15 V12.5 C3.5 11.5 4.2 10.8 5.2 10.6 L7.5 6.8 C7.9 6.2 8.5 5.8 9.3 5.8 H14.7 C15.5 5.8 16.1 6.2 16.5 6.8 L18.8 10.6 C19.8 10.8 20.5 11.5 20.5 12.5 V15 C20.5 15.8 19.8 16.5 19 16.5 H5 C4.2 16.5 3.5 15.8 3.5 15 Z", fill: "#C4E2FF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M8.8 10.4 L10 7.6 H14 L15.2 10.4 Z", fill: "#E6F3FF", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M5.3 16.8 A2.2 2.2 0 1 0 9.7 16.8 A2.2 2.2 0 1 0 5.3 16.8 Z", fill: "#7E5C44", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M14.3 16.8 A2.2 2.2 0 1 0 18.7 16.8 A2.2 2.2 0 1 0 14.3 16.8 Z", fill: "#7E5C44", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M17.7 13 A0.9 0.9 0 1 0 19.5 13 A0.9 0.9 0 1 0 17.7 13 Z", fill: "#FFE08A" },
+  ] },
+  train: { label: "기차", shapes: [
+      { d: "M8.5 17.5 L6.5 21 M15.5 17.5 L17.5 21", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M9.5 3 H14.5 A4 4 0 0 1 18.5 7 V13.5 A4 4 0 0 1 14.5 17.5 H9.5 A4 4 0 0 1 5.5 13.5 V7 A4 4 0 0 1 9.5 3 Z", fill: "#D4EAB4", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M9.3 5.8 H14.7 A1.5 1.5 0 0 1 16.2 7.3 V9.3 A1.5 1.5 0 0 1 14.7 10.8 H9.3 A1.5 1.5 0 0 1 7.8 9.3 V7.3 A1.5 1.5 0 0 1 9.3 5.8 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M7.9 14 A1.1 1.1 0 1 0 10.1 14 A1.1 1.1 0 1 0 7.9 14 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M13.9 14 A1.1 1.1 0 1 0 16.1 14 A1.1 1.1 0 1 0 13.9 14 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  book: { label: "책", shapes: [
+      { d: "M12 6.5 C10 5 7 4.5 3.5 5 V18 C7 17.5 10 18 12 19.5 Z", fill: "#FFFFFF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M12 6.5 C14 5 17 4.5 20.5 5 V18 C17 17.5 14 18 12 19.5 Z", fill: "#E6F3FF", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M6 8.5 C7.6 8.4 8.9 8.7 10 9.2 M6 11.5 C7.6 11.4 8.9 11.7 10 12.2", stroke: "#5B93CC", sw: 1.2 },
+      { d: "M15.6 5.3 V10 L16.8 9 L18 10 V5 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.2 },
+  ] },
+  party: { label: "축하", shapes: [
+      { d: "M3.5 20.5 L8 8.5 L15.5 16 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M5.6 14.8 L9.2 18.4 M6.9 11.3 L12.7 17.1", stroke: "#D9728F", sw: 1.2 },
+      { d: "M13.7 5 A1.3 1.3 0 1 0 16.3 5 A1.3 1.3 0 1 0 13.7 5 Z", fill: "#FFC9DA", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M18.2 9.5 A1.3 1.3 0 1 0 20.8 9.5 A1.3 1.3 0 1 0 18.2 9.5 Z", fill: "#C4E2FF", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M10.5 3.2 A1 1 0 1 0 12.5 3.2 A1 1 0 1 0 10.5 3.2 Z", fill: "#D4EAB4", stroke: "#3B2F3A", sw: 1.2 },
+      { d: "M17 12.5 Q19 11.3 20.6 12.8 M10.5 7 Q12.4 5.8 11.8 4.6", stroke: "#5B93CC", sw: 1.2 },
+  ] },
+  smile: { label: "웃음", shapes: [
+      { d: "M3.5 12 A8.5 8.5 0 1 0 20.5 12 A8.5 8.5 0 1 0 3.5 12 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M8.3 11 Q9.3 9.8 10.3 11 M13.7 11 Q14.7 9.8 15.7 11", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M10 14.2 Q12 16 14 14.2", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M6.2 13.6 A1.4 0.9 0 1 0 9 13.6 A1.4 0.9 0 1 0 6.2 13.6 Z", fill: "#FF8FA8", opacity: 0.7 },
+      { d: "M15 13.6 A1.4 0.9 0 1 0 17.8 13.6 A1.4 0.9 0 1 0 15 13.6 Z", fill: "#FF8FA8", opacity: 0.7 },
+  ] },
+  sun: { label: "해", shapes: [
+      { d: "M12 2.5 V4.5 M12 19.5 V21.5 M2.5 12 H4.5 M19.5 12 H21.5 M5.3 5.3 L6.7 6.7 M17.3 17.3 L18.7 18.7 M5.3 18.7 L6.7 17.3 M17.3 6.7 L18.7 5.3", stroke: "#C9952A", sw: 1.5 },
+      { d: "M6.8 12 A5.2 5.2 0 1 0 17.2 12 A5.2 5.2 0 1 0 6.8 12 Z", fill: "#FFE08A", stroke: "#3B2F3A", sw: 1.5 },
+      { d: "M8.9 10.4 A1.3 0.8 0 1 0 11.5 10.4 A1.3 0.8 0 1 0 8.9 10.4 Z", fill: "#FFFFFF", opacity: 0.8 },
+  ] },
+} satisfies Record<string, StickerArt>
