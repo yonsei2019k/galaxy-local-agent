@@ -44,7 +44,7 @@ class BrowserAuthContinuationTest {
 
     @Test fun reopenedNaverAuthUsesTheBoundServicePathWithFreshSignIn() {
         val page="https://booking.naver.com/my/reservations"
-        val open=auth.copy(arguments=JsonObject(mapOf("url" to JsonPrimitive("$page?session=old#fragment"))))
+        val open=HarnessStep(auth.tool,JsonObject(mapOf("url" to JsonPrimitive("$page?session=old#fragment"))),auth.evidence)
         val request=QueuedChatRequest("run","thread","branch",null,"fixture","model",false,emptyList(),"user",
             previousSteps=listOf(open))
         val saved=Json.parseToJsonElement(request.toJson()).jsonObject
