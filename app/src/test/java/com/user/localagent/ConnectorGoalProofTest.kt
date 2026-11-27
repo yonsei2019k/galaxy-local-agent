@@ -21,7 +21,7 @@ class ConnectorGoalProofTest {
         assertTrue(proof.matchesOwnerConnectorFields("team@example.org에게 교육 자료 보내줘"))
         assertFalse(proof.matchesOwnerConnectorFields("my-team@example.org에게 교육 자료 보내줘"))
         assertFalse(proof.matchesOwnerConnectorFields("team@example.org.au로 교육 자료 보내줘"))
-        val step=HarnessStep(call.name,call.arguments,StepEvidence(call.name,VerificationState.VERIFIED,"",outcomeProof=goalOutcomeDigest(proof)))
+        val step=HarnessStep(call.name,call.arguments,StepEvidence(call.name,VerificationState.VERIFIED,"보낸편지함 조회",auditId=call.id,outcomeProof=goalOutcomeDigest(proof)))
         assertTrue(goalCriterionMatches(GoalCriterion(text=proof.connectorCriterion(),proofTarget=proof),step))
         assertFalse(goalCriterionMatches(GoalCriterion(text="첨부한 파일 전달 확인",proofTarget=proof),step))
         assertNull(connectorGoalProof(call,JsonObject(data+("sent" to JsonPrimitive(false)))))
