@@ -30,11 +30,7 @@ internal class GoalWaitWork(private val context: Context) {
     val store = GoalWaitStore({ encrypted.read("goal.wait.v1") }, { encrypted.write("goal.wait.v1", it) })
 
     suspend fun arm(record: GoalWaitRecord) {
-        val time = when(val condition=record.condition) {
-            is WaitCondition.AtTime -> condition.atEpochMillis
-            is WaitCondition.OwnerAuth -> if(record.observedEvent!=null) 0L else record.deadlineAt
-            is WaitCondition.MediaEnd -> record.mediaPollAt?:0L
-        }
+        val time = GoalWaitPolicy.dueAt(record) ?: return
         val request = OneTimeWorkRequestBuilder<GoalWaitWorker>()
             .setInputData(workDataOf("goalId" to record.goalId, "waitId" to record.id))
             .setInitialDelay((time - System.currentTimeMillis()).coerceAtLeast(0), TimeUnit.MILLISECONDS)
@@ -64,6 +60,14 @@ internal class GoalWaitWork(private val context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork("goal-wait-"+record.id).await()
     }
 
+    suspend fun onPcAvailable() {
+        for (previous in store.all()) {
+            if (previous.pcRetries == 0 || previous.retryAt == null || previous.resumedOnceFor == previous.id) continue
+            val immediate = previous.copy(id = java.util.UUID.randomUUID().toString(), retryAt = null)
+            if (store.replace(immediate, previous)) arm(immediate)
+        }
+    }
+
     suspend fun restore() {
         for (record in store.all()) arm(record)
     }
@@ -75,6 +79,12 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val goalId = inputData.getString("goalId") ?: return Result.failure()
         var record = app.goalWaits.store.get(goalId) ?: return Result.success()
         if (record.id != inputData.getString("waitId")) return Result.success()
+        val dueAt=GoalWaitPolicy.dueAt(record) ?: return Result.success()
+        if(System.currentTimeMillis()<dueAt){
+            val delayed=record.copy(id=java.util.UUID.randomUUID().toString())
+            if(app.goalWaits.store.replace(delayed,record))app.goalWaits.arm(delayed)
+            return Result.success()
+        }
         if(record.ordinaryBrowserAuth)return if(app.runs.wakeBrowserAuth(record))Result.success()
             else if(runAttemptCount<5)Result.retry() else Result.failure()
         val ready=if(app.runs.isGoalWaitReady(record))true
@@ -86,7 +96,10 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 app.runs.isGoalWaitReady(record)
             }==true else false
         if(!ready)
-            return if(runAttemptCount<5 && app.runs.isRunLive(record.parentRunId))Result.retry() else Result.success()
+            return if(app.runs.isRunLive(record.parentRunId))Result.retry() else Result.success()
+        if (System.currentTimeMillis() >= record.deadlineAt) {
+            return if (app.runs.wakeGoal(record, WakeEvent.RESTORED_PAST_DUE)) Result.success() else Result.retry()
+        }
         val existing=record.observedEvent
         val media=record.condition as? WaitCondition.MediaEnd
         if(existing==null && record.pcMedia && media!=null) {
@@ -142,7 +155,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
             return if(app.runs.wakeGoal(observed,event))Result.success() else Result.retry()
         }
         val next=record.copy(id=java.util.UUID.randomUUID().toString(),
-            mediaPollAt=now+GoalWaitPolicy.MEDIA_POLL_MS,lastMediaProgressAt=if(moved)now else lastProgress,
+            mediaPollAt=now+GoalWaitPolicy.mediaPollDelay(player?.positionMs,player?.durationMs,player?.rate,moved),lastMediaProgressAt=if(moved)now else lastProgress,
             playingPositionMs=player?.positionMs?:record.playingPositionMs,
             lastMediaSampleAt=if(player==null)record.lastMediaSampleAt else now)
         if(app.goalWaits.store.replace(next,record))app.goalWaits.arm(next)
@@ -153,7 +166,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val app=(applicationContext as LocalAgentApplication).container
         val web=AppWebAgent.get(applicationContext)
         val work=AppWebAgent.WorkBinding(record.parentRunId,record.threadId,record.branchId)
-        fun active()=app.goalWaits.store.get(record.goalId)==record
+        fun active()=System.currentTimeMillis()<record.deadlineAt && app.goalWaits.store.get(record.goalId)==record
         val observation=web.sampleGoalMedia(work) ?: return WakeEvent.PLAYER_GONE
         if(observation.loginRequired)return WakeEvent.LOGIN_EXPIRED
         val player=observation.player ?: return WakeEvent.PLAYER_GONE

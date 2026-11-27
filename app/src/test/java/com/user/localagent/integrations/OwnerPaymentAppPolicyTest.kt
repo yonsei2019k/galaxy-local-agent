@@ -15,6 +15,15 @@ class OwnerPaymentAppPolicyTest {
             "intent://checkout?session=opaque#Intent;scheme=monimopay;package=net.ib.android.smcard;end", true, true))
     }
 
+    @Test fun historyUsesObservedMerchantAndIndependentQueryFreeOfficialRoutes() {
+        assertEquals("https://m.thankqcamping.com/join/non/ser_reservation.hbb",
+            OwnerPaymentAppPolicy.bookingMerchant("https://m.thankqcamping.com/resv/view.hbb?camp=1")?.history)
+        assertEquals("https://nol.yanolja.com/member/mypage",OwnerPaymentAppPolicy.bookingMerchant("https://nol.yanolja.com/stay/domestic/1")?.history)
+        for (url in listOf("http://m.thankqcamping.com","https://m.thankqcamping.com.evil.test","https://fake@nol.yanolja.com","https://nol.yanolja.com:8000","https://web.nicepay.co.kr/checkout"))
+            assertNull(OwnerPaymentAppPolicy.bookingMerchant(url))
+        assertEquals("https://www.nicepay.co.kr/cs/transInfo/cardList.do",OwnerPaymentAppPolicy.paymentHistory)
+    }
+
     @Test fun rejectsFramesAndAgentNavigation() {
         assertNull(OwnerPaymentAppPolicy.issuerData(checkout, issuer, false, true))
         assertNull(OwnerPaymentAppPolicy.issuerData(checkout, issuer, true, false))

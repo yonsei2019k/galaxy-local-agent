@@ -15,11 +15,12 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 
-data class FileArtifact(val file:File,val mimeType:String,val format:String,val bytes:Long,val verificationSummary:String) {
+data class FileArtifact(val file:File,val mimeType:String,val format:String,val bytes:Long,val verificationSummary:String,val sha256:String?=null) {
     /** No private absolute path, document content, account data, URI grant or external side effect. */
     fun toolResult():String=buildJsonObject {
         put("status","ok");put("fileName",file.name);put("mimeType",mimeType);put("format",format)
         put("bytes",bytes);put("verification",verificationSummary);put("privateArtifact",true)
+        sha256?.let { put("sha256",it) }
         put("exportOrShareRequiresUserAction",true)
     }.toString()
 }
@@ -81,8 +82,20 @@ class FileToolOperations(context:Context,private val officeTools:NativeOfficeToo
             }
             currentCoroutineContext().ensureActive()
             check(target.isFile&&target.length() in 0..20L*1024*1024)
+            val pdfHash = if (extension == "pdf") {
+                val digest = MessageDigest.getInstance("SHA-256")
+                target.inputStream().use { input ->
+                    val block = ByteArray(16 * 1024)
+                    while (true) {
+                        val read = input.read(block)
+                        if (read < 0) break
+                        digest.update(block,0,read)
+                    }
+                }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            } else null
             complete=true
-            FileArtifact(target,MIME_TYPES.getValue(extension),extension,target.length(),verification)
+            FileArtifact(target,MIME_TYPES.getValue(extension),extension,target.length(),verification,pdfHash)
         }finally {
             officeTemporary?.let {temporary->if(isOwnOffice(temporary,extension))temporary.delete()}
             if(!complete&&target.canonicalFile.parentFile==directory&&ARTIFACT_NAME.matches(target.name))target.delete()

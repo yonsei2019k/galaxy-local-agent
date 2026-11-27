@@ -26,6 +26,10 @@ object ActionCompletionReport {
             if(!result.success||result.verification in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)){
                 append("실행 결과 미확인 · ").append(result.content.take(1200));return@forEachIndexed
             }
+            if(call.name == "prepare_email" && PdfMailAttachments.FIELD in call.arguments && result.verification == VerificationState.PREPARED) {
+                append(result.content)
+                return@forEachIndexed
+            }
             if(call.name == KakaoShare.TOOL) {
                 append(if (result.verification == VerificationState.PREPARED) KakaoShare.HANDOFF else "카카오톡 전송 결과를 확인할 수 없어요.")
                 return@forEachIndexed

@@ -533,6 +533,15 @@ class MainActivity : ComponentActivity() {
             }
             result
         }
+        val pdfDraftIds = messages.takeLast(160).filter { it.role == "assistant" && GoalPdfEmail.MARKER in it.text }.map { it.id }
+        val pdfDrafts by produceState<Map<String,kotlinx.serialization.json.JsonObject>>(emptyMap(), composerThreadId, currentBranchId, pdfDraftIds) {
+            value = emptyMap()
+            value = pdfDraftIds.mapNotNull { id ->
+                try { GoalPdfEmail.lookup(app,composerThreadId,currentBranchId,id)?.second?.let { id to GoalPdfEmail.preview(it) } }
+                catch (cancel:CancellationException) { throw cancel }
+                catch (_:Exception) { null }
+            }.toMap()
+        }
         val fileReferences = remember(messages) {
             messages.takeLast(160).filter { it.role=="assistant" && "[[file:" in it.text }.mapNotNull {
                 message->chatFileNames(message.text).takeIf { it.isNotEmpty() }?.let { message.id to it }
@@ -617,7 +626,7 @@ class MainActivity : ComponentActivity() {
                     })
                     bookingPayment?.takeIf{!connectionsOpen&&it.binding.threadId==composerThreadId&&it.binding.branchId==currentBranchId}
                         ?.let { payment->put("bookingPayment",buildJsonObject {
-                            put("id",payment.id);put("seller","NICEPAY");put("amount",payment.amount);put("state",payment.state)
+                            put("id",payment.id);put("seller","NICEPAY");put("amount",payment.amount);put("state",payment.state);put("hasBookingHistory",payment.merchant!=null)
                         }) }
                     inlineApproval?.let { action->put("approvalCard",buildJsonObject {
                         put("id",action.presentationId)
@@ -646,10 +655,12 @@ class MainActivity : ComponentActivity() {
                         message.createdAt?.let{put("sentAt",it)}
                         val text = if (message.role == "assistant" || author != null)
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
+                        val cleanText = text.replace(GoalPdfEmail.MARKER,"").trimEnd()
+                        pdfDrafts[message.id]?.let { put("pdfEmail",it) }
                         val files = verifiedFiles[message.id].orEmpty()
-                        if (files.isEmpty()) put("text",text.take(32000)) else {
+                        if (files.isEmpty()) put("text",cleanText.take(32000)) else {
                             put("fileFormats",buildJsonArray { files.forEach { add(it.substringAfterLast('.')) } })
-                            put("text",files.fold(text){body,name->body.replace("[[file:$name]]","")}.trimEnd().take(32000))
+                            put("text",files.fold(cleanText){body,name->body.replace("[[file:$name]]","")}.trimEnd().take(32000))
                         }
                         author?.let { put("authorLabel", it.label) }
                     })}})
@@ -722,13 +733,13 @@ class MainActivity : ComponentActivity() {
                     if(sameRoom){
                         val payload=command.payload
                         when(command.action){
-                            "openBookingPayment","checkBookingPayment"->if(!connectionsOpen&&lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)){
+                            "openBookingPayment","checkBookingPayment","checkBookingHistory"->if(!connectionsOpen&&lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)){
                                 val id=payload.getValue("id").jsonPrimitive.content
                                 val opened=if(command.action=="openBookingPayment")webAgent.openOwnerPayment(
                                     this@MainActivity,id,composerThreadId,currentBranchId)
-                                else webAgent.checkOwnerPayment(id,composerThreadId,currentBranchId)
+                                else webAgent.openOwnerHistory(this@MainActivity,id,composerThreadId,currentBranchId,booking=command.action=="checkBookingHistory")
                                 if(!opened)android.widget.Toast.makeText(this@MainActivity,
-                                    "현재 결제 화면을 열 수 없어요. 예약 사이트의 결제 화면을 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
+                                    "선택한 화면을 열 수 없어요. 예약처의 예약 내역과 카드 거래 내역에서 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
                             }
                             "answerGoalQuestion"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()){
                                 chat.sendGoalOwnerAnswer(payload.getValue("runId").jsonPrimitive.content,
@@ -841,6 +852,18 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "copy"->{val id=payload.getValue("messageId").jsonPrimitive.content;if(messages.any{it.id==id&&(it.role=="assistant"||officeAuthor(it.role)!=null)})chat.copyMessage(id)}
+                            "openPdfEmail"->{
+                                val id=payload.getValue("messageId").jsonPrimitive.content
+                                val preview=pdfDrafts[id]
+                                if(preview!=null)this@MainActivity.lifecycleScope.launch {
+                                    try {
+                                        val intent=GoalPdfEmail.composer(this@MainActivity,app,composerThreadId,currentBranchId,id,preview)
+                                        if (app.runs.selectedThreadId.value == composerThreadId) startActivity(intent)
+                                    } catch(cancel:CancellationException){throw cancel}
+                                    catch(_:android.content.ActivityNotFoundException){status.value="휴대폰에서 Gmail을 열 수 없어요. 첨부한 초안은 여기에 보관했어요."}
+                                    catch(_:Exception){status.value="이 대화에서 첨부 원본을 다시 확인할 수 없어요. 파일을 다시 저장해 주세요."}
+                                }
+                            }
                             "messageFiles"->{
                                 val id=payload.getValue("messageId").jsonPrimitive.content
                                 val names=verifiedFiles[id]

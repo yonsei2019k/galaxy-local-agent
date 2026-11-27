@@ -7,6 +7,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GoalModelContextTest {
+    @Test fun longRunHistoryStaysInTheJournalWhileTheModelKeepsTheGoalAndProofTarget() {
+        val proof = com.user.localagent.core.GoalProofTarget(com.user.localagent.core.GoalProofKind.PROJECT_FILE, "result.txt")
+        val criterion = com.user.localagent.core.GoalCriterion(
+            text = "결과 저장", proofTarget = proof, evidence = List(90) { "audit-$it" },
+        )
+        val goal = com.user.localagent.core.GoalDefinition(
+            threadId = "thread", outcome = "자료 정리", criteria = listOf(criterion),
+            constraints = listOf("초안만 작성"), linkedRunIds = List(1000) { "segment-$it" },
+        )
+        val snapshot = GoalModelContext.snapshot(goal)
+        assertEquals(1000, snapshot.getValue("linkedRunCount").jsonPrimitive.int)
+        assertFalse("linkedRunIds" in snapshot)
+        assertEquals(goal.toJson()["constraints"], snapshot["constraints"])
+        val row = snapshot.getValue("criteria").jsonArray.single().jsonObject
+        assertEquals(criterion.id, row.getValue("id").jsonPrimitive.content)
+        assertEquals(proof.target, row.getValue("proofTarget").jsonObject.getValue("target").jsonPrimitive.content)
+        assertEquals(90, row.getValue("evidenceCount").jsonPrimitive.int)
+        assertFalse("evidence" in row)
+    }
+
     private val id="goal-"+"a".repeat(95)
     private val revision="1900000000000"
     private fun payload()=buildJsonObject {

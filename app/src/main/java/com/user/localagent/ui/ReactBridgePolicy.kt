@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -34,14 +34,14 @@ internal object ReactBridgePolicy {
         val allowed=when(action){
             "send"->setOf("text","submitToken")
             "draft"->setOf("text")
-            "copy","messageFiles","messageMenu","toggleAnswerSpeech"->setOf("messageId")
+            "copy","messageFiles","openPdfEmail","messageMenu","toggleAnswerSpeech"->setOf("messageId")
             "stayPhoto"->if("kind" in payload)setOf("messageId","index","kind")else setOf("messageId","index")
             "chooseReply"->setOf("runId","index")
             "answerGoalQuestion"->setOf("runId","text")
             "renameThread"->setOf("title")
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
             "collabRefresh"->setOf("bindingEpoch")
-            "selectThread","selectModel","removeAttachment","openBookingPayment","checkBookingPayment"->setOf("id")
+            "selectThread","selectModel","removeAttachment","openBookingPayment","checkBookingPayment","checkBookingHistory"->setOf("id")
             "stopGoalWait"->setOf("runId")
             "stop"->setOf("runId","actionEpoch")
             "steer"->setOf("runId","actionEpoch","text")

@@ -15,7 +15,7 @@ object GoalProgressToolCatalog {
             "Read the progress ledger (courses/units checklist) of a persistent goal. Private context only; never completion evidence."),
         ToolDefinition(UPDATE,Risk.LOW,version+mapOf("ops" to Argument("array",true,20_000)),
             "Update the goal's progress ledger with copied goalId/expectedUpdatedAt and ops1..20. Ops: {op:add,id,course,unit,kind:lecture|quiz|survey|certificate|condition|other,status?,note?,evidence?}, " +
-                "{op:set,id,status:todo|active|waiting|done|blocked,note?,evidence?[audit ids]}, {op:setMeta,requirements?,dailyLimit?,deadline?}. " +
+                "{op:set,id,status:todo|active|waiting|done|blocked,note?,evidence?[audit ids]}, {op:setMeta,requirements?,dailyLimit?,deadline?}. Record an explicit owner or site deadline as ISO offset datetime (or YYYY-MM-DD for the entire local day). " +
                 "done requires evidence audit ids observed in this run; at most 300 items. Never grants permissions or runs work."),
     )
     val names=definitions.map {it.name}.toSet()

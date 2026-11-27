@@ -9,6 +9,11 @@ import android.webkit.*
 import com.user.localagent.benchmark.RuntimeGate
 import com.user.localagent.core.BrowserNavigationRule
 import com.user.localagent.core.WebAgentPolicy
+import com.user.localagent.compute.PcLoginResult
+import com.user.localagent.compute.PcLoginStage
+import com.user.localagent.data.WorkTraceCode
+import com.user.localagent.data.WorkTraceDraft
+import com.user.localagent.data.WorkTraceKind
 import java.net.URI
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +70,8 @@ class AppWebAgent private constructor(private val context:Context) {
     data class LoginCard(val id:Long,val host:String,val pairedPc:Boolean=false,val websiteOnly:Boolean=false)
     private var pendingPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     private var pcLoginNeedsNewForm=false
+    internal val pcLoginNeedsCheck=MutableStateFlow(false)
+    internal val pcLoginRetryAt=MutableStateFlow(0L)
     private var confirmedPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     internal fun offerPcLogin(binding:WorkBinding,login:com.user.localagent.compute.PairedWebsiteLogin):Boolean {
         if(loginCard.value!=null || loginSubmitting || websiteLogin.value!=null || !login.current(context))return false
@@ -75,6 +82,8 @@ class AppWebAgent private constructor(private val context:Context) {
         cardOrigin=null
         pendingPcLogin=login
         pcLoginNeedsNewForm=false
+        pcLoginNeedsCheck.value=false
+        pcLoginRetryAt.value=0L
         expiredLoginBinding="$loginProcess:$id"
         loginFolded.value=false
         loginReturnOrigin=null
@@ -641,7 +650,9 @@ class AppWebAgent private constructor(private val context:Context) {
         }finally{loginSubmitting=false}
     }
 
-    private suspend fun submitPcLogin(id:Long,account:String,password:String):Boolean {
+    internal suspend fun checkPcLogin(id:Long)=submitPcLogin(id,"","",checkOnly=true)
+
+    private suspend fun submitPcLogin(id:Long,account:String,password:String,checkOnly:Boolean=false):Boolean {
         if(loginSubmitting||!RuntimeGate.foreground.get()||loginCard.value?.id!=id)return false
         val saved=pendingPcLogin
         val binding=browserWorkBinding.value
@@ -649,7 +660,7 @@ class AppWebAgent private constructor(private val context:Context) {
             loginStatus.value="PC 브라우저 연결을 확인하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
             return false
         }
-        if(account.isBlank()||account.length>320||password.length !in 1..1024){
+        if(!checkOnly && (account.isBlank()||account.length>320||password.length !in 1..1024)){
             loginStatus.value="아이디와 비밀번호를 모두 입력해 주세요."
             return false
         }
@@ -669,22 +680,38 @@ class AppWebAgent private constructor(private val context:Context) {
                 return false
             }
             loginStatus.value="전용 PC 브라우저의 사이트 로그인 상태를 확인하고 있어요."
-            val pc=if(pcLoginNeedsNewForm)saved.freshForm(context) else saved
-            if(pc==null){
-                loginStatus.value="PC에서 로그인 양식을 다시 열지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+            if(!checkOnly && System.currentTimeMillis()<pcLoginRetryAt.value){
+                loginStatus.value=pcLoginWaitMessage(pcLoginRetryAt.value)
                 return false
             }
-            if(!canSubmit())return false
-            pendingPcLogin=pc
-            pcLoginNeedsNewForm=true
-            com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_LOGIN_REQUEST_STARTED")
-            if(!pc.submit(context,account,password)){
-                if(loginCard.value?.id==id)
-                    loginStatus.value="사이트에서 로그인을 확인하지 못했어요. 입력 내용을 확인한 뒤 다시 눌러 주세요."
-                com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_SIGN_IN_NOT_CONFIRMED")
+            var pc=saved
+            var result=if(checkOnly||pcLoginNeedsCheck.value)saved.checkResult(context) else null
+            if(!checkOnly && result?.stage!=PcLoginStage.SIGNED_IN && result?.stage!=PcLoginStage.OWNER_VERIFICATION){
+                val fresh=if(pcLoginNeedsNewForm)saved.freshForm(context) else saved
+                if(fresh==null){
+                    loginStatus.value="PC에서 새 로그인 양식을 열지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+                    return false
+                }
+                if(!canSubmit())return false
+                pc=fresh
+                pendingPcLogin=fresh
+                pcLoginNeedsNewForm=true
+                pcLoginNeedsCheck.value=true
+                com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_LOGIN_REQUEST_STARTED")
+                result=fresh.submit(context,account,password)
+            }
+            if(!canSubmit()){
+                if(loginCard.value?.id==id && browserWorkBinding.value==binding){
+                    pcLoginNeedsCheck.value=true
+                    loginStatus.value="로그인 확인을 이어가려면 원래 채팅에서 결과를 다시 확인해 주세요."
+                }
                 return false
             }
-            if(loginCard.value?.id!=id || browserWorkBinding.value!=binding)return false
+            val outcome=result?:return false
+            if(outcome.stage!=PcLoginStage.SIGNED_IN){
+                recordPcLoginResult(binding,outcome)
+                return false
+            }
             confirmedPcLogin=pc
             showWebsiteWork("www.kairb.org",waiting=true)
             notifyGoalAuth(id)
@@ -694,11 +721,46 @@ class AppWebAgent private constructor(private val context:Context) {
             return true
         }catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
-            if(loginCard.value?.id==id)loginStatus.value="PC 연결이나 로그인 결과를 확인하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+            if(loginCard.value?.id==id && browserWorkBinding.value==binding)
+                recordPcLoginResult(binding,PcLoginResult(PcLoginStage.DISCONNECTED))
             com.user.localagent.FailureLog.record(context,"browser_owner_login",error,"PC_LOGIN_RESULT_UNAVAILABLE")
             return false
         }
         finally{loginSubmitting=false}
+    }
+
+    private fun pcLoginWaitMessage(at:Long):String {
+        val time=android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(at))
+        return "짧은 시간에 여러 번 시도했어요. ${time}부터 다시 제출할 수 있어요."
+    }
+
+    private suspend fun recordPcLoginResult(binding:WorkBinding,outcome:PcLoginResult){
+        pcLoginNeedsCheck.value=outcome.stage in setOf(PcLoginStage.OWNER_VERIFICATION,PcLoginStage.UNCONFIRMED,PcLoginStage.DISCONNECTED)
+        val message=when(outcome.stage){
+            PcLoginStage.CORRECT_INPUT->"KAIRB에서 입력 내용을 다시 확인해 달라고 했어요. 아이디와 비밀번호를 확인해 주세요."
+            PcLoginStage.OWNER_VERIFICATION->"KAIRB가 추가 본인 인증을 요청했어요. 휴대폰으로 승인 요청을 받으셨다면 승인 후 결과를 확인해 주세요."
+            PcLoginStage.RETRY_LATER->{
+                pcLoginRetryAt.value=System.currentTimeMillis()+(outcome.retryAfterSeconds?:300)*1_000L
+                pcLoginWaitMessage(pcLoginRetryAt.value)
+            }
+            PcLoginStage.FORM_EXPIRED->"이 로그인 창의 유효 시간이 끝났어요. 다시 제출하면 새 양식을 열어 이어갈게요."
+            PcLoginStage.DISCONNECTED->"PC에서 로그인 결과를 받지 못했어요. PC가 연결되면 같은 작업에서 결과를 확인할 수 있어요."
+            PcLoginStage.UNCONFIRMED->"KAIRB의 로그인 완료 표시를 찾지 못했어요. 먼저 같은 창에서 로그인 결과를 다시 확인해 주세요."
+            PcLoginStage.SIGNED_IN->return
+        }
+        loginStatus.value=message
+        recordPcWork(binding,message,"로그인 결과 확인",working=false)
+        val repo=(context as com.user.localagent.LocalAgentApplication).container.repository
+        try {
+            val traces=repo.workTrace
+            val trace=traces.open(binding.runId,binding.threadId)
+            if(trace.branchId!=binding.branchId)return
+            val paused=repo.chat.run(binding.runId)?.status=="paused"
+            traces.append(trace,WorkTraceDraft(traces.executionKey("owner.login",java.util.UUID.randomUUID().toString()),
+                if(paused)WorkTraceKind.ANSWER else WorkTraceKind.RATIONALE,
+                if(paused)WorkTraceCode.ANSWER_PAUSED else WorkTraceCode.DECISION_EXPLAINED,publicSummary=message))
+        }catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_LOGIN_HISTORY_UNAVAILABLE")}
     }
 
     private suspend fun awaitNolVaultReadback(id:Long):Boolean=withTimeoutOrNull(14_000){
@@ -777,12 +839,13 @@ class AppWebAgent private constructor(private val context:Context) {
 
     private class PaymentOffer(val id:String,val binding:WorkBinding,val browser:WebView,val document:String,
         val issuerData:String,val expiresAt:Long)
-    internal data class PaymentCard(val id:String,val binding:WorkBinding,val amount:Long,val state:String)
+    internal data class PaymentCard(val id:String,val binding:WorkBinding,val amount:Long,val state:String,val merchant:OwnerPaymentAppPolicy.Merchant?)
     private var paymentOffer:PaymentOffer?=null
     private var paymentDocumentRevision=0L
     private var browserNavigationWork:WorkBinding?=null
     private var browserPublicSearchUrl:String?=null
     private var paymentDocumentWork:WorkBinding?=null
+    private var paymentMerchant:Pair<WorkBinding,OwnerPaymentAppPolicy.Merchant>?=null
     private val paymentCard=MutableStateFlow<PaymentCard?>(null)
     internal val ownerPaymentCard:StateFlow<PaymentCard?> get()=paymentCard
     private val paymentScreen=MutableStateFlow(false)
@@ -809,7 +872,7 @@ class AppWebAgent private constructor(private val context:Context) {
             if(paymentOffer!==offer||paymentDocumentRevision!=revision||browser.url!=document||browserWorkBinding.value!=binding)
                 return@evaluateJavascript
             val amount=result?.toLongOrNull()
-            if(amount!=null)paymentCard.value=PaymentCard(offer.id,binding,amount,"ready")
+            if(amount!=null)paymentCard.value=PaymentCard(offer.id,binding,amount,"ready",paymentMerchant?.takeIf { it.first==binding }?.second)
         }
         browser.postDelayed({
             if(paymentOffer===offer){
@@ -844,13 +907,17 @@ class AppWebAgent private constructor(private val context:Context) {
         }
     }
 
-    internal fun checkOwnerPayment(id:String,threadId:String,branchId:String):Boolean {
+    internal fun openOwnerHistory(owner:android.app.Activity,id:String,threadId:String,branchId:String,booking:Boolean):Boolean {
         val card=paymentCard.value ?: return false
-        if(card.id!=id||card.binding.threadId!=threadId||card.binding.branchId!=branchId||
-            browserWorkBinding.value!=card.binding||agentActive.value||loginCard.value!=null||
-            !OwnerPaymentAppPolicy.trustedCheckout(webView?.url))return false
-        showBrowser()
-        return true
+        if (!RuntimeGate.foreground.get() || card.id!=id || card.binding.threadId!=threadId ||
+            card.binding.branchId!=branchId || agentActive.value || loginCard.value!=null || websiteLogin.value!=null) return false
+        val destination=if(booking)card.merchant?.history?:return false else OwnerPaymentAppPolicy.paymentHistory
+        // These public lookup pages accept a new GET with no checkout token or payment instrument.
+        val intent=android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse(destination))
+            .addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+        return try { owner.startActivity(intent); true }
+        catch(_:android.content.ActivityNotFoundException){ false }
+        catch(_:SecurityException){ false }
     }
 
     private fun paymentHandoff():JsonObject=buildJsonObject {
@@ -992,6 +1059,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 paymentCard.value=paymentCard.value?.copy(state="unverified")
                 paymentScreen.value=OwnerPaymentAppPolicy.trustedCheckout(url)
                 paymentDocumentWork=browserNavigationWork.takeIf{paymentScreen.value}
+                if(!paymentScreen.value)paymentMerchant=null
                 pdfDocument=null
                 loadingUrl=url
                 loading=true
@@ -1001,6 +1069,11 @@ class AppWebAgent private constructor(private val context:Context) {
                 if(url!=loadingUrl)return
                 loading=false
                 if(navigation.value.loading)navigation.value=NavigationStatus()
+                if(navigation.value.error==null&&!paymentScreen.value){
+                    val work=browserNavigationWork
+                    val merchant=OwnerPaymentAppPolicy.bookingMerchant(url)
+                    paymentMerchant=if(work!=null&&merchant!=null)work to merchant else null
+                }
             }
             override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
                 if("ERR_CLEARTEXT_NOT_PERMITTED" in error.description&&upgradeHallymLoginRedirect(request))return

@@ -8,7 +8,8 @@ class ToolInterruptionPolicyTest {
     private fun call(name:String)=ToolCall("timeout-test",name,buildJsonObject{})
 
     @Test fun failedRegisteredReadsReleaseThePendingEffectWithoutPretendingToReturnData() {
-        for(name in listOf("get_current_datetime","calculate","search_web","search_shopping","read_webpage","search_notes","read_note")) {
+        for(name in listOf("get_current_datetime","calculate","search_web","search_shopping","read_webpage","search_notes","read_note",
+            "search_gmail_messages","read_gmail_message","list_google_calendar_events","search_drive_files","read_drive_text_file","read_google_document")) {
             val actual=ToolInterruptionPolicy.timedOut(call(name))
             assertEquals(name,"timeout-test",actual.id)
             assertFalse(name,actual.success)

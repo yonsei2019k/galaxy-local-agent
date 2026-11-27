@@ -9,7 +9,7 @@ internal class GoalWaitStore(private val load: () -> String?, private val save: 
     private val codec = ListSerializer(GoalWaitRecord.serializer())
 
     private fun read(): List<GoalWaitRecord> =
-        load()?.let { runCatching { Json.decodeFromString(codec, it) }.getOrDefault(emptyList()) }.orEmpty()
+        load()?.let { Json.decodeFromString(codec, it) }.orEmpty()
 
     fun all(): List<GoalWaitRecord> = synchronized(lock) { read() }
 

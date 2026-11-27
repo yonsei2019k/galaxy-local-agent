@@ -28,33 +28,39 @@ class GoalWaitTest {
             r = d.record
         }
         val last = GoalWaitPolicy.onWake(r, WakeEvent.MEDIA_ENDED, now, zone, false)
-        assertTrue(last is WaitDecision.Rearm)
-        last as WaitDecision.Rearm
-        assertEquals(0, last.record.pcRetries)
+        assertTrue(last is WaitDecision.RetryLater)
+        last as WaitDecision.RetryLater
+        assertEquals(now + 3_600_000L, last.atEpochMillis)
+        assertEquals(media, last.record.condition)
         assertEquals(3, last.record.wakesToday)
-        assertEquals(WaitCondition.AtTime(now + 3_600_000L, true), last.condition)
     }
 
-    @Test fun dailyAndTotalLimits() {
-        val daily = GoalWaitPolicy.onWake(record(wakesToday = 12), WakeEvent.TIME_REACHED, now, zone, true)
-        assertEquals(WaitDecision.Rearm::class, daily::class)
-        daily as WaitDecision.Rearm
-        assertEquals(WaitCondition.AtTime(ms(2026, 11, 25, 9), true), daily.condition)
-        assertEquals(WaitDecision.Stop("wait_total_limit"), GoalWaitPolicy.onWake(record(wakesTotal = 120), WakeEvent.MEDIA_ENDED, now, zone, true))
-        assertEquals(WaitDecision.Stop("wait_deadline"), GoalWaitPolicy.onWake(record(deadline = now - 1), WakeEvent.MEDIA_ENDED, now, zone, true))
+    @Test fun dailyThrottlePreservesObservedConditionAndLifetimeCounterCannotStopAnUndatedGoal() {
+        val delayed = GoalWaitPolicy.onWake(record(wakesToday = 12), WakeEvent.MEDIA_ENDED, now, zone, true) as WaitDecision.RetryLater
+        assertEquals(ms(2026, 11, 25, 9), delayed.atEpochMillis)
+        assertEquals(media, delayed.record.condition)
+        val old = record(wakesTotal = 120, deadline = GoalWaitPolicy.deadline(null, null))
+        val next = GoalWaitPolicy.onWake(old, WakeEvent.TIME_REACHED, now + 40L * 86_400_000L, zone, true) as WaitDecision.Resume
+        assertEquals(121, next.record.wakesTotal)
+        assertEquals(WaitDecision.Stop("wait_deadline"), GoalWaitPolicy.onWake(record(deadline = now), WakeEvent.MEDIA_ENDED, now, zone, true))
     }
 
-    @Test fun authTimeoutRearmsNextDaySameTime() {
-        val auth = record(WaitCondition.OwnerAuth("handoff-1"), wakesToday = 1, wakesTotal = 1)
-        val d = GoalWaitPolicy.onWake(auth, WakeEvent.OWNER_AUTH_TIMEOUT, ms(2026, 11, 24, 21, 30), zone, true)
-        assertTrue(d is WaitDecision.Rearm)
-        d as WaitDecision.Rearm
-        assertEquals(WaitCondition.AtTime(ms(2026, 11, 25, 9), false), d.condition)
-        assertEquals(1, d.record.wakesToday)
-        val done = GoalWaitPolicy.onWake(auth, WakeEvent.OWNER_AUTH_DONE, now, zone, true)
-        assertTrue(done is WaitDecision.Resume)
-        assertEquals(1, (done as WaitDecision.Resume).record.wakesToday)
-        assertEquals(1, done.record.wakesTotal)
+    @Test fun undatedAuthSchedulesNoTimerUntilTheOwnerConfirms() {
+        val auth = record(WaitCondition.OwnerAuth("handoff-1"), deadline = Long.MAX_VALUE)
+        assertNull(GoalWaitPolicy.dueAt(auth))
+        val completed=auth.copy(observedEvent = WakeEvent.OWNER_AUTH_DONE)
+        assertEquals(0L, GoalWaitPolicy.dueAt(completed))
+        val decided = GoalWaitPolicy.onWake(completed, WakeEvent.OWNER_AUTH_DONE, now+40L*86_400_000L, zone, true) as WaitDecision.Resume
+        assertEquals(0, decided.record.wakesTotal)
+        assertNull(GoalWaitPolicy.dueAt(decided.record))
+    }
+
+    @Test fun offlineRetryCannotReplaceAuthenticationOrOutliveTheSiteDeadline() {
+        val auth=record(WaitCondition.OwnerAuth("bound"),deadline=now+1000)
+        val wait=GoalWaitPolicy.onWake(auth,WakeEvent.OWNER_AUTH_DONE,now,zone,false) as WaitDecision.RetryLater
+        assertEquals(auth.condition,wait.record.condition)
+        assertEquals(auth.deadlineAt,wait.atEpochMillis)
+        assertEquals(WaitDecision.Stop("wait_deadline"),GoalWaitPolicy.onWake(auth,WakeEvent.OWNER_AUTH_DONE,auth.deadlineAt,zone,false))
     }
 
     @Test fun restoredPastDueResumesOnce() {
@@ -82,11 +88,27 @@ class GoalWaitTest {
         assertEquals(WaitDecision.Stop("wait_repeat_failure"), GoalWaitPolicy.onResumeFailedImmediately(first.record, "k1"))
     }
 
-    @Test fun deadlineIsEarlierOf14DaysAndSiteDeadline() {
-        val day = 24 * 3_600_000L
-        assertEquals(1000 + 14 * day, GoalWaitPolicy.deadline(1000, null))
-        assertEquals(5000L, GoalWaitPolicy.deadline(1000, 5000))
-        assertEquals(1000 + 14 * day, GoalWaitPolicy.deadline(1000, 1000 + 30 * day))
+    @Test fun newUndatedGoalsHaveNoExpiryAndADeclaredDeadlineCanOnlyTighten() {
+        assertEquals(Long.MAX_VALUE, GoalWaitPolicy.deadline(null, null))
+        assertEquals(5000L, GoalWaitPolicy.deadline(null, 5000))
+        assertEquals(3000L, GoalWaitPolicy.deadline(5000, 3000))
+        assertEquals(3000L, GoalWaitPolicy.deadline(3000, 5000))
+    }
+
+    @Test fun activePlayerUsesItsRemainingTimeAndPeriodicStallChecks() {
+        assertEquals(GoalWaitPolicy.MEDIA_STALL_MS/2, GoalWaitPolicy.mediaPollDelay(1_000, 2_000_000, 1.0, true))
+        assertEquals(10_000L, GoalWaitPolicy.mediaPollDelay(20_000, 40_000, 2.0, true))
+        assertEquals(GoalWaitPolicy.MEDIA_POLL_MS, GoalWaitPolicy.mediaPollDelay(1_000, null, 1.0, true))
+        assertEquals(5_000L, GoalWaitPolicy.mediaPollDelay(1_000, 1_001, 1.0, true))
+    }
+
+    @Test fun ledgerAndToolDeadlinesAreComparableAtTheSameInstant() {
+        assertEquals(ms(2026, 11, 25, 0), GoalWaitPolicy.ledgerDeadline("2026-11-24",zone))
+        assertEquals(ms(2026, 11, 24, 9), GoalWaitPolicy.ledgerDeadline("2026-11-24T00:00:00Z",zone))
+        val timed=call(buildJsonObject { put("kind","at_time"); put("atEpochMillis",now); put("needsPlayback",false) })
+        val bounded=timed.copy(arguments=JsonObject(timed.arguments+("deadlineEpochMillis" to JsonPrimitive(now.toString()))))
+        ToolRegistry.validate(bounded)
+        assertEquals(now,GoalWaitToolCatalog.deadline(bounded))
     }
 
     private fun call(condition: JsonElement) = ToolCall("c", GoalWaitToolCatalog.WAIT, buildJsonObject {

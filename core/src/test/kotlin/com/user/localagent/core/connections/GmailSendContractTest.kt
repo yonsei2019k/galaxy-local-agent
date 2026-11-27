@@ -24,8 +24,10 @@ class GmailSendContractTest {
     private class Host:ConnectionHost {
         var identity:ConnectionAccess?=ConnectionAccess("synthetic-owner",1,true,true)
         var approved=false;var persist=true;var postMode="ok";var readbackMode="ok"
+        var searchResult="""{"messages":[]}"""
         var clock=java.time.Instant.parse("2026-10-31T08:30:00Z").toEpochMilli()
         var swapAccountAtAuthorizedPost=false
+        var disconnectAfterReadback=false
         var original=GmailSendContractTest().originalMessage()
         val sent=mutableListOf<ApiRequest>();val previews=mutableListOf<GmailSendPreview>();val records=mutableMapOf<String,MutationRecord>()
         val expectedAccesses=mutableListOf<ConnectionAccess>()
@@ -39,12 +41,15 @@ class GmailSendContractTest {
             expectedAccesses+=expectedAccess
             if(swapAccountAtAuthorizedPost&&request.method=="POST")identity=identity!!.copy(principal="different-owner",generation=2)
             check(identity==expectedAccess)
-            return send(service,request)
+            return send(service,request).also {
+                if (disconnectAfterReadback && request.url.endsWith("?format=raw")) identity=null
+            }
         }
         override suspend fun approveGmailSend(preview:GmailSendPreview):Boolean {previews+=preview;afterApproval?.invoke();return approved}
         override suspend fun send(service:ConnectedService,request:ApiRequest):ApiResponse {
             sent+=request
             return when {
+                request.url.contains("/messages?labelIds=SENT")->ApiResponse(200,searchResult)
                 request.url.endsWith("/profile")->ApiResponse(200,"{\"emailAddress\":\"owner@example.com\"}")
                 request.url.contains("original-1?format=metadata")->ApiResponse(200,original)
                 request.url.endsWith("/messages/send")->{
@@ -193,6 +198,27 @@ class GmailSendContractTest {
             assertEquals("request_started",h.records.values.single().phase)
             assertTrue(Json.parseToJsonElement(first.data).jsonObject.getValue("doNotRepeatWrite").jsonPrimitive.boolean)
         }
+    }
+    @Test fun lostResponseRecoversBySentSearchAndExactRawReadback()=runBlocking {
+        val h=Host().apply {approved=true;postMode="throw"}
+        val c=call()
+        assertFalse(ConnectionRuntime(h).execute(c).success)
+        h.searchResult="""{"messages":[{"id":"sent-1"},{"id":"other"}]}"""
+        assertFalse(ConnectionRuntime(h).execute(c).success)
+        h.searchResult="""{"messages":[{"id":"sent-1"}]}"""
+        h.readbackMode="to"
+        assertFalse(ConnectionRuntime(h).execute(c).success)
+        h.readbackMode="ok"
+        assertTrue(ConnectionRuntime(h).execute(c).success)
+        assertEquals(1,h.posts())
+        assertEquals(1,h.previews.size)
+    }
+    @Test fun disconnectedAccountCannotPublishVerifiedReceipt()=runBlocking {
+        val host=Host().apply { approved=true; disconnectAfterReadback=true }
+        val result=ConnectionRuntime(host).execute(call())
+        assertFalse(result.success)
+        assertEquals("sender_account_changed",result.code)
+        assertEquals(1,host.posts())
     }
     @Test fun callerCancellationAfterStartedPreservesNoRetryJournal()=runBlocking {
         val h=Host().apply {approved=true;postMode="cancel"};val c=call()

@@ -42,6 +42,8 @@ data class GoalWaitRecord(
     val playingPositionMs: Long? = null,
     val playingDurationMs: Long? = null,
     val pcMedia: Boolean = false,
+    val reopenPairedLogin: Boolean = false,
+    val retryAt: Long? = null,
     val mediaPollAt: Long? = null,
     val lastMediaProgressAt: Long? = null,
     val lastMediaSampleAt: Long? = null,
@@ -68,9 +70,7 @@ sealed interface WaitDecision {
 
 /** Pure wake decisions. Time always comes from the caller; records change only through returned copies. */
 object GoalWaitPolicy {
-    const val MAX_DAYS = 14
     const val MAX_WAKES_PER_DAY = 12
-    const val MAX_WAKES_TOTAL = 120
     const val PC_RETRY_INTERVAL_MS = 15 * 60_000L
     const val PC_RETRY_LIMIT = 8
     const val MEDIA_POLL_MS = 30_000L
@@ -78,50 +78,57 @@ object GoalWaitPolicy {
     const val MEDIA_MAX_MS = 6 * 3_600_000L
     const val AUTH_CUTOFF_HOUR = 21
     private const val HOUR_MS = 3_600_000L
-    private const val DAY_MS = 24 * HOUR_MS
+
+    fun mediaPollDelay(position: Long?, duration: Long?, rate: Double?, advancing: Boolean): Long {
+        if (!advancing || position == null || duration == null || position !in 0 until duration ||
+            rate == null || !rate.isFinite() || rate <= 0) return MEDIA_POLL_MS
+        return ((duration - position) / rate).toLong().coerceIn(5_000L, MEDIA_STALL_MS / 2)
+    }
 
     fun onWake(record: GoalWaitRecord, event: WakeEvent, now: Long, zone: ZoneId, pcAvailable: Boolean): WaitDecision {
         val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString()
         val rolled = if (record.dayKey != today) record.copy(wakesToday = 0, dayKey = today) else record
-        if (now > rolled.deadlineAt) return WaitDecision.Stop("wait_deadline")
+        if (now >= rolled.deadlineAt) return WaitDecision.Stop("wait_deadline")
         if (rolled.resumedOnceFor == rolled.id) return WaitDecision.Stop("wait_duplicate_wake")
-        if (rolled.wakesTotal >= MAX_WAKES_TOTAL) return WaitDecision.Stop("wait_total_limit")
         if (!pcAvailable) {
-            if (rolled.pcRetries < PC_RETRY_LIMIT - 1) {
-                return WaitDecision.RetryLater(now + PC_RETRY_INTERVAL_MS, rolled.copy(pcRetries = rolled.pcRetries + 1))
-            }
-            return rearmSameKind(rolled, now, zone)
+            val retries = (rolled.pcRetries.coerceAtMost(PC_RETRY_LIMIT) + 1).coerceAtMost(PC_RETRY_LIMIT)
+            val delay = if (retries < PC_RETRY_LIMIT) PC_RETRY_INTERVAL_MS else HOUR_MS
+            return WaitDecision.RetryLater(minOf(now + delay, rolled.deadlineAt), rolled.copy(pcRetries = retries))
         }
-        if (event == WakeEvent.OWNER_AUTH_TIMEOUT) {
-            return rearm(rolled, WaitCondition.AtTime(nextDayAtAnchor(rolled, now, zone), false))
-        }
+        if (event == WakeEvent.OWNER_AUTH_TIMEOUT) return WaitDecision.Stop("wait_auth_expired")
         val counted = event != WakeEvent.OWNER_AUTH_DONE
         if (counted && rolled.wakesToday >= MAX_WAKES_PER_DAY) {
-            val playback = rolled.condition is WaitCondition.MediaEnd
-            return rearm(rolled, WaitCondition.AtTime(nextDayAtAnchor(rolled, now, zone), playback))
+            return WaitDecision.RetryLater(minOf(nextDayAtAnchor(rolled, now, zone), rolled.deadlineAt), rolled.copy(pcRetries = 0))
         }
         val bump = if (counted) 1 else 0
-        return WaitDecision.Resume(rolled.copy(wakesToday = rolled.wakesToday + bump, wakesTotal = rolled.wakesTotal + bump,
+        return WaitDecision.Resume(rolled.copy(wakesToday = rolled.wakesToday + bump, wakesTotal = rolled.wakesTotal.coerceAtMost(Int.MAX_VALUE - bump) + bump,
             pcRetries = 0, resumedOnceFor = rolled.id))
     }
 
     fun onResumeFailedImmediately(record: GoalWaitRecord, conditionKey: String): WaitDecision =
         if (record.lastFailureKey == conditionKey) WaitDecision.Stop("wait_repeat_failure")
-        else WaitDecision.Rearm(record.condition, record.copy(lastFailureKey = conditionKey))
+        else WaitDecision.Rearm(record.condition, record.copy(lastFailureKey = conditionKey, resumedOnceFor = null))
 
-    fun deadline(startedAt: Long, siteDeadline: Long?): Long =
-        minOf(startedAt + MAX_DAYS * DAY_MS, siteDeadline ?: Long.MAX_VALUE)
+    /** A declared deadline can tighten a wait but can never extend an existing deadline. */
+    fun deadline(previous: Long?, declared: Long?): Long =
+        minOf(previous ?: Long.MAX_VALUE, declared ?: Long.MAX_VALUE)
 
-    private fun rearm(record: GoalWaitRecord, condition: WaitCondition) =
-        WaitDecision.Rearm(condition, record.copy(condition = condition, pcRetries = 0))
+    /** Date-only site deadlines include the whole stated day in the site's local zone. */
+    fun ledgerDeadline(value: String?, zone: ZoneId): Long? {
+        val text = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching { java.time.OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()
+            ?: runCatching { java.time.LocalDate.parse(text).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() }.getOrNull()
+    }
 
-    private fun rearmSameKind(record: GoalWaitRecord, now: Long, zone: ZoneId): WaitDecision {
-        val next = when (val c = record.condition) {
-            is WaitCondition.AtTime -> c.copy(atEpochMillis = nextDayAtAnchor(record, now, zone))
-            is WaitCondition.MediaEnd -> WaitCondition.AtTime(now + HOUR_MS, true)
-            is WaitCondition.OwnerAuth -> WaitCondition.AtTime(now + HOUR_MS, false)
+    /** An undated authentication handoff is woken exclusively by the owner's verified event. */
+    fun dueAt(record: GoalWaitRecord): Long? {
+        if (record.resumedOnceFor == record.id) return null
+        val due = record.retryAt ?: if (record.observedEvent != null) 0L else when (val c = record.condition) {
+            is WaitCondition.AtTime -> c.atEpochMillis
+            is WaitCondition.OwnerAuth -> record.deadlineAt
+            is WaitCondition.MediaEnd -> record.mediaPollAt ?: 0L
         }
-        return rearm(record, next)
+        return minOf(due, record.deadlineAt).takeUnless { it == Long.MAX_VALUE }
     }
 
     private fun nextDayAtAnchor(record: GoalWaitRecord, now: Long, zone: ZoneId): Long {

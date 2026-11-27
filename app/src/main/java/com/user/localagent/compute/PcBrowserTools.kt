@@ -64,7 +64,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 delay(500)
             }
         }
-        internal data class PairedPdf(val bytes:ByteArray,val sourceSha256:String?)
+        internal data class PairedPdf(val bytes:ByteArray,val sourceSha256:String?,val officialKairbCoursePdf:Boolean=false)
 
         internal suspend fun readPairedPdf(context:Context,key:String,snapshot:String,ref:String):PairedPdf {
             check(BrowserAgentSettings.pc(context).enabled())
@@ -80,7 +80,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 check(it.size<=com.user.localagent.web.PublicWebClient.MAX_BYTES)
             }
             val source=response["sourceSha256"]?.jsonPrimitive?.contentOrNull?.takeIf {it.matches(Regex("[a-f0-9]{64}"))}
-            return PairedPdf(bytes,source)
+            return PairedPdf(bytes,source,response["officialKairbCoursePdf"]==JsonPrimitive(true))
         }
         internal suspend fun samplePairedMedia(context:Context,workKey:String):
             com.user.localagent.integrations.MediaEndWatcher.Observation? {
@@ -408,7 +408,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             if(verified!=true)return uncertainRule(call)
             remember(page)
             return ToolResult(call.id,true,compact(JsonObject(page+("navigationRuleStatus" to JsonPrimitive("verified")))),
-                VerificationState.VERIFIED,"같은 링크 이동 · 도착 페이지와 새 확인 문구 확인")
+                VerificationState.VERIFIED,BrowserNavigationRule.VERIFIED_SUMMARY)
         }
         return refused(call,"RULE_SOURCE_CHANGED")
     }

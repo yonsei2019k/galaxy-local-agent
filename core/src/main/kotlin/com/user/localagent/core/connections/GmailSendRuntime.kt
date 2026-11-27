@@ -14,7 +14,6 @@ internal object GmailSendRuntime {
         send:suspend(ApiRequest)->ApiResponse,approve:suspend(GmailSendPreview)->Boolean):ConnectionOutcome {
         val prior=host.mutation(operation)
         // There is no Gmail send idempotency key: unknown completion MUST NOT retry POST.
-        if(prior!=null&&prior.remoteId==null)return uncertain("previous_send_outcome_unknown")
         val requestedAt:Long=if(prior==null)host.now()else {
             prior.requestedAtMillis?:return uncertain("previous_send_timestamp_unknown",prior.remoteId)
         }
@@ -42,17 +41,33 @@ internal object GmailSendRuntime {
                 }
                 if(!claimed)return uncertain("concurrent_send_requires_reconciliation",host.mutation(operation)?.remoteId)
                 currentCoroutineContext().ensureActive()
-                val posted=send(prepared.request)
-                if(posted.status !in 200..299)return uncertain("send_response_unverified")
-                remoteId=Json.parseToJsonElement(posted.body).jsonObject["id"]?.jsonPrimitive?.content
-                if(remoteId.isNullOrBlank())return uncertain("send_response_id_missing")
-                ConnectionRequests.key(remoteId!!)
-                val created=MutationRecord(prepared.preview.requestFingerprint,remoteId,"created",requestedAt)
-                host.saveMutation(operation,created);check(host.mutation(operation)==created)
+                val posted=try {send(prepared.request)}
+                    catch(cancel:CancellationException){throw cancel}
+                    catch(_:Exception){null}
+                remoteId=posted?.takeIf {it.status in 200..299}?.let {
+                    runCatching {Json.parseToJsonElement(it.body).jsonObject["id"]?.jsonPrimitive?.content?.also(ConnectionRequests::key)}.getOrNull()
+                }
+                if(remoteId!=null){
+                    val created=MutationRecord(prepared.preview.requestFingerprint,remoteId,"created",requestedAt)
+                    host.saveMutation(operation,created);check(host.mutation(operation)==created)
+                }
             }
-            val observed=send(GmailSendContract.readbackRequest(checkNotNull(remoteId)))
-            if(observed.status !in 200..299)return uncertain("send_readback_failed",remoteId)
-            if(!GmailSendContract.verify(prepared,remoteId!!,observed.body))return uncertain("send_readback_mismatch",remoteId)
+            if(remoteId==null){
+                // Gmail may have committed the POST before the client received a response.
+                val query=ConnectionRequests.encode("rfc822msgid:"+prepared.preview.rfcMessageId.removeSurrounding("<",">"))
+                val found=send(ApiRequest("https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=SENT&maxResults=2&q=$query"))
+                if(found.status !in 200..299)return uncertain("sent_search_unavailable")
+                val matches=Json.parseToJsonElement(found.body).jsonObject
+                if(matches["nextPageToken"]!=null)return uncertain("sent_search_ambiguous")
+                remoteId=(matches["messages"] as? JsonArray)?.singleOrNull()?.jsonObject
+                    ?.get("id")?.jsonPrimitive?.content?.also(ConnectionRequests::key)
+                    ?:return uncertain("previous_send_outcome_unknown")
+            }
+            val readbackId = checkNotNull(remoteId)
+            val observed = send(GmailSendContract.readbackRequest(readbackId))
+            if (observed.status !in 200..299) return uncertain("send_readback_failed", readbackId)
+            if (!GmailSendContract.verify(prepared, readbackId, observed.body)) return uncertain("send_readback_mismatch", readbackId)
+            if (host.access(ConnectedService.GMAIL) != access) return uncertain("sender_account_changed", readbackId)
             val verified=MutationRecord(prepared.preview.requestFingerprint,remoteId,"verified",requestedAt)
             host.saveMutation(operation,verified);check(host.mutation(operation)==verified)
             return ConnectionOutcome(true,VerificationState.VERIFIED,buildJsonObject {

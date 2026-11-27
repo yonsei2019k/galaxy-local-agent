@@ -71,13 +71,13 @@ data class QueuedChatRequest(
             }
         } else require(officeParentId == null)
         require(!scheduledClockReceiptOnly || scheduledReadTool == ScheduledReadPolicy.CLOCK_TOOL)
-        require(goalLedger.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
+        require(goalLedger.size<=GoalSegmentBinding.MAX_LEDGER_ENTRIES)
         require(goalLedger.map {it.sourceRunId to it.stepIndex}.distinct().size==goalLedger.size)
         goalSegment?.let { segment->
             require(goal!=null&&segment.goalId==goal.id&&segment.workDigest==goalWorkDigest(goal))
             require(mode in setOf("act","debug")) // Text-only answer checkpoints keep the chain without gaining tools.
             require((segment.rootRunId==runId)==(segment.segmentIndex==1))
-            require(segment.parentRunId!=runId&&segment.consumedToolCalls==goalLedger.size)
+            require(segment.parentRunId!=runId&&segment.consumedToolCalls-segment.archivedCalls==goalLedger.size)
             require(goalLedger.all {it.sourceRunId!=runId})
             require(goalLedger.all {it.sourceRunId in goal.linkedRunIds})
         }
@@ -142,7 +142,7 @@ data class QueuedChatRequest(
                 o["allowExternalAgent"]?.let{require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long},
                 o["goalSegment"]?.let {GoalSegmentBinding.parse(it.jsonObject)},
-                o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList(),
+                o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_LEDGER_ENTRIES);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList(),
                 o["cloudReadOnlyModes"]?.let {require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["capturedPcTextDefault"]?.let {require(it is JsonPrimitive&&it.isString);it.content},
                 o["scheduledReadTool"]?.let {require(it is JsonPrimitive&&it.isString);it.content},

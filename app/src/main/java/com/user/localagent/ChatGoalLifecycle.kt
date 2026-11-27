@@ -6,7 +6,6 @@ import com.user.localagent.automation.GoalLifecycleRequest
 import com.user.localagent.core.ConversationSubmissionPolicy
 import com.user.localagent.core.GoalDefinition
 import com.user.localagent.core.GoalStatus
-import com.user.localagent.core.GoalWaitPolicy
 import com.user.localagent.data.ChatAccessScope
 import com.user.localagent.data.ChatRunRecord
 import kotlinx.coroutines.Job
@@ -76,15 +75,25 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             check(thread.projectId==access.projectId&&thread.activeBranchId==branchId){"목표 요청의 원래 대화 분기가 변경되었습니다."}
             val binding=app.workspaceFor(access.projectId).bindingFingerprint()
             check(expectedWorkspaceBinding==null||expectedWorkspaceBinding==binding){"목표 요청 이후 프로젝트 폴더가 변경되었습니다."}
-            val sources=goal.linkedRunIds.map {id->
+            // Automatic children already inherit the parent's checked ledger. Validate all original
+            // rows one by one; retaining every prior encrypted envelope here grows quadratically.
+            val continuationParent=nextSegment?.let {
+                val id=checkNotNull(it.binding.parentRunId)
+                check(goal.linkedRunIds.lastOrNull()==id)
+                requireGoalRunBinding(goal,checkNotNull(app.repository.chat.run(id)))
+            }
+            val sources=mutableListOf<GoalRunEvidenceSource>()
+            for(id in goal.linkedRunIds) {
                 val run=checkNotNull(app.repository.chat.run(id)){"목표에 연결된 실행이 삭제되었습니다."}
-                requireGoalRunBinding(goal,run)
+                val historical=requireGoalRunBinding(goal,run)
+                continuationParent?.let {requireSameGoalAuthority(historical,it)}
                 check(!goalSourceNativeEffectsUnresolved(run)){"이전 목표 실행의 공통 기록이 없거나 효과가 불확실해 새 실행으로 우회하지 않았습니다."}
                 check(run.threadRevision==access.threadRevision&&run.projectRevision==(access.projectId?.let {app.repository.chat.project(it)?.revision}?:0L)) {
                     "원래 목표 실행 이후 대화·프로젝트 권한 버전이 변경되었습니다. 이전 승인을 확대하지 않았습니다."
                 }
                 check(run.status !in setOf("queued","running","waiting_approval")){"같은 목표의 작업이 아직 대기·진행 중입니다. 먼저 중지하거나 완료해주세요."}
-                GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson)
+                if(continuationParent==null||id==continuationParent.runId)
+                    sources+=GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson)
             }
             val queuedIds=app.repository.chat.queuedRuns().map {it.id}.toSet()
             check(goal.linkedRunIds.none {it in queuedIds}){"같은 목표의 이어쓰기 요청이 아직 대기 중입니다."}
@@ -96,7 +105,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     check(it.status=="paused"&&it.errorCode==GOAL_OWNER_INPUT&&it.branchId==branchId)
                 }
             }
-            val idle=answered?.let {(now-it.updatedAt).coerceIn(0L,GoalWaitPolicy.MAX_DAYS*86_400_000L)}?:0
+            val idle=answered?.let {check(it.updatedAt in 0..now); now-it.updatedAt}?:0
             val entryBudget=if(nextSegment==null)goalEntryBudget(goal,sources,now,idle)else null
             val parent=nextSegment?.let {next->
                 check(parentGoalStartRunId==null)
@@ -110,16 +119,19 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                 val original=QueuedChatRequest.fromJson(it.contextJson)
                 GoalReadbackSeed.from(original,assessGoalReadback(original,access.scopeKey))
             }
-            val priorLedger=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey,answered?.id)
-            if(priorLedger.size>=GoalSegmentBinding.MAX_TOOL_CALLS||!goalLedgerFits(priorLedger)||
-                (entryBudget!=null&&priorLedger.size-entryBudget.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS))throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
+            val history=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey,answered?.id)
+            val archive=GoalObservationIndex.decode("")
+            val priorLedger=if(nextSegment!=null)history else compactGoalLedger(history,archive)
+                ?:throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
+            if(entryBudget!=null&&history.size-entryBudget.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
             val active=withContext(NonCancellable) {
                 goals.saveGuarded(access,goal.copy(status=GoalStatus.ACTIVE)).also {writtenGoal=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
             val segment=nextSegment?.binding?:checkNotNull(entryBudget).let {budget->GoalSegmentBinding(goal.id,budget.originalGoalVersion,goalWorkDigest(goal),access.scopeKey,
-                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,priorLedger.size,budget.noProgressSegments,budget.totalSegments,budget.phaseStartSegments,budget.phaseStartCalls)}
+                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,history.size,budget.noProgressSegments,budget.totalSegments,budget.phaseStartSegments,budget.phaseStartCalls,
+                archivedCalls=history.size-priorLedger.size,archivedObservations=if(history.size!=priorLedger.size)archive.encode() else "")}
             check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding

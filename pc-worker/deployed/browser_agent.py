@@ -10,7 +10,7 @@ Rules enforced here, independent of the caller:
 Page text is untrusted data, never instructions. Nothing is written to logs.
 """
 from contextlib import contextmanager
-import base64, hashlib, hmac, ipaddress, json, os, re, secrets, socket, struct, subprocess, tempfile, threading, time
+import base64, hashlib, hmac, ipaddress, json, math, os, re, secrets, socket, struct, subprocess, tempfile, threading, time
 import urllib.parse, urllib.request
 from pathlib import Path
 
@@ -145,6 +145,19 @@ class _Socket:
         except OSError: pass
 
 
+def login_notice(text):
+    """Keep only a category from the official response. Never retain the site's message."""
+    if not isinstance(text, str):
+        return 'unconfirmed'
+    text = ''.join(text[:1000].split())
+    if any(marker in text for marker in ('추가인증이필요', '2단계인증을진행', '인증번호를입력', '휴대폰에서승인')):
+        return 'owner_verification'
+    if (any(marker in text for marker in ('아이디', '비밀번호', '패스워드', '회원정보')) and
+            any(marker in text for marker in ('일치하지', '불일치', '잘못', '틀렸', '확인해', '확인하시', '존재하지', '입력하세'))):
+        return 'correct_input'
+    return 'unconfirmed'
+
+
 class _Page:
     def __init__(self, ws_url):
         self.ws = _Socket(ws_url); self.next_id = 0
@@ -163,6 +176,7 @@ class _Page:
                 if (event.get('type') == 'alert' and event.get('url', '').partition('?')[0] in
                         ('https://www.kairb.org/member/login_reg.php', 'https://www.kairb.org/member/')):
                     self.owner_login_dialogs += 1
+                    self.owner_login_notice = login_notice(event.get('message'))
                     self.next_id += 1
                     self.ws.send(json.dumps({'id': self.next_id, 'method': 'Page.handleJavaScriptDialog',
                                              'params': {'accept': True}}))
@@ -317,6 +331,13 @@ KAIRB_ON_COURSES = r"""(document.readyState === 'complete' &&
     !document.querySelector('input[type=password]') &&
     document.body.innerText.includes('나의 교육수강') &&
     /수강하기|수강중|수강 내역|수강내역/.test(document.body.innerText))"""
+KAIRB_LOGIN_STAGE = r"""(() => {
+    if (location.origin !== 'https://www.kairb.org' || !location.pathname.startsWith('/member/')) return 'unconfirmed';
+    const visible = e => e.getClientRects().length && getComputedStyle(e).visibility === 'visible';
+    if ([...document.querySelectorAll('input[autocomplete="one-time-code"]')].some(visible)) return 'owner_verification';
+    if ([...document.querySelectorAll('form [aria-invalid=true]')].some(visible)) return 'correct_input';
+    return 'unconfirmed';
+})()"""
 
 class BrowserAgent:
     def __init__(self, profile=None, chrome=None):
@@ -327,6 +348,8 @@ class BrowserAgent:
         self.media_key = 'ziphap_' + secrets.token_hex(16)
         self.owner_login = None
         self.owner_login_attempts = []
+        self.owner_login_attempt = None
+        self.owner_login_return_url = None
 
     def owner_login_form(self, request):
         """Native paired-phone UI only. Bind a single, explicitly supported site's official form."""
@@ -354,6 +377,7 @@ class BrowserAgent:
                 if world is None:
                     raise BrowserError('OWNER_LOGIN_FORM_UNAVAILABLE', 409)
             self.owner_login = (token, time.monotonic() + 600, self.page, world, marker)
+            self.owner_login_attempt = None
             return {'challenge': token, 'origin': 'https://www.kairb.org'}
 
     def _owner_form(self, world, args):
@@ -379,9 +403,12 @@ class BrowserAgent:
                 raise BrowserError('OWNER_LOGIN_EXPIRED', 409)
             self.owner_login_attempts = [at for at in self.owner_login_attempts if now - at < 300]
             if len(self.owner_login_attempts) >= 3:
-                raise BrowserError('OWNER_LOGIN_WAIT', 429)
+                retry_in = math.ceil(300 - (now - self.owner_login_attempts[0]))
+                return {'signedIn': False, 'outcome': 'retry_later', 'retryAfterSeconds': retry_in}
             self.owner_login_attempts.append(now)
             self.page.owner_login_dialogs = 0
+            self.page.owner_login_notice = 'unconfirmed'
+            self.owner_login_attempt = (token, pending[1], self.page)
             try:
                 if not self._owner_form(pending[3], [pending[4], account, password]):
                     raise BrowserError('OWNER_LOGIN_FORM_CHANGED', 409)
@@ -398,6 +425,9 @@ class BrowserAgent:
                     if not navigation.get('errorText'):
                         self._settle(timeout=5)
                         confirmed = self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True
+                if confirmed:
+                    return self._owner_signed_in()
+                return self._owner_login_stage()
             except (BrowserError, OSError, ValueError) as failure:
                 if isinstance(failure, BrowserError) and failure.code == 'OWNER_LOGIN_FORM_CHANGED':
                     raise
@@ -405,7 +435,39 @@ class BrowserAgent:
                 raise BrowserError(code, 409) from None
             finally:
                 self.page.owner_login_dialogs = None
-            return {'signedIn': confirmed}
+
+    def _owner_login_stage(self):
+        stage = self.page.evaluate(KAIRB_LOGIN_STAGE, timeout=4)
+        if stage not in ('correct_input', 'owner_verification'):
+            stage = self.page.owner_login_notice
+        return {'signedIn': False, 'outcome': stage}
+
+    def _owner_signed_in(self):
+        # Return to the specific official list originally requested, including its filters.
+        target = self.owner_login_return_url
+        if target and self.page.evaluate('location.href', timeout=4) != target:
+            navigation = self.page.call('Page.navigate', {'url': target}, timeout=5)
+            if navigation.get('errorText'):
+                raise BrowserError('OWNER_LOGIN_READBACK_FAILED', 409)
+            self._settle(timeout=5)
+            if self.page.evaluate('location.href', timeout=4) != target:
+                return {'signedIn': False, 'outcome': 'unconfirmed'}
+            if self.page.evaluate("!!document.querySelector('input[type=password]')", timeout=4) is not False:
+                return {'signedIn': False, 'outcome': 'unconfirmed'}
+        return {'signedIn': True, 'outcome': 'signed_in'}
+
+    def owner_login_status(self, request):
+        if set(request) != {'challenge'} or not isinstance(request['challenge'], str) or not re.fullmatch('[0-9a-f]{64}', request['challenge']):
+            raise BrowserError('OWNER_LOGIN_FORMAT')
+        with self.lock:
+            prior = self.owner_login_attempt
+            if (not prior or not hmac.compare_digest(request['challenge'], prior[0])
+                    or prior[2] is not self.page or time.monotonic() >= prior[1]):
+                raise BrowserError('OWNER_LOGIN_EXPIRED', 409)
+            if (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
+                    self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True):
+                return self._owner_signed_in()
+            return self._owner_login_stage()
 
     def _chrome(self):
         for candidate in ([self.chrome] if self.chrome else []) + CHROME_CANDIDATES:
@@ -568,6 +630,13 @@ class BrowserAgent:
             if not isinstance(data,str) or len(data) > 2796204:
                 raise BrowserError('PC_PDF_UNAVAILABLE', 409)
             receipt = {'pdfBase64': data}
+            if current['url'].startswith('https://www.kairb.org/cme/'):
+                try:
+                    signed_in = self.page.evaluate(KAIRB_SIGNED_IN, timeout=3) is True
+                except (BrowserError, OSError, ValueError):
+                    signed_in = False
+                if signed_in:
+                    receipt['officialKairbCoursePdf'] = True
             if target.startswith('https://'):
                 receipt['sourceSha256'] = hashlib.sha256(target.encode('utf-8')).hexdigest()
             return receipt
@@ -595,6 +664,12 @@ class BrowserAgent:
         with self.lock:
             self._ensure(); self.pending = None
             self.owner_login = None
+            self.owner_login_attempt = None
+            requested = urllib.parse.urlsplit(request['url'])
+            if requested.netloc == 'www.kairb.org' and requested.scheme == 'https' and requested.path in ('/cme/cme_ing.php', '/cme/cme_complete.php'):
+                self.owner_login_return_url = request['url']
+            elif request['url'] != 'https://www.kairb.org/member/':
+                self.owner_login_return_url = None
             self.snapshot = None
             navigation = self.page.call('Page.navigate', {'url': request['url']})
             if navigation.get('errorText'):

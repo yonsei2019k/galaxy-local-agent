@@ -8,8 +8,8 @@ object GoalWaitToolCatalog {
     val definitions = listOf(
         ToolDefinition(WAIT, Risk.LOW,
             mapOf("goalId" to Argument("string", true, 100), "expectedUpdatedAt" to Argument("string", true, 19),
-                "condition" to Argument("object", true, 2000)),
-            "Park an active persistent goal until a future time or the end of a currently observed PC or phone player. Copy goalId and goalRevision from read_goal_progress (send goalRevision as expectedUpdatedAt). Use condition={kind:at_time,atEpochMillis:future epoch milliseconds,needsPlayback:false}. For media, copy the exact observed pageUrl and playerSignature from the current browser read, and the ledger item id: condition={kind:media_end,pageUrl,playerSignature,ledgerItemId}. Waiting adds no permissions and is not completion evidence."))
+                "condition" to Argument("object", true, 2000), "deadlineEpochMillis" to Argument("string", false, 19)),
+            "Park an active persistent goal until a future time or the end of a currently observed PC or phone player. Copy goalId and goalRevision from read_goal_progress (send goalRevision as expectedUpdatedAt). Use condition={kind:at_time,atEpochMillis:future epoch milliseconds,needsPlayback:false}. For media, copy the exact observed pageUrl and playerSignature from the current browser read, and the ledger item id: condition={kind:media_end,pageUrl,playerSignature,ledgerItemId}. If the owner or the site specifies an expiry, pass deadlineEpochMillis as a decimal epoch-millisecond string. Omit it for an undated goal. Waiting adds no permissions and is not completion evidence."))
 
     private val kinds = mapOf(
         "media_end" to setOf("kind", "pageUrl", "playerSignature", "ledgerItemId"),
@@ -17,11 +17,17 @@ object GoalWaitToolCatalog {
         "owner_auth" to setOf("kind", "handoffId"),
     )
 
+    fun deadline(call: ToolCall): Long? = call.arguments["deadlineEpochMillis"]?.let { value ->
+        require(value is JsonPrimitive && value.isString && value.content.all(Char::isDigit))
+        requireNotNull(value.longOrNull).also { require(it > 0) }
+    }
+
     fun parse(call: ToolCall): WaitCondition {
         require(call.name == WAIT) { "대기 도구가 아닙니다." }
         val definition = definitions.single()
         require(call.arguments.keys.all { it in definition.arguments }) { "대기 도구에 허용되지 않은 인자가 있습니다." }
         text(call.arguments["goalId"], 100); text(call.arguments["expectedUpdatedAt"], 19)
+        deadline(call)
         val condition = call.arguments["condition"] as? JsonObject ?: throw IllegalArgumentException("대기 조건은 객체여야 합니다.")
         val kind = text(condition["kind"], 40)
         val allowed = kinds[kind] ?: throw IllegalArgumentException("지원하지 않는 대기 조건입니다.")

@@ -35,7 +35,7 @@ object ToolRegistry {
         "search_notes" to "Find notes by literal title/body. Returns id, collection and updatedAt for read_note/patch_note; obtain these via search, not owner questions. Preserve query spaces; omit unknown scope.",
         "search_contacts" to "Search the phone's contacts by name or number (Android permission required). Returns names and numbers; use before preparing a message to a person. An empty query returns only how many contacts are saved, without names or numbers.",
         "prepare_sms" to "Open the phone's messaging app with recipient number and text filled in. The owner sends it; this tool never sends.",
-        "prepare_email" to "Open the phone's email app with recipient, subject and body filled in. The owner sends it; this tool never sends.",
+        "prepare_email" to "Prepare an email. For PDF attachments use pdfFiles with exact host-reported PDF filenames from this goal. A durable chat card lets the owner open Gmail and send. Never substitute a text-only send for requested attachments.",
         "open_map" to "Open the default map app searching for a place or address. Does not start turn-by-turn navigation by itself.",
         "open_url" to "Open an HTTPS page on the phone. Prefer observed listing URLs to keep the selected shop, room or product. Official service homes can open their installed apps: map.naver.com, app.catchtable.co.kr, www.tabling.co.kr, www.baemin.com, www.yogiyo.co.kr, or www.kakaomobility.com/kakaot/index.html. Provide exactly one of url and service. For a known official service, use service ID: skt, kt, lguplus, insurance_lookup, koreanair, asiana, jejuair, jinair, trinityairways (구 티웨이), naver_mail, kakao_support, netflix, coupang, coupang_eats, srt_booking, seoul_reservations, silson24 (official insurance claim login on the phone). Ask which provider if unclear. Use read_webpage to read content. Opening does not verify an account, fare, reservation, order or ride.",
         "save_memory" to "Record an owner-stated fact, preference or correction for later chats with owner review. For a request to learn from past conversations, read permitted owner messages first and save only clearly stated facts. Storage is confirmed by readback.",
@@ -72,6 +72,8 @@ object ToolRegistry {
         ToolDefinition("search_web",Risk.LOW,mapOf("query" to text(max=500),"source" to text(false,20),"startDate" to text(false,10),"endDate" to text(false,10),"page" to Argument("integer",false)),"Search public sources. Use naver_places for Korean local businesses. For a Korean performance title, use source=kopis with the title as query, optional inclusive startDate and endDate (YYYY-MM-DD, up to 31 days, default next 31 days), page 1-5. For domestic flight schedules, source=tago_flights takes query=GMP-CJU (departure-arrival airport codes), startDate YYYY-MM-DD and optional page 1-5. For Seoul public activities, source=seoul_reservations takes a Korean search term up to 50 characters. Listings do not verify availability or payment.",180_000),
         ToolDefinition("search_shopping",Risk.LOW,mapOf("query" to text(max=500),"store" to text(false,30)),"Look up public product links and observed prices. Never infer live stock, option equivalence, shipping-inclusive price or global lowest price without source evidence.",180_000),
         ToolDefinition("save_browser_pdf",Risk.LOW,mapOf("snapshotId" to text(max=64),"ref" to text(max=64),
+            "certificateCourse" to text(false,240,"Exact KAIRB course and year verification requires this and certificateYear on PC."),
+            "certificateYear" to text(false,4,"Four-digit completion year for the requested certificate."),
             "browser" to Argument("string",false,5,"Use pc for a ref from read_pc_browser_page; phone or omission for read_app_browser_page.")),
             "Save an already-issued original PDF from an observed same-session-pdf ref. Copy snapshotId and ref from the matching browser read. Supports direct same-origin HTTPS PDF or a same-origin blob. No forms, redirects or generated certificates.",60_000),
         ToolDefinition("save_public_pdf",Risk.LOW,mapOf("url" to text(max=2048)),"Save the original bytes of an existing public PDF from a direct HTTPS link on the phone. No cookies, login, form or printing. 2 MiB maximum. Checks PDF pages and saved bytes. Never generate a replacement for an issued certificate.",60_000),
@@ -99,7 +101,8 @@ object ToolRegistry {
         def("search_contacts",Risk.LOW,"query" to text(max=300),"limit" to Argument("integer",false)),
         KakaoShare.definition,
         def("prepare_sms",Risk.MEDIUM,"phoneNumber" to text(max=40),"message" to text(max=4000)),
-        def("prepare_email",Risk.MEDIUM,"to" to text(max=320),"subject" to text(max=300),"body" to text(max=12000)),
+        def("prepare_email",Risk.MEDIUM,"to" to text(max=320),"subject" to text(max=300),"body" to text(max=12000),
+            PdfMailAttachments.FIELD to text(false,900,"Comma-separated exact saved PDF filenames, in attachment order. No URLs, paths, or encoded bytes.")),
         def("open_map",Risk.LOW,"query" to text(max=500)),
         def("open_url",Risk.LOW,"url" to text(false,2048),"service" to text(false,40)),
         def("save_memory",Risk.MEDIUM,"content" to text(max=4000),"kind" to text(false,40,description="Classify one memory as fact, preference, or correction. Defaults to fact.")),
@@ -171,6 +174,11 @@ object ToolRegistry {
             call.arguments["seed"]?.let {require(it.jsonPrimitive.long>=0){"시드는0이상이어야 합니다."}}
         }
         if(call.name=="create_document")require(call.arguments.getValue("format").jsonPrimitive.content in setOf("docx","xlsx","pdf","txt","csv")){"지원하는 문서 형식이 아닙니다."}
+        if(call.name=="save_browser_pdf" && call.arguments.keys.any {it in setOf("certificateCourse","certificateYear")}){
+            require(call.arguments["browser"]==JsonPrimitive("pc") &&
+                call.arguments["certificateYear"]?.jsonPrimitive?.content?.matches(Regex("[0-9]{4}"))==true &&
+                !call.arguments["certificateCourse"]?.jsonPrimitive?.content.isNullOrBlank()){"이수증 확인에는 PC 브라우저와 과정명, 이수 연도가 필요합니다."}
+        }
         if(call.name=="read_skill")require(call.arguments.getValue("id").jsonPrimitive.content.matches(Regex("[a-z0-9][a-z0-9-]{0,63}"))){"등록된 스킬 ID가 필요합니다."}
         if(call.name in setOf("save_note","update_note"))require(call.arguments["scope"]?.jsonPrimitive?.content !in InternalNoteCollections.protected){"내부 자료·근거·진행 기록은 전용 기능에서 관리해주세요."}
         if(call.name in setOf("list_project_files","read_project_file","write_project_file"))call.arguments["path"]?.jsonPrimitive?.content?.takeIf {it.isNotBlank()}?.let {ProjectPaths.segments(it)}
@@ -210,6 +218,7 @@ object ToolRegistry {
         }
         if(call.name=="search_shopping")call.arguments["store"]?.let {require(it.jsonPrimitive.content in setOf("coupang","naver","danawa","11st","gmarket","amazon")){"지원하는 공개 검색처가 아닙니다."}}
         if(call.name=="prepare_sms") require(call.arguments.getValue("phoneNumber").jsonPrimitive.content.matches(Regex("[+0-9() -]{3,40}"))){"전화번호 형식 오류"}
+        if(call.name=="prepare_email") PdfMailAttachments.requested(call)
         if(call.name=="prepare_email") require(call.arguments.getValue("to").jsonPrimitive.content.matches(Regex("[^\\s@,;]+@[^\\s@,;]+\\.[^\\s@,;]+"))){"받는 주소 형식 오류"}
         if(call.name in OfficeToolCatalog.names)OfficeToolCatalog.validate(call)
         if(call.name==GoalWaitToolCatalog.WAIT) GoalWaitToolCatalog.parse(call)

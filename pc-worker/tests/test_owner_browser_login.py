@@ -1,6 +1,7 @@
 """Exercise the actual owner-input CDP code using locally fulfilled HTTPS pages."""
 import json
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -8,10 +9,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deployed'))
 import browser_agent as browser
 
 
+def wait_for_worker(future, page):
+    # Playwright dispatches the synthetic site's network events on this thread.
+    deadline = time.monotonic() + 60
+    while not future.done() and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+    return future.result(timeout=0)
+
+
 class OwnerLoginDialog(unittest.TestCase):
+    def test_cooldown_reports_remaining_time_without_using_the_form(self):
+        from unittest.mock import patch
+        agent = browser.BrowserAgent(profile='unused')
+        agent.page = object()
+        challenge = '0' * 64
+        agent.owner_login = (challenge, 2000, agent.page, 1, 'form')
+        agent.owner_login_attempts = [950, 965, 985]
+        with patch.object(browser.time, 'monotonic', return_value=1000):
+            result = agent.owner_login_submit({'challenge':challenge,'account':'fixture','password':'fixture'})
+        self.assertEqual(result, {'signedIn':False,'outcome':'retry_later','retryAfterSeconds':250})
+        self.assertEqual(len(agent.owner_login_attempts), 3)
+
     def test_only_login_response_alert_is_dismissed(self):
         def event(kind, url):
-            return {'method': 'Page.javascriptDialogOpening', 'params': {'type':kind, 'url':url}}
+            return {'method': 'Page.javascriptDialogOpening', 'params': {
+                'type':kind, 'url':url, 'message':'비밀번호가 일치하지 않습니다 [private fixture]'}}
         origin = 'https://www.kairb.org/member/login_reg.php'
         messages = iter([event('confirm', origin), event('alert', 'https://example.org/'),
                          event('alert', origin), {'id': 1, 'result': {'value': True}}])
@@ -28,6 +50,7 @@ class OwnerLoginDialog(unittest.TestCase):
         page.owner_login_dialogs = 0
         self.assertEqual(page.call('Runtime.evaluate'), {'value':True})
         self.assertEqual(page.owner_login_dialogs, 1)
+        self.assertEqual(page.owner_login_notice, 'correct_input')
         self.assertEqual([r['method'] for r in page.ws.sent], ['Runtime.evaluate', 'Page.handleJavaScriptDialog'])
 
 try:
@@ -58,10 +81,7 @@ class OwnerLogin(unittest.TestCase):
                     return agent.act({'snapshotId':opened['snapshotId'],'ref':control['ref'],'action':'click'})
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(open_popup)
-                    for _ in range(120):
-                        if future.done(): break
-                        context.pages[0].wait_for_timeout(100)
-                    result = future.result(timeout=2)
+                    result = wait_for_worker(future, context.pages[0])
                 self.assertEqual(result['url'], origin + '/player')
                 self.assertIn('동영상 재생', [e['label'] for e in result['elements']])
         finally:
@@ -92,11 +112,7 @@ class OwnerLogin(unittest.TestCase):
 
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(observe)
-                    for _ in range(160):
-                        if future.done():
-                            break
-                        context.pages[0].wait_for_timeout(100)
-                    official, unrelated = future.result(timeout=2)
+                    official, unrelated = wait_for_worker(future, context.pages[0])
                 self.assertEqual(official['completedCourseTitles'], ['Verified Fixture'])
                 self.assertNotIn('completedCourseTitles', unrelated)
         finally:
@@ -133,10 +149,7 @@ class OwnerLogin(unittest.TestCase):
 
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     task=executor.submit(observe)
-                    for _ in range(160):
-                        if task.done(): break
-                        context.pages[0].wait_for_timeout(100)
-                    result=task.result(timeout=2)
+                    result=wait_for_worker(task, context.pages[0])
                 self.assertEqual(browser.base64.b64decode(result['pdfBase64']), b'%PDF-1.7 fixture')
                 self.assertEqual(result['sourceSha256'], browser.hashlib.sha256((origin+'/receipt.pdf').encode()).hexdigest())
         finally:
@@ -164,11 +177,7 @@ class OwnerLogin(unittest.TestCase):
                     return agent.owner_login_form({'origin': origin})
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     task = executor.submit(observe)
-                    for _ in range(160):
-                        if task.done():
-                            break
-                        context.pages[0].wait_for_timeout(100)
-                    result = task.result(timeout=2)
+                    result = wait_for_worker(task, context.pages[0])
                 self.assertEqual(result.get('origin'), origin)
                 self.assertRegex(result['challenge'], r'^[a-f0-9]{64}$')
                 self.assertEqual(context.pages[0].url, login_path)
@@ -203,10 +212,7 @@ class OwnerLogin(unittest.TestCase):
                     return agent.owner_login_submit({'challenge':challenge, 'account':'fixture', 'password':'fixture'})
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(login)
-                    for _ in range(150):
-                        if future.done(): break
-                        context.pages[0].wait_for_timeout(100)
-                    self.assertEqual(future.result(timeout=2), {'signedIn': True})
+                    self.assertEqual(wait_for_worker(future, context.pages[0]), {'signedIn': True, 'outcome': 'signed_in'})
         finally:
             agent.dispose()
 
@@ -246,10 +252,60 @@ class OwnerLogin(unittest.TestCase):
             self.assertEqual(submitted, [])
             page.goto(origin + '/member/')
             valid = prepare()
-            self.assertEqual(submit(valid), {'signedIn': True})
+            self.assertEqual(submit(valid), {'signedIn': True, 'outcome': 'signed_in'})
             self.assertEqual(submitted, ['id=fixture&passwd=test-value'])
             with self.assertRaises(browser.BrowserError): submit(valid)
             page.goto('https://example.org/member/')
             with self.assertRaises(browser.BrowserError): prepare()
             self.assertEqual(len(submitted), 1)
             chrome.close()
+
+    def test_result_recheck_restores_the_filtered_original_list_without_resubmitting(self):
+        from concurrent.futures import ThreadPoolExecutor
+        origin = 'https://www.kairb.org'
+        destination = browser.KAIRB_COMPLETED + '?year=2026'
+        form = ('<form method="post" action="/member/login_reg.php"><input name="id">'
+                '<input type="password" name="passwd"><input type="submit"></form>')
+        posts = []
+        authenticated = False
+        agent = browser.BrowserAgent()
+        try:
+            agent._ensure()
+            with sync_playwright() as pw:
+                chrome = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{agent._port()}')
+                context = chrome.contexts[0]
+
+                def route(r):
+                    if r.request.method == 'POST':
+                        posts.append(r.request.url)
+                        body = '<input autocomplete="one-time-code">'
+                    elif r.request.url == destination and not authenticated:
+                        r.fulfill(status=302, headers={'Location': origin + '/member/'})
+                        return
+                    elif authenticated:
+                        body = '<a href="/member/logout.php">Logout</a>'
+                    else:
+                        body = form
+                    r.fulfill(content_type='text/html; charset=utf-8', body=body)
+
+                context.route(origin + '/**', route)
+                page = context.pages[0]
+                def login():
+                    agent.open({'url': destination})
+                    challenge = agent.owner_login_form({'origin': origin})['challenge']
+                    result = agent.owner_login_submit({'challenge': challenge, 'account': 'fixture', 'password':'fixture'})
+                    return challenge, result
+
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    challenge, result = wait_for_worker(executor.submit(login), page)
+                    self.assertEqual(result, {'signedIn':False, 'outcome':'owner_verification'})
+                    authenticated = True
+                    page.goto(origin + '/')
+                    result = wait_for_worker(executor.submit(agent.owner_login_status, {'challenge': challenge}), page)
+                    self.assertEqual(result, {'signedIn':True, 'outcome':'signed_in'})
+                    self.assertEqual(page.url, destination)
+                    self.assertEqual(len(posts), 1)
+                    with self.assertRaisesRegex(browser.BrowserError, 'OWNER_LOGIN_EXPIRED'):
+                        agent.owner_login_status({'challenge': '0' * 64})
+        finally:
+            agent.dispose()

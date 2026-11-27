@@ -10,6 +10,7 @@ data class BrowserNavigationRule(val label:String,val verifyText:String) {
 
     companion object {
         const val LABEL="expectedLinkLabel"
+        const val VERIFIED_SUMMARY="같은 링크 이동 · 도착 페이지와 새 확인 문구 확인"
         const val VERIFY="verifyPageText"
         val arguments=mapOf(
             LABEL to Argument("string",false,120,"Exact label of an observed recoverable-link. Use together with verifyPageText."),

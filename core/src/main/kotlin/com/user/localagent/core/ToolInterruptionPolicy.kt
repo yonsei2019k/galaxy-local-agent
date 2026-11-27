@@ -8,6 +8,8 @@ object ToolInterruptionPolicy {
     private val noMutationOnTimeout=setOf(
         "get_current_datetime","calculate","search_web","search_shopping","read_webpage",
         "search_notes","read_note","read_project_file","list_reminders","read_app_browser_page","read_pc_browser_page",
+        "search_gmail_messages","read_gmail_message","list_google_calendar_events",
+        "search_drive_files","read_drive_text_file","read_google_document",
     )
 
     fun hasNoMutation(name:String):Boolean =

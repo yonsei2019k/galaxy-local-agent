@@ -203,8 +203,18 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     val scope=rememberCoroutineScope()
     val keyboard=LocalSoftwareKeyboardController.current
     val loginStatus by agent.ownerLoginStatus.collectAsState()
-    var account by remember {mutableStateOf("")}
-    var password by remember {mutableStateOf("")}
+    val checkPending by agent.pcLoginNeedsCheck.collectAsState()
+    val retryAt by agent.pcLoginRetryAt.collectAsState()
+    var waitingToRetry by remember(login.id,retryAt){mutableStateOf(login.pairedPc && retryAt>System.currentTimeMillis())}
+    LaunchedEffect(login.id,retryAt){
+        if(waitingToRetry){
+            kotlinx.coroutines.delay((retryAt-System.currentTimeMillis()).coerceAtLeast(0L))
+            waitingToRetry=false
+        }
+    }
+    val resultCheck=login.pairedPc && checkPending
+    var account by remember(login.id){mutableStateOf("")}
+    var password by remember(login.id){mutableStateOf("")}
     var submitting by remember {mutableStateOf(false)}
     var saveOnPhone by remember {mutableStateOf(false)}
     var hasSaved by remember(login.id){mutableStateOf(false)}
@@ -232,10 +242,10 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     var checkedFields by remember(login.id){mutableStateOf(false)}
     val missingAccount=checkedFields&&account.isBlank()
     val missingPassword=checkedFields&&password.isEmpty()
-    fun submit(){
-        if(submitting||authPending)return
-        checkedFields=true
-        if(account.isBlank()||password.isEmpty())return
+    fun submit(checkOnly:Boolean=resultCheck){
+        if(submitting||authPending||waitingToRetry)return
+        checkedFields=!checkOnly
+        if(!checkOnly && (account.isBlank()||password.isEmpty()))return
         val enteredAccount=account
         val enteredPassword=password
         val keep=saveOnPhone
@@ -243,7 +253,9 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
         keyboard?.hide()
         scope.launch {
             try {
-                if(agent.submitLoginCard(login.id,enteredAccount,enteredPassword,keep)){
+                val success=if(checkOnly)agent.checkPcLogin(login.id)
+                    else agent.submitLoginCard(login.id,enteredAccount,enteredPassword,keep)
+                if(success){
                     account=""
                     password=""
                 }
@@ -261,7 +273,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
                 Text(login.host,style=MaterialTheme.typography.bodySmall)
                 if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
-                loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+                if(!login.pairedPc)loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
                 if(hasSaved&&keyguard?.isDeviceSecure==true)OutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
                     Text("저장된 로그인 사용")
                 }
@@ -280,11 +292,13 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                     if(!login.pairedPc)TextButton(onClick={keyboard?.hide();agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
+                    if(resultCheck)TextButton(onClick={submit(checkOnly=false)},enabled=!submitting){Text("입력값 다시 제출")}
                     TextButton(onClick={keyboard?.hide();agent.foldOwnerLogin(login.id)},enabled=!submitting){Text("나중에")}
                 }
             }
-            Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=!submitting&&!authPending){
-                Text(if(submitting)"로그인 확인 중" else "로그인하고 계속")
+            if(login.pairedPc)loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
+            Button(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=!submitting&&!authPending&&!waitingToRetry){
+                Text(when {submitting->"로그인 확인 중"; waitingToRetry->"재시도 대기 중"; resultCheck->"로그인 결과 다시 확인"; else->"로그인하고 계속"})
             }
         }
     }

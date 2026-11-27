@@ -6,6 +6,22 @@ import browser_agent as b
 
 
 class WorkSessions(unittest.TestCase):
+    def test_missing_optional_session_marker_preserves_captured_pdf(self):
+        target = 'https://www.kairb.org/cme/sample.pdf'
+        encoded_pdf = b.base64.b64encode(b'%PDF-1.7 fixture').decode()
+        class Page:
+            def evaluate(self, expression, timeout):
+                if expression == b.KAIRB_SIGNED_IN:
+                    raise TimeoutError()
+                return encoded_pdf
+
+        browser = b.BrowserAgent(profile='unused')
+        browser.page = Page()
+        browser.snapshot = {'id': 'fixture', 'pdfTargets': {'e1': target}}
+        browser._read = lambda: {'snapshotId': 'fixture', 'url': b.KAIRB_COMPLETED}
+        self.assertEqual(browser.save_pdf({'snapshotId':'fixture','ref':'e1'}), {
+            'pdfBase64': encoded_pdf, 'sourceSha256': b.hashlib.sha256(target.encode()).hexdigest()})
+
     def test_same_work_restores_page_without_observing_other_work_or_owner(self):
         class Browser:
             def __init__(self):

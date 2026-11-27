@@ -20,6 +20,11 @@ class GoalWaitStoreTest {
         assertEquals(listOf(next),store().all())
     }
 
+    @Test fun corruptArchivedDataCannotBeOverwrittenByANewWait() {
+        val store = GoalWaitStore({ "broken" },{ fail("existing waits were overwritten") })
+        assertThrows(IllegalArgumentException::class.java) { store.replace(first,null) }
+    }
+
     @Test fun consumedWakeSurvivesProcessRecreation() {
         var data: String? = null
         val store = GoalWaitStore({ data },{ data=it })

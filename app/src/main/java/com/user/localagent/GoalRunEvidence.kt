@@ -44,7 +44,6 @@ private fun goalCanonical(value:JsonElement):String=when(value) {
     is JsonArray->value.joinToString(prefix="[",postfix="]") {goalCanonical(it)}
     else->value.toString()
 }
-internal fun goalCallDigest(step:HarnessStep):String=goalDigest(step.tool+":"+goalCanonical(step.arguments))
 private val goalBrowserTools=AppBrowserToolCatalog.names+PcBrowserToolCatalog.names
 
 private fun progressRelevant(tool:String):Boolean=tool !in GoalToolCatalog.names&&
@@ -53,13 +52,21 @@ private fun progressRelevant(tool:String):Boolean=tool !in GoalToolCatalog.names
 
 /** The model receives the usual tool output. Only a hash of the observed result is carried in the ledger. */
 internal fun observedGoalProgress(call:ToolCall,result:ToolResult):String? {
-    if(!result.success||result.verification!=VerificationState.VERIFIED||result.effectNotApplied||!progressRelevant(call.name))return null
+    if(result.id!=call.id||!result.success||result.verification!=VerificationState.VERIFIED||result.effectNotApplied||!progressRelevant(call.name))return null
     val content=result.content
     if(content.isBlank()||content.length>128_000)return null
     val payload=runCatching {Json.parseToJsonElement(content) as? JsonObject}.getOrNull()
     val observation=when {
         call.name in goalBrowserTools -> {
             val page=payload?:return null
+            if (result.verificationSummary == BrowserNavigationRule.VERIFIED_SUMMARY) {
+                if (page["navigationRuleStatus"] != JsonPrimitive("verified")) return null
+                val url = (page["url"] as? JsonPrimitive)?.contentOrNull ?: return null
+                val destination = runCatching { java.net.URI(url).normalize() }.getOrNull() ?: return null
+                if (destination.scheme != "https" || destination.host == null || destination.rawUserInfo != null ||
+                    destination.port !in setOf(-1, 443) || destination.rawQuery != null || destination.rawFragment != null) return null
+                return goalDigest("link\n" + destination.host.lowercase(java.util.Locale.ROOT) + destination.rawPath)
+            }
             val fields=listOf("url","title","text").map {key->
                 page[key]?.jsonPrimitive?.contentOrNull.orEmpty().replace(Regex("\\s+")," ").trim()
             }
@@ -91,14 +98,15 @@ internal fun goalProgressKey(step:HarnessStep):String? {
         val kind=if(step.tool in goalBrowserTools)"browser-page" else step.tool
         return "$kind:$it"
     }
-    // Older browser checkpoints contain only a rendered status, with no stable observation to compare.
-    return if(step.tool in goalBrowserTools||step.tool==GoalProgressToolCatalog.UPDATE)null else goalCallDigest(step)
+    // Argument changes alone never establish a new observed result.
+    return null
 }
 
 internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
-    if(!result.success||result.effectNotApplied||result.verification!=VerificationState.VERIFIED)return null
+    if(result.id!=call.id||!result.success||result.effectNotApplied||result.verification!=VerificationState.VERIFIED)return null
     if(!goalCriterionEvidenceTool(call.name)||result.content.length>40_000)return null
     val actual=runCatching {Json.parseToJsonElement(result.content).jsonObject}.getOrNull()?:return null
+    connectorGoalProof(call,actual)?.let {return goalOutcomeDigest(it)}
     if(call.name!=PcBrowserToolCatalog.READ) {
         val sha=actual["sha256"]?.jsonPrimitive?.contentOrNull
         if(sha==null||!sha.matches(Regex("[a-f0-9]{64}")))return null
@@ -107,6 +115,16 @@ internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
         "save_browser_pdf"-> {
             if(actual["mimeType"]!=JsonPrimitive("application/pdf")||
                 (actual["pages"]?.jsonPrimitive?.intOrNull?:0)<1||actual["fileName"]?.jsonPrimitive?.contentOrNull.isNullOrBlank())return null
+            if("certificateYear" in call.arguments || "certificateCourse" in call.arguments){
+                val course=call.arguments["certificateCourse"]?.jsonPrimitive?.contentOrNull?:return null
+                val year=call.arguments["certificateYear"]?.jsonPrimitive?.contentOrNull?:return null
+                if(call.arguments["browser"]!=JsonPrimitive("pc") || actual["certificateCourse"]!=JsonPrimitive(course) ||
+                    actual["certificateCompletionYear"]!=year.toIntOrNull()?.let(::JsonPrimitive))return null
+                return runCatching {
+                    val target=JsonArray(listOf(JsonPrimitive(year),JsonPrimitive(course))).toString()
+                    goalOutcomeDigest(GoalProofTarget(GoalProofKind.KAIRB_CERTIFICATE,target).validate())
+                }.getOrNull()
+            }
             val source=actual["sourceSha256"]?.jsonPrimitive?.contentOrNull
                 ?.takeIf {it.matches(Regex("[a-f0-9]{64}"))}?:return null
             return goalBrowserPdfDigest(source)
@@ -142,19 +160,23 @@ internal fun goalOutcomeDigest(proof:GoalProofTarget):String=
 
 internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep):Boolean =
     criterion.proofTarget?.let {
+        (it.kind !in setOf(GoalProofKind.GMAIL_SENT,GoalProofKind.CALENDAR_EVENT,GoalProofKind.KAIRB_CERTIFICATE)||criterion.text==it.connectorCriterion())&&
         (it.kind!=GoalProofKind.KAIRB_COMPLETED_COURSE||criterion.text==it.courseListCriterion())&&
             (it.kind!=GoalProofKind.BROWSER_PDF_SOURCE||criterion.text==it.browserPdfCriterion())&&
             goalOutcomeDigest(it)==step.evidence.outcomeProof
     }==true
 
 internal fun goalMilestoneKey(step:HarnessStep):String? =
-    if(step.tool in goalBrowserTools) null
-    else if(step.evidence.outcomeProof!=null ||
+    if(step.evidence.outcomeProof!=null) "proof:"+step.evidence.outcomeProof
+    else if(step.tool in setOf(AppBrowserToolCatalog.ACTION,PcBrowserToolCatalog.ACTION) &&
+        step.evidence.summary==BrowserNavigationRule.VERIFIED_SUMMARY && BrowserNavigationRule.VERIFY in step.arguments) goalProgressKey(step)
+    else if(step.tool in goalBrowserTools) null
+    else if(
         step.tool in setOf(GoalProgressToolCatalog.UPDATE,"search_notes","read_project_file","list_calendar_events","search_web","search_shopping"))
         goalProgressKey(step)
     else null
 
-internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","save_browser_pdf","write_project_file",PcBrowserToolCatalog.READ)
+internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","save_browser_pdf","write_project_file",PcBrowserToolCatalog.READ,"send_gmail_message","create_google_calendar_event")
 
 internal fun goalCriterionEvidence(request:QueuedChatRequest,current:List<HarnessStep>):Map<String,HarnessStep> =
     (request.goalLedger.map {it.step}+current).mapNotNull {step->
@@ -181,6 +203,54 @@ internal fun goalCheckpointSummary(request:QueuedChatRequest):JsonArray=buildJso
 
 internal fun goalLedgerFits(ledger:List<GoalLedgerEntry>):Boolean=ledger.sumOf {it.json().toString().length+1}<=900_000
 
+/**
+ * A bounded negative cache of old observations. A collision can only deny a renewal.
+ * The encrypted source rows remain authoritative for writes, completion and readback.
+ */
+internal class GoalObservationIndex private constructor(private val bits:java.util.BitSet) {
+    private fun indices(value:String):IntArray {
+        val digest=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        return IntArray(4) { i->
+            val offset=i*2
+            ((digest[offset].toInt() and 255) shl 8) or (digest[offset+1].toInt() and 255)
+        }
+    }
+
+    fun add(value:String) { for(index in indices(value))bits.set(index) }
+    fun contains(value:String):Boolean= !bits.isEmpty && indices(value).all(bits::get)
+    fun encode():String="1."+java.util.Base64.getEncoder().encodeToString(bits.toByteArray())
+    companion object {
+        fun decode(encoded:String):GoalObservationIndex {
+            if(encoded.isEmpty())return GoalObservationIndex(java.util.BitSet())
+            require(encoded.length<=10_926 && encoded.startsWith("1."))
+            val bytes=java.util.Base64.getDecoder().decode(encoded.substring(2))
+            require(bytes.size<=8192)
+            return GoalObservationIndex(java.util.BitSet.valueOf(bytes))
+        }
+    }
+}
+
+/** Snapshots retain a recent tail and evidence that cannot be reconstructed from an observation key. */
+internal fun compactGoalLedger(entries:List<GoalLedgerEntry>,archived:GoalObservationIndex):List<GoalLedgerEntry>? {
+    if(entries.size < GoalSegmentBinding.MAX_LEDGER_ENTRIES && goalLedgerFits(entries))return entries
+    val latestBrowserRead=entries.lastOrNull { it.step.tool in goalArtifactBrowserReads && it.step.evidence.state==VerificationState.VERIFIED }
+    val tailStart=(entries.size-WorkSegments.STEP_BUDGET).coerceAtLeast(0)
+    val retained=entries.filterIndexed { index,entry->
+        val step=entry.step
+        val retain=index>=tailStart || entry===latestBrowserRead || step.evidence.outcomeProof!=null ||
+            !ToolReadPolicy.isReadOnly(step.tool) && (step.evidence.state!=VerificationState.VERIFIED || step.tool=="patch_note")
+        if(!retain) {
+            goalMilestoneKey(step)?.let(archived::add)
+            if(step.tool==GoalWaitToolCatalog.WAIT) {
+                val condition=step.arguments["condition"] as? JsonObject
+                condition?.get("ledgerItemId")?.jsonPrimitive?.contentOrNull?.let {archived.add("media:$it")}
+            }
+        }
+        retain
+    }
+    return retained.takeIf {it.size<GoalSegmentBinding.MAX_LEDGER_ENTRIES && goalLedgerFits(it)}
+}
+
 internal fun goalUnverifiedEffect(step:HarnessStep):Boolean=
     step.evidence.state==VerificationState.UNVERIFIED&&!step.evidence.effectNotApplied
 
@@ -196,7 +266,6 @@ internal fun goalWorkDigest(goal:GoalDefinition):String=goalDigest(buildJsonObje
 /** All states and positions are retained; no deduplication can erase an uncertain effect. */
 internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry> {
     val ledger=request.goalLedger+request.previousSteps.drop(request.goalReadbackSeedCount).mapIndexed {index,step->GoalLedgerEntry(request.runId,index,step)}
-    check(ledger.size<=GoalSegmentBinding.MAX_TOOL_CALLS){"목표의 누적 도구 예산을 초과했습니다."}
     check(ledger.map {it.sourceRunId to it.stepIndex}.distinct().size==ledger.size)
     return ledger
 }
@@ -242,9 +311,37 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
             check(previous==null||previous.json()==entry.json()){"동일 실행 위치의 목표 검증 기록이 변경되었습니다."}
             entries[key]=entry
         }
-        check(entries.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
     }
     return entries.values.toList()
+}
+
+/** Checks original Room rows during the same scope/cancellation check as a live write. */
+internal class ArchivedGoalWriteGuard(
+    private val current:QueuedChatRequest,task:TaskGoal,private val proposed:ToolCall,
+) {
+    private val visible=current.goalLedger.mapTo(hashSetOf()) {it.sourceRunId to it.stepIndex}
+    private val goal=checkNotNull(current.goal)
+    private val taskGoal=TaskGoal(task.ownerRequest,task.successCriteria,WorkSegments.STEP_BUDGET,task.requiredTools,task.requiredArtifactFormats)
+    private var count=0
+
+    fun inspect(source:QueuedChatRequest) {
+        val prior=checkNotNull(source.goal)
+        if(prior.outcome!=goal.outcome||prior.constraints!=goal.constraints)return
+        requireSameGoalAuthority(source,current)
+        for((index,step) in source.previousSteps.drop(source.goalReadbackSeedCount).withIndex()) {
+            if((source.runId to index) in visible)continue
+            count=Math.incrementExact(count)
+            check(!goalUncertainFailure(step)&&!goalUnverifiedEffect(step)&&!PreparedHandoff.pendingEffect(step))
+            if(!ToolReadPolicy.isReadOnly(step.tool)) {
+                val decision=TaskHarness.beforeStep(taskGoal,listOf(step),proposed)
+                check(decision !is HarnessDecision.Stop){(decision as HarnessDecision.Stop).reason}
+            }
+        }
+    }
+
+    fun finish() {
+        check(count==current.goalSegment?.archivedCalls){"이전 작업 기록을 모두 확인할 수 없어 변경 전에 멈췄어요."}
+    }
 }
 
 /** Called in addition to the current segment's normal typed/scope/consent/harness fences. */

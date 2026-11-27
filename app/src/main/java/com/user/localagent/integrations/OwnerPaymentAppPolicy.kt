@@ -13,6 +13,23 @@ internal object OwnerPaymentAppPolicy {
             url.rawUserInfo == null && url.port in setOf(-1, 443)
     }
 
+    const val paymentHistory = "https://www.nicepay.co.kr/cs/transInfo/cardList.do"
+
+    enum class Merchant(val history: String) {
+        THANKQ("https://m.thankqcamping.com/join/non/ser_reservation.hbb"),
+        NOL("https://nol.yanolja.com/member/mypage"),
+    }
+
+    fun bookingMerchant(page: String?): Merchant? {
+        val uri = page?.let { runCatching { URI(it) }.getOrNull() } ?: return null
+        if (!uri.scheme.equals("https",true) || uri.rawUserInfo != null || uri.port !in setOf(-1,443)) return null
+        return when (uri.host?.lowercase(java.util.Locale.ROOT)) {
+            "m.thankqcamping.com" -> Merchant.THANKQ
+            "nol.yanolja.com" -> Merchant.NOL
+            else -> null
+        }
+    }
+
     fun issuerData(source: String?, target: String, mainFrame: Boolean, ownerGesture: Boolean): String? {
         if (!mainFrame || !ownerGesture || !trustedCheckout(source) || target.length !in 1..4096) return null
         val data = if (target.startsWith("intent://")) {

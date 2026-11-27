@@ -50,6 +50,8 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                                 listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
                                     "$open${proof.target}$close" in ownerInstruction
                                 })
+                    else if(proof.kind in setOf(GoalProofKind.GMAIL_SENT,GoalProofKind.CALENDAR_EVENT,GoalProofKind.KAIRB_CERTIFICATE))
+                        draft.criteria[index].text==proof.connectorCriterion() && proof.matchesOwnerConnectorFields(ownerInstruction)
                     else proof.target in ownerInstruction
                 }
                 val typed=draft.copy(criteria=draft.criteria.mapIndexed {index,criterion->criterion.copy(proofTarget=proofs[index])})

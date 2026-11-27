@@ -6,6 +6,24 @@ import kotlinx.serialization.json.*
 
 /** Goal identity/version and complete visible IDs survive; never reapply the generic1100 cap. */
 object GoalModelContext {
+    /** Keep execution IDs and audit history in the host journal across arbitrarily many segments. */
+    fun snapshot(goal:com.user.localagent.core.GoalDefinition):JsonObject {
+        val fields=goal.toJson()
+        return buildJsonObject {
+            for((key,value) in fields){
+                when(key){
+                    "linkedRunIds"->put("linkedRunCount",goal.linkedRunIds.size)
+                    "criteria"->put(key,buildJsonArray {
+                        for(criterion in value.jsonArray){
+                            val row=criterion.jsonObject
+                            add(JsonObject((row-"evidence")+("evidenceCount" to JsonPrimitive(row["evidence"]?.jsonArray?.size?:0))))
+                        }
+                    })
+                    else->put(key,value)
+                }
+            }
+        }
+    }
     fun build(result:ToolResult,maxChars:Int=2200):String {
         require(maxChars in 1200..2200)
         val source=runCatching {require(result.content.length<=32000);Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
@@ -55,7 +73,7 @@ object GoalModelContext {
                 id?.let {put("goalId",it)};revision?.let {put("expectedUpdatedAt",it)}
                 identity(text("threadId"))?.let {put("threadId",it)}
                 source["projectId"]?.takeIf {it is JsonNull||it is JsonPrimitive&&it.isString&&identity(it.content)!=null}?.let {put("projectId",it)}
-                text("goalStatus")?.takeIf {it in setOf("draft","active","paused","complete")}?.let {put("goalStatus",it)}
+                text("goalStatus")?.takeIf {it in setOf("draft","active","waiting","paused","complete")}?.let {put("goalStatus",it)}
                 text("outcome")?.let {if(outcomeLimit>0)put("outcome",clip(it,outcomeLimit))else if(it.isNotEmpty())truncated=true}
                 if(source.containsKey("criteria")) {
                     put("criteria",visible);put("totalCriteria",total);put("criteriaOffset",offset);put("criteriaPartial",criteriaPartial)

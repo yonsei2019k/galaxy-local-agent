@@ -158,6 +158,16 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
                 activityEvent(record,run,start)
             }else activityEvent(record,run,null)
         }.toMutableList()
+        val pause = GoalAutopilotPauseReason.entries.find { it.code == run.errorCode }
+        if (pause != null) {
+            val lastTool = records.lastOrNull { it.event.code == WorkTraceCode.TOOL_STARTED }?.event?.toolName
+            val lastLabel = lastTool?.let(::toolLabel)?.takeUnless { it == lastTool }
+            events += UiRunActivityEvent(
+                "goal-pause:${run.id}", UiWorkEventKind.CONTEXT,
+                lastLabel?.let { "마지막으로 시도한 단계 · $it" } ?: "작업을 멈춘 이유",
+                pause.description, run.updatedAt, UiWorkEvidence.UNVERIFIED,
+            )
+        }
         if(run.id in unavailable)events+=UiRunActivityEvent("unavailable:${run.id}",UiWorkEventKind.CONTEXT,"일부 진행 기록의 저장·조회를 확인하지 못했습니다.",evidence=UiWorkEvidence.UNVERIFIED)
         val total=maxOf(totals[run.id]?:0,records.size.toLong())
         val waitingForReply=run.status=="paused"&&run.errorCode in setOf(
@@ -173,8 +183,9 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
                 runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
             userMessageId=run.userMessageId,finishedAt=run.finishedAt,goalOwnerReply=waitingForReply&&run.errorCode==GOAL_OWNER_INPUT,
-            canOpenOwnerLogin=run.status=="paused" && run.errorCode in BrowserAuthContinuation.reopenablePauses &&
-                runCatching { BrowserAuthContinuation.canReopenLogin(run.contextJson) }.getOrDefault(false)))
+            canOpenOwnerLogin=run.status=="paused" && (run.errorCode=="waiting_goal_condition"||run.errorCode in BrowserAuthContinuation.reopenablePauses) &&
+                runCatching { BrowserAuthContinuation.canReopenLogin(run.contextJson) || run.errorCode=="waiting_goal_condition" &&
+                    Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalOwnerLogin"]==JsonPrimitive(true) }.getOrDefault(false)))
     }
 }
 

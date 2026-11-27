@@ -21,6 +21,7 @@ export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   text: string
+  pdfEmail?: { to:string; subject:string; body:string; files:string[] }
   fileFormats?: string[]
   authorLabel?: string
   sentAt?: number
@@ -74,10 +75,11 @@ export interface BookingPayment {
   messageId?: string
   seller: string
   amount: number
+  hasBookingHistory?: boolean
   state: 'ready' | 'checking' | 'unverified'
 }
 
-export type BookingPaymentAction = 'openBookingPayment' | 'checkBookingPayment'
+export type BookingPaymentAction = 'openBookingPayment' | 'checkBookingPayment' | 'checkBookingHistory'
 
 export interface Snapshot {
   threadId: string
@@ -176,7 +178,7 @@ type Intent =
   | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
-  | { action: 'copy' | 'messageFiles' | 'messageMenu' | 'toggleAnswerSpeech'; payload: { messageId: string } }
+  | { action: 'copy' | 'messageFiles' | 'openPdfEmail' | 'messageMenu' | 'toggleAnswerSpeech'; payload: { messageId: string } }
   | { action: 'stayPhoto'; payload: { messageId: string; index: number; kind?: 'map' } }
   | { action: 'send'; payload: { text: string; submitToken: string } }
   | { action: 'stop'; payload: RunTarget }
@@ -228,6 +230,11 @@ function message(value: unknown): value is ConversationMessage {
   return record(value) && strings(value, 'id', 'text') &&
     (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool') &&
     (value.sentAt === undefined || (epoch(value.sentAt) && value.sentAt <= 8.64e15)) &&
+    (value.pdfEmail === undefined || (value.role === 'assistant' && record(value.pdfEmail) &&
+      strings(value.pdfEmail, 'to', 'subject', 'body') && Array.isArray(value.pdfEmail.files) &&
+      value.pdfEmail.files.length > 0 && value.pdfEmail.files.length <= 16 &&
+      value.pdfEmail.files.every(name => typeof name === 'string' &&
+        /^artifact-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}\.pdf$/.test(name)))) &&
     (value.fileFormats === undefined || (value.role === 'assistant' && Array.isArray(value.fileFormats) &&
       value.fileFormats.length <= 16 && value.fileFormats.every(format =>
         typeof format === 'string' && ['pdf', 'docx', 'xlsx', 'txt', 'csv'].includes(format)))) &&
@@ -366,9 +373,9 @@ function validBookingPayment(value: unknown): value is BookingPayment {
   const field = (item: unknown, limit: number) => typeof item === 'string' &&
     item.trim().length > 0 && item.length <= limit && !/[\u0000-\u001f\u007f]/.test(item)
   return record(value) && Object.keys(value).every(key =>
-    ['id', 'messageId', 'seller', 'amount', 'state'].includes(key)) &&
+    ['id', 'messageId', 'seller', 'amount', 'state', 'hasBookingHistory'].includes(key)) &&
     field(value.id, 128) && (value.messageId === undefined || field(value.messageId, 128)) &&
-    field(value.seller, 160) && epoch(value.amount) &&
+    field(value.seller, 160) && epoch(value.amount) && (value.hasBookingHistory === undefined || typeof value.hasBookingHistory === 'boolean') &&
     (value.state === 'ready' || value.state === 'checking' || value.state === 'unverified')
 }
 
@@ -388,10 +395,11 @@ export function hasNativeBridge() {
 /** A message hands control to Android. Android owns scope, authorization and the actual result. */
 export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
   if (intent.action !== 'ready' && !scope?.ready) return false
-  if (intent.action === 'openBookingPayment' || intent.action === 'checkBookingPayment') {
+  if (intent.action === 'openBookingPayment' || intent.action === 'checkBookingPayment' || intent.action === 'checkBookingHistory') {
     const card = scope?.bookingPayment
     if (!validBookingPayment(card) || card.id !== intent.payload.id ||
       Object.keys(intent.payload).length !== 1 ||
+      (intent.action === 'checkBookingHistory' && !card.hasBookingHistory) ||
       (intent.action === 'openBookingPayment' ? card.state !== 'ready' : card.state === 'checking')) return false
   }
   if (intent.action === 'chooseReply' && !scope?.tasks.some(task => task.id === intent.payload.runId &&

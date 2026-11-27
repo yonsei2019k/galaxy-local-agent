@@ -84,7 +84,7 @@ object AssistantPolicy {
                     appendLine("메신저 조회의 packageName은 아래 앱 이름에 해당하는 정확한 값만 쓴다: ${messengerLabels.entries.joinToString("; ") {"${it.key}=${it.value}"}}. 사용자가 앱별 알림 동의를 켠 경우에만 조회할 수 있다.")
                 }
                 if("prepare_sms" in allowed)appendLine("문자는 초안만 만든다. 사용자가 직접 확인하고 보내야 한다.")
-                if("prepare_email" in allowed||"create_gmail_draft" in allowed)appendLine("선택된 이메일 초안 도구는 초안만 만들며 실제로 발송하지 않는다. 초안 저장을 발송 완료라고 말하지 않는다.")
+                if("prepare_email" in allowed||"create_gmail_draft" in allowed)appendLine("선택된 이메일 초안 도구는 초안만 만들며 실제로 발송하지 않는다. PDF 첨부를 요청받으면 prepare_email의 pdfFiles에 이번 목표에서 확인한 PDF 이름들을 넣는다. 본문 전용 Gmail 도구로 대체하지 않는다. 초안 저장을 발송 완료라고 말하지 않는다.")
                 if(allowed.any {it in com.user.localagent.core.connections.GmailSendContract.names})appendLine("선택된 Gmail 발송·답장 도구는 실제 계정·수신자·제목·본문 전체와 답장 원본의 별도 승인 뒤 발송한다. 실제 SENT·내용 재조회 일치 전 완료를 말하지 않는다. 발송 결과가 불명확하면 같은 요청을 재발송하지 않는다.")
                 if("generate_image" in allowed)appendLine("이미지·사진 생성 요청은 generate_image로 실제 실행한다. prompt에는 사용자가 요청한 장면·스타일을 보존한다. 이미지 작업실에서 설치한 로컬 모델이 렌더링하며, 너는 텍스트 모델이라는 이유로 생성 기능이 없다고 말하지 않는다.")
                 if("get_sms_summary" in allowed)appendLine("전체 문자·기간 미지정 요청은 query를 생략해 연결된 범위부터 읽는다. 기간이나 특정 번호를 먼저 요구하지 않는다. 자료가 일부인 경우 그 범위만 명시한다.")

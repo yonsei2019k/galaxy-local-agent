@@ -72,14 +72,63 @@ enum class GoalStatus {
 }
 
 @Serializable
-enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE, BROWSER_PDF_SOURCE }
+enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE, BROWSER_PDF_SOURCE, GMAIL_SENT, CALENDAR_EVENT, KAIRB_CERTIFICATE }
 
 @Serializable
 data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
     fun browserPdfCriterion():String="브라우저에서 「$target」 PDF 원본 저장"
     fun courseListCriterion():String="KAIRB 수강완료 목록에서 「$target」 확인"
+    /** Exact readback facts produced only after the connector completed its approved operation. */
+    fun connectorFields():List<String> {
+        val values=kotlinx.serialization.json.Json.parseToJsonElement(target) as? kotlinx.serialization.json.JsonArray
+            ?:error("대상 필드 배열이 필요합니다.")
+        require(values.toString()==target)
+        return values.map {field->
+            require(field is kotlinx.serialization.json.JsonPrimitive && field.isString)
+            field.content.also {require(it.isNotBlank()&&it==it.trim()&&it.none(Char::isISOControl))}
+        }
+    }
+    fun connectorCriterion():String {
+        val fields=connectorFields()
+        return when(kind){
+            GoalProofKind.GMAIL_SENT->"보낸편지함에서 「${fields[0]}」에게 보낸 「${fields[1]}」 확인"
+            GoalProofKind.CALENDAR_EVENT->"캘린더 「${fields[0]}」에서 「${fields[1]}」 일정 확인 (${fields[2]} ~ ${fields[3]})"
+            GoalProofKind.KAIRB_CERTIFICATE->"KAIRB ${fields[0]}년 「${fields[1]}」 이수증 PDF 확인"
+            else->error("연결 서비스 근거가 아닙니다.")
+        }
+    }
+    fun matchesOwnerConnectorFields(instruction: String): Boolean {
+        val fields = connectorFields()
+        if (!fields.all { it in instruction }) return false
+        return when (kind) {
+            GoalProofKind.GMAIL_SENT -> {
+                val mailbox = Regex.escape(fields.first())
+                val localChars = "[A-Za-z0-9.!#$%&'*+/=?^_`{|}~@-]"
+                Regex("(?<!$localChars)$mailbox(?![A-Za-z0-9@-]|\\.[A-Za-z0-9])").containsMatchIn(instruction)
+            }
+            GoalProofKind.KAIRB_CERTIFICATE ->
+                Regex("(?<![0-9])" + Regex.escape(fields.first()) + "(?![0-9])").containsMatchIn(instruction)
+            GoalProofKind.CALENDAR_EVENT -> true
+            else -> false
+        }
+    }
     fun validate():GoalProofTarget {
         when(kind) {
+            GoalProofKind.KAIRB_CERTIFICATE->{
+                val fields=connectorFields()
+                require(fields.size==2 && fields[0].matches(Regex("[0-9]{4}")) && fields[1].length<=240)
+            }
+            GoalProofKind.GMAIL_SENT->{
+                val fields=connectorFields()
+                require(fields.size==2)
+                com.user.localagent.core.connections.GmailSendContract.mailbox(fields[0])
+            }
+            GoalProofKind.CALENDAR_EVENT->{
+                val fields=connectorFields()
+                require(fields.size==4)
+                com.user.localagent.core.connections.ConnectionRequests.key(fields[0])
+                require(java.time.OffsetDateTime.parse(fields[3]).isAfter(java.time.OffsetDateTime.parse(fields[2])))
+            }
             GoalProofKind.PUBLIC_PDF_SOURCE,GoalProofKind.BROWSER_PDF_SOURCE->require(WebAgentPolicy.urlAllowed(target)&&target.startsWith("https://")&&'#' !in target)
             GoalProofKind.PROJECT_FILE->require(ProjectPaths.segments(target).joinToString("/")==target)
             GoalProofKind.KAIRB_COMPLETED_COURSE->require(target.length in 1..240&&target==target.trim()&&target.none(Char::isISOControl))

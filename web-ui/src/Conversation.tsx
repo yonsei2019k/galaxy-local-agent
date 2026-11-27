@@ -170,7 +170,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onGoalAnswer, onBookingPayment, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -187,6 +187,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
   onGoalAnswer?(runId: string, text: string): boolean
+  onPdfEmail?(messageId: string): void
   onBookingPayment?(action: BookingPaymentAction, id: string): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
@@ -335,6 +336,17 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                       (!snapshot?.busy || snapshot?.spokenMessageId === item.id) ? onSpeak : undefined}
                     enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu}
                     onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} onStayPhoto={enabled ? onStayPhoto : undefined} />
+                  {item.pdfEmail && <section className="booking-payment-card" aria-label="PDF 첨부 메일">
+                    <strong>{item.pdfEmail.subject}</strong>
+                    <p>받는 사람 {item.pdfEmail.to}</p>
+                    <details><summary>본문과 첨부 PDF {item.pdfEmail.files.length}개 확인</summary>
+                      <p style={{ whiteSpace: 'pre-wrap' }}>{item.pdfEmail.body}</p>
+                      <ul>{item.pdfEmail.files.map(name => <li key={name}>{name}</li>)}</ul>
+                    </details>
+                    <button type="button" disabled={!enabled || !onPdfEmail} onClick={() => onPdfEmail?.(item.id)}>
+                      PDF를 첨부해 Gmail에서 열기
+                    </button>
+                  </section>}
                   {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
                   {websiteAnchor === item.id && websiteCard}
                   {approvalAnchor === item.id && approvalCard}

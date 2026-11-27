@@ -23,13 +23,15 @@ data class GoalSegmentBinding(
     val rootRunId:String,val parentRunId:String?,val parentCheckpointDigest:String?,val segmentIndex:Int,
     val startedAtMs:Long,val consumedToolCalls:Int,val noProgressSegments:Int,val totalSegments:Int=segmentIndex,
     val phaseStartSegments:Int=0,val phaseStartCalls:Int=0,val artifactWrapUp:Boolean=false,
-    val artifactAuthResumed:Boolean=false,
+    val artifactAuthResumed:Boolean=false,val archivedCalls:Int=0,val archivedObservations:String="",
 ) {
     init {
         require(listOf(goalId,scopeKey,rootRunId).all {it.isNotBlank()&&it.length<=256&&it.none {c->c.code<32}})
         require(originalGoalVersion>=0&&scopeRevision>=0&&workDigest.matches(Regex("[a-f0-9]{64}")))
-        require(segmentIndex in 1..MAX_SEGMENTS&&consumedToolCalls in 0..MAX_TOOL_CALLS&&noProgressSegments in 0..MAX_NO_PROGRESS)
-        require(totalSegments in segmentIndex..MAX_SEGMENTS)
+        require(segmentIndex>0&&consumedToolCalls>=0&&noProgressSegments in 0..MAX_NO_PROGRESS)
+        require(archivedCalls in 0..consumedToolCalls && (archivedCalls==0)==archivedObservations.isEmpty())
+        if(archivedCalls>0) GoalObservationIndex.decode(archivedObservations)
+        require(totalSegments>=segmentIndex)
         require(phaseStartSegments in 0 until totalSegments && phaseStartCalls in 0..consumedToolCalls)
         require(startedAtMs>=0&&startedAtMs<=Long.MAX_VALUE-MAX_DURATION_MS)
         require(!artifactAuthResumed||artifactWrapUp)
@@ -38,10 +40,11 @@ data class GoalSegmentBinding(
             parentRunId.none {it.code<32}&&parentCheckpointDigest?.matches(Regex("[a-f0-9]{64}"))==true)
     }
     internal fun json():JsonObject=buildJsonObject {
-        put("version",1);put("goalId",goalId);put("originalGoalVersion",originalGoalVersion);put("workDigest",workDigest)
+        put("version",if(archivedCalls>0||totalSegments>32||consumedToolCalls>MAX_LEDGER_ENTRIES)2 else 1);put("goalId",goalId);put("originalGoalVersion",originalGoalVersion);put("workDigest",workDigest)
         put("scopeKey",scopeKey);put("scopeRevision",scopeRevision);put("useOwnerMemory",useOwnerMemory);put("memoryEnabled",memoryEnabled)
         put("rootRunId",rootRunId);put("parentRunId",parentRunId);put("parentCheckpointDigest",parentCheckpointDigest)
         put("segmentIndex",segmentIndex);put("startedAtMs",startedAtMs);put("consumedToolCalls",consumedToolCalls);put("noProgressSegments",noProgressSegments);put("totalSegments",totalSegments)
+        if(archivedCalls>0){put("archivedCalls",archivedCalls);put("archivedObservations",archivedObservations)}
         if(artifactWrapUp)put("artifactWrapUp",true)
         if(artifactAuthResumed)put("artifactAuthResumed",true)
         if(phaseStartSegments!=0||phaseStartCalls!=0){put("phaseStartSegments",phaseStartSegments);put("phaseStartCalls",phaseStartCalls)}
@@ -49,25 +52,30 @@ data class GoalSegmentBinding(
     companion object {
         const val PHASE_SEGMENTS=8
         const val PHASE_TOOL_CALLS=144
-        const val MAX_SEGMENTS=32
-        const val MAX_TOOL_CALLS=576
+        const val MAX_LEDGER_ENTRIES=576
         const val MAX_DURATION_MS=30*60*1000L
         const val MAX_NO_PROGRESS=3
         internal fun parse(o:JsonObject):GoalSegmentBinding {
-            require(o.keys-setOf("phaseStartSegments","phaseStartCalls","artifactWrapUp","artifactAuthResumed")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
+            require(o.keys-setOf("archivedCalls","archivedObservations","phaseStartSegments","phaseStartCalls","artifactWrapUp","artifactAuthResumed")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
             fun s(k:String)=o.getValue(k).jsonPrimitive.let {require(it.isString);it.content}
             fun l(k:String)=o.getValue(k).jsonPrimitive.let {require(!it.isString);it.long}
             fun b(k:String)=o.getValue(k).jsonPrimitive.let {require(!it.isString);it.boolean}
             fun optional(k:String)=o.getValue(k).takeUnless {it is JsonNull}?.jsonPrimitive?.let {require(it.isString);it.content}
-            require(l("version")==1L && ("phaseStartSegments" in o)==("phaseStartCalls" in o))
+            val version=l("version")
+            require(version in 1L..2L && ("archivedCalls" in o)==("archivedObservations" in o))
+            require(version==2L || "archivedCalls" !in o)
+            require( ("phaseStartSegments" in o)==("phaseStartCalls" in o))
             val index=l("segmentIndex");val count=l("consumedToolCalls");val progress=l("noProgressSegments");val total=l("totalSegments")
-            require(index in 1..MAX_SEGMENTS.toLong()&&count in 0..MAX_TOOL_CALLS.toLong()&&progress in 0..MAX_NO_PROGRESS.toLong()&&total in index..MAX_SEGMENTS.toLong())
+            require(index in 1..Int.MAX_VALUE.toLong()&&count in 0..Int.MAX_VALUE.toLong()&&progress in 0..MAX_NO_PROGRESS.toLong()&&total in index..Int.MAX_VALUE.toLong())
+            require(version==2L || total<=32 && count<=MAX_LEDGER_ENTRIES)
             return GoalSegmentBinding(s("goalId"),l("originalGoalVersion"),s("workDigest"),s("scopeKey"),l("scopeRevision"),b("useOwnerMemory"),b("memoryEnabled"),
                 s("rootRunId"),optional("parentRunId"),optional("parentCheckpointDigest"),index.toInt(),l("startedAtMs"),count.toInt(),progress.toInt(),total.toInt(),
                 if("phaseStartSegments" in o)l("phaseStartSegments").also { require(it in 0 until total) }.toInt() else 0,
                 if("phaseStartCalls" in o)l("phaseStartCalls").also { require(it in 0..count) }.toInt() else 0,
                 o["artifactWrapUp"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false,
-                o["artifactAuthResumed"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false)
+                o["artifactAuthResumed"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false,
+                if("archivedCalls" in o)l("archivedCalls").also {require(it in 1..count)}.toInt() else 0,
+                if("archivedObservations" in o)s("archivedObservations") else "")
         }
     }
 }
@@ -84,11 +92,11 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
         SEGMENT_BUDGET->"이번 목표에서 이어서 실행할 구간 한도에 도달했어요. 확인한 결과는 남겨뒀어요."
         TOOL_BUDGET->"이번 목표에서 도구 실행 한도에 도달했어요. 확인한 결과는 남겨뒀어요."
         TIME_BUDGET->"이번 구간의 활동 시간 한도에 도달했어요. 확인한 결과는 남겨뒀어요."
-        NO_PROGRESS->"3개 실행 구간에서 새로운 검증 결과가 없어 일시 정지했습니다. 실패 기록과 기존 결과는 보존했습니다."
-        UNKNOWN_EFFECT->"이전 실행의 실제 효과가 불확실해 일시 정지했습니다. 대상 상태를 확인하기 전에 변경을 반복하지 않습니다."
-        FAILED_STEP->"이전 변경 작업의 실패 결과가 확인되지 않아 일시 정지했습니다. 기존 실패 기록을 유지합니다."
+        NO_PROGRESS->"세 차례 이어서 시도했지만 다음 단계로 넘어갈 단서를 찾지 못했어요. 어디까지 진행했는지 작업 내역에서 볼 수 있어요."
+        UNKNOWN_EFFECT->"마지막 요청이 처리됐는지 확인이 필요해요. 같은 요청이 두 번 처리될 수 있어 잠시 멈췄어요."
+        FAILED_STEP->"변경을 시도한 뒤 결과를 확인하지 못했어요. 앞에서 확인한 내용은 작업 내역에 남아 있어요."
         OWNER_HANDOFF->"추가 지시나 외부 앱의 실제 결과 확인이 필요해 일시 정지했습니다."
-        REQUIRED_READBACK->"이전 변경 결과의 실제 재조회가 확인되지 않아 일시 정지했습니다."
+        REQUIRED_READBACK->"변경을 요청했는데 다시 조회했을 때 결과를 확인할 수 없었어요."
         LEGACY_CONTEXT->"기존 요청에는 자동 연속 실행 연결이 없어 일시 정지했습니다. 이전 권한을 확대하지 않았습니다."
         INVALID_CHECKPOINT->"저장된 실제 실행 근거를 확인하지 못해 일시 정지했습니다. 근거를 버리고 다시 실행하지 않습니다."
         STOPPED->"목표 실행이 중지되었거나 원래 실행 조건을 유지하지 않아 일시 정지했습니다."
@@ -109,7 +117,6 @@ internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSou
     if(sources.isEmpty())return GoalEntryBudget(goal.updatedAt,nowMs,1,0)
     val requests=sources.map {QueuedChatRequest.fromJson(it.contextJson)}
     val consumed=maxOf(sources.size,requests.maxOf {it.goalSegment?.totalSegments?:1})
-    if(consumed>=GoalSegmentBinding.MAX_SEGMENTS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.SEGMENT_BUDGET)
     val latest=requests.last()
     val phase=latest.goalSegment
     if(consumed-(phase?.phaseStartSegments?:0)>=GoalSegmentBinding.PHASE_SEGMENTS)
@@ -123,8 +130,9 @@ internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSou
 }
 
 private fun hasNewGoalProgress(request:QueuedChatRequest,goal:GoalDefinition):Boolean {
-    val seen=request.goalLedger.mapNotNull {goalProgressKey(it.step)}.toSet()
-    return request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalProgressKey).any {it !in seen} ||
+    val seen=request.goalLedger.mapNotNull {goalMilestoneKey(it.step)}.toSet()
+    val archived=GoalObservationIndex.decode(request.goalSegment?.archivedObservations.orEmpty())
+    return request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalMilestoneKey).any {it !in seen && !archived.contains(it)} ||
         goal.criteria.any {now->now.status==GoalCriterionStatus.VERIFIED &&
             checkNotNull(request.goal).criteria.none {it.id==now.id&&it.status==GoalCriterionStatus.VERIFIED}}
 }
@@ -152,6 +160,8 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(request.continuation!=null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     if(unknownEffects)return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
     val ledger=completedGoalLedger(request)
+    val totalCalls=Math.addExact(segment.archivedCalls,ledger.size)
+    val archive=GoalObservationIndex.decode(segment.archivedObservations)
     if(ledger.any {goalUnverifiedEffect(it.step)})return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
     if(ledger.any {goalUncertainFailure(it.step)})return pause(GoalAutopilotPauseReason.FAILED_STEP)
     if(ledger.any {PreparedHandoff.pendingEffect(it.step)})return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
@@ -170,7 +180,6 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
             finalStep.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED
         val waitReady=finalStep?.tool==GoalWaitToolCatalog.WAIT && finalStep.evidence.state==VerificationState.VERIFIED
         if(parkedAt !in segment.startedAtMs..wokeAt || wokeAt>nowMs ||
-            wokeAt-parkedAt>GoalWaitPolicy.MAX_DAYS*86_400_000L ||
             (!authReady && !waitReady))
             return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
         resumedArtifactAuth=segment.artifactWrapUp&&!segment.artifactAuthResumed&&authReady&&
@@ -178,7 +187,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         if(waitReady && wake["event"]==JsonPrimitive(WakeEvent.MEDIA_ENDED.name)) {
             val condition=finalStep?.arguments?.get("condition") as? JsonObject
             val item=condition?.get("ledgerItemId")?.jsonPrimitive?.contentOrNull
-            completedMedia=item!=null&&condition?.get("kind")==JsonPrimitive("media_end")&&request.goalLedger.none {entry->
+            completedMedia=item!=null&&condition?.get("kind")==JsonPrimitive("media_end")&&!archive.contains("media:$item")&&request.goalLedger.none {entry->
                 entry.step.tool==GoalWaitToolCatalog.WAIT&&
                     (entry.step.arguments["condition"] as? JsonObject)?.get("ledgerItemId")==JsonPrimitive(item)
             }
@@ -194,35 +203,34 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
     val complete=goalCompletionProofsMatch(request,goal)&&recovery==null
     val wrapUp=complete&&(!segment.artifactWrapUp||resumedArtifactAuth)&&
-        ledger.size<GoalSegmentBinding.MAX_TOOL_CALLS-2&&segment.totalSegments<GoalSegmentBinding.MAX_SEGMENTS&&
         ledger.any {it.step.tool in goalArtifactBrowserReads&&it.step.evidence.state==VerificationState.VERIFIED}
     if(complete&&!wrapUp)return GoalSegmentDecision.Complete
     if(parent.errorCode=="execution_not_verified"&&recovery==null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     val progressed=wrapUp||completedMedia||recovery==null&&hasNewGoalProgress(request,goal)
     val noProgress=if(progressed)0 else segment.noProgressSegments+1
     val budget=segment.copy(startedAtMs=segment.startedAtMs+clockShift)
-    if(segment.totalSegments>=GoalSegmentBinding.MAX_SEGMENTS)return pause(GoalAutopilotPauseReason.SEGMENT_BUDGET)
-    if(ledger.size>=GoalSegmentBinding.MAX_TOOL_CALLS||!goalLedgerFits(ledger))return pause(GoalAutopilotPauseReason.TOOL_BUDGET)
-    val limit=goalBudgetStop(budget,ledger.size,nowMs,noProgress,useNativeBudget)
+    val limit=goalBudgetStop(budget,totalCalls,nowMs,noProgress,useNativeBudget)
     val observedMilestones=request.goalLedger.mapNotNull {goalMilestoneKey(it.step)}.toSet()
     val earnedPhase=completedMedia || goal.criteria.any {criterion->
         criterion.status==GoalCriterionStatus.VERIFIED&&request.goal.criteria.none {it.id==criterion.id&&it.status==GoalCriterionStatus.VERIFIED}
-    } || request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalMilestoneKey).any {it !in observedMilestones}
+    } || request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalMilestoneKey).any {it !in observedMilestones && !archive.contains(it)}
     val renew=limit in setOf(GoalAutopilotPauseReason.SEGMENT_BUDGET,GoalAutopilotPauseReason.TOOL_BUDGET,GoalAutopilotPauseReason.TIME_BUDGET) &&
         earnedPhase && recovery==null && nowMs>=budget.startedAtMs
     if(limit!=null&&!renew)return if(complete)GoalSegmentDecision.Complete else pause(limit)
     val nextStart=if(renew)maxOf(budget.startedAtMs,parent.finishedAt?:parent.updatedAt) else budget.startedAtMs
     if(nextStart>nowMs)return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+    val retained=compactGoalLedger(ledger,archive)?:return pause(GoalAutopilotPauseReason.TOOL_BUDGET)
+    val archivedCalls=totalCalls-retained.size
     return GoalSegmentDecision.Continue(budget.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
-        segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress,
+        segmentIndex=Math.incrementExact(segment.segmentIndex),totalSegments=Math.incrementExact(segment.totalSegments),consumedToolCalls=totalCalls,
+        archivedCalls=archivedCalls,archivedObservations=if(archivedCalls>0)archive.encode() else "",noProgressSegments=noProgress,
         startedAtMs=nextStart,phaseStartSegments=if(renew)segment.totalSegments else segment.phaseStartSegments,
-        phaseStartCalls=if(renew)ledger.size else segment.phaseStartCalls,artifactWrapUp=wrapUp,
-        artifactAuthResumed=wrapUp&&resumedArtifactAuth),ledger,recovery)
+        phaseStartCalls=if(renew)totalCalls else segment.phaseStartCalls,artifactWrapUp=wrapUp,
+        artifactAuthResumed=wrapUp&&resumedArtifactAuth),retained,recovery)
 }
 
 internal fun goalToolRoom(segment:GoalSegmentBinding,steps:Int):Int =
-    minOf(GoalSegmentBinding.MAX_TOOL_CALLS-segment.consumedToolCalls,
-        GoalSegmentBinding.PHASE_TOOL_CALLS-(segment.consumedToolCalls-segment.phaseStartCalls))-steps
+    GoalSegmentBinding.PHASE_TOOL_CALLS-(segment.consumedToolCalls-segment.phaseStartCalls)-steps
 
 internal fun goalBudgetStop(segment:GoalSegmentBinding,toolCount:Int,nowMs:Long,noProgress:Int,useNative:Boolean):GoalAutopilotPauseReason? {
     if(useNative){

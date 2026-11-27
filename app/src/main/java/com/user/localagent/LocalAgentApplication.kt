@@ -27,6 +27,13 @@ open class LocalAgentApplication : Application() {
             try { container.goalWaits.restore() } catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) { FailureLog.record(this@LocalAgentApplication,"goal_wait_restore",error) }
         }
+        maintenance.launch {
+            com.user.localagent.compute.PcTransport.pairedReachable.collect { reachable ->
+                if (reachable) try { container.goalWaits.onPcAvailable() }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (error: Exception) { FailureLog.record(this@LocalAgentApplication,"goal_wait_pc_reconnected",error) }
+            }
+        }
         container.remoteTests.start(maintenance)
         maintenance.launch {runCatching {com.user.localagent.audio.AudioChunkDecoder.cleanupOrphanedSessions(this@LocalAgentApplication)}}
     }

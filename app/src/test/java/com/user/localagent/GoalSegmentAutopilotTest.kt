@@ -13,7 +13,8 @@ class GoalSegmentAutopilotTest {
     private fun goal(ids:List<String> = listOf("run-a"))=GoalDefinition("goal-a","thread","project","Verify the requested QA result",
         listOf(GoalCriterion("criterion","Actual result is verified")),status=GoalStatus.ACTIVE,linkedRunIds=ids,updatedAt=20)
     private fun step(query:String="QA",state:VerificationState=VerificationState.VERIFIED,noEffect:Boolean=false)=HarnessStep("search_notes",
-        buildJsonObject {put("query",query)},StepEvidence("search_notes",state,"Synthetic exact host result",effectNotApplied=noEffect))
+        buildJsonObject {put("query",query)},StepEvidence("search_notes",state,"Synthetic exact host result",effectNotApplied=noEffect,
+            progressDigest=if(state==VerificationState.VERIFIED&&!noEffect)goalDigest("observed record $query") else null))
     private fun segment(goal:GoalDefinition=goal())=GoalSegmentBinding(goal.id,10,goalWorkDigest(goal),"scope",4,false,true,
         "run-a",null,null,1,started,0,0)
     private fun request(steps:List<HarnessStep> = listOf(step()),binding:GoalSegmentBinding=segment(),ledger:List<GoalLedgerEntry> = emptyList())=
@@ -97,8 +98,26 @@ class GoalSegmentAutopilotTest {
         val binding=segment().copy(consumedToolCalls=1,noProgressSegments=2)
         pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(request(listOf(read("new-snapshot","Reservation pending")),binding,history)))
         val changed=request(listOf(read("new-snapshot","Reservation confirmed")),binding,history)
-        assertTrue(decide(changed) is GoalSegmentDecision.Continue)
+        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(changed))
         assertEquals(changed.toJson(),QueuedChatRequest.fromJson(changed.toJson()).toJson())
+    }
+
+    @Test fun verifiedNavigationCountsOncePerDestinationAcrossChangingPageText() {
+        val call = ToolCall("link", PcBrowserToolCatalog.ACTION, buildJsonObject {
+            put("action","click"); put(BrowserNavigationRule.LABEL,"자료"); put(BrowserNavigationRule.VERIFY,"자료 목록")
+        })
+        fun milestone(path:String, text:String, status:String):String? {
+            val result=ToolResult(call.id,true,buildJsonObject {
+                put("url","https://example.com/$path"); put("text",text); put("navigationRuleStatus",status)
+            }.toString(),VerificationState.VERIFIED,BrowserNavigationRule.VERIFIED_SUMMARY)
+            return goalMilestoneKey(HarnessStep(call,StepEvidence(call.name,result.verification,result.verificationSummary,
+                progressDigest=observedGoalProgress(call,result))))
+        }
+        val first=milestone("materials","10:00","verified")
+        assertNotNull(first)
+        assertEquals(first,milestone("materials","10:01","verified"))
+        assertNotEquals(first,milestone("archive","10:01","verified"))
+        assertNull(milestone("materials","10:02","unverified"))
     }
 
     @Test fun criterionEvidenceIsBoundToRealCurrentOrInheritedAuditSteps() {
@@ -322,8 +341,9 @@ class GoalSegmentAutopilotTest {
         assertEquals(8,extended.binding.phaseStartSegments)
         assertEquals(1,extended.binding.phaseStartCalls)
         assertEquals(144,goalToolRoom(extended.binding,0))
-        val hardLimit=eighth.copy(totalSegments=GoalSegmentBinding.MAX_SEGMENTS,phaseStartSegments=24)
-        pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(binding=hardLimit)))
+        val fourthPhase=eighth.copy(totalSegments=32,phaseStartSegments=24)
+        assertEquals(33,(decide(request(binding=fourthPhase)) as GoalSegmentDecision.Continue).binding.totalSegments)
+        pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(emptyList(),binding=fourthPhase)))
         pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(now=started-1))
         assertEquals(GoalStatus.ACTIVE,goal().status)
     }
@@ -457,6 +477,34 @@ class GoalSegmentAutopilotTest {
         assertEquals(9,current.goalSegment!!.totalSegments)
         assertEquals(8,current.goalSegment!!.phaseStartSegments)
         assertEquals(GoalStatus.ACTIVE,current.goal!!.status)
+    }
+    @Test fun observedWorkContinuesPastThirtyTwoSegmentsWithoutReplayingArchivedReadsOrWrites() {
+        var current=request()
+        val sources=mutableListOf<QueuedChatRequest>()
+        val mutation=HarnessStep("save_public_pdf",buildJsonObject {put("url","https://example.org/a.pdf")},
+            StepEvidence("save_public_pdf",VerificationState.VERIFIED,"Saved PDF"))
+        for(segment in 1..35) {
+            val steps=(0 until 18).map {if(segment==1&&it==0)mutation else step("record-$segment-$it")}
+            current=current.copy(previousSteps=steps)
+            sources+=current
+            val next=decide(current) as GoalSegmentDecision.Continue
+            val id="successor-$segment"
+            current=current.copy(runId=id,userMessageId="user-$segment",previousSteps=emptyList(),
+                goal=current.goal!!.copy(linkedRunIds=current.goal.linkedRunIds+id),goalSegment=next.binding,goalLedger=next.ledger)
+        }
+        assertEquals(630,current.goalSegment!!.consumedToolCalls)
+        assertTrue(current.goalLedger.size<144)
+        assertEquals(current,QueuedChatRequest.fromJson(current.toJson()))
+        val repeated=current.copy(previousSteps=listOf(step("record-1-1")),
+            goalSegment=current.goalSegment!!.copy(noProgressSegments=2))
+        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(repeated))
+        val task=TaskGoal("Save the document",listOf("Read it"),requiredTools=setOf(mutation.tool))
+        val duplicate=ArchivedGoalWriteGuard(current,task,ToolCall("repeat",mutation.tool,mutation.arguments))
+        assertThrows(IllegalStateException::class.java){sources.forEach(duplicate::inspect)}
+        val other=ArchivedGoalWriteGuard(current,task,ToolCall("new",mutation.tool,buildJsonObject {put("url","https://example.org/b.pdf")}))
+        assertThrows(IllegalStateException::class.java){other.finish()}
+        sources.forEach(other::inspect)
+        other.finish()
     }
     @Test fun registeredReadFailureThenVerifiedAlternativeMayContinueWithoutErasingTheFailure() {
         val parent=request(listOf(step("first read",VerificationState.FAILED),step("alternative")))

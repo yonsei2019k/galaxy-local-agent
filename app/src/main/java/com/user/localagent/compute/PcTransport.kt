@@ -24,7 +24,9 @@ class PcTransport(context:Context) {
     private val context=context.applicationContext
     private val settings=PcComputeSettings.get(context)
     @Volatile private var lastDiscovery=0L
-    private companion object {
+    companion object {
+        private val reachable = kotlinx.coroutines.flow.MutableStateFlow(false)
+        internal val pairedReachable: kotlinx.coroutines.flow.StateFlow<Boolean> get() = reachable
         /** Shared by every transport instance: when, and on which network, this phone last saw the paired PC answer. */
         @Volatile var lastReachableAt=0L
         @Volatile var lastReachableNetwork:Long?=null
@@ -99,14 +101,15 @@ class PcTransport(context:Context) {
      * (the supervisor brings it back within ~15 s), so wait and retry instead of failing the request.
      */
     suspend fun available(computeOwner:String?=null,waitForRestart:Boolean=false):PcConnection?{
-        probe(computeOwner)?.let{return it}
+        probe(computeOwner)?.let{reachable.value=true;return it}
+        if (computeOwner == null) reachable.value=false
         // A different network (left home Wi-Fi, switched to mobile data) is not a worker restart: fail fast.
         val sameNetwork=lastReachableNetwork!=null&&lastReachableNetwork==networkHandle()
         val delays=com.user.localagent.core.PcReconnectPolicy.retryDelays(waitForRestart&&sameNetwork,System.currentTimeMillis()-lastReachableAt)
         delays.forEachIndexed {index,wait->
             settings.report("PC 응답 대기 · 작업기 재시작 중일 수 있어 다시 확인합니다 (${index+1}/${delays.size})")
             delay(wait)
-            probe(computeOwner)?.let{return it}
+            probe(computeOwner)?.let{reachable.value=true;return it}
         }
         if(delays.isNotEmpty())settings.report("PC가 ${delays.sum()/1000}초 동안 응답하지 않았습니다 · PC 전원과 네트워크를 확인해주세요")
         return null

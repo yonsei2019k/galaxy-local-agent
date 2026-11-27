@@ -60,7 +60,7 @@ describe('booking payment handoff', () => {
     expect(card?.textContent).toContain('150,000원')
     expect(card?.parentElement?.getAttribute('role')).toBe('log')
     click('공식 결제 앱 열기')
-    click('결제 결과 다시 확인')
+    click('카드 거래 내역 보기')
     expect(requests().slice(-2)).toEqual([open, check].map(action => ({
       version: 1, threadId: base.threadId, branchId: base.branchId, ...action,
     })))
@@ -70,7 +70,7 @@ describe('booking payment handoff', () => {
     mount()
     const checking: Snapshot = { ...base, bookingPayment: { ...payment, state: 'checking' } }
     snapshot(checking)
-    expect(button('결제 결과 다시 확인').disabled).toBe(true)
+    expect(button('카드 거래 내역 보기').disabled).toBe(true)
     expect(host.querySelector('[aria-label="예약 결제 확인"]')?.getAttribute('aria-busy')).toBe('true')
     expect(postIntent(checking, check)).toBe(false)
     expect(postIntent({ ...base, bookingPayment: payment }, { ...open, payload: { id: 'old-payment' } })).toBe(false)
@@ -79,8 +79,18 @@ describe('booking payment handoff', () => {
     snapshot(unresolved)
     expect(() => button('공식 결제 앱 열기')).toThrow()
     expect(postIntent(unresolved, open)).toBe(false)
-    expect(button('결제 결과 다시 확인').disabled).toBe(false)
+    expect(button('카드 거래 내역 보기').disabled).toBe(false)
     expect(host.querySelector('[aria-label="예약 결제 확인"]')?.textContent).toContain('아직 결제 결과가 확인되지 않았어요.')
+  })
+
+  it('offers the original merchant lookup only when the host bound the checkout to that merchant', () => {
+    mount()
+    const card = { ...payment, hasBookingHistory: true, state: 'unverified' } as const
+    snapshot({ ...base, bookingPayment: card })
+    click('예약처에서 내역 보기')
+    const intent = { action: 'checkBookingHistory', payload: { id: payment.id } } as const
+    expect(requests().at(-1)).toEqual({ version: 1, threadId: base.threadId, branchId: base.branchId, ...intent })
+    expect(postIntent({ ...base, bookingPayment: payment }, intent)).toBe(false)
   })
 
   it('does not trust message blocks or snapshots with extra payment data', () => {
@@ -134,6 +144,17 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('opens the PDF email by its originating chat message and rejects untrusted file paths', () => {
+    mount()
+    const pdfEmail = {to:'sender@example.org',subject:'이수증',body:'첨부합니다.',files:['artifact-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf']}
+    const draft = {id:'draft-msg',role:'assistant' as const,text:'준비했어요.',pdfEmail}
+    snapshot({...base,messages:[draft]})
+    click('PDF를 첨부해 Gmail에서 열기')
+    expect(requests().at(-1)).toMatchObject({action:'openPdfEmail',payload:{messageId:'draft-msg'}})
+    expect(readSnapshot({...base,messages:[{...draft,pdfEmail:{...pdfEmail,files:['../private.pdf']}}]})).toBeNull()
+    expect(readSnapshot({...base,messages:[{...draft,role:'user'}]})).toBeNull()
+  })
+
   it('opens the native file actions for the originating assistant answer without accepting a file path', () => {
     mount()
     snapshot({ ...base, messages: [

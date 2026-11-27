@@ -184,6 +184,9 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
     private fun ToolCall.s(key:String,default:String="")=arguments[key]?.jsonPrimitive?.content?:default
     private fun ToolCall.i(key:String,default:Int)=arguments[key]?.jsonPrimitive?.int?:default
     fun prepareIntent(call:ToolCall):Intent? {
+        require(call.name != "prepare_email" || com.user.localagent.core.PdfMailAttachments.FIELD !in call.arguments) {
+            "PDF 메일은 파일을 만든 대화에서 준비해 주세요."
+        }
         ToolRegistry.validate(call)
         recipients.consume(call)
         if(call.name=="open_tmap_destination"){
@@ -316,7 +319,10 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                                 call.s("snapshotId"),call.s("ref"))
                             val saved=PublicPdfArtifact.saveBytes(java.io.File(context.filesDir,"exports"),pdf.bytes,
                                 com.user.localagent.web.PublicWebClient.MAX_BYTES,progress,{commit->current();commit()})
-                            PublicPdfArtifact.withBrowserSource(saved,pdf.sourceSha256)
+                            val receipt=PublicPdfArtifact.withBrowserSource(saved,pdf.sourceSha256)
+                            if(pdf.officialKairbCoursePdf && "certificateCourse" in call.arguments)
+                                CertificateReadback.inspect(java.io.File(context.filesDir,"exports"),receipt)
+                            else receipt
                         } else {
                             check(call.arguments["browser"] in setOf(null,JsonPrimitive("phone")))
                             val id=call.s("snapshotId");val ref=call.s("ref")

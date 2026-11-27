@@ -23,6 +23,14 @@ internal class GoalProgressStore(private val store: ConnectionStore) {
         } ?: false
     }
 
+    fun deadline(key:String, goalId:String):String? = synchronized(lock) {
+        store.read("goal.progress.v1.$key")?.let {
+            val ledger=GoalProgressLimits.json.decodeFromString<GoalProgressLedger>(it).validate()
+            check(ledger.goalId==goalId)
+            ledger.deadline
+        }
+    }
+
     fun summary(key: String): String? = synchronized(lock) {
         store.read("goal.progress.v1.$key")?.let {
             GoalProgressLimits.json.decodeFromString<GoalProgressLedger>(it).validate().summary().take(320)
