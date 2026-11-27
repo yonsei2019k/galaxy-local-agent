@@ -7,8 +7,8 @@ on:
 permissions:
   contents: read
 env:
-  # The 0.2.0 candidate uses 2102. Workflow run 53 is the first slot in this train.
-  RELEASE_VERSION_OFFSET: 2049
+  # Run 53 published 2102. Local signed upgrades reserved 2103 through 2106.
+  RELEASE_VERSION_OFFSET: 2053
   RELEASE_TRAIN_START_CODE: 2102
   ZIPHAP_OUTLOOK_CLIENT_ID: ${{ vars.ZIPHAP_OUTLOOK_CLIENT_ID }}
   ZIPHAP_OUTLOOK_TENANT: ${{ vars.ZIPHAP_OUTLOOK_TENANT }}
@@ -89,6 +89,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python scripts/gen-design-tokens.py --check
+          python scripts/gen-icons.py --check
           python scripts/build-react-ui.py --self-test
           node --test scripts/tests/test_app_web_agent.cjs
           python scripts/build-react-ui.py --ci-tests
