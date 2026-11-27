@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.dp
  * 2.0 by renaming the call: callbacks, modifiers, testTags and semantics pass through untouched.
  */
 
-/** Filled secondary action in place of OutlinedButton: sunken fill, no border, radius 16, at least 48dp tall. */
+/** Filled secondary action in place of OutlinedButton: sunken grey pill, no border, at least 48dp tall. */
 @Composable
 fun ZipOutlinedButton(
     onClick: () -> Unit,
@@ -67,7 +67,7 @@ fun ZipOutlinedButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = 48.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(ZipHapTokens.RadiusControl),
+        shape = RoundedCornerShape(ZipHapTokens.RadiusPill),
         colors = ButtonDefaults.buttonColors(
             containerColor = ZipHapColors.SurfaceSunken,
             contentColor = ZipHapColors.TextPrimary,
@@ -80,7 +80,7 @@ fun ZipOutlinedButton(
     )
 }
 
-/** Cobalt filled primary in place of Button (coral when [destructive]): radius 16, at least 48dp tall, no shadow. */
+/** Ink pill primary in place of Button (coral when [destructive]): fully rounded, at least 48dp tall, no shadow. */
 @Composable
 fun ZipFilledButton(
     onClick: () -> Unit,
@@ -94,9 +94,9 @@ fun ZipFilledButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = 48.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(ZipHapTokens.RadiusControl),
+        shape = RoundedCornerShape(ZipHapTokens.RadiusPill),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (destructive) ZipHapColors.Coral else ZipHapColors.Cobalt,
+            containerColor = if (destructive) ZipHapColors.Coral else ZipHapColors.Ink,
             contentColor = Color.White,
             disabledContainerColor = ZipHapTokens.Line,
             disabledContentColor = ZipHapColors.TextFaint,
@@ -221,12 +221,12 @@ fun ZipFilterChip(
             containerColor = ZipHapColors.SurfaceSunken,
             labelColor = ZipHapColors.TextPrimary,
             iconColor = ZipHapColors.TextSecondary,
-            selectedContainerColor = ZipHapColors.CobaltSoft,
-            selectedLabelColor = ZipHapTokens.CobaltText,
-            selectedLeadingIconColor = ZipHapTokens.CobaltText,
-            selectedTrailingIconColor = ZipHapTokens.CobaltText,
+            selectedContainerColor = ZipHapColors.Ink,
+            selectedLabelColor = ZipHapColors.OnInk,
+            selectedLeadingIconColor = ZipHapColors.OnInk,
+            selectedTrailingIconColor = ZipHapColors.OnInk,
             disabledContainerColor = ZipHapColors.SurfaceSunken,
-            disabledSelectedContainerColor = ZipHapColors.CobaltSoft,
+            disabledSelectedContainerColor = ZipHapColors.SoftStrong,
             disabledLabelColor = ZipHapColors.TextFaint,
         ),
         border = null,
@@ -254,7 +254,7 @@ fun ZipAssistChip(
         colors = AssistChipDefaults.assistChipColors(
             containerColor = ZipHapColors.SurfaceSunken,
             labelColor = ZipHapColors.TextPrimary,
-            leadingIconContentColor = ZipHapTokens.CobaltText,
+            leadingIconContentColor = ZipHapColors.TextPrimary,
             trailingIconContentColor = ZipHapColors.TextSecondary,
             disabledContainerColor = ZipHapColors.SurfaceSunken,
             disabledLabelColor = ZipHapColors.TextFaint,

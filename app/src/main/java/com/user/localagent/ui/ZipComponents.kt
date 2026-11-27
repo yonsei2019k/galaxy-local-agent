@@ -146,7 +146,14 @@ fun ZipIllustration(
     Image(painterResource(illustration), contentDescription, modifier)
 }
 
-/** 40dp rounded tile (radius 12) with the tone's soft background and a 22dp duotone icon in the tone color. */
+/**
+ * Tile colors in the monochrome UI (2026-11-27, same rule as the web): a grey tile with an ink icon. Coral keeps its
+ * tint because it means "needs the owner" or a failure; the other tones only named a category.
+ */
+internal fun zipTileColors(tone: ZipTone): Pair<Color, Color> =
+    if (tone == ZipTone.Coral) tone.soft to tone.content else ZipHapColors.Soft to ZipHapColors.TextPrimary
+
+/** 40dp rounded tile (radius 12): grey background and a 22dp duotone ink icon (coral tone keeps its tint). */
 @Composable
 fun ZipIconTile(
     @DrawableRes icon: Int,
@@ -156,11 +163,26 @@ fun ZipIconTile(
     size: Dp = ZipHapTokens.IconTile,
     iconSize: Dp = 22.dp,
 ) {
+    val (background, content) = zipTileColors(tone)
     Box(
-        modifier.size(size).clip(RoundedCornerShape(ZipHapTokens.RadiusTile)).background(tone.soft),
+        modifier.size(size).clip(RoundedCornerShape(ZipHapTokens.RadiusTile)).background(background),
         contentAlignment = Alignment.Center,
     ) {
-        ZipIcon(icon, contentDescription, tint = tone.content, size = iconSize)
+        ZipIcon(icon, contentDescription, tint = content, size = iconSize)
+    }
+}
+
+/**
+ * Security tile for approval, sign-in, payment and vault surfaces: a dark rounded tile holding the metal lock
+ * (`R.drawable.zi_ill_metal_lock`, fixed gradient colors, never tinted). Decorative; the text next to it carries the meaning.
+ */
+@Composable
+fun ZipMetalLockTile(modifier: Modifier = Modifier, size: Dp = 36.dp) {
+    Box(
+        modifier.size(size).clip(RoundedCornerShape(ZipHapTokens.RadiusTile)).background(ZipHapTokens.Night),
+        contentAlignment = Alignment.Center,
+    ) {
+        ZipIllustration(com.user.localagent.runtime.R.drawable.zi_ill_metal_lock, contentDescription = null, modifier = Modifier.size(size * 0.82f))
     }
 }
 
@@ -334,19 +356,19 @@ fun ZipRow(
     ZipRowLayout(title, subtitle, icon, iconTone, enabled, modifier.then(click), trailing, showChevron)
 }
 
-/** Cobalt switch colors; the unchecked track keeps a 3:1 outline so the control stays visible on white. */
+/** Ink switch colors (monochrome); the unchecked track keeps a 3:1 outline so the control stays visible on white. */
 @Composable
 fun zipSwitchColors() = SwitchDefaults.colors(
     checkedThumbColor = Color.White,
-    checkedTrackColor = ZipHapColors.Cobalt,
+    checkedTrackColor = ZipHapColors.Ink,
     checkedBorderColor = Color.Transparent,
-    checkedIconColor = ZipHapColors.Cobalt,
+    checkedIconColor = ZipHapColors.Ink,
     uncheckedThumbColor = ZipHapColors.Outline,
     uncheckedTrackColor = ZipHapColors.SurfaceSunken,
     uncheckedBorderColor = ZipHapColors.Outline,
 )
 
-/** Row with a trailing cobalt switch; the whole row toggles (Role.Switch), so the touch target is the full row. */
+/** Row with a trailing ink switch; the whole row toggles (Role.Switch), so the touch target is the full row. */
 @Composable
 fun ZipSwitchRow(
     title: String,
@@ -379,7 +401,7 @@ private fun ZipButtonContent(text: String, icon: Int?) {
     Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
 }
 
-/** Primary action: cobalt fill (coral when [destructive]), white label, height 52, radius 16. */
+/** Primary action: ink pill (coral when [destructive]), white label, height 52, fully rounded. */
 @Composable
 fun ZipPrimaryButton(
     text: String,
@@ -394,9 +416,9 @@ fun ZipPrimaryButton(
         onClick = onClick,
         modifier = (if (fullWidth) modifier.fillMaxWidth() else modifier).heightIn(min = ZipHapTokens.ControlHeight),
         enabled = enabled,
-        shape = RoundedCornerShape(ZipHapTokens.RadiusControl),
+        shape = RoundedCornerShape(ZipHapTokens.RadiusPill),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (destructive) ZipHapColors.Coral else ZipHapColors.Cobalt,
+            containerColor = if (destructive) ZipHapColors.Coral else ZipHapColors.Ink,
             contentColor = Color.White,
             disabledContainerColor = ZipHapTokens.Line,
             disabledContentColor = ZipHapColors.TextFaint,
@@ -406,7 +428,7 @@ fun ZipPrimaryButton(
     ) { ZipButtonContent(text, icon) }
 }
 
-/** Secondary action: sunken grey fill, no border, dark label, height 52, radius 16. */
+/** Secondary action: sunken grey pill, no border, dark label, height 52. */
 @Composable
 fun ZipSecondaryButton(
     text: String,
@@ -420,7 +442,7 @@ fun ZipSecondaryButton(
         onClick = onClick,
         modifier = (if (fullWidth) modifier.fillMaxWidth() else modifier).heightIn(min = ZipHapTokens.ControlHeight),
         enabled = enabled,
-        shape = RoundedCornerShape(ZipHapTokens.RadiusControl),
+        shape = RoundedCornerShape(ZipHapTokens.RadiusPill),
         colors = ButtonDefaults.buttonColors(
             containerColor = ZipHapColors.SurfaceSunken,
             contentColor = ZipHapColors.TextPrimary,
@@ -432,7 +454,7 @@ fun ZipSecondaryButton(
     ) { ZipButtonContent(text, icon) }
 }
 
-/** Low-emphasis text action in cobalt-text, at least 48dp tall. */
+/** Low-emphasis text action in ink, at least 48dp tall. */
 @Composable
 fun ZipTextButton(
     text: String,
@@ -447,7 +469,7 @@ fun ZipTextButton(
         enabled = enabled,
         shape = RoundedCornerShape(ZipHapTokens.RadiusChip),
         colors = ButtonDefaults.textButtonColors(
-            contentColor = if (destructive) ZipTone.Coral.content else ZipHapTokens.CobaltText,
+            contentColor = if (destructive) ZipTone.Coral.content else ZipHapColors.TextPrimary,
             disabledContentColor = ZipHapColors.TextFaint,
         ),
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
@@ -593,7 +615,7 @@ fun ZipSheet(
 // Empty state
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Empty screen or section: a spot illustration (decorative), display-font title, grey body (omitted when blank) and an optional action. */
+/** Empty screen or section: a spot illustration (decorative), heavy SUIT title, grey body (omitted when blank) and an optional action. */
 @Composable
 fun ZipEmptyState(
     @DrawableRes illustration: Int,
@@ -611,7 +633,7 @@ fun ZipEmptyState(
         Text(
             title,
             Modifier.semantics { heading() },
-            style = MaterialTheme.typography.titleLarge.copy(fontFamily = ZipFonts.display),
+            style = MaterialTheme.typography.headlineSmall.copy(fontSize = MaterialTheme.typography.titleLarge.fontSize, lineHeight = MaterialTheme.typography.titleLarge.lineHeight),
             color = ZipHapColors.TextPrimary,
             textAlign = TextAlign.Center,
         )

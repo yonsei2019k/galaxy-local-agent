@@ -12,8 +12,7 @@ import com.user.localagent.ui.ZipFilledButton
 import com.user.localagent.ui.ZipOutlinedButton
 import com.user.localagent.ui.ZipHapColors
 import com.user.localagent.ui.ZipHapTokens
-import com.user.localagent.ui.ZipIconTile
-import com.user.localagent.ui.ZipTone
+import com.user.localagent.ui.ZipMetalLockTile
 import com.user.localagent.ui.zipShadow
 
 private fun approvalTitle(action:PendingAction):String =
@@ -70,6 +69,7 @@ internal fun ActionApprovalDialog(
 ) {
     AlertDialog(
         onDismissRequest={onDecision(false)},
+        icon={ZipMetalLockTile(size=44.dp)},
         title={Text(approvalTitle(action))},
         text={ApprovalContents(action,review,Modifier.heightIn(max=460.dp))},
         confirmButton={ApprovalConfirm(action,onDecision)},
@@ -87,7 +87,7 @@ internal fun InlineActionApproval(action:PendingAction,review:String,onDecision:
     ) {
         Column(Modifier.fillMaxSize().padding(horizontal=14.dp,vertical=8.dp)) {
             Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-                ZipIconTile(com.user.localagent.runtime.R.drawable.zi_shield,tone=ZipTone.Coral,size=32.dp,iconSize=18.dp)
+                ZipMetalLockTile(size=32.dp)
                 Text(approvalTitle(action),style=MaterialTheme.typography.titleSmall, maxLines=2)
             }
             Spacer(Modifier.height(6.dp))

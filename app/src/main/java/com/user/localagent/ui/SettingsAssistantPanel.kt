@@ -146,7 +146,7 @@ private fun SettingsPortrait(character: CharacterPreference) {
         }
     }
     Box(
-        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.CobaltSoft),
+        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.Soft),
         contentAlignment = Alignment.Center,
     ) {
         bitmap?.let { Image(it, contentDescription = null, modifier = Modifier.size(36.dp)) }
