@@ -79,7 +79,7 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
           <span key={index} className={index === step ? 'is-current' : undefined} />)}</div>
         {step === 1 && <MotionField className="office-guide-art-wrap"><Illustration name="connections" className="office-guide-art art-float" /></MotionField>}
         <div aria-live="polite">
-          {step === 0 && <p>일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
+          {step === 0 && <p>방구석에서 하나하나 챙겨 드리는 비서 집순이예요! 일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
           {step === 1 && <p>일정을 보려면 휴대폰 일정 읽기를 허용해 주세요. Google이나 컴퓨터는 필요할 때 연결해도 돼요.</p>}
           {step === 2 && <p>해볼 일을 고르면 입력창에 문장을 써드릴게요. 고쳐 쓰거나 바로 보내도 돼요. 휴대폰 일정이 연결되지 않았으면 먼저 읽기 권한을 물어볼게요.</p>}
         </div>
