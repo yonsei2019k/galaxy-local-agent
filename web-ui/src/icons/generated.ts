@@ -1,4 +1,4 @@
-// Generated from design/icons.json, design/illustrations.json and design/stickers.json by scripts/gen-icons.py. Do not edit.
+// Generated from design/icons.json, design/illustrations.json, design/stickers.json and design/metal.json by scripts/gen-icons.py. Do not edit.
 
 export interface IconLayers { soft: string; accents: readonly { d: string; color: string }[]; line: string; dots: string }
 export interface IllustrationShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }
@@ -399,3 +399,56 @@ export const STICKERS = {
       { d: "M8.9 10.4 A1.3 0.8 0 1 0 11.5 10.4 A1.3 0.8 0 1 0 8.9 10.4 Z", fill: "#FFFFFF", opacity: 0.8 },
   ] },
 } satisfies Record<string, StickerArt>
+
+export type MetalGradient =
+  | { type: 'linear'; x1: number; y1: number; x2: number; y2: number; stops: readonly (readonly [number, string])[] }
+  | { type: 'radial'; cx: number; cy: number; r: number; stops: readonly (readonly [number, string])[] }
+export interface MetalShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }
+export interface MetalArt { gradients: Readonly<Record<string, MetalGradient>>; shapes: readonly MetalShape[] }
+
+export const METAL = {
+  lock: {
+    gradients: {
+      shackle: { type: 'linear', x1: 0, y1: 22, x2: 0, y2: 80, stops: [[0, "#D8D8DD"], [1, "#6B6B74"]] },
+      body: { type: 'linear', x1: 34, y1: 70, x2: 126, y2: 142, stops: [[0, "#EEEEF1"], [0.4, "#A3A3AC"], [0.65, "#CFCFD5"], [1, "#4B4B53"]] },
+    },
+    shapes: [
+        { d: "M52 74 V56 A28 28 0 0 1 108 56 V74", stroke: "grad:shackle", sw: 12 },
+        { d: "M54 70 H106 A20 20 0 0 1 126 90 V122 A20 20 0 0 1 106 142 H54 A20 20 0 0 1 34 122 V90 A20 20 0 0 1 54 70 Z", fill: "grad:body" },
+        { d: "M44 76 H116 A4 4 0 0 1 120 80 V80 A4 4 0 0 1 116 84 H44 A4 4 0 0 1 40 80 V80 A4 4 0 0 1 44 76 Z", fill: "#FFFFFF", opacity: 0.45 },
+        { d: "M71 104 A9 9 0 1 0 89 104 A9 9 0 1 0 71 104 Z", fill: "#1A1920" },
+        { d: "M76 108 H84 L82 124 H78 Z", fill: "#1A1920" },
+    ],
+  },
+  key: {
+    gradients: {
+      bow: { type: 'linear', x1: 14, y1: 46, x2: 66, y2: 98, stops: [[0, "#F4F4F6"], [0.35, "#9A9AA3"], [0.6, "#D9D9DE"], [1, "#55555D"]] },
+      blade: { type: 'linear', x1: 64, y1: 64, x2: 146, y2: 104, stops: [[0, "#F4F4F6"], [0.35, "#9A9AA3"], [0.6, "#D9D9DE"], [1, "#55555D"]] },
+    },
+    shapes: [
+        { d: "M14 72 A26 26 0 1 0 66 72 A26 26 0 1 0 14 72 Z", fill: "grad:bow" },
+        { d: "M24 66 A8 8 0 1 0 40 66 A8 8 0 1 0 24 66 Z", fill: "#1A1920" },
+        { d: "M64 64 H136 A6 6 0 0 1 142 70 V74 A6 6 0 0 1 136 80 H64 A6 6 0 0 1 58 74 V70 A6 6 0 0 1 64 64 Z", fill: "grad:blade" },
+        { d: "M115 78 H119 A3 3 0 0 1 122 81 V93 A3 3 0 0 1 119 96 H115 A3 3 0 0 1 112 93 V81 A3 3 0 0 1 115 78 Z", fill: "grad:blade" },
+        { d: "M131 78 H133 A3 3 0 0 1 136 81 V88 A3 3 0 0 1 133 91 H131 A3 3 0 0 1 128 88 V81 A3 3 0 0 1 131 78 Z", fill: "grad:blade" },
+        { d: "M63.5 66 H130.5 A1.5 1.5 0 0 1 132 67.5 V67.5 A1.5 1.5 0 0 1 130.5 69 H63.5 A1.5 1.5 0 0 1 62 67.5 V67.5 A1.5 1.5 0 0 1 63.5 66 Z", fill: "#FFFFFF", opacity: 0.6 },
+    ],
+  },
+  switch: {
+    gradients: {
+      trackTop: { type: 'linear', x1: 0, y1: 34, x2: 0, y2: 76, stops: [[0, "#F2F2F5"], [0.5, "#9C9CA5"], [1, "#55555D"]] },
+      trackBottom: { type: 'linear', x1: 0, y1: 88, x2: 0, y2: 130, stops: [[0, "#F2F2F5"], [0.5, "#9C9CA5"], [1, "#55555D"]] },
+      on: { type: 'linear', x1: 0, y1: 40, x2: 0, y2: 70, stops: [[0, "#6C9BFF"], [1, "#2A55C8"]] },
+      knobOn: { type: 'radial', cx: 108, cy: 48, r: 20, stops: [[0, "#FFFFFF"], [0.6, "#B9B9C0"], [1, "#5D5D66"]] },
+      knobOff: { type: 'radial', cx: 40, cy: 102, r: 20, stops: [[0, "#FFFFFF"], [0.6, "#B9B9C0"], [1, "#5D5D66"]] },
+    },
+    shapes: [
+        { d: "M43 34 H117 A21 21 0 0 1 138 55 V55 A21 21 0 0 1 117 76 H43 A21 21 0 0 1 22 55 V55 A21 21 0 0 1 43 34 Z", fill: "grad:trackTop" },
+        { d: "M43 40 H117 A15 15 0 0 1 132 55 V55 A15 15 0 0 1 117 70 H43 A15 15 0 0 1 28 55 V55 A15 15 0 0 1 43 40 Z", fill: "grad:on" },
+        { d: "M96 55 A18 18 0 1 0 132 55 A18 18 0 1 0 96 55 Z", fill: "grad:knobOn" },
+        { d: "M43 88 H117 A21 21 0 0 1 138 109 V109 A21 21 0 0 1 117 130 H43 A21 21 0 0 1 22 109 V109 A21 21 0 0 1 43 88 Z", fill: "grad:trackBottom" },
+        { d: "M43 94 H117 A15 15 0 0 1 132 109 V109 A15 15 0 0 1 117 124 H43 A15 15 0 0 1 28 109 V109 A15 15 0 0 1 43 94 Z", fill: "#2B2A31" },
+        { d: "M28 109 A18 18 0 1 0 64 109 A18 18 0 1 0 28 109 Z", fill: "grad:knobOff" },
+    ],
+  },
+} satisfies Record<string, MetalArt>

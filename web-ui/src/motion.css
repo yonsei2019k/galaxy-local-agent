@@ -90,27 +90,23 @@
    leave the screen pause (data-paused from useVisibleMotion). */
 .character-button { position: relative; }
 .character-thinking { position: absolute; top: -1px; right: -5px; display: flex; gap: 2px; padding: 3px 4px; border-radius: var(--radius-pill); background: var(--color-surface); box-shadow: var(--shadow-float); pointer-events: none; }
-.character-thinking i { width: 4px; height: 4px; border-radius: 50%; background: var(--color-cobalt); }
+.character-thinking i { width: 4px; height: 4px; border-radius: 50%; background: var(--color-ink); }
 .character-burst { position: absolute; inset: 0; pointer-events: none; }
 .character-burst i { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 2px; background: var(--color-sun); opacity: 0; transform: rotate(45deg); }
 .character-burst i:nth-child(2) { background: var(--color-coral); }
 .character-burst i:nth-child(3) { background: var(--color-cobalt); }
 .character-burst i:nth-child(4) { background: var(--color-mint); }
 .character-burst i:nth-child(5) { background: var(--color-lilac); }
-.twinkle { position: absolute; width: 14px; height: 14px; background: var(--color-sun); clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); pointer-events: none; }
-.twinkle--1 { top: 10%; right: 8%; }
-.twinkle--2 { top: 30%; left: 2%; width: 10px; height: 10px; background: #ff8fa8; }
-.twinkle--3 { bottom: 14%; right: 2%; width: 9px; height: 9px; background: #8fc3ff; }
 .skeleton { display: grid; gap: 10px; width: min(100%, 22rem); }
 .skeleton > span { position: relative; display: block; overflow: hidden; height: 14px; border-radius: var(--radius-pill); background: var(--color-surface-sunken); }
 .skeleton > span::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .75), transparent); transform: translateX(-100%); }
-.skeleton .skeleton-bubble { justify-self: end; width: 46%; height: 40px; margin-bottom: 6px; border-radius: var(--radius-card) var(--radius-card) 6px var(--radius-card); background: var(--color-cobalt-soft); }
+.skeleton .skeleton-bubble { justify-self: end; width: 46%; height: 40px; margin-bottom: 6px; border-radius: var(--radius-card) var(--radius-card) 6px var(--radius-card); background: var(--color-soft-strong); }
 .skeleton .skeleton-line { width: 82%; }
 .skeleton .skeleton-line--wide { width: 100%; }
 .skeleton .skeleton-line--short { width: 54%; }
-.voice-avatar { position: relative; isolation: isolate; display: inline-grid; place-items: center; flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--color-sun-soft); }
-.voice-avatar::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--color-cobalt-soft); opacity: 0; z-index: -1; }
-.voice-avatar[data-stage="listening"] { background: var(--color-cobalt-soft); }
+.voice-avatar { position: relative; isolation: isolate; display: inline-grid; place-items: center; flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--color-soft); }
+.voice-avatar::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--color-soft-strong); opacity: 0; z-index: -1; }
+.voice-avatar[data-stage="listening"] { background: var(--color-soft-strong); }
 
 @media (prefers-reduced-motion: no-preference) {
   .character-button[data-mood="answered"] > .character { animation: mood-bounce 700ms var(--ease-spring); }
@@ -130,10 +126,10 @@
   .character-burst i:nth-child(4) { --bx: -22px; --by: 12px; animation-delay: 60ms; }
   .character-burst i:nth-child(5) { --bx: -22px; --by: -16px; animation-delay: 20ms; }
 
-  .mascot-field[data-motion="on"] > .character { animation: mascot-float 5.2s ease-in-out infinite; }
-  .mascot-field[data-motion="on"] > .twinkle { animation: twinkle 2.8s ease-in-out infinite; }
-  .mascot-field[data-motion="on"] > .twinkle--2 { animation-delay: -1s; }
-  .mascot-field[data-motion="on"] > .twinkle--3 { animation-delay: -1.9s; }
+  .room-scene[data-motion="on"] > .room-guest { animation: mascot-float 6.4s ease-in-out infinite; }
+  .room-scene[data-motion="on"] > .room-guest--2 { animation-duration: 5.8s; animation-delay: -1.4s; }
+  .room-scene[data-motion="on"] > .room-guest--3 { animation-duration: 7.8s; animation-delay: -2.6s; }
+  .room-scene[data-motion="on"] > .room-guest--4 { animation-duration: 9s; animation-delay: -3.3s; }
   .art-float { animation: mascot-float 4.8s ease-in-out infinite; }
   [data-paused="true"], [data-paused="true"] * { animation-play-state: paused !important; }
 
@@ -159,7 +155,7 @@
   .character-burst { display: none; }
   /* Safety net: decorative motion stays still even if a rule above slips out of the no-preference gate.
      Focus rings are outlines and never transition, so they are unaffected. */
-  :is(.character, .character *, .character-thinking, .character-thinking i, .twinkle, .art-float, .skeleton > span,
+  :is(.character, .character *, .room-guest, .character-thinking, .character-thinking i, .art-float, .skeleton > span,
       .sheet, .sheet-body, .reply-options button, .sticker-art, .work-card, .work-icon, .work-progress span, .messages > .message,
       .stay-chevron, .stay-actions a, .stay-actions button, .voice-avatar, .office-guide-steps span, .work-history-row),
   .skeleton > span::after, .voice-avatar::after, .sheet::backdrop {
@@ -175,7 +171,6 @@
 @keyframes dot-wave { 0%, 60%, 100% { transform: translateY(0); opacity: .55; } 30% { transform: translateY(-2px); opacity: 1; } }
 @keyframes burst { 0% { opacity: 0; transform: translate(0, 0) rotate(45deg) scale(.4); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--bx), var(--by)) rotate(45deg) scale(1); } }
 @keyframes mascot-float { 50% { transform: translateY(-6px); } }
-@keyframes twinkle { 0%, 100% { opacity: .35; transform: scale(.7) rotate(0deg); } 50% { opacity: 1; transform: scale(1.1) rotate(20deg); } }
 @keyframes shimmer { to { transform: translateX(100%); } }
 @keyframes sheet-content-spring { from { transform: translateY(28px); opacity: .4; } }
 @keyframes pop-in { from { opacity: 0; transform: scale(.85); } }

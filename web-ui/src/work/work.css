@@ -1,13 +1,13 @@
 /* One-line work cards and their detail sheet. State is carried by icon shape + label + tone, never by color alone.
-   Cards are white surfaces with the soft card shadow and a tone icon tile; no borders. */
+   Cards are white surfaces with the soft card shadow and a grey icon tile (monochrome; coral only for review and failure); no borders. */
 .work-card, .work-sheet-head {
   --tone-bg: var(--color-surface-sunken);
   --tone-fg: var(--color-muted);
 }
-.work-card--active { --tone-bg: var(--color-cobalt-soft); --tone-fg: var(--color-cobalt-text); }
-.work-card--waiting { --tone-bg: var(--color-sun-soft); --tone-fg: var(--color-sun-text); }
+.work-card--active { --tone-bg: var(--color-soft); --tone-fg: var(--color-text); }
+.work-card--waiting { --tone-bg: var(--color-soft); --tone-fg: var(--color-text-sub); }
 .work-card--review, .work-card--failed { --tone-bg: var(--color-coral-soft); --tone-fg: var(--color-coral-text); }
-.work-card--complete { --tone-bg: var(--color-mint-soft); --tone-fg: var(--color-mint-text); }
+.work-card--complete { --tone-bg: var(--color-soft); --tone-fg: var(--color-text); }
 
 .work-card {
   position: relative;
@@ -41,8 +41,8 @@
 .work-chevron { width: 18px; height: 18px; color: var(--color-text-faint); }
 .work-duration { white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Running: a thin track under the text, inside the card. */
-.work-progress { position: absolute; inset: auto 18px 5px 62px; height: 3px; border-radius: var(--radius-pill); background: var(--color-cobalt-soft); overflow: hidden; }
-.work-progress span { display: block; width: 28%; height: 100%; background: var(--color-cobalt); border-radius: var(--radius-pill); }
+.work-progress { position: absolute; inset: auto 18px 5px 62px; height: 3px; border-radius: var(--radius-pill); background: var(--color-soft-strong); overflow: hidden; }
+.work-progress span { display: block; width: 28%; height: 100%; background: var(--color-ink); border-radius: var(--radius-pill); }
 
 .work-cards { display: grid; gap: var(--space-2); min-width: 0; margin-top: var(--space-4); }
 
@@ -50,15 +50,15 @@
 .work-sheet .work-sheet-title { margin: 0; color: var(--color-text); font-size: var(--fs-title); font-weight: var(--fw-bold); line-height: var(--lh-tight); letter-spacing: var(--ls-tight); overflow-wrap: anywhere; }
 .work-sheet .work-state { justify-self: start; display: inline-block; margin: 4px 0 0; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--tone-bg); font-size: var(--fs-small); }
 .work-sheet-detail { margin: 0; color: var(--color-text); font-size: var(--fs-body); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
-/* Steps: a quiet dotted timeline; the latest step is cobalt. */
+/* Steps: a quiet dotted timeline; the latest step is ink. */
 .work-steps, .work-evidence { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .work-steps li { position: relative; padding: 2px 0 2px 22px; color: var(--color-text); font-size: var(--fs-body); overflow-wrap: anywhere; }
 .work-steps li::before { content: ""; position: absolute; left: 4px; top: .75em; width: 8px; height: 8px; border-radius: 50%; background: #d9dde7; }
-.work-steps li:last-child::before { background: var(--color-cobalt); box-shadow: 0 0 0 4px var(--color-cobalt-soft); }
+.work-steps li:last-child::before { background: var(--color-ink); box-shadow: 0 0 0 4px var(--color-soft-strong); }
 .work-evidence li { padding: var(--space-3) var(--space-4); border-radius: var(--radius-control); background: var(--color-surface-sunken); }
 .work-evidence .evidence-label { font-size: var(--fs-small); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
 .work-evidence p { margin: 2px 0 0; color: var(--color-text-sub); font-size: var(--fs-small); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
-.work-stop { min-height: var(--control-height); border: 0; border-radius: var(--radius-control); background: var(--color-cobalt-soft); color: var(--color-cobalt-text); font: inherit; font-size: var(--fs-body); font-weight: var(--fw-bold); cursor: pointer; }
+.work-stop { min-height: var(--control-height); border: 0; border-radius: var(--radius-pill); background: var(--color-soft); color: var(--color-text); font: inherit; font-size: var(--fs-body); font-weight: var(--fw-bold); cursor: pointer; }
 .work-stop:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 
 .work-sheet--history { min-height: min(62vh, 520px); }
@@ -95,13 +95,13 @@
   color: var(--color-text); font-size: var(--fs-body); overflow-wrap: anywhere;
 }
 /* Timeline: soft dots on a pale rail drawn as a fill, not a border. */
-.work-timeline li::before { content: ""; position: absolute; left: 4px; top: calc(var(--space-2) + .55em); width: 8px; height: 8px; border-radius: 50%; background: var(--color-cobalt-soft); box-shadow: inset 0 0 0 2px var(--color-cobalt); }
-.work-timeline li + li::after { content: ""; position: absolute; left: 7px; top: -.4em; height: calc(var(--space-2) + .9em); width: 2px; border-radius: 2px; background: var(--color-cobalt-soft); }
+.work-timeline li::before { content: ""; position: absolute; left: 4px; top: calc(var(--space-2) + .55em); width: 8px; height: 8px; border-radius: 50%; background: var(--color-surface); box-shadow: inset 0 0 0 2px var(--color-ink); }
+.work-timeline li + li::after { content: ""; position: absolute; left: 7px; top: -.4em; height: calc(var(--space-2) + .9em); width: 2px; border-radius: 2px; background: var(--color-soft-strong); }
 .work-timeline time { color: var(--color-text-sub); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
 .work-timeline li > :only-child { grid-column: 2; }
 .work-timeline p { margin: 3px 0 0; color: var(--color-text-sub); white-space: pre-wrap; font-size: var(--fs-small); line-height: 1.5; }
 /* Header work line: a real button whose touch area grows past its 16px-tall look so the header stays slim. */
-.header-work { position: relative; display: flex; max-width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--color-cobalt-text); font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-medium); line-height: 16px; text-align: start; cursor: pointer; }
+.header-work { position: relative; display: flex; max-width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--color-text-sub); font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-medium); line-height: 16px; text-align: start; cursor: pointer; }
 .header-work span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-work-time { flex: none; margin-inline-start: 3px; font-variant-numeric: tabular-nums; }
 .header-work::after { content: ""; position: absolute; inset: -14px 0; }

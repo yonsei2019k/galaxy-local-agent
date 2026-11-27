@@ -1,7 +1,7 @@
-/* Stay comparison: one white card, a soft cobalt header, rows split only by an inset --color-divider hairline. */
+/* Stay comparison: one white card, a soft grey header, rows split only by an inset --color-divider hairline. */
 .stay-comparison { margin-block: var(--space-2); border: 0; border-radius: var(--radius-card); overflow: hidden; background: var(--color-surface); box-shadow: var(--shadow-card); }
-.stay-header { padding: var(--space-4) var(--space-4) var(--space-3); background: var(--color-cobalt-soft); }
-.rich-answer .stay-header h3 { margin: 0; color: var(--color-cobalt-text); font-size: var(--fs-subtitle); font-weight: var(--fw-bold); letter-spacing: var(--ls-tight); line-height: var(--lh-tight); }
+.stay-header { padding: var(--space-4) var(--space-4) var(--space-3); background: var(--color-soft); }
+.rich-answer .stay-header h3 { margin: 0; color: var(--color-text); font-size: var(--fs-subtitle); font-weight: var(--fw-bold); letter-spacing: var(--ls-tight); line-height: var(--lh-tight); }
 .rich-answer .stay-name strong { margin: 0; color: var(--color-text); font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: var(--ls-tight); line-height: 1.4; }
 .rich-answer .stay-comparison p { margin: 3px 0 0; }
 .stay-header p, .stay-name span, .stay-facts, .stay-source, .stay-cancellation, .stay-price span { color: var(--color-text-sub); font-size: var(--fs-small); overflow-wrap: anywhere; }
@@ -11,12 +11,12 @@
 .stay-top { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); align-items: center; justify-content: space-between; }
 .stay-name { display: grid; gap: 3px; flex: 1 1 118px; min-width: 0; overflow-wrap: anywhere; }
 .stay-price { display: grid; gap: 2px; text-align: end; margin-inline-start: auto; }
-.stay-price strong { color: var(--color-cobalt-text); font-size: var(--fs-subtitle); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; letter-spacing: var(--ls-tight); }
+.stay-price strong { color: var(--color-text); font-size: var(--fs-subtitle); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; letter-spacing: var(--ls-tight); }
 .stay-facts { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
 .stay-facts span { padding: 4px 10px; border-radius: var(--radius-pill); background: var(--color-surface-sunken); }
 .stay-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
 .stay-actions a, .stay-actions button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--touch-min); padding-inline: var(--space-4); border: 0; border-radius: var(--radius-control); color: var(--color-text); font: inherit; font-size: var(--fs-small); font-weight: var(--fw-bold); text-decoration: none; background: var(--color-surface-sunken); cursor: pointer; }
-.stay-actions button { background: var(--color-cobalt-soft); color: var(--color-cobalt-text); }
+.stay-actions button { background: var(--color-soft); color: var(--color-text); }
 .stay-actions a:focus-visible, .stay-actions button:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 
 .stay-top { cursor: pointer; list-style: none; min-height: var(--touch-min); border-radius: var(--radius-chip); }
@@ -24,7 +24,7 @@
 .stay-top:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 .stay-chevron { width: 18px; height: 18px; color: var(--color-text-faint); }
 .stay-list details[open] .stay-chevron { transform: rotate(180deg); }
-.stay-toggle { position: relative; width: 100%; min-height: var(--row-min-height); border: 0; background: var(--color-surface); color: var(--color-cobalt-text); font: inherit; font-weight: var(--fw-bold); cursor: pointer; }
+.stay-toggle { position: relative; width: 100%; min-height: var(--row-min-height); border: 0; background: var(--color-surface); color: var(--color-text); font: inherit; font-weight: var(--fw-bold); cursor: pointer; }
 .stay-toggle::before { content: ""; position: absolute; inset: 0 var(--space-4) auto; height: 1px; background: var(--color-divider); }
 .stay-toggle:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: -2px; }
 

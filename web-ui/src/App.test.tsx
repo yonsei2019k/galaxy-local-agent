@@ -335,6 +335,37 @@ describe('native conversation', () => {
     expect(requests()).toEqual([])
   })
 
+  it('opens an empty conversation on the room scene with the chosen 집순이 among a few others', () => {
+    mount()
+    snapshot(base)
+    const scene = host.querySelector('.welcome .room-scene')!
+    expect(scene).not.toBeNull()
+    const host집순이 = scene.querySelector('.room-host svg.character')!
+    expect(host집순이.getAttribute('role')).toBe('img')
+    const guests = [...scene.querySelectorAll('.room-guest svg.character')]
+    expect(guests.length).toBeGreaterThanOrEqual(3)
+    expect(guests.length).toBeLessThanOrEqual(4)
+    for (const guest of guests) expect(guest.getAttribute('aria-hidden')).toBe('true')
+    expect(host.querySelector('.welcome h1')?.textContent).toBe('무엇을 도와드릴까요?')
+    // Without calendar access the plain first screen offers no suggestion that would start a permission request.
+    const chips = [...host.querySelectorAll('.room-suggestions button')].map(item => item.textContent)
+    expect(chips).toEqual(['웹에서 정보 찾기', '첨부한 자료 요약'])
+  })
+
+  it('draws the booking payment card dark with a metal lock and unchanged wording', () => {
+    mount()
+    snapshot({ ...base, bookingPayment: { id: 'p1', seller: '예시 숙소', amount: 150_000, state: 'ready' } })
+    const card = host.querySelector('article[aria-label="예약 결제 확인"]')!
+    expect(card.querySelector('svg[data-metal="lock"]')?.getAttribute('aria-hidden')).toBe('true')
+    const ids = [...card.querySelectorAll('svg[data-metal] [id]')].map(element => element.id)
+    expect(ids.length).toBeGreaterThan(0)
+    for (const element of card.querySelectorAll('svg[data-metal] [fill^="url(#"], svg[data-metal] [stroke^="url(#"]')) {
+      const ref = (element.getAttribute('fill')?.startsWith('url(') ? element.getAttribute('fill') : element.getAttribute('stroke'))!.slice(5, -1)
+      expect(ids).toContain(ref)
+    }
+    expect([...card.querySelectorAll('button')].map(item => item.textContent)).toEqual(['공식 결제 앱 열기', '결제 결과 다시 확인'])
+  })
+
   it('requests hydration and rejects malformed or cross-thread native snapshots', () => {
     mount()
     expect(requests()).toEqual([{ version: 1, threadId: '', branchId: '', action: 'ready', payload: {} }])

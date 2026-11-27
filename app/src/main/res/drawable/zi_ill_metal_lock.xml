@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from design/metal.json by scripts/gen-icons.py. Do not edit. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="160dp"
+    android:height="160dp"
+    android:viewportWidth="160"
+    android:viewportHeight="160">
+    <path android:pathData="M52 74 V56 A28 28 0 0 1 108 56 V74" android:strokeWidth="12" android:strokeLineCap="round" android:strokeLineJoin="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:type="linear" android:startX="0" android:startY="22" android:endX="0" android:endY="80">
+                <item android:offset="0" android:color="#FFD8D8DD" />
+                <item android:offset="1" android:color="#FF6B6B74" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M54 70 H106 A20 20 0 0 1 126 90 V122 A20 20 0 0 1 106 142 H54 A20 20 0 0 1 34 122 V90 A20 20 0 0 1 54 70 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="34" android:startY="70" android:endX="126" android:endY="142">
+                <item android:offset="0" android:color="#FFEEEEF1" />
+                <item android:offset="0.4" android:color="#FFA3A3AC" />
+                <item android:offset="0.65" android:color="#FFCFCFD5" />
+                <item android:offset="1" android:color="#FF4B4B53" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M44 76 H116 A4 4 0 0 1 120 80 V80 A4 4 0 0 1 116 84 H44 A4 4 0 0 1 40 80 V80 A4 4 0 0 1 44 76 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.45" />
+    <path android:pathData="M71 104 A9 9 0 1 0 89 104 A9 9 0 1 0 71 104 Z" android:fillColor="#1A1920" />
+    <path android:pathData="M76 108 H84 L82 124 H78 Z" android:fillColor="#1A1920" />
+</vector>

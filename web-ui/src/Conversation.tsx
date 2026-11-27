@@ -11,7 +11,7 @@ import { isLiveTaskPhase } from './composer'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { situationForMood, useCharacterMood } from './character/useCharacterMood'
-import type { CharacterSituation } from './character/characterData'
+import { COLORS, VARIANTS, type CharacterChoice, type CharacterSituation } from './character/characterData'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
 import { websiteWorkFor, workHistory } from './work/workHistory'
@@ -24,6 +24,22 @@ const exampleRequests: { label: string; text: string; icon: IconName; needsCalen
   { label: '웹에서 정보 찾기', text: '이번 주말 서울 날씨를 찾아서 출처와 함께 알려줘.', icon: 'globe' },
   { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', icon: 'file', needsFile: true },
 ]
+
+/**
+ * The other 집순이 in the room scene: different hoods and colors from the owner's choice, so the chosen one stays
+ * the only one in its look. Positions, blur (depth) and float timing live in styles.css (.room-guest--N).
+ */
+function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[] {
+  const colors = COLORS.map(item => item.id).filter(color => color !== host.color)
+  const variants = VARIANTS.map(item => item.id)
+  const start = variants.indexOf(host.variant) + 1
+  const looks: { expr: CharacterChoice['expr']; size: number }[] = [
+    { expr: 'smile', size: 64 }, { expr: 'wink', size: 56 }, { expr: 'sleepy', size: 48 }, { expr: 'surprise', size: 72 },
+  ]
+  return looks.map((look, index) => ({
+    variant: variants[(start + index) % variants.length], color: colors[(index * 2 + 1) % colors.length], ...look,
+  }))
+}
 
 function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
@@ -39,15 +55,25 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
 }) {
   const [character] = useCharacter()
   const [step, setStep] = useState(0)
+  // Suggestions on the plain first screen only draft text; the calendar one appears once reading is already allowed,
+  // so this screen never starts a permission request (the first-run guide keeps that flow).
+  const suggestions = staff || guide ? [] : exampleRequests.filter(example => !example.needsCalendar || calendarGranted)
   return (
     <div className={compact ? "welcome welcome--compact" : "welcome"}>
-      {!compact && <MotionField className="mascot-field">
-        <Character choice={character} situation={situation} size={160} />
-        <span className="twinkle twinkle--1" aria-hidden="true" /><span className="twinkle twinkle--2" aria-hidden="true" />
-        <span className="twinkle twinkle--3" aria-hidden="true" />
+      {!compact && <MotionField className="room-scene">
+        <span className="room-window" aria-hidden="true" /><span className="room-beam" aria-hidden="true" /><span className="room-rug" aria-hidden="true" />
+        {roomCast(character).map((guest, index) =>
+          <span key={index} className={`room-guest room-guest--${index + 1}`} aria-hidden="true">
+            <Character choice={guest} size={guest.size} decorative />
+          </span>)}
+        <span className="room-host"><Character choice={character} situation={situation} size={160} /></span>
       </MotionField>}
       <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+      {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
+        {suggestions.map(example => <button type="button" key={example.label} className="suggestion-chip" disabled={hasDraft}
+          onClick={() => onDraftExample(example.text, example.needsFile)}><Icon name={example.icon} />{example.label}</button>)}
+      </div>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
         <div className="office-guide-steps" aria-hidden="true">{[0, 1, 2].map(index =>
           <span key={index} className={index === step ? 'is-current' : undefined} />)}</div>
