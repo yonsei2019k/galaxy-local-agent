@@ -80,7 +80,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                     "원래 목표 실행 이후 대화·프로젝트 권한 버전이 변경되었습니다. 이전 승인을 확대하지 않았습니다."
                 }
                 check(run.status !in setOf("queued","running","waiting_approval")){"같은 목표의 작업이 아직 대기·진행 중입니다. 먼저 중지하거나 완료해주세요."}
-                GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson)
+                GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson,run.startedAt,run.finishedAt)
             }
             val queuedIds=app.repository.chat.queuedRuns().map {it.id}.toSet()
             check(goal.linkedRunIds.none {it in queuedIds}){"같은 목표의 이어쓰기 요청이 아직 대기 중입니다."}
@@ -102,7 +102,8 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
             val segment=nextSegment?.binding?:checkNotNull(entryBudget).let {budget->GoalSegmentBinding(goal.id,budget.originalGoalVersion,goalWorkDigest(goal),access.scopeKey,
-                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,priorLedger.size,budget.noProgressSegments,budget.totalSegments)}
+                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,priorLedger.size,budget.noProgressSegments,budget.totalSegments,
+                budget.activeElapsedMs)}
             check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())
             val pcBinding=capturedPcDataBinding

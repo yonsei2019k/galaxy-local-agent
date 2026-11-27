@@ -28,7 +28,7 @@ class GoalRestartRecoveryTest {
         checkNotNull(stored)
     }
     private fun row(native:String?,status:String="interrupted",errorCode:String?="process_restarted"):ChatRunRecord {
-        val captured=Json.parseToJsonElement(request.copy(previousSteps=listOf(step)).toJson()).jsonObject
+        val captured=JsonObject(Json.parseToJsonElement(request.copy(previousSteps=listOf(step)).toJson()).jsonObject+("goalActiveMs" to JsonPrimitive(100)))
         val context=native?.let {JsonObject(captured+("sharedEngineState" to Json.parseToJsonElement(it)))}?:captured
         return ChatRunRecord(id=request.runId,threadId=request.threadId,branchId=request.branchId,userMessageId=request.userMessageId,
             projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=context.toString(),errorCode=errorCode)

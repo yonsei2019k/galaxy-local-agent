@@ -65,7 +65,8 @@ data class QueuedChatRequest(
         goalSegment?.let {put("goalSegment",it.json());put("goalLedger",buildJsonArray {goalLedger.forEach {entry->add(entry.json())}})}
     }.toString()
     companion object {
-        fun fromJson(text:String):QueuedChatRequest {
+        /** nowMs only bounds the conservative active-time read of a legacy goal binding. */
+        fun fromJson(text:String,nowMs:Long=System.currentTimeMillis()):QueuedChatRequest {
             val o=Json.parseToJsonElement(text).jsonObject
             require(o.getValue("version").jsonPrimitive.int==1)
             fun s(k:String)=o.getValue(k).jsonPrimitive.content
@@ -85,7 +86,7 @@ data class QueuedChatRequest(
                 o["readbackObligations"]?.let(ChatReadbackObligationCodec::decode),
                 o["allowExternalAgent"]?.let{require(it is JsonPrimitive&&!it.isString);it.boolean}?:false,
                 o["externalAgentRevision"]?.takeUnless{it is JsonNull}?.let{require(it is JsonPrimitive&&!it.isString);it.long},
-                o["goalSegment"]?.let {GoalSegmentBinding.parse(it.jsonObject)},
+                o["goalSegment"]?.let {GoalSegmentBinding.parse(it.jsonObject,nowMs)},
                 o["goalLedger"]?.let {value->require(value.jsonArray.size<=GoalSegmentBinding.MAX_TOOL_CALLS);value.jsonArray.map {GoalLedgerEntry.parse(it.jsonObject)}}?:emptyList())
         }
     }

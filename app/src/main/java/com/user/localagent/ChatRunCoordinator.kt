@@ -163,6 +163,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private var requestAutopilotPauseReason:GoalAutopilotPauseReason?=null
     private var goalCleanupHold:java.io.Closeable?=null
     private var localGoalEffects:GoalEffectRecorder?=null
+    private var goalActiveClock:GoalActiveClock?=null
+    /** Owner decision waits are not goal active time. */
+    private suspend fun <T> outsideGoalActiveTime(block:suspend()->T):T=goalActiveClock?.excluding(block)?:block()
     private val workerObservers=mutableMapOf<String,Job>()
     val activeExecutions=MutableStateFlow<List<ActiveChatExecution>>(emptyList())
     val hasActiveRuns=MutableStateFlow(false)
@@ -912,6 +915,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             app.cancelIdleUnload()
             busy.value=true
             requestCleanupSucceeded=false;requestTaskGoalForLedger=null;requestAutopilotPauseReason=null
+            // Queue waits before this point are not active time; a resumed row keeps the time it already recorded.
+            goalActiveClock=request.goalSegment?.let {
+                val stored=app.repository.chat.run(request.runId)?.contextJson.orEmpty()
+                val recorded=runCatching {Json.parseToJsonElement(stored).jsonObject.containsKey("goalActiveMs")}.getOrDefault(false)
+                GoalActiveClock(baselineMs=if(recorded)goalRunActiveMs(stored,null,null)else 0L)
+            }
             requestSteps.clear();requestSteps.addAll(request.previousSteps);observedOutcomes.clear()
             requestReadbackObligations=request.readbackObligations
             requestDirectSelectedTools=emptySet()
@@ -1709,7 +1718,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }}.toMap()
         requestReadbackObligations=com.user.localagent.core.RequiredReadbackObligations.capture(selected,context,requestSteps,evidence.mutations,evidence.reads,evidence.aligned,signatures)
         val updated=stored.copy(previousSteps=requestSteps.toList(),readbackObligations=requestReadbackObligations)
-        val merged=JsonObject(original+Json.parseToJsonElement(updated.toJson()).jsonObject)
+        // Run-context key, not request state: the next segment charges this host-measured active time once.
+        val active=goalActiveClock?.takeIf {request.goalSegment!=null}?.let {mapOf("goalActiveMs" to JsonPrimitive(it.activeMs()))}.orEmpty()
+        val merged=JsonObject(original+Json.parseToJsonElement(updated.toJson()).jsonObject+active)
         app.repository.chat.updateRunContext(run.id,merged.toString())
     }
     private var requestFeedbackGeneration:Long?=null
@@ -2020,7 +2031,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     requestDirectSelectedTools=emptySet()
                     clearHostActionPhase()
                     if(pendingGoalStopRunId==request.runId)pendingGoalStopRunId=null
-                    runCatching {localGoalEffects?.close()};localGoalEffects=null
+                    runCatching {localGoalEffects?.close()};localGoalEffects=null;goalActiveClock=null
                     workTraceSession=null
                     requestGuidance.clear();contextCalls.clear();omittedGuidance.clear()
                     completedSteps[request.runId]=requestSteps.toList()
@@ -2563,7 +2574,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             reviewText="여러 연락처 중 수신자를 선택해주세요. 선택 전에는 문자 앱을 열지 않습니다.\n문자 내용:\n"+call.arguments.getValue("message").jsonPrimitive.content,recipientChoices=choices)
         check(approval.value==null)
         approval.value=action;status.value="문자 수신자 선택 대기"
-        val accepted=try{decision.await()}finally{if(approval.value===action)approval.value=null}
+        val accepted=try{outsideGoalActiveTime{decision.await()}}finally{if(approval.value===action)approval.value=null}
         if(!accepted)throw CancellationException("사용자가 수신자 선택을 취소했습니다.")
         currentCoroutineContext().ensureActive()
         check(app.repository.chat.run(request.runId)?.let{it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true)
@@ -2610,12 +2621,17 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         requestTaskGoalForLedger=goal
         return runTool(call)
     }
+    /** Carried active time of earlier segments plus this segment's monotonic active time; a missing clock charges the whole limit. */
+    private fun goalActiveElapsedMs(request:QueuedChatRequest):Long {
+        val segment=request.goalSegment?:return 0
+        val current=goalActiveClock?.activeMs()?:GoalSegmentBinding.MAX_DURATION_MS
+        return minOf(GoalSegmentBinding.MAX_DURATION_MS,segment.activeElapsedMs+current)
+    }
     private fun goalBudgetReason(request:QueuedChatRequest):GoalAutopilotPauseReason? {
         val segment=request.goalSegment?:return null
-        val now=System.currentTimeMillis()
         return when {
             segment.consumedToolCalls+requestSteps.size>=GoalSegmentBinding.MAX_TOOL_CALLS->GoalAutopilotPauseReason.TOOL_BUDGET
-            now<segment.startedAtMs||now-segment.startedAtMs>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
+            goalActiveElapsedMs(request)>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
             else->requestAutopilotPauseReason
         }
     }
@@ -2623,7 +2639,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val segment=request.goalSegment?:return true
         if(request.continuation!=null)return true
         if(pauseGoalBudgetIfExhausted(request))return false
-        val remaining=(GoalSegmentBinding.MAX_DURATION_MS-(System.currentTimeMillis()-segment.startedAtMs)).coerceIn(1L,GoalSegmentBinding.MAX_DURATION_MS)
+        val remaining=(GoalSegmentBinding.MAX_DURATION_MS-goalActiveElapsedMs(request)).coerceIn(1L,GoalSegmentBinding.MAX_DURATION_MS)
         val deadline=Math.addExact(android.os.SystemClock.elapsedRealtime(),remaining)
         goalCleanupHold=com.user.localagent.voice.AgentRunService.holdForCleanup(request.runId,deadline)
         if(goalCleanupHold!=null)return true
@@ -2677,7 +2693,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val deferred=CompletableDeferred<Boolean>()
             val request=checkNotNull(activeRequest)
             val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId,reviewText=targetReview);approval.value=action
-            val allowed=try { deferred.await() } finally { approval.value=null }
+            val allowed=try { outsideGoalActiveTime{deferred.await()} } finally { approval.value=null }
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
             noteOwnerAccepted=call.name=="patch_note"

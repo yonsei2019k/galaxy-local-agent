@@ -18,12 +18,11 @@ pub enum NativeGoalBudgetStop {
 pub fn native_goal_budget_stop(
     segments: u32,
     tool_calls: u32,
-    started_ms: u64,
-    now_ms: u64,
+    active_elapsed_ms: u64,
     no_progress: u32,
 ) -> Option<NativeGoalBudgetStop> {
     use ziphap_core::GoalBudgetStop::*;
-    ziphap_core::goal_budget_stop(segments, tool_calls, started_ms, now_ms, no_progress).map(|stop| match stop {
+    ziphap_core::goal_budget_stop(segments, tool_calls, active_elapsed_ms, no_progress).map(|stop| match stop {
         Segments => NativeGoalBudgetStop::Segments,
         Tools => NativeGoalBudgetStop::Tools,
         Time => NativeGoalBudgetStop::Time,

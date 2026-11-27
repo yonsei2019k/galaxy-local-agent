@@ -22,7 +22,7 @@ class LocalGoalJournalContinuityTest {
     private fun recorder(store:Store,binding:String=goalJournalBinding(request,"scope").toString(),journal:GoalExecutionJournal=FakeGoalExecutionJournal(goalJournalBinding(request,"scope").toString()))=
         GoalEffectRecorder(journal,{binding},{store.checkpoint=it})
     private fun row(store:Store,status:String,steps:List<HarnessStep>):ChatRunRecord {
-        val captured=Json.parseToJsonElement(request.copy(previousSteps=steps).toJson()).jsonObject
+        val captured=JsonObject(Json.parseToJsonElement(request.copy(previousSteps=steps).toJson()).jsonObject+("goalActiveMs" to JsonPrimitive(100)))
         val context=store.checkpoint?.let {JsonObject(captured+("sharedEngineState" to Json.parseToJsonElement(it)))}?:captured
         return ChatRunRecord(id=request.runId,threadId=request.threadId,branchId=request.branchId,userMessageId=request.userMessageId,
             projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=context.toString())

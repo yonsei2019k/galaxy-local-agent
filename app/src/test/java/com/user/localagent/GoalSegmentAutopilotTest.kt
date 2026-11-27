@@ -20,11 +20,15 @@ class GoalSegmentAutopilotTest {
         QueuedChatRequest("run-a","thread","branch","project","QA request","cloud-model",false,emptyList(),"user-a",
             previousSteps=steps,workspaceBinding="workspace",goal=goal((listOf("run-a")+ledger.map {it.sourceRunId}).distinct()),capturedPcRevision=5,allowExternalAgent=true,externalAgentRevision=7,
             goalSegment=binding,goalLedger=ledger)
-    private fun row(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted")=
+    /** active=null models a run written before segment active time was recorded. */
+    private fun context(request:QueuedChatRequest,active:Long?)=active?.let {JsonObject(Json.parseToJsonElement(request.toJson()).jsonObject+("goalActiveMs" to JsonPrimitive(it))).toString()}?:request.toJson()
+    private fun row(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted",active:Long?=100,
+        startedAt:Long?=null,finishedAt:Long?=null)=
         ChatRunRecord(id=request.runId,threadId=request.threadId,branchId=request.branchId,userMessageId=request.userMessageId,
-            projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=request.toJson(),errorCode=errorCode)
+            projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=context(request,active),errorCode=errorCode,
+            startedAt=startedAt,finishedAt=finishedAt)
     private fun decide(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted",now:Long=started+100,
-        unknown:Boolean=false,goal:GoalDefinition=checkNotNull(request.goal))=goalSegmentDecision(row(request,status,errorCode),goal,"scope",now,unknown)
+        unknown:Boolean=false,goal:GoalDefinition=checkNotNull(request.goal),active:Long?=100)=goalSegmentDecision(row(request,status,errorCode,active),goal,"scope",now,unknown)
     private fun pause(expected:GoalAutopilotPauseReason,actual:GoalSegmentDecision)=assertEquals(GoalSegmentDecision.Pause(expected),actual)
     private fun child(parent:QueuedChatRequest,next:GoalSegmentDecision.Continue)=parent.copy(runId="run-b",userMessageId="user-b",
         previousSteps=emptyList(),goal=goal(listOf("run-a","run-b")),goalSegment=next.binding,goalLedger=next.ledger)
@@ -36,7 +40,7 @@ class GoalSegmentAutopilotTest {
         assertTrue(child.previousSteps.isEmpty());assertEquals(18,child.goalLedger.size)
         assertEquals(18,next.binding.consumedToolCalls);assertEquals(2,next.binding.segmentIndex)
         assertEquals(10L,next.binding.originalGoalVersion);assertEquals("run-a",next.binding.rootRunId)
-        assertEquals(goalDigest(parent.toJson()),next.binding.parentCheckpointDigest)
+        assertEquals(goalDigest(row(parent).contextJson),next.binding.parentCheckpointDigest)
         assertEquals((0..17).toList(),child.goalLedger.map {it.stepIndex})
         assertEquals(child.toJson(),QueuedChatRequest.fromJson(child.toJson()).toJson())
         assertEquals(child,QueuedChatRequest.fromJson(child.toJson()))
@@ -76,9 +80,45 @@ class GoalSegmentAutopilotTest {
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {
         val eighth=segment().copy(rootRunId="root-run",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
         pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(binding=eighth)))
-        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(now=started+GoalSegmentBinding.MAX_DURATION_MS))
-        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(now=started-1))
+        val spent=segment().copy(activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-100)
+        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(request(binding=spent),active=100))
+        assertTrue(decide(request(binding=spent),active=99) is GoalSegmentDecision.Continue)
         assertEquals(GoalStatus.ACTIVE,goal().status)
+    }
+    @Test fun thirtyMinutesCountActiveSegmentTimeNotWallClockGapsOrClockSteps() {
+        val binding=segment().copy(activeElapsedMs=120_000)
+        for(now in listOf(started-1,started+10*GoalSegmentBinding.MAX_DURATION_MS)) {
+            val next=decide(request(binding=binding),now=now,active=60_000) as GoalSegmentDecision.Continue
+            assertEquals(180_000L,next.binding.activeElapsedMs)
+        }
+    }
+    @Test fun aParentWithoutRecordedActiveTimeIsChargedItsWallSpanOrTheWholeRemainder() {
+        val parent=request(binding=segment().copy(activeElapsedMs=1_000))
+        val spanned=goalSegmentDecision(row(parent,active=null,startedAt=50_000,finishedAt=55_000),checkNotNull(parent.goal),"scope",started+100,false) as GoalSegmentDecision.Continue
+        assertEquals(6_000L,spanned.binding.activeElapsedMs)
+        pause(GoalAutopilotPauseReason.TIME_BUDGET,goalSegmentDecision(row(parent,active=null),checkNotNull(parent.goal),"scope",started+100,false))
+        for(bad in listOf(-1L,GoalSegmentBinding.MAX_DURATION_MS+1))
+            pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(parent,active=bad))
+    }
+    @Test fun aLegacyBindingWithoutActiveTimeIsReadConservativelyAndNeverRenewed() {
+        val encoded=Json.parseToJsonElement(request().toJson()).jsonObject
+        val legacy=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-"activeElapsedMs"))).toString()
+        assertEquals(1_000L,QueuedChatRequest.fromJson(legacy,started+1_000).goalSegment!!.activeElapsedMs)
+        assertEquals(GoalSegmentBinding.MAX_DURATION_MS,QueuedChatRequest.fromJson(legacy,started+5*GoalSegmentBinding.MAX_DURATION_MS).goalSegment!!.activeElapsedMs)
+        assertEquals(0L,QueuedChatRequest.fromJson(legacy,started-5).goalSegment!!.activeElapsedMs)
+        val negative=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject+("activeElapsedMs" to JsonPrimitive(-1))))).toString()
+        assertTrue(runCatching {QueuedChatRequest.fromJson(negative)}.isFailure)
+        val plain=request()
+        assertEquals(plain.toJson(),QueuedChatRequest.fromJson(context(plain,100)).toJson()) // The run-context key is not request state.
+    }
+    @Test fun runtimeTimeBudgetUsesTheCarriedActiveTimePlusTheCurrentSegment() {
+        val segment=segment().copy(activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-1_000)
+        assertNull(goalBudgetStop(segment,0,segment.activeElapsedMs+999,0,false))
+        assertEquals(GoalAutopilotPauseReason.TIME_BUDGET,goalBudgetStop(segment,0,segment.activeElapsedMs+1_000,0,false))
+        var now=0L;val clock=GoalActiveClock({now},baselineMs=500)
+        now=10_000;assertEquals(10_500L,clock.activeMs())
+        kotlinx.coroutines.runBlocking {clock.excluding {now=70_000}} // Owner approval wait is not active time.
+        now=71_000;assertEquals(11_500L,clock.activeMs())
     }
     @Test fun cumulativeToolBudgetIncludesAllEarlierSegmentsAndCurrentAttempts() {
         val history=(0 until 126).map {GoalLedgerEntry("past-${it/18}",it%18,step("old-$it"))}
@@ -173,14 +213,18 @@ class GoalSegmentAutopilotTest {
     }
     @Test fun explicitResumeAndSteeringCannotRenewTheOriginalGoalBudget() {
         val parent=request(binding=segment().copy(totalSegments=7))
-        val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",parent.toJson())
-        val budget=goalEntryBudget(goal(),listOf(source),started+100)
+        val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
+        val budget=goalEntryBudget(goal(),listOf(source),started+10*GoalSegmentBinding.MAX_DURATION_MS)
         assertEquals(started,budget.startedAtMs);assertEquals(8,budget.totalSegments);assertEquals(10L,budget.originalGoalVersion)
-        val eighth=source.copy(contextJson=parent.copy(goalSegment=parent.goalSegment!!.copy(totalSegments=8)).toJson())
+        assertEquals(100L,budget.activeElapsedMs)
+        val eighth=source.copy(contextJson=context(parent.copy(goalSegment=parent.goalSegment!!.copy(totalSegments=8)),100))
         val segmentError=runCatching {goalEntryBudget(goal(),listOf(eighth),started+100)}.exceptionOrNull() as GoalAutopilotPaused
         assertEquals(GoalAutopilotPauseReason.SEGMENT_BUDGET,segmentError.reason)
-        val timeError=runCatching {goalEntryBudget(goal(),listOf(source),started+GoalSegmentBinding.MAX_DURATION_MS)}.exceptionOrNull() as GoalAutopilotPaused
+        val spent=source.copy(contextJson=context(parent,GoalSegmentBinding.MAX_DURATION_MS))
+        val timeError=runCatching {goalEntryBudget(goal(),listOf(spent),started+100)}.exceptionOrNull() as GoalAutopilotPaused
         assertEquals(GoalAutopilotPauseReason.TIME_BUDGET,timeError.reason)
+        val unrecorded=runCatching {goalEntryBudget(goal(),listOf(source.copy(contextJson=parent.toJson())),started+100)}.exceptionOrNull() as GoalAutopilotPaused
+        assertEquals(GoalAutopilotPauseReason.TIME_BUDGET,unrecorded.reason)
     }
     @Test fun liveCurrentCallsCannotPassTheCumulative144BoundaryOfAnImmutableQueuedRequest() {
         val history=(0 until 143).map {GoalLedgerEntry("past-${it/18}",it%18,step("past-$it"))}

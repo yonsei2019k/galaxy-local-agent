@@ -103,7 +103,8 @@ internal fun requireGoalLedgerAllowsCall(request:QueuedChatRequest,taskGoal:Task
 }
 
 /** Host Room run metadata and its encrypted context, never a user message or imported document. */
-internal data class GoalRunEvidenceSource(val runId:String,val threadId:String,val projectId:String?,val status:String,val contextJson:String)
+internal data class GoalRunEvidenceSource(val runId:String,val threadId:String,val projectId:String?,val status:String,val contextJson:String,
+    val startedAt:Long?=null,val finishedAt:Long?=null)
 
 internal fun sameGoalWork(left:GoalDefinition,right:GoalDefinition):Boolean =
     left.id==right.id&&left.threadId==right.threadId&&left.projectId==right.projectId&&
