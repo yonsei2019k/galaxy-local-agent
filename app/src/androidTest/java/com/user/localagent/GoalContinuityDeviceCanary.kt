@@ -1,5 +1,7 @@
 package com.user.localagent
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Process
 import android.os.SystemClock
 import androidx.room.Room
@@ -12,9 +14,15 @@ import com.user.localagent.data.LocalDatabase
 import com.user.localagent.data.LocalRepository
 import com.user.localagent.data.ProjectSettings
 import com.user.localagent.engine.RustExecutionJournal
+import com.user.localagent.workspace.ProjectWorkspace
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import org.junit.Assert.*
@@ -37,7 +45,43 @@ class GoalContinuityDeviceCanary {
     }
     private val databaseName get() = "c090-goal-$token.db"
     private val marker get() = File(context.noBackupFilesDir, "c090-goal-$token.marker")
+    private val root get() = File(context.noBackupFilesDir, "c090-goal-$token")
+    private val prefPrefix get() = "c090-$token-"
+    private val fixturePreferences get() = File(root, "used-prefs")
+    private val preferenceLock = Any()
+    private val openedPreferences = mutableSetOf<String>()
     private fun processIdentity() = "${Process.myPid()}:${Process.getStartUptimeMillis()}"
+
+    private fun fixtureContext() = object : ContextWrapper(context) {
+        private fun directory(name: String) = File(root, name).apply { check(isDirectory || mkdirs()) }
+        override fun getApplicationContext(): Context = this
+        override fun getFilesDir() = directory("files")
+        override fun getCacheDir() = directory("cache")
+        override fun getNoBackupFilesDir() = directory("no-backup")
+        override fun getExternalFilesDir(type: String?) = directory("external")
+        override fun getSharedPreferences(name: String, mode: Int): android.content.SharedPreferences {
+            require(name.matches(Regex("[A-Za-z0-9._-]{1,256}")))
+            synchronized(preferenceLock) {
+                if (openedPreferences.add(name)) {
+                    check(root.isDirectory || root.mkdirs())
+                    fixturePreferences.appendText("$name\n")
+                }
+            }
+            return baseContext.getSharedPreferences(prefPrefix + name, mode)
+        }
+    }
+
+    private fun cleanFixture() {
+        require(marker.isFile)
+        if (context.getDatabasePath(databaseName).exists()) assertTrue(context.deleteDatabase(databaseName))
+        if (fixturePreferences.isFile) for (name in fixturePreferences.readLines().distinct()) {
+            require(name.matches(Regex("[A-Za-z0-9._-]{1,256}")))
+            context.deleteSharedPreferences(prefPrefix + name)
+        }
+        check(root.canonicalFile.parentFile == context.noBackupFilesDir.canonicalFile)
+        if (root.exists()) assertTrue(root.deleteRecursively())
+        assertTrue(marker.delete())
+    }
 
     private fun openFixture(): LocalDatabase {
         System.loadLibrary("sqlcipher")
@@ -63,7 +107,8 @@ class GoalContinuityDeviceCanary {
     }
 
     private suspend fun seedParent(repo: LocalRepository, kind: String) {
-        val project = repo.chat.createProject("Synthetic $kind", ProjectSettings(useOwnerMemory = false))
+        val project = repo.chat.createProject("Synthetic $kind", ProjectSettings(useOwnerMemory = false,
+            disabledTools = ToolRegistry.definitions.keys - "read_note"))
         val room = repo.chat.createThread(project.id, "Synthetic $kind")
         val access = repo.chat.accessScope(room.id)
         val user = repo.chat.addMessage(room.id, room.activeBranchId, "user", "Read the synthetic fixture note")
@@ -78,7 +123,8 @@ class GoalContinuityDeviceCanary {
         val scoped = repo.forThread(room.id)
         val note = scoped.saveNote("C090 synthetic note", "Scoped test data")
         var request = QueuedChatRequest(run.id, room.id, room.activeBranchId, project.id, user.text, run.modelId,
-            false, emptyList(), user.id, goal = goal, goalSegment = segment)
+            false, emptyList(), user.id, goal = goal, goalSegment = segment,
+            workspaceBinding = ProjectWorkspace(fixtureContext(), project.workspaceKey).bindingFingerprint())
         repo.chat.updateRunContext(run.id, request.toJson())
         repo.chat.startRun(run.id)
         val clock = GoalActiveClock()
@@ -108,19 +154,30 @@ class GoalContinuityDeviceCanary {
         val db = openFixture()
         try {
             val repo = LocalRepository(db)
-            assertEquals(2, repo.chat.recoverInterruptedRuns())
+            val resolvedRow = checkNotNull(repo.chat.run("c090-resolved"))
+            val unknownRow = checkNotNull(repo.chat.run("c090-inflight"))
+            assertEquals("running", resolvedRow.status)
+            assertEquals("running", unknownRow.status)
+            val originalGoals = listOf(resolvedRow, unknownRow).associate { row ->
+                row.id to checkNotNull(ChatGoalStore(repo).load(row.threadId))
+            }
+            val selected = dispatchRecoveredChild(repo)
             for (kind in listOf("resolved", "inflight")) {
                 val row = checkNotNull(repo.chat.run("c090-$kind"))
                 assertEquals("interrupted", row.status)
-                assertEquals("process_restarted", row.errorCode)
+                assertEquals(if (kind == "resolved") "process_restarted" else GoalAutopilotPauseReason.UNKNOWN_EFFECT.code, row.errorCode)
                 val access = repo.chat.accessScope(row.threadId)
-                val goal = checkNotNull(ChatGoalStore(repo).loadGuarded(access))
+                val goal = originalGoals.getValue(row.id)
                 val unknown = goalRunEffectsUnresolved(row, access.scopeKey)
                 val now = System.currentTimeMillis()
                 val decision = goalRestartDecision(row, goal, access.scopeKey, now, unknown, true)
                 if (kind == "inflight") {
                     assertTrue(unknown)
                     assertEquals(GoalSegmentDecision.Pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT), decision)
+                    val saved = checkNotNull(ChatGoalStore(repo).loadGuarded(access))
+                    assertEquals(GoalStatus.PAUSED, saved.status)
+                    assertEquals(listOf(row.id), saved.linkedRunIds)
+                    assertEquals(1, repo.chat.runsForThread(row.threadId).size)
                 } else {
                     assertFalse(unknown)
                     val next = decision as GoalSegmentDecision.Continue
@@ -128,26 +185,51 @@ class GoalContinuityDeviceCanary {
                     assertEquals(2, next.binding.segmentIndex)
                     assertEquals("read_note", next.ledger.single().step.tool)
                     assertEquals(goalRunActiveMs(row.contextJson, row.startedAt, row.finishedAt), next.binding.activeElapsedMs)
-                    val original = QueuedChatRequest.fromJson(row.contextJson)
-                    val child = original.copy(runId = "c090-child", userMessageId = "c090-child-user",
-                        previousSteps = emptyList(), goal = goal.copy(linkedRunIds = goal.linkedRunIds + "c090-child"),
-                        goalSegment = next.binding, goalLedger = next.ledger)
-                    requireGoalLaunchBinding(child, child.goal, row, false, now, true)
+                    assertEquals(next.binding, selected.goalSegment)
+                    val child = checkNotNull(repo.chat.run(selected.runId))
+                    assertNotNull(child.startedAt)
+                    assertEquals("EXECUTION_INITIALIZATION_FAILED", child.errorCode)
+                    assertEquals(row.threadId, child.threadId)
+                    assertEquals(listOf(row.id, selected.runId), checkNotNull(ChatGoalStore(repo).loadGuarded(access)).linkedRunIds)
+                    assertFalse(selected.allowCloudText || selected.allowExternalAgent)
+                    requireGoalLaunchBinding(selected, selected.goal, row, false, now, true)
                 }
             }
             assertEquals(0, repo.chat.recoverInterruptedRuns())
         } finally {
             db.close()
         }
-        assertTrue(context.deleteDatabase(databaseName))
-        assertTrue(marker.delete())
+        cleanFixture()
+    }
+
+    /** Let normal startup recover rows, link the new run, commit it and start it. Stop at engine admission. */
+    private suspend fun dispatchRecoveredChild(repo: LocalRepository): QueuedChatRequest {
+        val isolated = fixtureContext()
+        val app = AppContainer(isolated, repositoryOverride = repo, assistantWorkEnabled = false)
+        val selected = CompletableDeferred<QueuedChatRequest>()
+        val coordinator = withContext(Dispatchers.Main) {
+            ChatRunCoordinator(isolated, app, workerEngineFactory = { request ->
+                check(request.goalSegment?.parentRunId == "c090-resolved")
+                check(selected.complete(request))
+                error("Synthetic test stops before choosing any model")
+            }, contactLookup = { _, _ -> error("Unexpected contact lookup") },
+                externalIntentLauncher = { error("Unexpected external launch") })
+        }
+        try {
+            return withTimeout(30_000) {
+                val child = selected.await()
+                while (repo.chat.run(child.runId)?.errorCode != "EXECUTION_INITIALIZATION_FAILED") delay(25)
+                child
+            }
+        } finally {
+            coordinator.scope.coroutineContext[Job]?.cancelAndJoin()
+            app.cancelIdleUnload()
+        }
     }
 
     /** Explicit cleanup after a failed run is limited to the supplied synthetic fixture UUID. */
     @Test fun discardSyntheticFixture() {
-        require(marker.isFile) { "Synthetic fixture marker missing" }
-        if (context.getDatabasePath(databaseName).exists()) assertTrue(context.deleteDatabase(databaseName))
-        assertTrue(marker.delete())
+        cleanFixture()
     }
 
     /** The full run spends 30 real minutes monitoring only a fixed synthetic in-memory condition. */
