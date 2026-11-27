@@ -48,7 +48,8 @@ class GoalTransientRetryTest {
             assertEquals(segment().budgetWindow,continued.binding.budgetWindow)
             assertEquals(0,continued.binding.noProgressSegments)
             pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide("paused",code,2,true,listOf(failed)))
-            pause(GoalAutopilotPauseReason.OWNER_HANDOFF,decide("paused",code,2,steps=listOf(failed.copy(evidence=failed.evidence.copy(summary="OWNER_LOGIN_PAGE_CHANGED")))))
+            val needsOwner=HarnessStep(tool,args,failed.evidence.copy(summary="OWNER_LOGIN_PAGE_CHANGED"))
+            pause(GoalAutopilotPauseReason.OWNER_HANDOFF,decide("paused",code,2,steps=listOf(needsOwner)))
         }
         assertEquals(3_600_000L,goalTransientRetryDelayMs(3))
         assertTrue(decide("paused","planning_pc_unavailable",2,steps=emptyList()) is GoalSegmentDecision.Continue)
@@ -58,6 +59,35 @@ class GoalTransientRetryTest {
         assertFalse(goalRetryableBrowserRead(read.copy(id="other"),timeout))
         assertFalse(goalRetryableBrowserRead(read.copy(name=PcBrowserToolCatalog.ACTION),timeout))
         assertFalse(goalRetryableBrowserRead(read,timeout.copy(verificationSummary="OWNER_LOGIN_PAGE_CHANGED")))
+    }
+
+    @Test fun unchangedReadOnlyResearchGetsADelayedReplanButOwnerAndWriteStepsDoNot() {
+        val r=request().copy(goalSegment=segment().copy(noProgressSegments=2))
+        fun row(q:QueuedChatRequest,code:String)=ChatRunRecord(id=q.runId,threadId=q.threadId,branchId=q.branchId,
+            userMessageId=q.userMessageId,projectId=q.projectId,modelId=q.modelId,thinking=q.thinking,status="paused",contextJson=q.toJson(),errorCode=code)
+        val previousGoal=goal.copy(linkedRunIds=listOf("earlier",r.runId))
+        val previousSegment=segment().copy(rootRunId="earlier",segmentIndex=2,totalSegments=2,parentRunId="earlier",
+            parentCheckpointDigest="a".repeat(64),consumedToolCalls=1,noProgressSegments=2)
+        val repeated=r.copy(goal=previousGoal,goalSegment=previousSegment,goalLedger=listOf(GoalLedgerEntry("earlier",0,r.previousSteps.single())))
+        val checkpoint=row(repeated,"partial_verified_sources")
+        assertTrue(goalTransientFailure(checkpoint))
+        assertTrue(goalSegmentDecision(checkpoint,previousGoal,"scope",started+100,false) is GoalSegmentDecision.Continue)
+        assertFalse(goalTransientFailure(row(repeated,"awaiting_owner_input")))
+        assertFalse(goalTransientFailure(row(repeated.copy(previousSteps=listOf(step(tool="save_note"))),"partial_verified_sources")))
+    }
+
+    @Test fun waitingForPlanningCanCrossTheLastSegmentWithoutDroppingOriginalScope() {
+        val atBoundary=segment(2).copy(rootRunId="first",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
+        val r=request(2,emptyList()).copy(goalSegment=atBoundary)
+        val row=ChatRunRecord(id=r.runId,threadId=r.threadId,branchId=r.branchId,userMessageId=r.userMessageId,
+            projectId=r.projectId,modelId=r.modelId,thinking=r.thinking,status="paused",contextJson=r.toJson(),errorCode="planning_total_timeout")
+        val next=goalSegmentDecision(row,goal,"scope",started+100,false) as GoalSegmentDecision.Continue
+        assertEquals(9,next.binding.totalSegments)
+        assertEquals(8,next.binding.phaseStartSegments)
+        assertEquals(atBoundary.scopeRevision,next.binding.scopeRevision)
+        assertEquals(atBoundary.rootRunId,next.binding.rootRunId)
+        assertEquals(atBoundary.budgetWindow,next.binding.budgetWindow)
+        pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,goalSegmentDecision(row,goal,"scope",started+100,true))
     }
 
     @Test fun persistedTimerCanOnlyWakeItsExactFailedParentAndHonoursOfflineDeadlineAndCancellation() {

@@ -17,7 +17,7 @@ class BrowserAuthContinuationTest {
     @Test fun authenticatedResumeUsesOriginalBrowserAndRequiresFreshInspectableSnapshot() {
         val prior=step("open_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
         assertEquals("read_pc_browser_page",BrowserAuthContinuation.readAfterAuth(prior))
-        assertNull(BrowserAuthContinuation.readAfterAuth(prior.copy(evidence=prior.evidence.copy(effectNotApplied=false))))
+        assertNull(BrowserAuthContinuation.readAfterAuth(step(prior.tool,VerificationState.FAILED,false,BrowserAgentTools.PHONE_AUTH_REQUIRED)))
         fun page(content:String)=com.user.localagent.core.ToolResult("read",true,content,VerificationState.VERIFIED)
         assertTrue(BrowserAuthContinuation.verifiedPage(page("""{"snapshotId":"new","loginRequired":false}""")))
         for(body in listOf("""{"snapshotId":null,"loginRequired":false}""","""{"snapshotId":"new","loginRequired":true}""",

@@ -44,6 +44,7 @@ import com.user.localagent.inference.publicDescription
 import com.user.localagent.core.ToolCall
 import com.user.localagent.core.ProjectWriteSchemaConstraints
 import com.user.localagent.core.ToolRegistry
+import com.user.localagent.core.WebsiteExecutionPolicy
 import com.user.localagent.core.NoteReadPatchToolCatalog
 import com.user.localagent.core.CapabilityGrant
 import com.user.localagent.core.CapabilityPolicy
@@ -1022,7 +1023,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         app.goalWaits.arm(record)
         val due=checkNotNull(GoalWaitPolicy.dueAt(record))
         val time=java.time.Instant.ofEpochMilli(due).atZone(ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("M월 d일 HH:mm"))
-        val notice="일시 장애로 진행을 멈췄어요. 원래 목표와 확인한 결과를 보존했고, ${time}에 다시 확인할게요."
+        val notice=when(parent.errorCode) {
+            GOAL_BROWSER_READ_RETRY->"브라우저에서 페이지를 읽는 데 시간이 걸리고 있어요. ${time}에 같은 작업 화면을 다시 확인할게요."
+            WebsiteExecutionPolicy.RECONNECT_CODE,"planning_pc_busy","planning_pc_unavailable"->"PC 작업기 연결을 기다리고 있어요. ${time}에 연결을 확인하고 이어갈게요."
+            else->"확인한 내용과 남은 단계를 저장했어요. ${time}에 다시 열어 다음 방법을 찾을게요."
+        }
         app.repository.chat.noteGoalRetry(parent,"scheduled",notice)
         if(selectedThreadId.value==goal.threadId){goalState.value=parked;status.value=notice}
     }
@@ -2042,7 +2047,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         JsonPrimitive(WakeEvent.MEDIA_STALLED.name),JsonPrimitive(WakeEvent.PLAYER_GONE.name),
                         JsonPrimitive(WakeEvent.MEDIA_LIMIT.name),JsonPrimitive(WakeEvent.LOGIN_EXPIRED.name)->
                             "이전 영상 확인이 끊겼어요. 원래 사이트의 저장된 진도를 다시 읽고 필요한 경우 휴대폰 인증을 요청하세요. 완료는 사이트에서 확인하세요.\n"
-                        else->""
+                        else->if((request.goalSegment?.noProgressSegments?:0)>=2) "같은 조회로 얻은 새 단서가 없어요. 저장된 선택과 결과를 비교한 뒤, 원래 범위에서 다른 자료원이나 화면을 골라 확인하세요.\n" else ""
                     }
                     val recent=previous?.takeIf {it.binding.runId==parent.id}?.goal.orEmpty()
                     previous=CloudConversationContext.PreviousTask(parentBinding,parent.status,source.text,
@@ -3173,7 +3178,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         else->"생성 종료 · 로컬 처리"
     }
     private suspend fun pauseForTruncatedTool(request:QueuedChatRequest){
-        answer("작업 요청을 끝까지 만들지 못해 실행하지 않았습니다. 요청을 더 작게 나누어 다시 보내주세요.")
+        answer(if(request.goalSegment!=null) "다음 동작을 준비하는 중에 입력이 끊겼어요. 어디까지 진행했는지 저장할게요."
+            else "작업 요청을 끝까지 만들지 못해 실행하지 않았습니다. 요청을 더 작게 나누어 다시 보내주세요.")
         persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode="tool_call_truncated")
     }

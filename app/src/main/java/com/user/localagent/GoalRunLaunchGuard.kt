@@ -267,7 +267,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         criterion.status==GoalCriterionStatus.VERIFIED&&request.goal.criteria.none {it.id==criterion.id&&it.status==GoalCriterionStatus.VERIFIED}
     } || request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalMilestoneKey).any {it !in observedMilestones && !archive.contains(it)}
     val renew=limit in setOf(GoalAutopilotPauseReason.SEGMENT_BUDGET,GoalAutopilotPauseReason.TOOL_BUDGET,GoalAutopilotPauseReason.TIME_BUDGET) &&
-        earnedPhase && recovery==null && nowMs>=budget.startedAtMs
+        (earnedPhase || retryableWithoutEffect) && recovery==null && nowMs>=budget.startedAtMs
     if(limit!=null&&!renew)return if(complete)GoalSegmentDecision.Complete else pause(limit)
     val nextStart=if(renew)maxOf(budget.startedAtMs,parent.finishedAt?:parent.updatedAt) else budget.startedAtMs
     if(renew&&nextStart>nowMs)return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
@@ -292,14 +292,16 @@ internal fun goalRetryableBrowserRead(call:ToolCall,result:ToolResult):Boolean =
     call.id==result.id && !result.success && result.verification==VerificationState.FAILED && result.effectNotApplied &&
     result.verificationSummary=="read_timeout_no_mutation"
 
+private val planningTimeoutCode=Regex("planning_[a-z_]{1,48}_timeout")
+private val readOnlyReplanCodes=setOf("reasoning_budget_exhausted","partial_verified_browser_reads","partial_verified_sources","partial_verified_tool_budget","final_synthesis_needs_action")
 private val transientPauseCodes=setOf(GOAL_BROWSER_READ_RETRY,WebsiteExecutionPolicy.RECONNECT_CODE,"planning_pc_busy","planning_pc_unavailable","tool_call_truncated")
 internal fun goalTransientFailure(parent:ChatRunRecord):Boolean {
     val code=parent.errorCode?:return false
-    if(code==WebsiteExecutionPolicy.RECONNECT_CODE||code==GOAL_BROWSER_READ_RETRY)
+    if(code==WebsiteExecutionPolicy.RECONNECT_CODE||code==GOAL_BROWSER_READ_RETRY||code in readOnlyReplanCodes)
         return runCatching {goalSafeExtendedRetry(parent,QueuedChatRequest.fromJson(parent.contextJson))}.getOrDefault(false)
     return when(parent.status) {
         "failed"->code in transientFailureCodes||code.matches(Regex("PC_BRIDGE_TIMEOUT_[A-Z_]{1,64}"))
-        "paused"->code in transientPauseCodes||code.matches(Regex("planning_[a-z_]{1,48}_timeout"))
+        "paused"->code in transientPauseCodes||code.matches(planningTimeoutCode)
         else->false
     }
 }
@@ -313,7 +315,14 @@ internal fun goalTransientRetryDelayMs(attempt:Int):Long = when(attempt) {
 private fun goalSafeExtendedRetry(parent:ChatRunRecord,request:QueuedChatRequest):Boolean {
     if(parent.status!="paused")return false
     val fresh=request.previousSteps.drop(request.goalReadbackSeedCount)
-    if(parent.errorCode in setOf("planning_pc_busy","planning_pc_unavailable"))return fresh.isEmpty()
+    if(parent.errorCode in readOnlyReplanCodes) {
+        val segment=request.goalSegment?:return false
+        return segment.noProgressSegments>=GoalSegmentBinding.MAX_NO_PROGRESS-1 && request.continuation==null &&
+            fresh.isNotEmpty() && fresh.all {ToolReadPolicy.isReadOnly(it.tool) && it.evidence.state==VerificationState.VERIFIED} &&
+            request.goal?.let { !hasNewGoalProgress(request,it) }==true
+    }
+    if(parent.errorCode in setOf("planning_pc_busy","planning_pc_unavailable","tool_call_truncated")||
+        parent.errorCode?.matches(planningTimeoutCode)==true)return fresh.isEmpty()
     val last=fresh.lastOrNull()?:return false
     if(last.evidence.state!=VerificationState.FAILED || !last.evidence.effectNotApplied)return false
     return when(parent.errorCode) {

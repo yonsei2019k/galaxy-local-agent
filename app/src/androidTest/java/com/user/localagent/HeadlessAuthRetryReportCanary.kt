@@ -27,13 +27,14 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Uses only a fresh test-package database, isolated preferences and an in-process browser fixture. */
+/** Opens only a new UUID-named database and preferences, never the application repository. */
 @RunWith(AndroidJUnit4::class)
 class HeadlessAuthRetryReportCanary {
     @Test fun boundAuthReadAndRetrySurviveReopenWithoutDuplicateChat() = runBlocking(Dispatchers.IO) {
-        val context=InstrumentationRegistry.getInstrumentation().context
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
         val fixture="auth-retry-"+UUID.randomUUID()
         val databaseName="$fixture.db"
+        check(!context.getDatabasePath(databaseName).exists())
         val key=java.security.SecureRandom().generateSeed(32)
         System.loadLibrary("sqlcipher")
         fun open()=Room.databaseBuilder(context,LocalDatabase::class.java,databaseName)
@@ -78,9 +79,10 @@ class HeadlessAuthRetryReportCanary {
             val read=ToolCall("timeout",PcBrowserToolCatalog.READ,empty)
             val timeout=ToolResult(read.id,false,"{}",VerificationState.FAILED,"read_timeout_no_mutation",effectNotApplied=true)
             assertTrue(goalRetryableBrowserRead(read,timeout))
-            val second=first.copy(segmentIndex=2,totalSegments=2,parentRunId=auth.id,parentCheckpointDigest=goalDigest(released.contextJson))
+            val second=goalSegmentDecision(released,goal,access.scopeKey,now,false,useNativeBudget=true) as GoalSegmentDecision.Continue
+            assertEquals(auth.id,second.binding.parentRunId)
             val retryRequest=original.copy(runId=retry.id,goal=goal.copy(linkedRunIds=listOf(auth.id,retry.id)),
-                goalSegment=second,previousSteps=listOf(step(read,timeout)))
+                goalSegment=second.binding,goalLedger=second.ledger,previousSteps=listOf(step(read,timeout)))
             val source=checkNotNull(BrowserAuthContinuation.source(retryRequest){repo.chat.run(it)})
             assertEquals(auth.id,source.id)
             val timedHistory=ChatExecutionReport.checkpoint(retryRequest,envelope(retryRequest),ObservedToolOutcome(read,timeout),1){repo.chat.run(it)}
@@ -105,7 +107,7 @@ class HeadlessAuthRetryReportCanary {
             assertEquals(parent.contextJson,checkNotNull(repo.chat.run(parent.id)).contextJson)
 
             val child=newRun()
-            val next=goalSegmentDecision(restored,checkNotNull(retryRequest.goal),access.scopeKey,now+30_000,false) as GoalSegmentDecision.Continue
+            val next=goalSegmentDecision(restored,checkNotNull(retryRequest.goal),access.scopeKey,now+30_000,false,useNativeBudget=true) as GoalSegmentDecision.Continue
             val resumed=retryRequest.copy(runId=child.id,goal=goal.copy(linkedRunIds=listOf(auth.id,retry.id,child.id)),
                 previousSteps=emptyList(),goalSegment=next.binding,goalLedger=next.ledger)
             assertEquals(restored.id,next.binding.parentRunId)
