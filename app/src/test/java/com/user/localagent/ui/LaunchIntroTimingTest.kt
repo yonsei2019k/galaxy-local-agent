@@ -15,9 +15,9 @@ class LaunchIntroTimingTest {
     ) = launchIntroVisible(elapsedMs, chatReady, animationsOn, dismissed, videoStarted, videoDone)
 
     @Test
-    fun waitsForChatEvenAfterMaximum() {
+    fun slowChatCannotExtendMaximum() {
         assertTrue(visible(0, chatReady = false))
-        assertTrue(visible(5000, chatReady = false, videoStarted = true))
+        assertFalse(visible(5000, chatReady = false, videoStarted = true))
     }
 
     @Test
@@ -46,7 +46,7 @@ class LaunchIntroTimingTest {
     fun animationsOffDoNotWait() {
         assertFalse(visible(0, animationsOn = false))
         assertFalse(visible(0, animationsOn = false, videoStarted = true))
-        assertTrue(visible(0, chatReady = false, animationsOn = false))
+        assertFalse(visible(0, chatReady = false, animationsOn = false))
     }
 
     @Test

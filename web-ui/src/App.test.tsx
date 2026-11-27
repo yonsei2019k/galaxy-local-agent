@@ -464,7 +464,7 @@ describe('native conversation', () => {
       const ref = (element.getAttribute('fill')?.startsWith('url(') ? element.getAttribute('fill') : element.getAttribute('stroke'))!.slice(5, -1)
       expect(ids).toContain(ref)
     }
-    expect([...card.querySelectorAll('button')].map(item => item.textContent)).toEqual(['공식 결제 앱 열기', '결제 결과 다시 확인'])
+    expect([...card.querySelectorAll('button')].map(item => item.textContent)).toEqual(['공식 결제 앱 열기', '카드 거래 내역 보기'])
   })
 
   it('requests hydration and rejects malformed or cross-thread native snapshots', () => {

@@ -24,4 +24,17 @@
     <color name="zip_token_lilac">#7C4DEB</color>
     <color name="zip_token_lilac_text">#6D3FE0</color>
     <color name="zip_token_lilac_soft">#F0E9FF</color>
+    <color name="zip_token_ink">#141318</color>
+    <color name="zip_token_ink_hover">#2C2B33</color>
+    <color name="zip_token_on_ink">#FFFFFF</color>
+    <color name="zip_token_soft">#EFEFF3</color>
+    <color name="zip_token_soft_strong">#E4E4EA</color>
+    <color name="zip_token_wall_top">#FBE9DC</color>
+    <color name="zip_token_wall_bottom">#F6D9C6</color>
+    <color name="zip_token_floor">#EAC3A6</color>
+    <color name="zip_token_rug">#F3D2BD</color>
+    <color name="zip_token_night">#141318</color>
+    <color name="zip_token_night_card">#22212A</color>
+    <color name="zip_token_night_text">#F5F4F8</color>
+    <color name="zip_token_night_muted">#B4B1BF</color>
 </resources>

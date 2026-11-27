@@ -44,7 +44,7 @@ internal const val LAUNCH_INTRO_MIN_MS = 1400L
 internal const val LAUNCH_INTRO_MAX_MS = 3000L
 
 /**
- * Whether the launch intro is still shown. It always waits for the chat; a tap ends it at once. With animations on,
+ * Whether the launch intro is still shown. It covers chat startup up to the time cap; a tap ends it at once. With animations on,
  * once the chat is ready: if the video started rendering it stays until the video completes or [LAUNCH_INTRO_MAX_MS]
  * after intro start; if the video never started it stays until [LAUNCH_INTRO_MIN_MS]. Animations off do not wait.
  */
@@ -56,10 +56,9 @@ internal fun launchIntroVisible(
     videoStarted: Boolean = false,
     videoDone: Boolean = false,
 ): Boolean {
-    if (dismissed) return false
+    if (dismissed || !animationsOn || elapsedMs >= LAUNCH_INTRO_MAX_MS) return false
     if (!chatReady) return true
-    if (!animationsOn) return false
-    return if (videoStarted) !videoDone && elapsedMs < LAUNCH_INTRO_MAX_MS else elapsedMs < LAUNCH_INTRO_MIN_MS
+    return if (videoStarted) !videoDone else elapsedMs < LAUNCH_INTRO_MIN_MS
 }
 
 /** Branding for the first chat render. It never owns input or delays WebView readiness. */

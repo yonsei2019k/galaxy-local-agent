@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class CharacterWebViewDeviceCanary {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val replies = java.util.concurrent.atomic.AtomicInteger()
     private val origin = "https://c090-fixture.invalid"
     private lateinit var reader: ImageReader
     private lateinit var display: VirtualDisplay
@@ -57,7 +58,14 @@ class CharacterWebViewDeviceCanary {
                             ?: WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(byteArrayOf()))
                 }
                 WebViewCompat.addWebMessageListener(web, "ziphapNative", setOf(origin)) { _, message, _, mainFrame, _ ->
-                    if (mainFrame && org.json.JSONObject(message.data.orEmpty()).optString("action") == "ready") ready.countDown()
+                    if (mainFrame) {
+                        val command = org.json.JSONObject(message.data.orEmpty())
+                        when (command.optString("action")) {
+                            "ready" -> ready.countDown()
+                            "chooseReply" -> if (command.getJSONObject("payload").getString("runId") == "question" &&
+                                command.getJSONObject("payload").getInt("index") == 0) replies.incrementAndGet()
+                        }
+                    }
                 }
                 presentation.setContentView(web)
                 presentation.show()
@@ -86,6 +94,7 @@ class CharacterWebViewDeviceCanary {
                 true
             """.trimIndent())
             awaitFact(web, "window.fixtureFonts === true && getComputedStyle(document.body).fontFamily.includes('SUIT')")
+            checkDesignStates(snapshot)
             evaluate(web, "document.querySelector('.character-button').click()")
             awaitFact(web, "document.querySelector('.character-preview .character--full-motion')?.getBoundingClientRect().width > 100")
             assertEquals("Device prefers reduced motion", "false", evaluate(web, "matchMedia('(prefers-reduced-motion: reduce)').matches"))
@@ -102,6 +111,19 @@ class CharacterWebViewDeviceCanary {
                 })()
             """.trimIndent())
             awaitFact(web, "window.fixtureTransforms?.size >= 3")
+            saveDisplay("character")
+            evaluate(web, """(() => {
+                const intervals = []; let previous = 0;
+                function sample(t) {
+                    if (previous) intervals.push(t - previous);
+                    previous = t;
+                    if (intervals.length < 90) requestAnimationFrame(sample);
+                    else { intervals.sort((a,b) => a-b); window.frameP95 = intervals[85]; }
+                }
+                requestAnimationFrame(sample);
+            })()""")
+            awaitFact(web, "window.frameP95 > 0")
+            android.util.Log.i("ZipDesignDevice", "90 frame intervals, p95 ms=" + evaluate(web, "window.frameP95"))
         } finally {
             instrumentation.runOnMainSync {
                 if (::web.isInitialized) web.stopLoading()
@@ -111,6 +133,49 @@ class CharacterWebViewDeviceCanary {
                 if (::reader.isInitialized) reader.close()
             }
         }
+    }
+
+    private fun checkDesignStates(snapshot: String) {
+        evaluate(web, """window.updateFixture = patch => window.dispatchEvent(new CustomEvent('ziphap:snapshot',
+            {detail:{...$snapshot,busy:false,activeRunId:null,...patch}})); true""")
+        fun show(mood: String, patch: String) {
+            evaluate(web, "window.updateFixture($patch)")
+            awaitFact(web, "document.querySelector('.character-button[data-mood=$mood] svg[data-situation=$mood]') != null")
+        }
+        fun task(phase: String) = "{tasks:[{id:'work',phase:'$phase',label:'확인',detail:'',canCancel:false}]}"
+        show("idle", "{}")
+        show("greeting", "{messages:[]}")
+        show("listening", "{draft:'질문'}")
+        show("thinking", "{busy:true}")
+        show("working", task("running"))
+        show("done", task("completed"))
+        show("waiting", task("waiting_goal"))
+        show("blocked", task("paused"))
+        show("confirm", """{messages:[{id:'q',role:'assistant',text:'이 일정으로 할까요?'}],
+            tasks:[{id:'question',phase:'waiting_input',label:'',detail:'일정을 선택해 주세요.',canCancel:false,
+              choices:[{label:'이 일정으로 할게요',recommended:true},{label:'다른 일정 볼래요',recommended:false}]}]}""")
+        saveDisplay("choice")
+        evaluate(web, """(() => { const chip=document.querySelector('.reply-chip'); chip.click(); chip.click(); })()""")
+        awaitFact(web, "document.querySelector('.reply-chip').disabled")
+        instrumentation.waitForIdleSync()
+        assertEquals(1, replies.get())
+        evaluate(web, """window.updateFixture({bookingPayment:{id:'p1',seller:'예시 숙소',amount:150000,state:'ready'}})""")
+        awaitFact(web, "document.querySelector('svg[data-metal=lock]')?.getBoundingClientRect().height > 0")
+        saveDisplay("lock")
+        show("thinking", "{busy:true}")
+    }
+
+    private fun saveDisplay(name: String) {
+        val result = CountDownLatch(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(840, 1440, android.graphics.Bitmap.Config.ARGB_8888)
+        var code = -1
+        android.view.PixelCopy.request(checkNotNull(presentation.window), bitmap, { code = it; result.countDown() }, Handler(Looper.getMainLooper()))
+        assertTrue(result.await(5, TimeUnit.SECONDS))
+        assertEquals(android.view.PixelCopy.SUCCESS, code)
+        val dir = java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "design-3d-qa")
+        dir.mkdirs()
+        java.io.File(dir, "$name.png").outputStream().use { assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
+        bitmap.recycle()
     }
 
     private fun awaitFact(web: WebView, predicate: String) {
