@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate web-ui/src/tokens.css and ZipHapTokens.kt from design/tokens.json.
+"""Generate CSS, Compose and Android View resources from design/tokens.json.
 
 Usage: python scripts/gen-design-tokens.py [--check]
 --check exits 1 when the committed outputs differ from what the source would generate.
@@ -15,6 +15,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "design" / "tokens.json"
 CSS_OUT = ROOT / "web-ui" / "src" / "tokens.css"
 KT_OUT = ROOT / "app" / "src" / "main" / "java" / "com" / "user" / "localagent" / "ui" / "ZipHapTokens.kt"
+
+COLORS_OUT = ROOT / "app" / "src" / "main" / "res" / "values" / "ziphap_view_colors.xml"
 
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -133,8 +135,14 @@ def generate(tokens):
 
 
 def main(argv):
-    css, kt = generate(json.loads(SOURCE.read_text(encoding="utf-8")))
-    outputs = ((CSS_OUT, css), (KT_OUT, kt))
+    tokens = json.loads(SOURCE.read_text(encoding="utf-8"))
+    css, kt = generate(tokens)
+    colors = [f"<!-- {HEADER} -->", "<resources>"]
+    for name, value in tokens["color"].items():
+        resource = name.replace("-", "_")
+        colors.append(f'    <color name="zip_token_{resource}">{value}</color>')
+    colors.append("</resources>")
+    outputs = ((CSS_OUT, css), (KT_OUT, kt), (COLORS_OUT, "\n".join(colors) + "\n"))
     if "--check" in argv:
         stale = [p for p, text in outputs if not p.exists() or p.read_bytes().replace(b"\r\n", b"\n") != text.encode("utf-8")]
         for p in stale:

@@ -73,7 +73,7 @@ class PcOpenClawActivity : Activity() {
             setOnClickListener { action() }
             root.addView(this)
         }
-        label("PC 집합 에이전트", 24f)
+        label("PC 집합 에이전트", 24f).typeface = resources.getFont(com.user.localagent.runtime.R.font.jua_regular)
         label("PC에서 OpenClaw가 지정 문서를 처리합니다. 추론은 선택한 구독의 서버에서 수행됩니다.")
         providerPicker = Spinner(this).apply {
             adapter = ArrayAdapter(this@PcOpenClawActivity, android.R.layout.simple_spinner_dropdown_item,

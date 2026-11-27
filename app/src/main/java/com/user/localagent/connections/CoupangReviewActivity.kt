@@ -74,7 +74,10 @@ class CoupangReviewActivity : ComponentActivity() {
             root.addView(this)
         }
 
-        text("쿠팡 구매후기").textSize = 22f
+        text("쿠팡 구매후기").apply {
+            textSize = 22f
+            typeface = resources.getFont(com.user.localagent.runtime.R.font.jua_regular)
+        }
         text("집합 앱 안에서 직접 로그인하세요. 조회한 상품 정보는 이 화면에만 표시됩니다.")
         val navigation = LinearLayout(this).also(root::addView)
         button(navigation, "주문목록") { open(Evidence.ORDERS) }

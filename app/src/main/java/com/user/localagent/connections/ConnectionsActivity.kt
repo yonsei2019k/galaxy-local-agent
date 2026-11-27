@@ -44,7 +44,7 @@ class ConnectionsActivity:Activity() {
         val scroll=ScrollView(this).apply {addView(root)};setContentView(scroll)
         fun label(text:String,size:Float=15f)=TextView(this).apply {this.text=text;textSize=size;setPadding(0,10,0,10)}.also(root::addView)
         fun button(text:String,action:()->Unit)=Button(this).apply {this.text=text;setOnClickListener {if(!busy)action()}}.also(root::addView)
-        label("앱과 자료 연결",24f)
+        label("앱과 자료 연결",24f).typeface = resources.getFont(com.user.localagent.runtime.R.font.jua_regular)
         label("계정 연결과 실제 자료 조회 성공을 따로 표시합니다. 구글 Chat·Keep·AI Studio·Home·Blogger·Books·Classroom·Meet는 포함하지 않습니다.")
         servicePicker=Spinner(this).apply {adapter=ArrayAdapter(this@ConnectionsActivity,android.R.layout.simple_spinner_dropdown_item,ConnectedService.entries.map {it.label})};root.addView(servicePicker)
         status=label("")

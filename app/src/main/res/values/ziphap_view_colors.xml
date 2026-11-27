@@ -1,0 +1,27 @@
+<!-- Generated from design/tokens.json by scripts/gen-design-tokens.py. Do not edit. -->
+<resources>
+    <color name="zip_token_bg">#F3F4F8</color>
+    <color name="zip_token_surface">#FFFFFF</color>
+    <color name="zip_token_surface_sunken">#F1F3F7</color>
+    <color name="zip_token_divider">#EEF0F4</color>
+    <color name="zip_token_text">#171B33</color>
+    <color name="zip_token_text_sub">#5B6178</color>
+    <color name="zip_token_text_faint">#676D85</color>
+    <color name="zip_token_muted">#5E6480</color>
+    <color name="zip_token_line">#E3E6EF</color>
+    <color name="zip_token_cobalt">#3355F0</color>
+    <color name="zip_token_cobalt_text">#2E4BE0</color>
+    <color name="zip_token_cobalt_soft">#E6EBFF</color>
+    <color name="zip_token_coral">#C9401F</color>
+    <color name="zip_token_coral_text">#B83C1D</color>
+    <color name="zip_token_coral_soft">#FFE9E2</color>
+    <color name="zip_token_mint">#0B7F5D</color>
+    <color name="zip_token_mint_text">#0B7A5B</color>
+    <color name="zip_token_mint_soft">#DDF7EE</color>
+    <color name="zip_token_sun">#FFB020</color>
+    <color name="zip_token_sun_text">#8A5A00</color>
+    <color name="zip_token_sun_soft">#FFF3D6</color>
+    <color name="zip_token_lilac">#7C4DEB</color>
+    <color name="zip_token_lilac_text">#6D3FE0</color>
+    <color name="zip_token_lilac_soft">#F0E9FF</color>
+</resources>

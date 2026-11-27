@@ -1,1 +1,19 @@
-<resources><style name="Theme.LocalAgent" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:windowBackground">#F7F8FC</item><item name="android:windowLightStatusBar">true</item><item name="android:windowLightNavigationBar">true</item><item name="android:statusBarColor">#F7F8FC</item><item name="android:navigationBarColor">#F7F8FC</item></style></resources>
+<resources>
+    <style name="Theme.LocalAgent" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">@font/suit_variable</item>
+        <item name="android:textViewStyle">@style/ZipHapViewText</item>
+        <item name="android:buttonStyle">@style/ZipHapViewButton</item>
+        <item name="android:colorAccent">@color/zip_token_cobalt</item>
+        <item name="android:windowBackground">@color/zip_token_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@color/zip_token_bg</item>
+        <item name="android:navigationBarColor">@color/zip_token_bg</item>
+    </style>
+    <style name="ZipHapViewText" parent="@android:style/Widget.Material.Light.TextView">
+        <item name="android:fontFamily">@font/suit_variable</item>
+    </style>
+    <style name="ZipHapViewButton" parent="@android:style/Widget.Material.Light.Button">
+        <item name="android:fontFamily">@font/suit_variable</item>
+    </style>
+</resources>
