@@ -28,7 +28,8 @@ internal object GoalPdfEmail {
         val saved = runCatching { QueuedChatRequest.fromJson(source.contextJson) }.getOrNull() ?: return false
         return saved.runId == source.id && saved.threadId == current.threadId && saved.branchId == current.branchId &&
             saved.projectId == current.projectId && saved.goal?.id == current.goal?.id &&
-            saved.goalSegment?.workDigest == current.goalSegment?.workDigest
+            saved.goalSegment?.workDigest == current.goalSegment?.workDigest &&
+            (current.goal == null || saved.goal?.let(::goalWorkDigest) == goalWorkDigest(current.goal))
     }
 
     /** Older original PDFs use a digest-derived filename. Other legacy PDFs without byte evidence cannot be attached. */
@@ -61,12 +62,41 @@ internal object GoalPdfEmail {
         return candidate
     }
 
+    private fun sourceIds(request: QueuedChatRequest) =
+        (listOf(request.runId) + request.goal?.linkedRunIds.orEmpty().asReversed()).distinct()
+
+    suspend fun savedNames(app: AppContainer, request: QueuedChatRequest): JsonArray {
+        val names = linkedSetOf<String>()
+        for (id in sourceIds(request)) {
+            val row = app.repository.chat.run(id) ?: continue
+            if (!row.contextJson.contains("\"verifiedChatFiles\"") || !matchesScope(request,row)) continue
+            val metadata = Json.parseToJsonElement(row.contextJson).jsonObject
+            for (entry in (metadata["verifiedChatFiles"] as? JsonArray).orEmpty()) {
+                val name = (entry as? JsonPrimitive)?.takeIf { it.isString }?.content ?: continue
+                if (name.endsWith(".pdf") && com.user.localagent.ui.chatFileNames("[[file:$name]]").singleOrNull() == name) names.add(name)
+                if (names.size >= 32) break
+            }
+            if (names.size >= 32) break
+        }
+        return JsonArray(names.map(::JsonPrimitive))
+    }
+
+    suspend fun requireTextOnlySend(app:AppContainer, request:QueuedChatRequest, call:ToolCall) {
+        if (call.name != "send_gmail_message") return
+        for (id in sourceIds(request)) {
+            val row = app.repository.chat.run(id) ?: continue
+            if (!row.contextJson.contains("\"$KEY\"") || !matchesScope(request,row)) continue
+            val prepared = Json.parseToJsonElement(row.contextJson).jsonObject[KEY] as? JsonObject ?: continue
+            require(prepared["to"]?.jsonPrimitive?.content?.equals(call.arguments["to"]?.jsonPrimitive?.content,ignoreCase=true) != true ||
+                prepared["subject"] != call.arguments["subject"]) { "이 메일에는 PDF가 첨부되어 있어요. 대화의 첨부 초안에서 Gmail을 열어 주세요." }
+        }
+    }
+
     suspend fun resolve(app: AppContainer, directory: File, request: QueuedChatRequest, names: List<String>): List<File> =
         withContext(Dispatchers.IO) {
             val remaining = names.toMutableSet()
             val verified = mutableMapOf<String, File>()
-            val ids = (listOf(request.runId) + request.goal?.linkedRunIds.orEmpty().asReversed()).distinct()
-            for (sourceId in ids) {
+            for (sourceId in sourceIds(request)) {
                 val row = app.repository.chat.run(sourceId) ?: continue
                 if (!matchesScope(request, row)) continue
                 val metadata = Json.parseToJsonElement(row.contextJson).jsonObject

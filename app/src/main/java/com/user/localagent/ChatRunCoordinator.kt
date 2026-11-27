@@ -3767,7 +3767,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     put("auditId",id);put("tool",step.tool);put("observed",step.evidence.summary.take(160))
                 })}}
                 val body=Json.parseToJsonElement(result.content).jsonObject
-                result.copy(content=JsonObject(body+("completionEvidence" to details)).toString())
+                val pdfNames = GoalPdfEmail.savedNames(app,request)
+                result.copy(content=JsonObject(body + ("completionEvidence" to details) + ("savedPdfFiles" to pdfNames)).toString())
             }
             check(request.goalSegment != null)
             check(GoalToolCatalog.revision(call.arguments.getValue("expectedUpdatedAt")) == live.updatedAt)
@@ -4369,6 +4370,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             commitObserved(failure)
             return failure
         }
+        if (call.name == "send_gmail_message") GoalPdfEmail.requireTextOnlySend(app, checkNotNull(activeRequest), call)
         val localPdfDraft = call.name == "prepare_email" && com.user.localagent.core.PdfMailAttachments.FIELD in call.arguments
         val confirmation = !localPdfDraft && (CapabilityPolicy.requiresConfirmation(call,"builtin",codeHash,grants) ||
             (phoneReview?.first ?: tools.browserActionNeedsOwner(call)))
