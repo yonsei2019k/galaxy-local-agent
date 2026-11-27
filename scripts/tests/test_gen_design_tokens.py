@@ -120,7 +120,7 @@ class GenDesignTokensTest(unittest.TestCase):
 
 
 class CheckModeTest(unittest.TestCase):
-    def run_check(self, css_bytes, kt_bytes):
+    def run_check(self, css_bytes, kt_bytes, stale_colors=False):
         with tempfile.TemporaryDirectory() as d:
             d = pathlib.Path(d)
             tokens = d / "tokens.json"
@@ -130,16 +130,21 @@ class CheckModeTest(unittest.TestCase):
                 css_out.write_bytes(css_bytes)
             if kt_bytes is not None:
                 kt_out.write_bytes(kt_bytes)
-            saved = (gen.SOURCE, gen.CSS_OUT, gen.KT_OUT, gen.ROOT)
-            gen.SOURCE, gen.CSS_OUT, gen.KT_OUT, gen.ROOT = tokens, css_out, kt_out, d
+            colors_out = d / "ziphap_view_colors.xml"
+            colors_out.write_text("stale" if stale_colors else gen.view_colors(SAMPLE), encoding="utf-8")
+            saved = (gen.SOURCE, gen.CSS_OUT, gen.KT_OUT, gen.ROOT, gen.COLORS_OUT)
+            gen.SOURCE, gen.CSS_OUT, gen.KT_OUT, gen.ROOT, gen.COLORS_OUT = tokens, css_out, kt_out, d, colors_out
             try:
                 return gen.main(["--check"])
             finally:
-                gen.SOURCE, gen.CSS_OUT, gen.KT_OUT, gen.ROOT = saved
+                gen.SOURCE, gen.CSS_OUT, gen.KT_OUT, gen.ROOT, gen.COLORS_OUT = saved
 
     def setUp(self):
         css, kt = gen.generate(SAMPLE)
         self.css, self.kt = css.encode(), kt.encode()
+
+    def test_check_rejects_stale_view_colors(self):
+        self.assertEqual(self.run_check(self.css, self.kt, stale_colors=True), 1)
 
     def test_check_passes_when_current(self):
         self.assertEqual(self.run_check(self.css, self.kt), 0)

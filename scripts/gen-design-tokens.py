@@ -134,15 +134,19 @@ def generate(tokens):
     return "\n".join(css) + "\n", "\n".join(kt) + "\n"
 
 
-def main(argv):
-    tokens = json.loads(SOURCE.read_text(encoding="utf-8"))
-    css, kt = generate(tokens)
+def view_colors(tokens):
     colors = [f"<!-- {HEADER} -->", "<resources>"]
-    for name, value in tokens["color"].items():
+    for name, value in tokens.get("color", {}).items():
         resource = name.replace("-", "_")
         colors.append(f'    <color name="zip_token_{resource}">{value}</color>')
     colors.append("</resources>")
-    outputs = ((CSS_OUT, css), (KT_OUT, kt), (COLORS_OUT, "\n".join(colors) + "\n"))
+    return "\n".join(colors) + "\n"
+
+
+def main(argv):
+    tokens = json.loads(SOURCE.read_text(encoding="utf-8"))
+    css, kt = generate(tokens)
+    outputs = ((CSS_OUT, css), (KT_OUT, kt), (COLORS_OUT, view_colors(tokens)))
     if "--check" in argv:
         stale = [p for p, text in outputs if not p.exists() or p.read_bytes().replace(b"\r\n", b"\n") != text.encode("utf-8")]
         for p in stale:
