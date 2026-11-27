@@ -2284,20 +2284,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 check(authority().permits(capture))
                 controller.close();closed=true
                 persistNativeState(nativeJournal.sealCheckpoint())
-                if(publicResearch){
-                    publishActionFinal(request,emptySet(),"공개 자료 조회 없이 조사가 끝났습니다. 확인된 출처가 없어 결과로 표시하지 않았습니다.",true,"research_evidence_unavailable")
-                    return
-                }
-                val body = CloudAgentFinals.toolFreeAnswer(report.getValue("answer").jsonPrimitive.content)
-                if (body.isBlank()) {
-                    publishActionFinal(request, emptySet(), "답변을 받지 못했습니다. 요청을 보존했어요.", true)
-                    return
-                }
-                answer(body)
-                recordCloudReceipt(request.runId,null,0,report.getValue("elapsedMs"),nativeJournal.snapshot())
-                app.repository.chat.updateRun(request.runId,"completed")
-                workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
-                status.value="응답 완료"
+                publishCloudTextAnswer(request, publicResearch, report, nativeJournal)
                 return
             }
             val accepted=plan
@@ -2315,22 +2302,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             check(authority().permits(capture))
             controller.close();closed=true
             check(authority().permits(capture))
-            val answerText=CloudAgentFinals.visibleAnswer(report.getValue("answer").jsonPrimitive.content)
-            // Host-rendered reports replace model prose only when something was changed or handed off.
-            // A read-only answer (date, calendar, contacts, search) keeps the model's synthesis of verified reads.
-            val final=if(CloudAgentFinals.needsHostReport(observedOutcomes.map{it.call.name}))
-                com.user.localagent.core.ActionCompletionReport.render(requestAuthorizedTools,observedOutcomes)
-                else answerText
-            if (final.isBlank()) {
-                publishActionFinal(request, requestAuthorizedTools, "답변을 받지 못했습니다. 확인한 결과를 보존했어요.", true)
-                return
-            }
-            persistStepEvidence();answer(final)
-            persistNativeState(nativeJournal.sealCheckpoint())
-            recordCloudReceipt(request.runId,checkNotNull(accepted).planDigest,actual.size,report.getValue("elapsedMs"),nativeJournal.snapshot())
-            app.repository.chat.updateRun(request.runId,"completed")
-            workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
-            status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
+            publishVerifiedCloudAnswer(request, report, checkNotNull(accepted).planDigest, actual.size, nativeJournal)
         } catch(privateResult:PrivateResultWithheld){
             FailureLog.cloudStop(context,"PRIVATE_RESULT_WITHHELD_${privateResult.kind.name}",
                 controller.stopMetadata(),lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
@@ -2374,6 +2346,48 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
             }
         }
+    }
+
+    private suspend fun publishCloudTextAnswer(
+        request: QueuedChatRequest, publicResearch: Boolean, report: JsonObject,
+        nativeJournal: com.user.localagent.engine.RustExecutionJournal,
+    ) {
+        if(publicResearch){
+            publishActionFinal(request,emptySet(),"공개 자료 조회 없이 조사가 끝났습니다. 확인된 출처가 없어 결과로 표시하지 않았습니다.",true,"research_evidence_unavailable")
+            return
+        }
+        val body = CloudAgentFinals.toolFreeAnswer(report.getValue("answer").jsonPrimitive.content)
+        if (body.isBlank()) {
+            publishActionFinal(request, emptySet(), "답변을 받지 못했습니다. 요청을 보존했어요.", true)
+            return
+        }
+        answer(body)
+        recordCloudReceipt(request.runId,null,0,report.getValue("elapsedMs"),nativeJournal.snapshot())
+        app.repository.chat.updateRun(request.runId,"completed")
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
+        status.value="응답 완료"
+    }
+
+    private suspend fun publishVerifiedCloudAnswer(
+        request: QueuedChatRequest, report: JsonObject, planDigest: String, toolCount: Int,
+        nativeJournal: com.user.localagent.engine.RustExecutionJournal,
+    ) {
+        val answerText=CloudAgentFinals.visibleAnswer(report.getValue("answer").jsonPrimitive.content)
+        // Host-rendered reports replace model prose only when something was changed or handed off.
+        // A read-only answer (date, calendar, contacts, search) keeps the model's synthesis of verified reads.
+        val final=if(CloudAgentFinals.needsHostReport(observedOutcomes.map{it.call.name}))
+            com.user.localagent.core.ActionCompletionReport.render(requestAuthorizedTools,observedOutcomes)
+            else answerText
+        if (final.isBlank()) {
+            publishActionFinal(request, requestAuthorizedTools, "답변을 받지 못했습니다. 확인한 결과를 보존했어요.", true)
+            return
+        }
+        persistStepEvidence();answer(final)
+        persistSharedEngineState(request,nativeJournal.sealCheckpoint())
+        recordCloudReceipt(request.runId,planDigest,toolCount,report.getValue("elapsedMs"),nativeJournal.snapshot())
+        app.repository.chat.updateRun(request.runId,"completed")
+        workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
+        status.value="클라우드 응답과 실제 휴대폰 실행 결과 확인 완료"
     }
 
     private suspend fun publishIncompleteCloudResult(request:QueuedChatRequest,resultState:String,
