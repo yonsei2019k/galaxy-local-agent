@@ -133,7 +133,7 @@ internal fun goalSourceNativeEffectsUnresolved(row:com.user.localagent.data.Chat
     if(native==null||native is JsonNull)true
     else {
         val sourceScope=request.goalSegment?.scopeKey?:request.readbackObligations?.context?.scopeKey
-        sourceScope==null||goalNativeEffectsUnresolved(row,sourceScope,true)
+        sourceScope==null||goalRunEffectsUnresolved(row,sourceScope)
     }
 }catch(_:Exception){true}
 
@@ -291,6 +291,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val thread=threads.firstOrNull {it.id==previous}?:threads.firstOrNull()?:app.repository.chat.createThread()
         selectThread(thread.id)
         queued.value=app.repository.chat.queuedRuns().mapNotNull {run->runCatching {QueuedChatRequest.fromJson(run.contextJson)}.getOrNull()}
+        // A restored goal request needs a new foreground receipt; if it cannot start, the existing hold check pauses the goal.
+        queued.value.filter {it.goal!=null}.forEach {request->
+            if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
+                runCatching {com.user.localagent.voice.AgentRunService.track(context,request.runId,request.threadId,request.text)}
+        }
+        recoverActiveGoalsAfterRestart(threads.map {it.id})
         initialized.complete(Unit)
         drain()
     }}
@@ -608,7 +614,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 requireCapturedGoalAuthority(candidate)
                                 if(candidate.goalSegment?.parentRunId!=null)check((goalQueuedEpochs[candidate.runId]?:0L)==(goalStopEpochs[candidate.threadId]?:0L)){"중지 요청 이후 이전 목표 구간을 시작하지 않았습니다."}
                                 val parent=(candidate.goalSegment?.parentRunId?:candidate.parentGoalStartRunId)?.let {id->app.repository.chat.run(id)}
-                                if(candidate.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,candidate.goalSegment.scopeKey,true)) {"이전 구간의 공통 실행 기록이 불확실해 다시 실행하지 않았습니다."}
+                                if(candidate.goalSegment?.parentRunId!=null)check(parent!=null&&!goalRunEffectsUnresolved(parent,candidate.goalSegment.scopeKey)) {"이전 구간의 공통 실행 기록이 불확실해 다시 실행하지 않았습니다."}
                                 requireGoalLaunchBinding(candidate,actual,parent,goalRunCallerJobs[candidate.runId]?.isCancelled==true)
                             }
                             if(candidate.continuation!=null)app.repository.chat.resumeRun(candidate.runId)else app.repository.chat.startRun(candidate.runId)
@@ -724,7 +730,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     check(thread.activeBranchId==request.branchId&&thread.projectId==request.projectId&&
                         app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
                     goalSegmentDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),
-                        goalNativeEffectsUnresolved(parent,access.scopeKey,true),useNativeBudget=true)
+                        goalRunEffectsUnresolved(parent,access.scopeKey),useNativeBudget=true)
                 }
                 check(goals.loadGuarded(access)==goal&&app.repository.chat.run(parent.id)==parent)
                 when(decision) {
@@ -774,6 +780,50 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 candidate.goal?.let{sameGoalWork(it,goal)}==true&&row.status in com.user.localagent.data.ChatStore.TERMINAL)
                 pauseApprovedGoal(access,goal,row,GoalAutopilotPauseReason.STOPPED)
         }}
+    }
+    /**
+     * Startup only, after queue restoration: an ACTIVE goal whose last linked segment ended while the app was gone
+     * continues through the same queue CAS/readback path, or pauses with a recorded reason. Legacy goal runs are untouched.
+     */
+    private suspend fun recoverActiveGoalsAfterRestart(threadIds:List<String>) {
+        for(threadId in threadIds) try {
+            goalMutation.withLock {
+                val access=app.repository.chat.accessScope(threadId)
+                val goal=goals.loadGuarded(access)?:return@withLock
+                if(goal.status!=com.user.localagent.core.GoalStatus.ACTIVE||goal.linkedRunIds.isEmpty())return@withLock
+                val linked=goal.linkedRunIds.map {app.repository.chat.run(it)}
+                if(linked.any {it==null||it.status in setOf("queued","running","waiting_approval")}||queued.value.any {it.runId in goal.linkedRunIds})return@withLock
+                val parent=checkNotNull(linked.last())
+                if(parent.status !in com.user.localagent.data.ChatStore.TERMINAL+"paused")return@withLock
+                val stored=requireGoalRunBinding(goal,parent)
+                if(stored.goalSegment==null||stored.continuation!=null)return@withLock
+                val decision=try {
+                    requireGoalSegmentScope(stored,access);requireCapturedGoalAuthority(stored)
+                    val thread=checkNotNull(app.repository.chat.thread(threadId))
+                    check(thread.activeBranchId==stored.branchId&&thread.projectId==stored.projectId&&
+                        app.workspaceFor(stored.projectId).bindingFingerprint()==stored.workspaceBinding)
+                    goalRestartDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),goalRunEffectsUnresolved(parent,access.scopeKey),useNativeBudget=true)
+                }catch(cancel:CancellationException){throw cancel}
+                catch(error:Exception){FailureLog.record(context,"goal_restart",error,"GOAL_RESTART_REJECTED");GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)}
+                check(goals.loadGuarded(access)==goal&&app.repository.chat.run(parent.id)==parent)
+                when(decision) {
+                    is GoalSegmentDecision.Continue->try {
+                        val receipt=queueNextGoalSegment(access,goal,parent,decision,checkNotNull(currentCoroutineContext()[Job]))
+                        goalQueuedEpochs[checkNotNull(receipt.queuedRunId)]=goalStopEpochs[threadId]?:0L
+                        status.value="앱이 다시 시작된 뒤 확인된 결과를 보존하고 같은 목표를 이어갑니다 · ${decision.binding.totalSegments}/${GoalSegmentBinding.MAX_SEGMENTS}"
+                    }catch(cancel:CancellationException){throw cancel}
+                    catch(error:Exception){
+                        // A budget pause is already recorded by the queue path; any other failure must not leave an orphan ACTIVE goal.
+                        FailureLog.record(context,"goal_restart",error,"GOAL_RESTART_QUEUE_FAILED")
+                        val current=goals.loadGuarded(access)
+                        if(current!=null&&current.status==com.user.localagent.core.GoalStatus.ACTIVE&&current.linkedRunIds.lastOrNull()==parent.id)
+                            pauseApprovedGoal(access,current,checkNotNull(app.repository.chat.run(parent.id)),GoalAutopilotPauseReason.PROCESS_RESTARTED)
+                    }
+                    is GoalSegmentDecision.Pause->pauseApprovedGoal(access,goal,parent,decision.reason)
+                }
+            }
+        }catch(cancel:CancellationException){throw cancel}
+        catch(error:Exception){FailureLog.record(context,"goal_restart",error,"GOAL_RESTART_FAILED")}
     }
     private suspend fun cancelStoppedGoalContinuations(threadId:String) {
         goalMutation.withLock {cancelStoppedGoalContinuationsLocked(threadId)}
@@ -1323,7 +1373,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             requireGoalSegmentScope(request,access);requireCapturedGoalAuthority(request)
             val parent=(request.goalSegment?.parentRunId?:request.parentGoalStartRunId)?.let {app.repository.chat.run(it)}
             requireGoalLaunchBinding(request,goals.loadGuarded(access),parent,false)
-            if(request.goalSegment?.parentRunId!=null)check(parent!=null&&!goalNativeEffectsUnresolved(parent,access.scopeKey,true))
+            if(request.goalSegment?.parentRunId!=null)check(parent!=null&&!goalRunEffectsUnresolved(parent,access.scopeKey))
         }
         if(pauseGoalBudgetIfExhausted(request))return
         val externalSettings=ExternalAgentSettings.get(context)

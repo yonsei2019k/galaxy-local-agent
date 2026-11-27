@@ -59,6 +59,7 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
     TIME_BUDGET("goal_autopilot_time_budget"), NO_PROGRESS("goal_autopilot_no_progress"),
     CRITERIA_READY("goal_autopilot_criteria_ready"),
     INVALID_CHECKPOINT("goal_autopilot_invalid_checkpoint"),
+    PROCESS_RESTARTED("goal_autopilot_process_restarted"),
     ;
     val description:String get()=when(this) {
         SEGMENT_BUDGET->"목표의 누적 실행 구간 한도 8개에 도달해 일시 정지했습니다. 확인된 결과를 보존했으며 전체 완료를 뜻하지 않습니다."
@@ -73,6 +74,7 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
         LEGACY_CONTEXT->"기존 요청에는 자동 연속 실행 연결이 없어 일시 정지했습니다. 이전 권한을 확대하지 않았습니다."
         INVALID_CHECKPOINT->"저장된 실제 실행 근거를 확인하지 못해 일시 정지했습니다. 근거를 버리고 다시 실행하지 않습니다."
         STOPPED->"목표 실행이 중지되었거나 원래 실행 조건을 유지하지 않아 일시 정지했습니다."
+        PROCESS_RESTARTED->"앱이 다시 시작되어 목표를 일시 정지했습니다. 확인된 결과를 보존했고 재개할 수 있습니다."
     }
 }
 internal sealed interface GoalSegmentDecision {
@@ -125,7 +127,8 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(ledger.any {it.step.evidence.state==VerificationState.UNVERIFIED})return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
     if(ledger.any {goalUncertainFailure(it.step)})return pause(GoalAutopilotPauseReason.FAILED_STEP)
     if(ledger.any {PreparedHandoff.pendingEffect(it.step)})return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
-    if(parent.status !in setOf("completed","paused"))return pause(GoalAutopilotPauseReason.STOPPED)
+    // A process-restart interruption is a checkpoint like completion only because unknownEffects already required a resolved record.
+    if(parent.status !in setOf("completed","paused")&&!goalParentRestarted(parent))return pause(GoalAutopilotPauseReason.STOPPED)
     if(parent.status=="paused"&&parent.errorCode!="reasoning_budget_exhausted")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     val readbackContext=RequiredReadbackObligations.Context(request.runId,request.threadId,request.projectId,scopeKey,request.workspaceBinding)
     val assessment=RequiredReadbackObligations.assess(request.readbackObligations,readbackContext,request.previousSteps,
@@ -137,6 +140,23 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     return GoalSegmentDecision.Continue(segment.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
         segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress),ledger)
 }
+
+internal fun goalParentRestarted(parent:ChatRunRecord)=parent.status=="interrupted"&&parent.errorCode=="process_restarted"
+
+/**
+ * The one effect rule every goal caller uses. An interrupted run can never start another effect, so its record
+ * need not be closed; it still needs no in-flight call and no uncertainty. Every other run needs a closed record.
+ */
+internal fun goalRunEffectsUnresolved(row:ChatRunRecord,scopeKey:String):Boolean=goalNativeEffectsUnresolved(row,scopeKey,requireClosed=row.status!="interrupted")
+
+/** Startup decision for an ACTIVE goal whose last linked run ended while the app was not running. */
+internal fun goalRestartDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
+    useNativeBudget:Boolean=false):GoalSegmentDecision = try {
+    when(val decision=goalSegmentDecision(parent,goal,scopeKey,nowMs,unknownEffects,useNativeBudget)) {
+        is GoalSegmentDecision.Continue->decision
+        is GoalSegmentDecision.Pause->if(decision.reason==GoalAutopilotPauseReason.STOPPED)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)else decision
+    }
+}catch(_:Exception){GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)}
 
 internal fun goalBudgetStop(segment:GoalSegmentBinding,toolCount:Int,nowMs:Long,noProgress:Int,useNative:Boolean):GoalAutopilotPauseReason? {
     if(useNative){
