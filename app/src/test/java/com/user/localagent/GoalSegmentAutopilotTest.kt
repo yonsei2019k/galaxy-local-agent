@@ -102,7 +102,7 @@ class GoalSegmentAutopilotTest {
     }
     @Test fun aLegacyBindingWithoutActiveTimeIsReadConservativelyAndNeverRenewed() {
         val encoded=Json.parseToJsonElement(request().toJson()).jsonObject
-        val added=setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls")
+        val added=setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls","transientRetries")
         val legacy=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-added))).toString()
         val partial=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-"budgetWindow"))).toString()
         assertTrue(runCatching {QueuedChatRequest.fromJson(partial)}.isFailure)

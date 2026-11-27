@@ -713,10 +713,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(request.goalSegment==null||request.continuation!=null||!currentCoroutineContext().isActive||!scope.isActive)return
         if(worker.requestSteeredAway||worker.pendingSteerRunId==request.runId)return // Explicit steering owns the next queue CAS.
         try {
-            goalMutation.withLock {
+            var retryWaited=false
+            while(true) {
+            val retryWait:Long=goalMutation.withLock<Long?> {
                 val access=app.repository.chat.accessScope(request.threadId)
-                val goal=goals.loadGuarded(access)?:return@withLock
-                if(goal.status!=com.user.localagent.core.GoalStatus.ACTIVE||!sameGoalWork(checkNotNull(request.goal),goal)||goal.linkedRunIds.lastOrNull()!=request.runId)return@withLock
+                val goal=goals.loadGuarded(access)?:return@withLock null
+                if(goal.status!=com.user.localagent.core.GoalStatus.ACTIVE||!sameGoalWork(checkNotNull(request.goal),goal)||goal.linkedRunIds.lastOrNull()!=request.runId)return@withLock null
                 var parent=checkNotNull(app.repository.chat.run(request.runId))
                 if(parent.status !in com.user.localagent.data.ChatStore.TERMINAL+"paused")
                     parent=app.repository.chat.updateRun(parent.id,"failed",errorCode="goal_cleanup_checkpoint_failed")
@@ -739,13 +741,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 when(decision) {
                     is GoalSegmentDecision.Continue->{
                         check((goalStopEpochs[request.threadId]?:0L)==worker.admittedGoalStopEpoch)
+                        // A transient retry first waits without holding goalMutation; every check above then runs again.
+                        if(!retryWaited&&decision.binding.transientRetries>0)return@withLock goalTransientRetryDelayMs(decision.binding.transientRetries)
                         val receipt=queueNextGoalSegment(access,goal,parent,decision,checkNotNull(currentCoroutineContext()[Job]))
                         goalQueuedEpochs[checkNotNull(receipt.queuedRunId)]=worker.admittedGoalStopEpoch
-                        if((goalStopEpochs[request.threadId]?:0L)!=worker.admittedGoalStopEpoch){cancelStoppedGoalContinuationsLocked(request.threadId);return@withLock}
+                        if((goalStopEpochs[request.threadId]?:0L)!=worker.admittedGoalStopEpoch){cancelStoppedGoalContinuationsLocked(request.threadId);return@withLock null}
                         status.value="확인된 결과를 보존하고 같은 목표를 이어갑니다 · ${decision.binding.totalSegments}/${GoalSegmentBinding.MAX_SEGMENTS}"
                     }
                     is GoalSegmentDecision.Pause->pauseApprovedGoal(access,goal,parent,decision.reason)
                 }
+                null
+            }?:break
+            status.value="일시 장애 뒤 ${retryWait/1000}초 기다린 다음 같은 목표를 다시 확인합니다. 확인된 결과는 보존됩니다."
+            delay(retryWait)
+            retryWaited=true
+            check(com.user.localagent.voice.AgentRunService.cleanupHeld(request.runId)){"재시도 대기 중 백그라운드 실행 유지가 끝나 목표를 이어가지 않았습니다."}
             }
         }catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
