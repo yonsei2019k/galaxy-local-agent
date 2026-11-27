@@ -102,7 +102,11 @@ class GoalSegmentAutopilotTest {
     }
     @Test fun aLegacyBindingWithoutActiveTimeIsReadConservativelyAndNeverRenewed() {
         val encoded=Json.parseToJsonElement(request().toJson()).jsonObject
-        val legacy=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-"activeElapsedMs"))).toString()
+        val added=setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls")
+        val legacy=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-added))).toString()
+        val partial=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-"budgetWindow"))).toString()
+        assertTrue(runCatching {QueuedChatRequest.fromJson(partial)}.isFailure)
+        assertEquals(0,QueuedChatRequest.fromJson(legacy).goalSegment!!.budgetWindow)
         assertEquals(1_000L,QueuedChatRequest.fromJson(legacy,started+1_000).goalSegment!!.activeElapsedMs)
         assertEquals(GoalSegmentBinding.MAX_DURATION_MS,QueuedChatRequest.fromJson(legacy,started+5*GoalSegmentBinding.MAX_DURATION_MS).goalSegment!!.activeElapsedMs)
         assertEquals(0L,QueuedChatRequest.fromJson(legacy,started-5).goalSegment!!.activeElapsedMs)
@@ -211,7 +215,55 @@ class GoalSegmentAutopilotTest {
         val task=TaskGoal("Save requested QA report",listOf("Verify QA"),stepBudget=1,requiredTools=setOf("save_note"))
         requireGoalLedgerAllowsCall(request,task,ToolCall("new","save_note",buildJsonObject {put("content","QA report")}),emptyList())
     }
-    @Test fun explicitResumeAndSteeringCannotRenewTheOriginalGoalBudget() {
+    @Test fun ownerResumeOpensANewBudgetWindowWithoutDroppingTheLedgerOrItsDuplicateGuards() {
+        val args=buildJsonObject {put("content","Exact QA report")}
+        val write=GoalLedgerEntry("first",0,HarnessStep("save_note",args,StepEvidence("save_note",VerificationState.VERIFIED,"Verified write")))
+        val spent=request(binding=segment().copy(totalSegments=8,consumedToolCalls=1,noProgressSegments=2,activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-1),ledger=listOf(write))
+        val source=GoalRunEvidenceSource(spent.runId,spent.threadId,spent.projectId,"completed",context(spent,GoalSegmentBinding.MAX_DURATION_MS))
+        assertTrue(runCatching {goalEntryBudget(goal(listOf("first","run-a")),listOf(source),started+100)}.isFailure) // Without an owner action, still spent.
+        val renewed=goalEntryBudget(goal(listOf("first","run-a")),listOf(source),started+100,renewBudget=true)
+        assertEquals(1,renewed.totalSegments);assertEquals(0,renewed.noProgressSegments);assertEquals(0L,renewed.activeElapsedMs)
+        assertEquals(1,renewed.budgetWindow);assertEquals(10L,renewed.originalGoalVersion)
+        // The new window's chain carries the whole ledger; an exact earlier write is still blocked.
+        val ledger=completedGoalLedger(spent)
+        val linked=goal(listOf("first","run-a","run-n"))
+        val window=segment(linked).copy(rootRunId="run-n",consumedToolCalls=ledger.size,budgetWindow=1,budgetBaseToolCalls=ledger.size)
+        val next=QueuedChatRequest("run-n","thread","branch","project","QA request","cloud-model",false,emptyList(),"user-n",workspaceBinding="workspace",
+            goal=linked,capturedPcRevision=5,allowExternalAgent=true,externalAgentRevision=7,goalSegment=window,goalLedger=ledger)
+        val task=TaskGoal("Save the QA report",listOf("Read back"),requiredTools=setOf("save_note"))
+        assertTrue(runCatching {requireGoalLedgerAllowsCall(next,task,ToolCall("duplicate","save_note",args),emptyList())}.isFailure)
+        assertTrue(decide(next.copy(previousSteps=listOf(step("fresh")))) is GoalSegmentDecision.Continue)
+    }
+    @Test fun anUncertainOrHandedOffEffectAlsoRefusesARenewedWindow() {
+        val unverified=request(listOf(HarnessStep("save_note",buildJsonObject {put("content","QA")},StepEvidence("save_note",VerificationState.UNVERIFIED,"Timed out"))))
+        val prepared=request(listOf(HarnessStep("prepare_sms",buildJsonObject {put("phoneNumber","01000000000");put("message","QA")},StepEvidence("prepare_sms",VerificationState.PREPARED,"Prepared only"))))
+        for(parent in listOf(unverified,prepared)) {
+            val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
+            assertTrue(runCatching {collectGoalLedger(goal(),listOf(source),"workspace","scope",renewBudget=true)}.isFailure)
+        }
+    }
+    @Test fun aRenewedWindowFreesSpaceOnlyByDroppingOldReadOnlyEntries() {
+        val writes=(0 until 14).map {GoalLedgerEntry("w-${it/18}",it%18,HarnessStep("save_note",buildJsonObject {put("content","QA $it")},StepEvidence("save_note",VerificationState.VERIFIED,"Saved")))}
+        val reads=(0 until 130).map {GoalLedgerEntry("r-${it/18}",it%18,step("read-$it"))}
+        val pruned=goalLedgerForRenewedWindow(reads.take(65)+writes+reads.drop(65))
+        assertEquals(GoalSegmentBinding.MAX_TOOL_CALLS-WorkSegments.STEP_BUDGET,pruned.size)
+        assertEquals(writes.map {it.json()},pruned.filter {it.step.tool=="save_note"}.map {it.json()})
+        assertEquals(reads.takeLast(112).map {it.json()},pruned.filter {it.step.tool=="search_notes"}.map {it.json()}) // Oldest reads go first.
+        val small=reads.take(10)+writes
+        assertEquals(small,goalLedgerForRenewedWindow(small))
+        val onlyWrites=(0 until 144).map {GoalLedgerEntry("m-${it/18}",it%18,HarnessStep("save_note",buildJsonObject {put("content","M $it")},StepEvidence("save_note",VerificationState.VERIFIED,"Saved")))}
+        assertEquals(GoalAutopilotPauseReason.TOOL_BUDGET,(runCatching {goalLedgerForRenewedWindow(onlyWrites)}.exceptionOrNull() as GoalAutopilotPaused).reason)
+    }
+    @Test fun windowToolBudgetCountsOnlyCallsAfterTheWindowStartedAndTheWindowCountIsBounded() {
+        val history=(0 until 120).map {GoalLedgerEntry("past-${it/18}",it%18,step("past-$it"))}
+        val windowed=segment().copy(consumedToolCalls=120,budgetWindow=3,budgetBaseToolCalls=120)
+        assertTrue(decide(request((0 until 18).map {step("new-$it")},windowed,history)) is GoalSegmentDecision.Continue)
+        val parent=request(binding=segment().copy(budgetWindow=GoalSegmentBinding.MAX_BUDGET_WINDOWS))
+        val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
+        assertEquals(GoalAutopilotPauseReason.SEGMENT_BUDGET,(runCatching {goalEntryBudget(goal(),listOf(source),started+100,renewBudget=true)}.exceptionOrNull() as GoalAutopilotPaused).reason)
+        assertTrue(runCatching {segment().copy(budgetBaseToolCalls=1)}.isFailure)
+    }
+    @Test fun steeringAndAResumeInsideAGoalSegmentCannotRenewTheOriginalGoalBudget() {
         val parent=request(binding=segment().copy(totalSegments=7))
         val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
         val budget=goalEntryBudget(goal(),listOf(source),started+10*GoalSegmentBinding.MAX_DURATION_MS)

@@ -56,7 +56,10 @@ internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry
 }
 
 /** A fresh explicit start/resume preserves the complete host ledger, including safe failures. */
-internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,workspaceBinding:String,scopeKey:String):List<GoalLedgerEntry> {
+internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,workspaceBinding:String,scopeKey:String,
+    renewBudget:Boolean=false):List<GoalLedgerEntry> {
+    // An owner-renewed window may see the union of earlier windows; goalLedgerForRenewedWindow bounds it afterwards.
+    val cap=if(renewBudget)Int.MAX_VALUE else GoalSegmentBinding.MAX_TOOL_CALLS
     val entries=linkedMapOf<Pair<String,Int>,GoalLedgerEntry>()
     for(source in sources) {
         check(source.runId in goal.linkedRunIds&&source.threadId==goal.threadId&&source.projectId==goal.projectId)
@@ -79,9 +82,26 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
             check(previous==null||previous.json()==entry.json()){"동일 실행 위치의 목표 검증 기록이 변경되었습니다."}
             entries[key]=entry
         }
-        check(entries.size<=GoalSegmentBinding.MAX_TOOL_CALLS)
+        check(entries.size<=cap)
     }
     return entries.values.toList()
+}
+
+/**
+ * Opening an owner-renewed window may free space for one segment only by dropping the oldest read-only entries.
+ * Every mutation, failure and handoff position stays; a ledger full of them is a tool-budget stop.
+ */
+internal fun goalLedgerForRenewedWindow(ledger:List<GoalLedgerEntry>):List<GoalLedgerEntry> {
+    val target=GoalSegmentBinding.MAX_TOOL_CALLS-WorkSegments.STEP_BUDGET
+    var excess=ledger.size-target
+    val kept=if(excess<=0)ledger else ledger.filter {entry->
+        val drop=excess>0&&ToolReadPolicy.isReadOnly(entry.step.tool)&&entry.step.evidence.state!=VerificationState.UNVERIFIED&&
+            !PreparedHandoff.pendingEffect(entry.step)
+        if(drop)excess--
+        !drop
+    }
+    if(kept.size>=GoalSegmentBinding.MAX_TOOL_CALLS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
+    return kept
 }
 
 /** Called in addition to the current segment's normal typed/scope/consent/harness fences. */

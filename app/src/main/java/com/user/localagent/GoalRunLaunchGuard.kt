@@ -16,12 +16,16 @@ data class GoalSegmentBinding(
     val startedAtMs:Long,val consumedToolCalls:Int,val noProgressSegments:Int,val totalSegments:Int=segmentIndex,
     /** Active time of all earlier segments, carried by the host; never derived from the wall clock of a later read. */
     val activeElapsedMs:Long=0,
+    /** Owner-renewed budget window (0 = original). Only an owner action opens the next one; the ledger is never reset. */
+    val budgetWindow:Int=0,
+    /** Ledger size when this window opened; this window's tool budget counts only later calls. */
+    val budgetBaseToolCalls:Int=0,
 ) {
     init {
         require(listOf(goalId,scopeKey,rootRunId).all {it.isNotBlank()&&it.length<=256&&it.none {c->c.code<32}})
         require(originalGoalVersion>=0&&scopeRevision>=0&&workDigest.matches(Regex("[a-f0-9]{64}")))
         require(segmentIndex in 1..MAX_SEGMENTS&&consumedToolCalls in 0..MAX_TOOL_CALLS&&noProgressSegments in 0..MAX_NO_PROGRESS)
-        require(totalSegments in segmentIndex..MAX_SEGMENTS)
+        require(totalSegments in segmentIndex..MAX_SEGMENTS&&budgetWindow in 0..MAX_BUDGET_WINDOWS&&budgetBaseToolCalls in 0..consumedToolCalls)
         require(startedAtMs>=0&&startedAtMs<=Long.MAX_VALUE-MAX_DURATION_MS&&activeElapsedMs in 0..MAX_DURATION_MS)
         require((segmentIndex==1)==(parentRunId==null&&parentCheckpointDigest==null))
         if(segmentIndex>1)require(parentRunId!=null&&parentRunId.isNotBlank()&&parentRunId.length<=100&&
@@ -32,15 +36,16 @@ data class GoalSegmentBinding(
         put("scopeKey",scopeKey);put("scopeRevision",scopeRevision);put("useOwnerMemory",useOwnerMemory);put("memoryEnabled",memoryEnabled)
         put("rootRunId",rootRunId);put("parentRunId",parentRunId);put("parentCheckpointDigest",parentCheckpointDigest)
         put("segmentIndex",segmentIndex);put("startedAtMs",startedAtMs);put("consumedToolCalls",consumedToolCalls);put("noProgressSegments",noProgressSegments);put("totalSegments",totalSegments)
-        put("activeElapsedMs",activeElapsedMs)
+        put("activeElapsedMs",activeElapsedMs);put("budgetWindow",budgetWindow);put("budgetBaseToolCalls",budgetBaseToolCalls)
     }
     companion object {
         const val MAX_SEGMENTS=8
         const val MAX_TOOL_CALLS=144
         const val MAX_DURATION_MS=30*60*1000L
         const val MAX_NO_PROGRESS=3
+        const val MAX_BUDGET_WINDOWS=100
         private val LEGACY_KEYS=setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments")
-        private val CURRENT_KEYS=LEGACY_KEYS+"activeElapsedMs"
+        private val CURRENT_KEYS=LEGACY_KEYS+setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls")
         /** A legacy binding has no active time: it is charged the whole wall span since its start, clamped, never less. */
         internal fun parse(o:JsonObject,nowMs:Long=System.currentTimeMillis()):GoalSegmentBinding {
             val legacy=o.keys==LEGACY_KEYS
@@ -54,7 +59,9 @@ data class GoalSegmentBinding(
             require(index in 1..MAX_SEGMENTS.toLong()&&count in 0..MAX_TOOL_CALLS.toLong()&&progress in 0..MAX_NO_PROGRESS.toLong()&&total in index..MAX_SEGMENTS.toLong())
             return GoalSegmentBinding(s("goalId"),l("originalGoalVersion"),s("workDigest"),s("scopeKey"),l("scopeRevision"),b("useOwnerMemory"),b("memoryEnabled"),
                 s("rootRunId"),optional("parentRunId"),optional("parentCheckpointDigest"),index.toInt(),l("startedAtMs"),count.toInt(),progress.toInt(),total.toInt(),
-                if(legacy)(nowMs-l("startedAtMs")).coerceIn(0,MAX_DURATION_MS)else l("activeElapsedMs"))
+                if(legacy)(nowMs-l("startedAtMs")).coerceIn(0,MAX_DURATION_MS)else l("activeElapsedMs"),
+                if(legacy)0 else l("budgetWindow").also {require(it in 0..MAX_BUDGET_WINDOWS.toLong())}.toInt(),
+                if(legacy)0 else l("budgetBaseToolCalls").also {require(it in 0..count)}.toInt())
         }
     }
 }
@@ -90,25 +97,37 @@ internal sealed interface GoalSegmentDecision {
     data class Pause(val reason:GoalAutopilotPauseReason):GoalSegmentDecision
 }
 internal class GoalAutopilotPaused(val reason:GoalAutopilotPauseReason):IllegalStateException(reason.description)
-internal data class GoalEntryBudget(val originalGoalVersion:Long,val startedAtMs:Long,val totalSegments:Int,val noProgressSegments:Int,val activeElapsedMs:Long)
+internal data class GoalEntryBudget(val originalGoalVersion:Long,val startedAtMs:Long,val totalSegments:Int,val noProgressSegments:Int,val activeElapsedMs:Long,
+    val budgetWindow:Int=0,val budgetBaseToolCalls:Int=0)
 
-/** Explicit START/RESUME/steer is not a budget-renewal receipt. Count every earlier goal run. */
-internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,nowMs:Long):GoalEntryBudget {
+/**
+ * Explicit START/RESUME/steer is not a budget-renewal receipt: count every earlier run of the current window.
+ * renewBudget is set only by an owner action (UI start of a PAUSED goal, or a RESUME from a run not bound to a goal);
+ * it opens the next window with fresh segment/time/no-progress counts. The caller still checks and keeps the whole ledger.
+ */
+internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,nowMs:Long,renewBudget:Boolean=false):GoalEntryBudget {
     if(sources.isEmpty())return GoalEntryBudget(goal.updatedAt,nowMs,1,0,0)
     val requests=sources.map {QueuedChatRequest.fromJson(it.contextJson,nowMs)}
-    val consumed=maxOf(sources.size,requests.maxOf {it.goalSegment?.totalSegments?:1})
+    val original=requests.minBy {it.goalSegment?.startedAtMs?:it.queueOrder}.let {it.goalSegment?.originalGoalVersion?:checkNotNull(it.goal).updatedAt}
+    val window=requests.maxOf {it.goalSegment?.budgetWindow?:0}
+    if(renewBudget) {
+        if(window>=GoalSegmentBinding.MAX_BUDGET_WINDOWS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.SEGMENT_BUDGET)
+        return GoalEntryBudget(original,nowMs,1,0,0,window+1) // The caller sets the base from the retained ledger.
+    }
+    val current=requests.indices.filter {(requests[it].goalSegment?.budgetWindow?:0)==window}
+    val consumed=maxOf(current.size,current.maxOf {requests[it].goalSegment?.totalSegments?:1})
     if(consumed>=GoalSegmentBinding.MAX_SEGMENTS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.SEGMENT_BUDGET)
-    val started=requests.minOf {it.goalSegment?.startedAtMs?:it.queueOrder}
+    val started=current.minOf {requests[it].goalSegment?.startedAtMs?:requests[it].queueOrder}
     // A segment chain carries its cumulative active time; legacy runs without a chain add their own time on top.
     val own=sources.map {goalRunActiveMs(it.contextJson,it.startedAt,it.finishedAt)}
-    val carried=requests.indices.filter {requests[it].goalSegment!=null}.maxOfOrNull {checkNotNull(requests[it].goalSegment).activeElapsedMs+own[it]}?:0L
-    val active=minOf(GoalSegmentBinding.MAX_DURATION_MS,carried+requests.indices.filter {requests[it].goalSegment==null}.sumOf {own[it]})
+    val carried=current.filter {requests[it].goalSegment!=null}.maxOfOrNull {checkNotNull(requests[it].goalSegment).activeElapsedMs+own[it]}?:0L
+    val active=minOf(GoalSegmentBinding.MAX_DURATION_MS,carried+current.filter {requests[it].goalSegment==null}.sumOf {own[it]})
     if(started<=0||active>=GoalSegmentBinding.MAX_DURATION_MS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TIME_BUDGET)
     val latest=requests.last()
     val noProgress=latest.goalSegment?.let {goalNoProgressCount(latest,goal)}?:0
     if(noProgress>=GoalSegmentBinding.MAX_NO_PROGRESS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.NO_PROGRESS)
-    val original=requests.minBy {it.goalSegment?.startedAtMs?:it.queueOrder}.let {it.goalSegment?.originalGoalVersion?:checkNotNull(it.goal).updatedAt}
-    return GoalEntryBudget(original,started,consumed+1,noProgress,active)
+    val base=current.mapNotNull {requests[it].goalSegment?.budgetBaseToolCalls}.maxOrNull()?:0
+    return GoalEntryBudget(original,started,consumed+1,noProgress,active,window,base)
 }
 
 private fun goalNoProgressCount(request:QueuedChatRequest,goal:GoalDefinition):Int {
@@ -150,7 +169,9 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     val noProgress=goalNoProgressCount(request,goal)
     // The parent's own host-written active time (approval and queue waits excluded) is charged exactly once here.
     val active=minOf(GoalSegmentBinding.MAX_DURATION_MS,segment.activeElapsedMs+goalRunActiveMs(parent.contextJson,parent.startedAt,parent.finishedAt))
-    goalBudgetStop(segment,ledger.size,active,noProgress,useNativeBudget)?.let{return pause(it)}
+    // This window's calls only; reaching the absolute ledger capacity is always a tool-budget stop.
+    val windowCalls=if(ledger.size>=GoalSegmentBinding.MAX_TOOL_CALLS)GoalSegmentBinding.MAX_TOOL_CALLS else ledger.size-segment.budgetBaseToolCalls
+    goalBudgetStop(segment,windowCalls,active,noProgress,useNativeBudget)?.let{return pause(it)}
     return GoalSegmentDecision.Continue(segment.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
         segmentIndex=segment.segmentIndex+1,totalSegments=segment.totalSegments+1,consumedToolCalls=ledger.size,noProgressSegments=noProgress,
         activeElapsedMs=active),ledger)

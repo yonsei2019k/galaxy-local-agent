@@ -73,9 +73,11 @@ fun ChatRunCoordinator.startGoal(goal:GoalDefinition,onSuccess:()->Unit={}) {
             val before=checkNotNull(app.repository.chat.thread(threadId))
             val branchId=before.activeBranchId
             val binding=app.workspaceFor(access.projectId).bindingFingerprint()
+            // The owner's button on the exact PAUSED version they saw is the only UI budget-renewal receipt.
+            val ownerResume=goalMutation.withLock {goals.loadGuarded(access)?.let {it.status==GoalStatus.PAUSED&&it.id==goal.id&&it.updatedAt==goal.updatedAt}==true}
             val prepared=saveUiGoalGuarded(access,goal)
             goalMutation.withLock {
-                queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),
+                queueBoundedGoalRun(access,prepared,branchId,model,thinking,binding,checkNotNull(currentCoroutineContext()[Job]),renewBudget=ownerResume,
                     capturedPcRevision=pcAuthority.revision,allowCloudText=pcAuthority.allowCloudText,
                     capturedAllowExternalAgent=model==ExternalAgentSettings.MODEL_ID&&externalAuthority.enabled,
                     capturedExternalAgentRevision=if(model==ExternalAgentSettings.MODEL_ID)externalAuthority.revision else null)
