@@ -186,7 +186,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private var localGoalEffects:GoalEffectRecorder?=null
     private var goalActiveClock:GoalActiveClock?=null
     /** Owner decision waits are not goal active time. */
-    private suspend fun <T> outsideGoalActiveTime(block:suspend()->T):T=goalActiveClock?.excluding(block)?:block()
+    private suspend fun <T> outsideGoalActiveTime(block: suspend () -> T): T {
+        val clock = goalActiveClock ?: return block()
+        return clock.excluding(block)
+    }
     private val workerObservers=mutableMapOf<String,Job>()
     val activeExecutions=MutableStateFlow<List<ActiveChatExecution>>(emptyList())
     val hasActiveRuns=MutableStateFlow(false)
