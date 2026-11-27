@@ -21,11 +21,15 @@ class GoalSegmentAutopilotTest {
         QueuedChatRequest("run-a","thread","branch","project","QA request","cloud-model",false,emptyList(),"user-a",
             previousSteps=steps,workspaceBinding="workspace",goal=goal((listOf("run-a")+ledger.map {it.sourceRunId}).distinct()),capturedPcRevision=5,allowExternalAgent=true,externalAgentRevision=7,
             goalSegment=binding,goalLedger=ledger)
-    private fun row(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted")=
+    /** active=null models a run written before segment active time was recorded. */
+    private fun context(request:QueuedChatRequest,active:Long?)=active?.let {JsonObject(Json.parseToJsonElement(request.toJson()).jsonObject+("goalActiveMs" to JsonPrimitive(it))).toString()}?:request.toJson()
+    private fun row(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted",active:Long?=100,
+        startedAt:Long?=null,finishedAt:Long?=null)=
         ChatRunRecord(id=request.runId,threadId=request.threadId,branchId=request.branchId,userMessageId=request.userMessageId,
-            projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=request.toJson(),errorCode=errorCode,updatedAt=started+10)
+            projectId=request.projectId,modelId=request.modelId,thinking=request.thinking,status=status,contextJson=context(request,active),errorCode=errorCode,
+            updatedAt=started+10,startedAt=startedAt,finishedAt=finishedAt)
     private fun decide(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted",now:Long=started+100,
-        unknown:Boolean=false,goal:GoalDefinition=checkNotNull(request.goal))=goalSegmentDecision(row(request,status,errorCode),goal,"scope",now,unknown)
+        unknown:Boolean=false,goal:GoalDefinition=checkNotNull(request.goal),active:Long?=100)=goalSegmentDecision(row(request,status,errorCode,active),goal,"scope",now,unknown)
     private fun pause(expected:GoalAutopilotPauseReason,actual:GoalSegmentDecision)=assertEquals(GoalSegmentDecision.Pause(expected),actual)
     private fun child(parent:QueuedChatRequest,next:GoalSegmentDecision.Continue)=parent.copy(runId="run-b",userMessageId="user-b",
         previousSteps=emptyList(),goal=goal(listOf("run-a","run-b")),goalSegment=next.binding,goalLedger=next.ledger)
@@ -37,7 +41,7 @@ class GoalSegmentAutopilotTest {
         assertTrue(child.previousSteps.isEmpty());assertEquals(18,child.goalLedger.size)
         assertEquals(18,next.binding.consumedToolCalls);assertEquals(2,next.binding.segmentIndex)
         assertEquals(10L,next.binding.originalGoalVersion);assertEquals("run-a",next.binding.rootRunId)
-        assertEquals(goalDigest(parent.toJson()),next.binding.parentCheckpointDigest)
+        assertEquals(goalDigest(row(parent).contextJson),next.binding.parentCheckpointDigest)
         assertEquals((0..17).toList(),child.goalLedger.map {it.stepIndex})
         assertEquals(child.toJson(),QueuedChatRequest.fromJson(child.toJson()).toJson())
         assertEquals(child,QueuedChatRequest.fromJson(child.toJson()))
@@ -335,7 +339,7 @@ class GoalSegmentAutopilotTest {
     @Test fun eightSegmentsAndThirtyMinutesArePausesRatherThanGoalCompletion() {
         val eighth=segment().copy(rootRunId="root-run",segmentIndex=8,totalSegments=8,parentRunId="previous",parentCheckpointDigest="a".repeat(64))
         pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(emptyList(),binding=eighth)))
-        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(request(emptyList()),now=started+GoalSegmentBinding.MAX_DURATION_MS))
+        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(request(emptyList()),active=GoalSegmentBinding.MAX_DURATION_MS))
         val extended=decide(request(binding=eighth)) as GoalSegmentDecision.Continue
         assertEquals(9,extended.binding.totalSegments)
         assertEquals(8,extended.binding.phaseStartSegments)
@@ -344,8 +348,49 @@ class GoalSegmentAutopilotTest {
         val fourthPhase=eighth.copy(totalSegments=32,phaseStartSegments=24)
         assertEquals(33,(decide(request(binding=fourthPhase)) as GoalSegmentDecision.Continue).binding.totalSegments)
         pause(GoalAutopilotPauseReason.SEGMENT_BUDGET,decide(request(emptyList(),binding=fourthPhase)))
-        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(now=started-1))
+        val spent=segment().copy(activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-100)
+        pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(request(emptyList(),binding=spent),active=100))
+        assertTrue(decide(request(emptyList(),binding=spent),active=99) is GoalSegmentDecision.Continue)
         assertEquals(GoalStatus.ACTIVE,goal().status)
+    }
+    @Test fun thirtyMinutesCountActiveSegmentTimeNotWallClockGapsOrClockSteps() {
+        val binding=segment().copy(activeElapsedMs=120_000)
+        for(now in listOf(started-1,started+10*GoalSegmentBinding.MAX_DURATION_MS)) {
+            val next=decide(request(binding=binding),now=now,active=60_000) as GoalSegmentDecision.Continue
+            assertEquals(180_000L,next.binding.activeElapsedMs)
+        }
+    }
+    @Test fun aParentWithoutRecordedActiveTimeIsChargedItsWallSpanOrTheWholeRemainder() {
+        val parent=request(binding=segment().copy(activeElapsedMs=1_000))
+        val spanned=goalSegmentDecision(row(parent,active=null,startedAt=50_000,finishedAt=55_000),checkNotNull(parent.goal),"scope",started+100,false) as GoalSegmentDecision.Continue
+        assertEquals(6_000L,spanned.binding.activeElapsedMs)
+        pause(GoalAutopilotPauseReason.TIME_BUDGET,goalSegmentDecision(row(parent.copy(previousSteps=emptyList()),active=null),checkNotNull(parent.goal),"scope",started+100,false))
+        for(bad in listOf(-1L,GoalSegmentBinding.MAX_DURATION_MS+1))
+            pause(GoalAutopilotPauseReason.TIME_BUDGET,decide(parent.copy(previousSteps=emptyList()),active=bad))
+    }
+    @Test fun aLegacyBindingWithoutActiveTimeIsReadConservativelyAndNeverRenewed() {
+        val encoded=Json.parseToJsonElement(request().toJson()).jsonObject
+        val added=setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls","transientRetries")
+        val legacy=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-added))).toString()
+        val partial=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-"budgetWindow"))).toString()
+        assertTrue(runCatching {QueuedChatRequest.fromJson(partial)}.isFailure)
+        assertEquals(0,QueuedChatRequest.fromJson(legacy).goalSegment!!.budgetWindow)
+        assertEquals(1_000L,QueuedChatRequest.fromJson(legacy,started+1_000).goalSegment!!.activeElapsedMs)
+        assertEquals(GoalSegmentBinding.MAX_DURATION_MS,QueuedChatRequest.fromJson(legacy,started+5*GoalSegmentBinding.MAX_DURATION_MS).goalSegment!!.activeElapsedMs)
+        assertEquals(0L,QueuedChatRequest.fromJson(legacy,started-5).goalSegment!!.activeElapsedMs)
+        val negative=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject+("activeElapsedMs" to JsonPrimitive(-1))))).toString()
+        assertTrue(runCatching {QueuedChatRequest.fromJson(negative)}.isFailure)
+        val plain=request()
+        assertEquals(plain.toJson(),QueuedChatRequest.fromJson(context(plain,100)).toJson()) // The run-context key is not request state.
+    }
+    @Test fun runtimeTimeBudgetUsesTheCarriedActiveTimePlusTheCurrentSegment() {
+        val segment=segment().copy(activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-1_000)
+        assertNull(goalBudgetStop(segment,0,segment.activeElapsedMs+999,0,false))
+        assertEquals(GoalAutopilotPauseReason.TIME_BUDGET,goalBudgetStop(segment,0,segment.activeElapsedMs+1_000,0,false))
+        var now=0L;val clock=GoalActiveClock({now},baselineMs=500)
+        now=10_000;assertEquals(10_500L,clock.activeMs())
+        kotlinx.coroutines.runBlocking {clock.excluding {now=70_000}} // Owner approval wait is not active time.
+        now=71_000;assertEquals(11_500L,clock.activeMs())
     }
     @Test fun cumulativeToolBudgetIncludesAllEarlierSegmentsAndCurrentAttempts() {
         val history=(0 until 126).map {GoalLedgerEntry("past-${it/18}",it%18,step("old-$it"))}
@@ -422,6 +467,19 @@ class GoalSegmentAutopilotTest {
             assertTrue(runCatching {QueuedChatRequest.fromJson(JsonObject(o+("goalSegment" to JsonObject(change))).toString())}.isFailure)
         }
     }
+    @Test fun legacyArchivedPhasesAndCurrentRetryMetadataRestoreTogether() {
+        val archive=GoalObservationIndex.decode("").apply {add("previous-observation")}
+        val original=segment().copy(totalSegments=33,phaseStartSegments=32,phaseStartCalls=149,
+            consumedToolCalls=150,archivedCalls=145,archivedObservations=archive.encode(),artifactWrapUp=true,
+            budgetWindow=1,budgetBaseToolCalls=140,transientRetries=1,activeElapsedMs=80)
+        assertEquals(original,GoalSegmentBinding.parse(original.json(),started+1000))
+        val old=JsonObject(original.json()-setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls","transientRetries"))
+        val restored=GoalSegmentBinding.parse(old,started+1000)
+        assertEquals(1000L,restored.activeElapsedMs)
+        assertEquals(145,restored.archivedCalls)
+        assertEquals(143,goalToolRoom(restored,0))
+        assertTrue(restored.artifactWrapUp)
+    }
     @Test fun actualAccessScopeAndItsRevisionMustMatchBeforeLaunch() {
         val request=request()
         val access=ChatAccessScope("thread","project","scope",false,4,true)
@@ -443,16 +501,82 @@ class GoalSegmentAutopilotTest {
         val task=TaskGoal("Save requested QA report",listOf("Verify QA"),stepBudget=1,requiredTools=setOf("save_note"))
         requireGoalLedgerAllowsCall(request,task,ToolCall("new","save_note",buildJsonObject {put("content","QA report")}),emptyList())
     }
-    @Test fun explicitResumeAndSteeringCannotRenewTheOriginalGoalBudget() {
+    @Test fun ownerResumeOpensANewBudgetWindowWithoutDroppingTheLedgerOrItsDuplicateGuards() {
+        val args=buildJsonObject {put("content","Exact QA report")}
+        val write=GoalLedgerEntry("first",0,HarnessStep("save_note",args,StepEvidence("save_note",VerificationState.VERIFIED,"Verified write")))
+        val spent=request(binding=segment().copy(totalSegments=8,consumedToolCalls=1,noProgressSegments=2,activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-1),ledger=listOf(write))
+        val source=GoalRunEvidenceSource(spent.runId,spent.threadId,spent.projectId,"completed",context(spent,GoalSegmentBinding.MAX_DURATION_MS))
+        assertTrue(runCatching {goalEntryBudget(goal(listOf("first","run-a")),listOf(source),started+100)}.isFailure) // Without an owner action, still spent.
+        val renewed=goalEntryBudget(goal(listOf("first","run-a")),listOf(source),started+100,renewBudget=true)
+        assertEquals(1,renewed.totalSegments);assertEquals(0,renewed.noProgressSegments);assertEquals(0L,renewed.activeElapsedMs)
+        assertEquals(1,renewed.budgetWindow);assertEquals(10L,renewed.originalGoalVersion)
+        // The new window's chain carries the whole ledger; an exact earlier write is still blocked.
+        val ledger=completedGoalLedger(spent)
+        val linked=goal(listOf("first","run-a","run-n"))
+        val window=segment(linked).copy(rootRunId="run-n",consumedToolCalls=ledger.size,budgetWindow=1,budgetBaseToolCalls=ledger.size)
+        val next=QueuedChatRequest("run-n","thread","branch","project","QA request","cloud-model",false,emptyList(),"user-n",workspaceBinding="workspace",
+            goal=linked,capturedPcRevision=5,allowExternalAgent=true,externalAgentRevision=7,goalSegment=window,goalLedger=ledger)
+        val task=TaskGoal("Save the QA report",listOf("Read back"),requiredTools=setOf("save_note"))
+        assertTrue(runCatching {requireGoalLedgerAllowsCall(next,task,ToolCall("duplicate","save_note",args),emptyList())}.isFailure)
+        assertTrue(decide(next.copy(previousSteps=listOf(step("fresh")))) is GoalSegmentDecision.Continue)
+    }
+    @Test fun anUncertainOrHandedOffEffectAlsoRefusesARenewedWindow() {
+        val unverified=request(listOf(HarnessStep("save_note",buildJsonObject {put("content","QA")},StepEvidence("save_note",VerificationState.UNVERIFIED,"Timed out"))))
+        val prepared=request(listOf(HarnessStep("prepare_sms",buildJsonObject {put("phoneNumber","01000000000");put("message","QA")},StepEvidence("prepare_sms",VerificationState.PREPARED,"Prepared only"))))
+        for(parent in listOf(unverified,prepared)) {
+            val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
+            assertTrue(runCatching {collectGoalLedger(goal(),listOf(source),"workspace","scope",renewBudget=true)}.isFailure)
+        }
+    }
+    @Test fun aRenewedWindowFreesSpaceOnlyByDroppingOldReadOnlyEntries() {
+        val writes=(0 until 14).map {GoalLedgerEntry("w-${it/18}",it%18,HarnessStep("save_note",buildJsonObject {put("content","QA $it")},StepEvidence("save_note",VerificationState.VERIFIED,"Saved")))}
+        val reads=(0 until 130).map {GoalLedgerEntry("r-${it/18}",it%18,step("read-$it"))}
+        val pruned=goalLedgerForRenewedWindow(reads.take(65)+writes+reads.drop(65))
+        assertEquals(GoalSegmentBinding.PHASE_TOOL_CALLS-WorkSegments.STEP_BUDGET,pruned.size)
+        assertEquals(writes.map {it.json()},pruned.filter {it.step.tool=="save_note"}.map {it.json()})
+        assertEquals(reads.takeLast(112).map {it.json()},pruned.filter {it.step.tool=="search_notes"}.map {it.json()}) // Oldest reads go first.
+        val small=reads.take(10)+writes
+        assertEquals(small,goalLedgerForRenewedWindow(small))
+        val onlyWrites=(0 until 144).map {GoalLedgerEntry("m-${it/18}",it%18,HarnessStep("save_note",buildJsonObject {put("content","M $it")},StepEvidence("save_note",VerificationState.VERIFIED,"Saved")))}
+        assertEquals(GoalAutopilotPauseReason.TOOL_BUDGET,(runCatching {goalLedgerForRenewedWindow(onlyWrites)}.exceptionOrNull() as GoalAutopilotPaused).reason)
+    }
+    @Test fun windowToolBudgetCountsOnlyCallsAfterTheWindowStartedAndTheWindowCountIsBounded() {
+        val history=(0 until 120).map {GoalLedgerEntry("past-${it/18}",it%18,step("past-$it"))}
+        val windowed=segment().copy(consumedToolCalls=120,budgetWindow=3,budgetBaseToolCalls=120)
+        assertTrue(decide(request((0 until 18).map {step("new-$it")},windowed,history)) is GoalSegmentDecision.Continue)
+        val parent=request(binding=segment().copy(budgetWindow=GoalSegmentBinding.MAX_BUDGET_WINDOWS))
+        val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
+        assertEquals(GoalAutopilotPauseReason.SEGMENT_BUDGET,(runCatching {goalEntryBudget(goal(),listOf(source),started+100,renewBudget=true)}.exceptionOrNull() as GoalAutopilotPaused).reason)
+        assertTrue(runCatching {segment().copy(budgetBaseToolCalls=1)}.isFailure)
+    }
+    @Test fun historyLargerThanOneWindowPausesANonRenewingReentryOnTheToolBudget() {
+        val pastA=(0 until 130).map {GoalLedgerEntry("pa-${it/18}",it%18,step("pa-$it"))}
+        val pastB=(0 until 30).map {GoalLedgerEntry("pb-${it/18}",it%18,step("pb-$it"))}
+        val a=request(listOf(step("a")),segment().copy(consumedToolCalls=130),pastA)
+        val bGoal=goal((listOf("run-c")+pastB.map {it.sourceRunId}).distinct())
+        val b=QueuedChatRequest("run-c","thread","branch","project","QA request","cloud-model",false,emptyList(),"user-c",
+            previousSteps=listOf(step("b")),workspaceBinding="workspace",goal=bGoal,capturedPcRevision=5,allowExternalAgent=true,externalAgentRevision=7,
+            goalSegment=segment(bGoal).copy(rootRunId="run-c",consumedToolCalls=30),goalLedger=pastB)
+        val all=goal((listOf("run-a","run-c")+pastA.map {it.sourceRunId}+pastB.map {it.sourceRunId}).distinct())
+        val sources=listOf(a,b).map {GoalRunEvidenceSource(it.runId,it.threadId,it.projectId,"completed",context(it,100))}
+        val error=runCatching {collectGoalLedger(all,sources,"workspace","scope")}.exceptionOrNull()
+        assertEquals(GoalAutopilotPauseReason.TOOL_BUDGET,(error as GoalAutopilotPaused).reason)
+        assertEquals(162,collectGoalLedger(all,sources,"workspace","scope",renewBudget=true).size)
+    }
+    @Test fun steeringAndAResumeInsideAGoalSegmentCannotRenewTheOriginalGoalBudget() {
         val parent=request(binding=segment().copy(totalSegments=7))
-        val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",parent.toJson())
-        val budget=goalEntryBudget(goal(),listOf(source),started+100)
+        val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))
+        val budget=goalEntryBudget(goal(),listOf(source),started+10*GoalSegmentBinding.MAX_DURATION_MS)
         assertEquals(started,budget.startedAtMs);assertEquals(8,budget.totalSegments);assertEquals(10L,budget.originalGoalVersion)
-        val eighth=source.copy(contextJson=parent.copy(goalSegment=parent.goalSegment!!.copy(totalSegments=8)).toJson())
+        assertEquals(100L,budget.activeElapsedMs)
+        val eighth=source.copy(contextJson=context(parent.copy(goalSegment=parent.goalSegment!!.copy(totalSegments=8)),100))
         val segmentError=runCatching {goalEntryBudget(goal(),listOf(eighth),started+100)}.exceptionOrNull() as GoalAutopilotPaused
         assertEquals(GoalAutopilotPauseReason.SEGMENT_BUDGET,segmentError.reason)
-        val timeError=runCatching {goalEntryBudget(goal(),listOf(source),started+GoalSegmentBinding.MAX_DURATION_MS)}.exceptionOrNull() as GoalAutopilotPaused
+        val spent=source.copy(contextJson=context(parent,GoalSegmentBinding.MAX_DURATION_MS))
+        val timeError=runCatching {goalEntryBudget(goal(),listOf(spent),started+100)}.exceptionOrNull() as GoalAutopilotPaused
         assertEquals(GoalAutopilotPauseReason.TIME_BUDGET,timeError.reason)
+        val unrecorded=runCatching {goalEntryBudget(goal(),listOf(source.copy(contextJson=parent.toJson())),started+100)}.exceptionOrNull() as GoalAutopilotPaused
+        assertEquals(GoalAutopilotPauseReason.TIME_BUDGET,unrecorded.reason)
     }
     @Test fun liveCurrentCallsCannotPassTheCumulative144BoundaryOfAnImmutableQueuedRequest() {
         val history=(0 until 143).map {GoalLedgerEntry("past-${it/18}",it%18,step("past-$it"))}

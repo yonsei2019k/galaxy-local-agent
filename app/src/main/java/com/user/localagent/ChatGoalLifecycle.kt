@@ -46,7 +46,8 @@ internal suspend fun ChatRunCoordinator.applyGoalLifecycle(req:GoalLifecycleRequ
                     capturedPcRevision=caller.capturedPcRevision,allowCloudText=caller.allowCloudText,
                     capturedAllowExternalAgent=caller.allowExternalAgent,capturedExternalAgentRevision=caller.externalAgentRevision,
                     capturedKakaoReadBinding=caller.kakaoReadBinding,capturedPcImageRecoveryAllowed=caller.pcImageRecoveryAllowed,
-                    capturedPcTextDefault=caller.capturedPcTextDefault)
+                    capturedPcTextDefault=caller.capturedPcTextDefault,
+                    renewBudget=req.action==GoalLifecycleAction.RESUME&&caller.goal==null&&caller.goalSegment==null)
             }
             GoalLifecycleAction.PAUSE,GoalLifecycleAction.CLEAR,GoalLifecycleAction.UPDATE -> null
         }
@@ -62,7 +63,8 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
     capturedAllowExternalAgent:Boolean=false,capturedExternalAgentRevision:Long?=null,
     capturedKakaoReadBinding:String?=null,capturedPcImageRecoveryAllowed:Boolean=false,
     nextSegment:GoalSegmentDecision.Continue?=null,capturedPcTextDefault:String?=null,
-    ownerReplyTo:String?=null):GoalLifecycleReceipt {
+    ownerReplyTo:String?=null,renewBudget:Boolean=false):GoalLifecycleReceipt {
+    check(!renewBudget||nextSegment==null&&ownerReplyTo==null)
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
     val ownedContexts=linkedSetOf<String>()
@@ -93,7 +95,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                 }
                 check(run.status !in setOf("queued","running","waiting_approval")){"같은 목표의 작업이 아직 대기·진행 중입니다. 먼저 중지하거나 완료해주세요."}
                 if(continuationParent==null||id==continuationParent.runId)
-                    sources+=GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson)
+                    sources+=GoalRunEvidenceSource(run.id,run.threadId,run.projectId,run.status,run.contextJson,run.startedAt,run.finishedAt)
             }
             val queuedIds=app.repository.chat.queuedRuns().map {it.id}.toSet()
             check(goal.linkedRunIds.none {it in queuedIds}){"같은 목표의 이어쓰기 요청이 아직 대기 중입니다."}
@@ -106,7 +108,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                 }
             }
             val idle=answered?.let {check(it.updatedAt in 0..now); now-it.updatedAt}?:0
-            val entryBudget=if(nextSegment==null)goalEntryBudget(goal,sources,now,idle)else null
+            val entryBudget=if(nextSegment==null)goalEntryBudget(goal,sources,now,idle,renewBudget)else null
             val parent=nextSegment?.let {next->
                 check(parentGoalStartRunId==null)
                 val row=checkNotNull(app.repository.chat.run(checkNotNull(next.binding.parentRunId)))
@@ -119,18 +121,19 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                 val original=QueuedChatRequest.fromJson(it.contextJson)
                 GoalReadbackSeed.from(original,assessGoalReadback(original,access.scopeKey))
             }
-            val history=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey,answered?.id)
+            val history=nextSegment?.ledger?:collectGoalLedger(goal,sources,binding,access.scopeKey,answered?.id,renewBudget)
             val archive=GoalObservationIndex.decode("")
-            val priorLedger=if(nextSegment!=null)history else compactGoalLedger(history,archive)
+            val priorLedger=if(nextSegment!=null)history else if(renewBudget)goalLedgerForRenewedWindow(history,archive) else compactGoalLedger(history,archive)
                 ?:throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
-            if(entryBudget!=null&&history.size-entryBudget.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
+            if(entryBudget!=null&&!renewBudget&&history.size-entryBudget.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
             val active=withContext(NonCancellable) {
                 goals.saveGuarded(access,goal.copy(status=GoalStatus.ACTIVE)).also {writtenGoal=it}
             }
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             val runId=UUID.randomUUID().toString().also {reserved=it}
             val segment=nextSegment?.binding?:checkNotNull(entryBudget).let {budget->GoalSegmentBinding(goal.id,budget.originalGoalVersion,goalWorkDigest(goal),access.scopeKey,
-                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,history.size,budget.noProgressSegments,budget.totalSegments,budget.phaseStartSegments,budget.phaseStartCalls,
+                access.threadRevision,access.useOwnerMemory,access.memoryEnabled,runId,null,null,1,budget.startedAtMs,history.size,budget.noProgressSegments,budget.totalSegments,budget.phaseStartSegments,if(renewBudget)history.size else budget.phaseStartCalls,
+                activeElapsedMs=budget.activeElapsedMs,budgetWindow=budget.budgetWindow,budgetBaseToolCalls=if(renewBudget)history.size else budget.budgetBaseToolCalls,
                 archivedCalls=history.size-priorLedger.size,archivedObservations=if(history.size!=priorLedger.size)archive.encode() else "")}
             check(segment.scopeKey==access.scopeKey&&segment.scopeRevision==access.threadRevision&&segment.useOwnerMemory==access.useOwnerMemory&&segment.memoryEnabled==access.memoryEnabled){"목표의 캡처된 자료 접근 범위가 변경되었습니다."}
             val pendingGoal=active.copy(linkedRunIds=(active.linkedRunIds+runId).distinct())

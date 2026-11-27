@@ -59,7 +59,7 @@ pub struct RunMachine {
 }
 impl RunMachine {
     pub fn new(binding: RunBinding, profile: ExecutionProfile, journal_capacity: usize, now_ms: u64) -> Result<Self, CoreError> {
-        binding.validate()?; profile.validate()?;
+        profile.validate_binding(&binding)?;
         let mut journal = RunJournal::new(binding.clone(), journal_capacity)?;
         journal.append(EventKind::Created, now_ms)?;
         Ok(Self { binding, profile, state: RunState::Queued, journal, effects: BTreeMap::new(),

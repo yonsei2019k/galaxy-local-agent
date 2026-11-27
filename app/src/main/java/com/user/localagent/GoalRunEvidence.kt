@@ -17,10 +17,11 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
         step.evidence.progressDigest?.let {put("progressDigest",it)}
         step.evidence.auditId?.let {put("auditId",it)}
         step.evidence.outcomeProof?.let {put("outcomeProof",it)}
+        step.evidence.observationDigest?.let {put("observationDigest",it)}
     }
     companion object {
         internal fun parse(o:JsonObject):GoalLedgerEntry {
-            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId","progressDigest","auditId","outcomeProof")})
+            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId","progressDigest","auditId","outcomeProof","observationDigest")})
             fun s(key:String)=o.getValue(key).jsonPrimitive.let {require(it.isString);it.content}
             val tool=s("tool");val args=o.getValue("arguments").jsonObject
             val state=VerificationState.valueOf(s("state"))
@@ -33,7 +34,8 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
                 o["continuationId"]?.jsonPrimitive?.let {require(it.isString);it.content},noEffect,
                 o["progressDigest"]?.jsonPrimitive?.let {require(it.isString);it.content},
                 o["auditId"]?.jsonPrimitive?.let {require(it.isString);it.content},
-                o["outcomeProof"]?.jsonPrimitive?.let {require(it.isString);it.content})))
+                o["outcomeProof"]?.jsonPrimitive?.let {require(it.isString);it.content},
+                o["observationDigest"]?.jsonPrimitive?.let {require(it.isString);it.content})))
         }
     }
 }
@@ -94,7 +96,7 @@ private val filteredGoalObservationKeys=setOf("snapshotId","auditId","requestId"
 
 internal fun goalProgressKey(step:HarnessStep):String? {
     if(step.evidence.state!=VerificationState.VERIFIED||step.evidence.effectNotApplied||!progressRelevant(step.tool))return null
-    step.evidence.progressDigest?.let {
+    (step.evidence.progressDigest ?: step.evidence.observationDigest)?.let {
         val kind=if(step.tool in goalBrowserTools)"browser-page" else step.tool
         return "$kind:$it"
     }
@@ -241,6 +243,7 @@ internal fun compactGoalLedger(entries:List<GoalLedgerEntry>,archived:GoalObserv
             !ToolReadPolicy.isReadOnly(step.tool) && (step.evidence.state!=VerificationState.VERIFIED || step.tool=="patch_note")
         if(!retain) {
             goalMilestoneKey(step)?.let(archived::add)
+            goalRepeatedReadKey(step)?.let(archived::add)
             if(step.tool==GoalWaitToolCatalog.WAIT) {
                 val condition=step.arguments["condition"] as? JsonObject
                 condition?.get("ledgerItemId")?.jsonPrimitive?.contentOrNull?.let {archived.add("media:$it")}
@@ -263,6 +266,19 @@ internal fun goalWorkDigest(goal:GoalDefinition):String=goalDigest(buildJsonObje
         it.proofTarget?.let { proof->put("proof",buildJsonObject {put("kind",proof.kind.name);put("target",proof.target)}) }})}})
 }.toString())
 
+/** Computed by the host from the actual executor result of a verified read-only tool; null for anything else. */
+internal fun goalObservationDigest(call:ToolCall,result:ToolResult):String? =
+    if(ToolReadPolicy.isReadOnly(call.name)&&result.success&&result.verification==VerificationState.VERIFIED&&result.id==call.id)
+        observedGoalProgress(call,result)?.take(16) else null
+
+
+/** A changing verified read may clear stagnation. Only milestones can renew a spent phase. */
+internal fun goalRepeatedReadKey(step:HarnessStep):String? {
+    if(step.tool in goalBrowserTools || !progressRelevant(step.tool) || step.tool==GoalProgressToolCatalog.UPDATE)return null
+    val digest=step.evidence.observationDigest?:return null
+    return "read:"+goalDigest(step.tool+":"+goalCanonical(step.arguments))+":"+digest
+}
+
 /** All states and positions are retained; no deduplication can erase an uncertain effect. */
 internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry> {
     val ledger=request.goalLedger+request.previousSteps.drop(request.goalReadbackSeedCount).mapIndexed {index,step->GoalLedgerEntry(request.runId,index,step)}
@@ -272,7 +288,7 @@ internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry
 
 /** A fresh explicit start/resume preserves the complete host ledger, including safe failures. */
 internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,workspaceBinding:String,scopeKey:String,
-    ownerReplyTo:String?=null):List<GoalLedgerEntry> {
+    ownerReplyTo:String?=null,renewBudget:Boolean=false):List<GoalLedgerEntry> {
     val entries=linkedMapOf<Pair<String,Int>,GoalLedgerEntry>()
     val checkpoints=sources.associate {it.runId to QueuedChatRequest.fromJson(it.contextJson)}
     val successors=checkpoints.values.groupBy {it.goalOwnerReplyParentId?:it.goalSegment?.parentRunId}
@@ -312,7 +328,26 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
             entries[key]=entry
         }
     }
+    val phase=checkpoints.values.lastOrNull()?.goalSegment
+    val base=maxOf(phase?.phaseStartCalls?:0,phase?.budgetBaseToolCalls?:0)
+    if(!renewBudget && entries.size-base>GoalSegmentBinding.PHASE_TOOL_CALLS)
+        throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
     return entries.values.toList()
+}
+
+/** An explicit renewal drops only old verified reads; original rows guard any later replay. */
+internal fun goalLedgerForRenewedWindow(ledger:List<GoalLedgerEntry>,archive:GoalObservationIndex=GoalObservationIndex.decode("")):List<GoalLedgerEntry> {
+    val target=GoalSegmentBinding.PHASE_TOOL_CALLS-WorkSegments.STEP_BUDGET
+    var excess=ledger.size-target
+    val kept=ledger.filter {entry->
+        val step=entry.step
+        val drop=excess>0 && ToolReadPolicy.isReadOnly(step.tool) && step.evidence.state==VerificationState.VERIFIED &&
+            step.evidence.outcomeProof==null && step.tool !in goalArtifactBrowserReads && !PreparedHandoff.pendingEffect(step)
+        if(drop) {excess--;goalMilestoneKey(step)?.let(archive::add);goalRepeatedReadKey(step)?.let(archive::add)}
+        !drop
+    }
+    if(kept.size>=GoalSegmentBinding.PHASE_TOOL_CALLS||!goalLedgerFits(kept))throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
+    return kept
 }
 
 /** Checks original Room rows during the same scope/cancellation check as a live write. */
@@ -363,7 +398,8 @@ internal fun requireGoalLedgerAllowsCall(request:QueuedChatRequest,taskGoal:Task
 }
 
 /** Host Room run metadata and its encrypted context, never a user message or imported document. */
-internal data class GoalRunEvidenceSource(val runId:String,val threadId:String,val projectId:String?,val status:String,val contextJson:String)
+internal data class GoalRunEvidenceSource(val runId:String,val threadId:String,val projectId:String?,val status:String,val contextJson:String,
+    val startedAt:Long?=null,val finishedAt:Long?=null)
 
 internal fun sameGoalWork(left:GoalDefinition,right:GoalDefinition):Boolean =
     left.id==right.id&&left.threadId==right.threadId&&left.projectId==right.projectId&&

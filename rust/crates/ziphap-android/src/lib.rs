@@ -149,12 +149,11 @@ pub enum NativeGoalBudgetStop {
 pub fn native_goal_budget_stop(
     segments: u32,
     tool_calls: u32,
-    started_ms: u64,
-    now_ms: u64,
+    active_elapsed_ms: u64,
     no_progress: u32,
 ) -> Option<NativeGoalBudgetStop> {
     use ziphap_core::GoalBudgetStop::*;
-    ziphap_core::goal_budget_stop(segments, tool_calls, started_ms, now_ms, no_progress).map(|stop| match stop {
+    ziphap_core::goal_budget_stop(segments, tool_calls, active_elapsed_ms, no_progress).map(|stop| match stop {
         Segments => NativeGoalBudgetStop::Segments,
         Tools => NativeGoalBudgetStop::Tools,
         Time => NativeGoalBudgetStop::Time,
@@ -204,6 +203,7 @@ impl NativeRunJournal {
     pub fn new(binding_json: String, profile_json: String, now_ms: u64) -> Result<Arc<Self>, EngineError> {
         let binding = RunBinding::from_json(&binding_json)?;
         let profile = ExecutionProfile::from_json(&profile_json)?;
+        profile.validate_binding(&binding)?;
         let deadline_at_ms = now_ms.checked_add(profile.deadline_ms).ok_or(EngineError::Rejected)?;
         let mut journal = RunJournal::new(binding, EVENT_CAPACITY)?;
         journal.append(EventKind::Created, now_ms)?;
@@ -407,6 +407,23 @@ mod tests {
         let restored=NativeRunJournal::restore(binding(),checkpoint.clone()).unwrap();
         assert!(restored.begin_call(binding(),"two".into(),"save_note".into(),102).is_err());
         assert!(NativeRunJournal::restore(binding().replace("scope","other"),checkpoint).is_err());
+    }
+    #[test] fn local_phone_goal_journal_restores_exact_null_revision_binding_and_keeps_inflight_uncertain() {
+        let local=r#"{"runId":"r","threadId":"t","projectId":null,"branchId":"b","scopeId":"scope","authorizationRevision":null}"#.to_string();
+        let profile=r#"{"profileId":"local-goal","provider":"local_phone","modelId":"local-model","reasoning":null,"maxToolCalls":18,"deadlineMs":1800000,"cloudAuthorized":false}"#;
+        let n=NativeRunJournal::new(local.clone(),profile.into(),100).unwrap();
+        n.begin_call(local.clone(),"one".into(),"read_note".into(),101).unwrap();
+        n.finish_call("one".into(),true,"VERIFIED".into(),false,102).unwrap();
+        n.close(103).unwrap();
+        let closed=n.checkpoint().unwrap();
+        assert!(closed.contains("\"authorizationRevision\":null")&&closed.contains("\"closed\":true"));
+        assert!(NativeRunJournal::restore(local.clone(),closed.clone()).is_ok());
+        assert!(NativeRunJournal::restore(binding(),closed).is_err());
+        let w=NativeRunJournal::new(local.clone(),profile.into(),100).unwrap();
+        w.begin_call(local.clone(),"one".into(),"save_note".into(),101).unwrap();
+        let died=NativeRunJournal::restore(local.clone(),w.checkpoint().unwrap()).unwrap();
+        assert!(died.begin_call(local.clone(),"two".into(),"read_note".into(),102).is_err());
+        assert!(NativeRunJournal::new(local,profile.replace("\"cloudAuthorized\":false","\"cloudAuthorized\":true"),100).is_err());
     }
     #[test] fn pending_external_effect_and_low_risk_mutation_cannot_become_no_effect() {
         for tool in ["prepare_sms","create_goal"]{

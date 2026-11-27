@@ -1,3 +1,9 @@
+## 2026-11-27 — C-090 통합 배포 후보
+
+- 기존 0.2.4 후보의 장기 업무·인증 복구를 유지하면서 디자인과 장기 목표 두 브랜치를 통합했다. 미리 승인된 실제 진행 단계 뒤에는 같은 목표에서 계속 작업할 수 있다. 사용자 인증과 승인 대기, 실행 전 대기열 시간은 활동 한도에서 제외한다. 재시작 후 결과를 모르는 변경 작업은 재실행 전에 원래 대상을 조회한다.
+- Android View 기반 연결 화면도 본문 SUIT와 디자인 원본의 색을 사용한다. 연결·PC·구매후기 제목에는 주아를 쓴다. APK 빌드 전 웹·Android 색상 및 아이콘 생성물을 원본 JSON과 대조한다.
+- 화면 동작, 장기 업무 모의 시험, 실제 설치 버전과 재시작 시험의 증거는 각각 별도로 기록한다.
+
 ## 2026-11-27 — C-090 디자인 2.0과 최신 채팅 통합
 
 - 작업 이력 기준 `dbb8e4e`에 디자인 브랜치 `8f85357`의 15개 커밋을 병합했다. 집순이 캐릭터·스티커와 SUIT·주아를 적용하고 목표 답변 입력, PDF 첨부 메일, 권한 카드, PC 로그인 재열기·재시도·고정 제출을 보존했다. 로그인 입력칸의 강제 스크롤은 되살리지 않았다.
@@ -19,6 +25,11 @@
 검증: core 테스트, android-runtime 단위 테스트 1,226건, lint 2종(오류 0), assembleRelease가 BUILD SUCCESSFUL이다. 웹 vitest 156건, 화면 하네스 51건(일반과 움직임 줄이기), 이모티콘 검사 0건.
 
 미검증: 서명, 설치, 실제 기기 렌더링(그림자, 듀오톤 아이콘 색, WebView 글꼴, 길게 눌러 복사)은 확인하지 않았다. View 기반 Activity 5개는 아직 바꾸지 않았다. 모델 답변이 이모티콘을 덜 쓰게 하는 `JIPSOONI_VOICE` 지침은 Codex 소유라 인계로 넘긴다.
+
+## 2026-11-27 — C-090 장기 목표 통합
+
+- dbb8e4e 기준의 권한, 로그인, 완료 근거, 단계별 예산과 장부 보관 검사를 유지하며 899dd85의 로컬 실행 전 저널, 실제 활동 시간, 소유자 재개, 관찰 변화와 제한 재시도를 통합했다. 앱 시작 때 저장한 대기 조건과 마지막 실행을 같은 복구 경로에서 확인한다. 개인 내용은 실패 기록에 넣지 않는다.
+- Rust core/Android 호스트 테스트 63건 통과. Kotlin 및 Android 기기 검증은 합친 빌드에서 별도로 확인한다.
 
 ## 2026-11-27 — 장기 목표 이어가기와 로그인 후 복구
 
@@ -3134,3 +3145,14 @@ PC 재시작 후 재조립한 0.1.71-next-action-test의 서명과 권한이 기
 - Android 계측에 설치된 React 자산을 비공개 가상 화면에서 여는 합성 대화 시험을 추가했다. 앱 글꼴 두 종, 체크 스티커의 SVG와 원문, 생각 중 상태, 캐릭터의 프레임별 변환을 확인한다.
 - 별도 SQLCipher 시험 DB에 실행 중인 목표 두 건을 저장하고, 새 프로세스에서 앱의 중단 복구 코드와 실제 Rust 실행 기록을 검사한다. 확인한 읽기는 다음 구간의 시작 조건을 대조하고, 진행 중이던 호출은 확인되지 않은 효과로 보류해야 한다.
 - 실제 기기 단조 시계와 Rust 한도 판정 시험은 전체 30분과 마지막 2초만 측정하는 시험을 분리한다. 양쪽 모두 2.5초의 승인 대기를 제외한다. 시험 입력은 합성 자료만 사용한다. 이 기록 시점에는 통합 소스 빌드와 실기 실행을 기다리고 있다.
+
+## 2026-11-27 — SOURCE goal continuity (claude/goal-continuity worktree, base cb99358)
+Branch-only source change; not integrated into galaxy-local-agent, not built into an installed APK, no device evidence. Spec: ignored `.local/sdd/2026-11-27-goal-continuity/spec.md`. Commits in order 6→7→3→2→1→4→5.
+- Fixed-code FailureLog for goal continue/launch/pause stops (no goal text or results).
+- Local goal-bound runs now write the same SQLCipher write-ahead shared journal as cloud runs (shared GoalEffectRecorder; begin right before the effect after approvals; sealed before every terminal write). Rust adds ExecutionProvider `local_phone`; RunBinding.authorizationRevision is an explicit, never-omitted `null` for local runs. Contract change for every reader of `sharedEngineState`.
+- One effect rule `goalRunEffectsUnresolved`: an `interrupted` run needs a resolved (not closed) record; `interrupted/process_restarted` is a continuable checkpoint. Startup re-tracks restored goal requests and continues or pauses orphan ACTIVE segment goals (new reason `goal_autopilot_process_restarted`).
+- GoalSegmentBinding gains `activeElapsedMs`, `budgetWindow`, `budgetBaseToolCalls`, `transientRetries` (strict key set; legacy key set accepted conservatively). Run context key `goalActiveMs` (host active time, approval/queue waits excluded). Rust `goal_budget_stop(segments,tools,active_elapsed_ms,no_progress)`; 30 min/144/8/3 unchanged.
+- Only an owner action (UI start of a PAUSED goal, RESUME from a non-goal run) opens a new budget window; ledger checks and duplicate-write guards are unchanged; only old read-only ledger entries may be dropped to make room.
+- Bounded (2) segment retry after resolved transient failures, 30 s × attempt wait outside goalMutation, new reason `goal_autopilot_transient_failure`. No cloud POST retry.
+- StepEvidence.observationDigest (host SHA-256 prefix of verified goal reads) makes a changed observation count as progress.
+Validation: see the agent report for this branch (JVM/Rust/lint/assemble results). Device and real workflow behaviour unverified.

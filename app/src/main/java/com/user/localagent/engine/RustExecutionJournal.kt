@@ -7,23 +7,27 @@ import uniffi.ziphap_android.NativeRunJournal
 import uniffi.ziphap_android.protocolVersion
 
 /** Actual Android dispatch metadata only. This never grants permission or marks a task complete. */
-internal class RustExecutionJournal(binding:String,profile:String,checkpoint:String?=null) : AutoCloseable {
-    private val native=if(checkpoint==null)NativeRunJournal(binding,profile,SystemClock.elapsedRealtime().toULong()) else NativeRunJournal.restore(binding,checkpoint)
+internal class RustExecutionJournal(binding:String,profile:String,checkpoint:String?=null,private val nowMs:()->Long=SystemClock::elapsedRealtime) : com.user.localagent.GoalExecutionJournal {
+    private val native=if(checkpoint==null)NativeRunJournal(binding,profile,nowMs().toULong()) else NativeRunJournal.restore(binding,checkpoint)
     init { check(protocolVersion()==2u){"공통 실행 엔진 버전이 일치하지 않습니다."} }
-    fun begin(binding:String,call:ToolCall){
-        native.beginCall(binding,call.id,call.name,SystemClock.elapsedRealtime().toULong())
+    override fun begin(binding:String,call:ToolCall){
+        native.beginCall(binding,call.id,call.name,nowMs().toULong())
     }
-    fun outcome(result: ToolResult) {
+    override fun outcome(call: ToolCall,result: ToolResult) {
+        require(call.id==result.id)
+        outcome(result)
+    }
+    fun outcome(result:ToolResult) {
         native.finishCall(
             result.id,
             result.success,
             result.verification.name,
             result.effectNotApplied,
-            SystemClock.elapsedRealtime().toULong(),
+            nowMs().toULong(),
         )
     }
     fun snapshot():String=native.events(0u)
-    fun checkpoint():String=native.checkpoint()
-    fun sealCheckpoint():String { native.close(SystemClock.elapsedRealtime().toULong());return native.checkpoint() }
-    override fun close(){try{native.close(SystemClock.elapsedRealtime().toULong())}finally{native.destroy()}}
+    override fun checkpoint():String=native.checkpoint()
+    override fun sealCheckpoint():String { native.close(nowMs().toULong());return native.checkpoint() }
+    override fun close(){try{native.close(nowMs().toULong())}finally{native.destroy()}}
 }
