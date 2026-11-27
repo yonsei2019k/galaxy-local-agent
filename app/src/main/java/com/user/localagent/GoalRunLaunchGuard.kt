@@ -70,7 +70,7 @@ data class GoalSegmentBinding(
         const val MAX_BUDGET_WINDOWS=100
         const val MAX_TRANSIENT_RETRIES=2
         private val clockKeys=setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls","transientRetries")
-        internal fun parse(o:JsonObject,nowMs:Long=System.currentTimeMillis()):GoalSegmentBinding {
+        internal fun parse(o:JsonObject,queuedAt:Long):GoalSegmentBinding {
             val legacy=o.keys.none {it in clockKeys}
             require(legacy || o.keys.containsAll(clockKeys))
             require(o.keys-clockKeys-setOf("archivedCalls","archivedObservations","phaseStartSegments","phaseStartCalls","artifactWrapUp","artifactAuthResumed")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
@@ -93,7 +93,12 @@ data class GoalSegmentBinding(
                 o["artifactAuthResumed"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false,
                 if("archivedCalls" in o)l("archivedCalls").also {require(it in 1..count)}.toInt() else 0,
                 if("archivedObservations" in o)s("archivedObservations") else "",
-                if(legacy)(nowMs-l("startedAtMs")).coerceIn(0,MAX_DURATION_MS)else l("activeElapsedMs"),
+                if(legacy) {
+                    // Carry time before this segment was queued. Its own activity is added from the run row.
+                    // A later read of the same checkpoint must produce the identical child binding.
+                    val start = l("startedAtMs")
+                    if (queuedAt > 0 && queuedAt >= start) (queuedAt-start).coerceAtMost(MAX_DURATION_MS) else MAX_DURATION_MS
+                } else l("activeElapsedMs"),
                 if(legacy)0 else l("budgetWindow").also {require(it in 0..MAX_BUDGET_WINDOWS.toLong())}.toInt(),
                 if(legacy)0 else l("budgetBaseToolCalls").also {require(it in 0..count)}.toInt(),
                 if(legacy)0 else l("transientRetries").also {require(it in 0..MAX_TRANSIENT_RETRIES.toLong())}.toInt())
@@ -140,7 +145,7 @@ internal data class GoalEntryBudget(val originalGoalVersion:Long,val startedAtMs
 internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,nowMs:Long,
     ownerWaitMs:Long=0,renewBudget:Boolean=false):GoalEntryBudget {
     if(sources.isEmpty())return GoalEntryBudget(goal.updatedAt,nowMs,1,0)
-    val requests=sources.map {QueuedChatRequest.fromJson(it.contextJson,nowMs)}
+    val requests=sources.map {QueuedChatRequest.fromJson(it.contextJson)}
     val original=requests.first().let {it.goalSegment?.originalGoalVersion?:checkNotNull(it.goal).updatedAt}
     val window=requests.maxOf {it.goalSegment?.budgetWindow?:0}
     if(renewBudget) {
@@ -190,7 +195,7 @@ internal fun goalMayResumeFrom(row:ChatRunRecord):Boolean =
 /** Pure host decision. unknownEffects must come from the real runtime journal, never model prose. */
 internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
     useNativeBudget:Boolean=false):GoalSegmentDecision {
-    val request=try {QueuedChatRequest.fromJson(parent.contextJson,nowMs)}catch(_:Exception) {
+    val request=try {QueuedChatRequest.fromJson(parent.contextJson)}catch(_:Exception) {
         return GoalSegmentDecision.Pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
     }
     val segment=request.goalSegment?:return GoalSegmentDecision.Pause(GoalAutopilotPauseReason.LEGACY_CONTEXT)

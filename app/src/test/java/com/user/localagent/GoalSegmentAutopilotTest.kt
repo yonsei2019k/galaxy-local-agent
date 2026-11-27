@@ -375,13 +375,32 @@ class GoalSegmentAutopilotTest {
         val partial=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject-"budgetWindow"))).toString()
         assertTrue(runCatching {QueuedChatRequest.fromJson(partial)}.isFailure)
         assertEquals(0,QueuedChatRequest.fromJson(legacy).goalSegment!!.budgetWindow)
-        assertEquals(1_000L,QueuedChatRequest.fromJson(legacy,started+1_000).goalSegment!!.activeElapsedMs)
-        assertEquals(GoalSegmentBinding.MAX_DURATION_MS,QueuedChatRequest.fromJson(legacy,started+5*GoalSegmentBinding.MAX_DURATION_MS).goalSegment!!.activeElapsedMs)
-        assertEquals(0L,QueuedChatRequest.fromJson(legacy,started-5).goalSegment!!.activeElapsedMs)
+        fun readAtQueueTime(time: Long?): Long {
+            val envelope = Json.parseToJsonElement(legacy).jsonObject
+            val saved = if (time == null) envelope - "queueOrder" else envelope + ("queueOrder" to JsonPrimitive(time))
+            return checkNotNull(QueuedChatRequest.fromJson(JsonObject(saved).toString()).goalSegment).activeElapsedMs
+        }
+        assertEquals(1_000L, readAtQueueTime(started+1_000))
+        assertEquals(GoalSegmentBinding.MAX_DURATION_MS, readAtQueueTime(started+5*GoalSegmentBinding.MAX_DURATION_MS))
+        assertEquals(GoalSegmentBinding.MAX_DURATION_MS, readAtQueueTime(started-5))
+        assertEquals(GoalSegmentBinding.MAX_DURATION_MS, readAtQueueTime(null))
         val negative=JsonObject(encoded+("goalSegment" to JsonObject(encoded.getValue("goalSegment").jsonObject+("activeElapsedMs" to JsonPrimitive(-1))))).toString()
         assertTrue(runCatching {QueuedChatRequest.fromJson(negative)}.isFailure)
         val plain=request()
         assertEquals(plain.toJson(),QueuedChatRequest.fromJson(context(plain,100)).toJson()) // The run-context key is not request state.
+    }
+    @Test fun legacyParentProducesTheSameChildAfterAnOvernightQueueWait() {
+        val original = request().copy(queueOrder=started+1_000)
+        val parent = row(original, active=2_000)
+        val envelope = Json.parseToJsonElement(parent.contextJson).jsonObject
+        val legacy = envelope.getValue("goalSegment").jsonObject -
+            setOf("activeElapsedMs", "budgetWindow", "budgetBaseToolCalls", "transientRetries")
+        val saved = parent.copy(contextJson=JsonObject(envelope + ("goalSegment" to JsonObject(legacy))).toString())
+        fun childAt(now: Long) = (goalSegmentDecision(saved, checkNotNull(original.goal), "scope", now, false)
+            as GoalSegmentDecision.Continue).binding
+        val child = childAt(started+5_000)
+        assertEquals(3_000L, child.activeElapsedMs)
+        assertEquals(child, childAt(started+24*60*60*1000L))
     }
     @Test fun runtimeTimeBudgetUsesTheCarriedActiveTimePlusTheCurrentSegment() {
         val segment=segment().copy(activeElapsedMs=GoalSegmentBinding.MAX_DURATION_MS-1_000)
