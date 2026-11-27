@@ -4,10 +4,13 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
+import android.os.SystemClock
 import android.view.Surface
 import android.view.TextureView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -30,12 +35,48 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.user.localagent.runtime.R
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+
+/** Shortest time the intro stays up when animations are on; the chat keeps loading underneath. */
+internal const val LAUNCH_INTRO_MIN_MS = 1400L
+
+/** Longest the intro may outlast the chat becoming ready. The minimum above is always shorter, so it bounds this too. */
+internal const val LAUNCH_INTRO_MAX_AFTER_READY_MS = 3000L
+
+/**
+ * Whether the launch intro is still shown. It always waits for the chat; with animations on it also stays until
+ * [LAUNCH_INTRO_MIN_MS] has passed or the video has finished, whichever is sooner. A tap ends it at once.
+ */
+internal fun launchIntroVisible(
+    elapsedMs: Long,
+    chatReady: Boolean,
+    animationsOn: Boolean,
+    dismissed: Boolean,
+    videoDone: Boolean = false,
+): Boolean {
+    if (dismissed) return false
+    if (!chatReady) return true
+    return animationsOn && !videoDone && elapsedMs < LAUNCH_INTRO_MIN_MS
+}
 
 /** Branding for the first chat render. It never owns input or delays WebView readiness. */
 @Composable
-internal fun LaunchIntro(modifier: Modifier = Modifier) {
+internal fun LaunchIntro(chatReady: Boolean, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var play by remember { mutableStateOf(false) }
+    val animationsOn = remember { ValueAnimator.areAnimatorsEnabled() }
+    var elapsedMs by remember { mutableStateOf(0L) }
+    var videoDone by remember { mutableStateOf(false) }
+    var dismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(animationsOn) {
+        val start = SystemClock.uptimeMillis()
+        while (animationsOn && elapsedMs < LAUNCH_INTRO_MIN_MS) {
+            delay(40)
+            elapsedMs = SystemClock.uptimeMillis() - start
+        }
+    }
+    val visible = launchIntroVisible(elapsedMs, chatReady, animationsOn, dismissed, videoDone)
+    LaunchedEffect(visible) { if (!visible) onDismiss() }
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             play = ValueAnimator.areAnimatorsEnabled()
@@ -46,12 +87,17 @@ internal fun LaunchIntro(modifier: Modifier = Modifier) {
             }
         }
     }
-    Box(modifier.background(Color(0xfff8f7f3)), contentAlignment = Alignment.Center) {
+    Box(
+        modifier.background(Color(0xfff3f4f8))
+            .semantics { contentDescription = "집합 시작 화면, 누르면 넘어가요" }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "건너뛰기") { dismissed = true },
+        contentAlignment = Alignment.Center,
+    ) {
         Box(Modifier.padding(horizontal = 20.dp).widthIn(max = 440.dp).fillMaxWidth().aspectRatio(16f / 9f)) {
             var hasFrame by remember { mutableStateOf(false) }
             if (play) {
                 AndroidView(
-                    factory = { context -> LaunchIntroVideo(context) { hasFrame = it } },
+                    factory = { context -> LaunchIntroVideo(context, { hasFrame = it }, { videoDone = true }) },
                     modifier = Modifier.matchParentSize(),
                     onRelease = LaunchIntroVideo::dispose,
                     update = {},
@@ -69,7 +115,11 @@ internal fun LaunchIntro(modifier: Modifier = Modifier) {
 }
 
 /** A texture can show its first frame over the poster without blocking or tinting the chat. */
-private class LaunchIntroVideo(context: Context, private val frameVisible: (Boolean) -> Unit) :
+private class LaunchIntroVideo(
+    context: Context,
+    private val frameVisible: (Boolean) -> Unit,
+    private val completed: () -> Unit,
+) :
     TextureView(context), TextureView.SurfaceTextureListener {
     private var player: MediaPlayer? = null
     private var surface: Surface? = null
@@ -103,7 +153,12 @@ private class LaunchIntroVideo(context: Context, private val frameVisible: (Bool
                 if (player === current) releasePlayer()
                 true
             }
-            video.setOnCompletionListener { if (player === it) dispose() }
+            video.setOnCompletionListener {
+                if (player === it) {
+                    completed()
+                    dispose()
+                }
+            }
             checkNotNull(resources.openRawResourceFd(R.raw.ziphap_launch_intro)).use { asset ->
                 video.setDataSource(asset.fileDescriptor, asset.startOffset, asset.length)
             }
