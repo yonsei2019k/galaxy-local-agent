@@ -210,6 +210,23 @@ mod tests {
         assert!(restored.begin_call(binding(),"two".into(),"save_note".into(),102).is_err());
         assert!(NativeRunJournal::restore(binding().replace("scope","other"),checkpoint).is_err());
     }
+    #[test] fn local_phone_goal_journal_restores_exact_null_revision_binding_and_keeps_inflight_uncertain() {
+        let local=r#"{"runId":"r","threadId":"t","projectId":null,"branchId":"b","scopeId":"scope","authorizationRevision":null}"#.to_string();
+        let profile=r#"{"profileId":"local-goal","provider":"local_phone","modelId":"local-model","reasoning":null,"maxToolCalls":18,"deadlineMs":1800000,"cloudAuthorized":false}"#;
+        let n=NativeRunJournal::new(local.clone(),profile.into(),100).unwrap();
+        n.begin_call(local.clone(),"one".into(),"read_note".into(),101).unwrap();
+        n.finish_call("one".into(),"VERIFIED".into(),false,102).unwrap();
+        n.close(103).unwrap();
+        let closed=n.checkpoint().unwrap();
+        assert!(closed.contains("\"authorizationRevision\":null")&&closed.contains("\"closed\":true"));
+        assert!(NativeRunJournal::restore(local.clone(),closed.clone()).is_ok());
+        assert!(NativeRunJournal::restore(binding(),closed).is_err());
+        let w=NativeRunJournal::new(local.clone(),profile.into(),100).unwrap();
+        w.begin_call(local.clone(),"one".into(),"save_note".into(),101).unwrap();
+        let died=NativeRunJournal::restore(local.clone(),w.checkpoint().unwrap()).unwrap();
+        assert!(died.begin_call(local.clone(),"two".into(),"read_note".into(),102).is_err());
+        assert!(NativeRunJournal::new(local,profile.replace("\"cloudAuthorized\":false","\"cloudAuthorized\":true"),100).is_err());
+    }
     #[test] fn pending_external_effect_and_low_risk_mutation_cannot_become_no_effect() {
         for tool in ["prepare_sms","create_goal"]{
             let n=native();n.begin_call(binding(),"one".into(),tool.into(),101).unwrap();

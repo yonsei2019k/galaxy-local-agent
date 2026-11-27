@@ -96,8 +96,7 @@ internal fun goalNativeEffectsUnresolved(row:com.user.localagent.data.ChatRunRec
         check(!boolean("uncertain")&&(!requireClosed||boolean("closed")))
         check(native.getValue("inFlight") is JsonNull&&native.getValue("inFlightTool") is JsonNull)
         val binding=native.getValue("binding").jsonObject
-        val expectedScope=ExternalAgentContract.sha(listOf(request.runId,request.threadId,request.branchId,request.projectId.orEmpty(),scopeKey,request.workspaceBinding.orEmpty()).joinToString("\n"))
-        check(binding==buildJsonObject {put("runId",request.runId);put("threadId",request.threadId);put("branchId",request.branchId);put("projectId",request.projectId);put("scopeId",expectedScope);put("authorizationRevision",request.externalAgentRevision)})
+        check(binding==goalJournalBinding(request,scopeKey)) // The same function writes cloud-revision and local null-revision bindings.
         val calls=native.getValue("calls").jsonArray.map {it.jsonPrimitive.let {v->check(v.isString);v.content}}
         val budget=native.getValue("budget").jsonPrimitive.let{check(!it.isString);it.int}
         check(budget in 1..128&&calls.size<=budget&&calls.distinct().size==calls.size)
@@ -147,7 +146,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private val contactLookup:((String,Int)->List<com.user.localagent.core.ContactCandidate>)?=null,
     private val workerConnectionHubFactory:((QueuedChatRequest)->com.user.localagent.connections.ConnectionHub)?=null,
     private val requestConnectionHub:com.user.localagent.connections.ConnectionHub?=null,
-    private val externalIntentLauncher:(suspend(Intent)->Unit)?=null) {
+    private val externalIntentLauncher:(suspend(Intent)->Unit)?=null,
+    private val goalJournalFactory:(String,String,String?)->GoalExecutionJournal={binding,profile,checkpoint->
+        com.user.localagent.engine.RustExecutionJournal(binding,profile,checkpoint)}) {
     internal val executionEngine:com.user.localagent.inference.ComputeExecutionEngine=workerBinding?.engine?:app.engine
     internal val executionOrchestration:com.user.localagent.models.LocalOrchestration=if(workerBinding==null)app.orchestration else
         com.user.localagent.models.LocalOrchestration(context,app.models,executionEngine)
@@ -161,6 +162,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private var requestTaskGoalForLedger:com.user.localagent.core.TaskGoal?=null
     private var requestAutopilotPauseReason:GoalAutopilotPauseReason?=null
     private var goalCleanupHold:java.io.Closeable?=null
+    private var localGoalEffects:GoalEffectRecorder?=null
     private val workerObservers=mutableMapOf<String,Job>()
     val activeExecutions=MutableStateFlow<List<ActiveChatExecution>>(emptyList())
     val hasActiveRuns=MutableStateFlow(false)
@@ -636,7 +638,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val engine=workerEngineFactory?.invoke(request)?:com.user.localagent.inference.AutomaticComputeEngine(context,ownerRunId=request.runId,
                             beforePhoneLoad={app.engine.unloadPhoneResidency()},capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText)
                         ChatRunCoordinator(context,app,ChatRequestWorkerBinding(this@ChatRunCoordinator,request,engine),
-                            inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,requestConnectionHub=requestHub,externalIntentLauncher=externalIntentLauncher)
+                            inferenceChoiceOverride=inferenceChoiceOverride,contactLookup=contactLookup,requestConnectionHub=requestHub,externalIntentLauncher=externalIntentLauncher,
+                            goalJournalFactory=goalJournalFactory)
                     }catch(cancel:CancellationException){throw cancel}
                     catch(_:Exception){
                         app.repository.chat.updateRun(request.runId,"failed","EXECUTION_INITIALIZATION_FAILED")
@@ -879,6 +882,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 liveComputeProgress=observeComputeProgress(request,workTraceSession,this)
                 prepareRequestTools(request,requestProgress){lease=it}
                 if(request.modelId==ExternalAgentSettings.MODEL_ID){executeCloudPhoneRequest(request);return@launch}
+                openLocalGoalJournal(request)
                 workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"프로젝트·자료 범위와 작업 모드를 준비했습니다.")
                 if(usableAttachments.isNotEmpty())app.chatAttachments.recoverRequest(request.runId,request.threadId,usableAttachments)
                 lines.value=app.repository.chat.messages(request.threadId,request.branchId).first().takeWhileInclusive {it.id!=request.userMessageId}.map {ChatLine(it.id,it.role,it.text)}
@@ -925,6 +929,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 withContext(NonCancellable){persistStepEvidence()}
                 if(semantic?.action==com.user.localagent.core.SemanticAction.CANCEL){
                     answer("요청을 중지했습니다. 이미 확인된 실행 결과와 기록은 보존했고, 추가 작업은 실행하지 않았습니다.")
+                    sealLocalGoalJournal(request)
                     app.repository.chat.updateRun(request.runId,"cancelled",errorCode="owner_requested_cancel")
                     status.value="요청 중지 · 기존 실행 기록 보존됨"
                     return@launch
@@ -1245,6 +1250,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     workTraceSession?.closeProgress()
                     // Preserve actual host outcomes before the terminal-state write closes context updates.
                     runCatching {persistStepEvidence()}
+                    runCatching {sealLocalGoalJournal(request)}
                     app.repository.chat.updateRun(request.runId,"cancelled")
                 }
                 app.chatAttachments.restoreToThread(request.threadId,attachmentSnapshot)
@@ -1366,12 +1372,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             put("reasoning",JsonNull);put("maxToolCalls",minOf(18,GoalSegmentBinding.MAX_TOOL_CALLS-(request.goalSegment?.consumedToolCalls?:0)));put("deadlineMs",330000);put("cloudAuthorized",request.allowExternalAgent)
         }.toString(),savedNative?.toString())
         nativeDeadlineAt=Json.parseToJsonElement(nativeJournal.checkpoint()).jsonObject.getValue("deadlineAtMs").jsonPrimitive.long
-        suspend fun persistNativeState(checkpoint:String=nativeJournal.checkpoint()) {
-            val stored=checkNotNull(app.repository.chat.run(request.runId))
-            check(stored.threadId==request.threadId&&stored.branchId==request.branchId&&stored.projectId==request.projectId)
-            val old=Json.parseToJsonElement(stored.contextJson).jsonObject
-            app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("sharedEngineState" to Json.parseToJsonElement(checkpoint))).toString())
-        }
+        suspend fun persistNativeState(checkpoint:String=nativeJournal.checkpoint())=persistSharedEngineState(request,checkpoint)
+        val effects=GoalEffectRecorder(nativeJournal,{nativeBinding()},{persistNativeState(it)})
         fun noEffect(call:ToolCall,reason:String):ToolResult {
             val result=ToolResult(call.id,false,reason,VerificationState.FAILED,reason,effectNotApplied=true)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,result)
@@ -1388,16 +1390,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     noEffect(call,"실행 권한이나 대상이 변경되어 도구를 시작하지 않았습니다.")
                 else if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
                     noEffect(call,"백그라운드 실행 유지가 종료되어 도구를 시작하지 않았습니다.")
-                else if(runCatching{nativeJournal.begin(nativeBinding(),call)}.isFailure)
-                    noEffect(call,"공통 실행 기록이 재실행·만료·미확인 상태를 감지해 도구를 시작하지 않았습니다.")
-                else {
-                    // SQLCipher commit is the write-ahead boundary. A process death after this point
-                    // restores an uncertain in-flight call and cannot silently replay a write.
-                    persistNativeState()
-                    val result=runTool(call)
-                    withContext(NonCancellable){nativeJournal.outcome(call,result);persistNativeState()}
-                    result
-                }
+                else effects.run(call,{noEffect(call,GOAL_JOURNAL_REFUSED)}){runTool(call)}
             },recordActual={entry->
                 check(actual.put(entry.proposal.callId,entry)==null)
                 // Same as the local path: a handed-off Intent stops the run before the model can repeat it.
@@ -1560,6 +1553,34 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }
     }
 
+    /** Merges the host journal checkpoint into this run's encrypted context; terminal rows reject the write. */
+    private suspend fun persistSharedEngineState(request:QueuedChatRequest,checkpoint:String) {
+        val stored=checkNotNull(app.repository.chat.run(request.runId))
+        check(stored.threadId==request.threadId&&stored.branchId==request.branchId&&stored.projectId==request.projectId)
+        val old=Json.parseToJsonElement(stored.contextJson).jsonObject
+        app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("sharedEngineState" to Json.parseToJsonElement(checkpoint))).toString())
+    }
+    /** Goal-bound local runs get the same write-ahead record as cloud runs. No record means no local goal effect. */
+    private suspend fun openLocalGoalJournal(request:QueuedChatRequest) {
+        if(request.goal==null||request.continuation!=null||!request.allowTools||request.modelId==ExternalAgentSettings.MODEL_ID)return
+        suspend fun binding()=goalJournalBinding(request,app.repository.chat.accessScope(request.threadId).scopeKey).toString()
+        val saved=app.repository.chat.run(request.runId)?.contextJson?.let {Json.parseToJsonElement(it).jsonObject["sharedEngineState"]}?.takeUnless {it is JsonNull}
+        val journal=try {goalJournalFactory(binding(),localGoalJournalProfile(request),saved?.toString())}
+            catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){throw IllegalStateException("목표 실행의 공통 실행 기록을 준비하지 못해 도구를 시작하지 않았습니다.",error)}
+        val effects=GoalEffectRecorder(journal,{binding()},{persistSharedEngineState(request,it)})
+        localGoalEffects=effects
+        persistSharedEngineState(request,effects.checkpoint())
+    }
+    /** Called before every terminal write of a local goal run; a terminal row can no longer accept the checkpoint. */
+    private suspend fun sealLocalGoalJournal(request:QueuedChatRequest) {
+        val effects=localGoalEffects?:return
+        withContext(NonCancellable){
+            val checkpoint=effects.sealCheckpoint()
+            if(app.repository.chat.run(request.runId)?.status !in com.user.localagent.data.ChatStore.TERMINAL)persistSharedEngineState(request,checkpoint)
+        }
+    }
+
     /** planDigest null marks a model-only answer: no plan, no phone call, not execution evidence. */
     private suspend fun recordCloudReceipt(runId:String,planDigest:String?,phoneCalls:Int,providerMs:JsonElement,nativeEvents:String?=null) {
         val beforeClose=checkNotNull(app.repository.chat.run(runId))
@@ -1601,7 +1622,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(app.repository.chat.run(request.runId)?.status !in com.user.localagent.data.ChatStore.TERMINAL){
             if(app.repository.chat.assistantForRun(request.runId)?.text.isNullOrBlank())
                 answer(if(planningDeferred)requireNotNull(planning).message.orEmpty() else "작업을 끝내지 못했습니다: ${error.message ?: error.javaClass.simpleName}")
-            withContext(NonCancellable){runCatching {persistStepEvidence()}}
+            withContext(NonCancellable){runCatching {persistStepEvidence()};runCatching {sealLocalGoalJournal(request)}}
             val errorCode=planning?.reasonCode
                 ?:(error as? com.user.localagent.externalagent.PcAgentBridgeTimeout)?.stageCode
                 ?:error.javaClass.simpleName
@@ -1911,6 +1932,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             withContext(NonCancellable){
                 workTraceSession?.closeProgress()
                 runCatching {persistStepEvidence()}
+                runCatching {sealLocalGoalJournal(request)}
                 if(app.repository.chat.run(request.runId)?.status=="running"){
                     if(interruptedTerminalState!=null){
                         // An optional error answer/checkpoint can fail after a scope change.
@@ -1948,6 +1970,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     requestDirectSelectedTools=emptySet()
                     clearHostActionPhase()
                     if(pendingGoalStopRunId==request.runId)pendingGoalStopRunId=null
+                    runCatching {localGoalEffects?.close()};localGoalEffects=null
                     workTraceSession=null
                     requestGuidance.clear();contextCalls.clear();omittedGuidance.clear()
                     completedSteps[request.runId]=requestSteps.toList()
@@ -2517,11 +2540,14 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(pendingSteerRunId==request.runId)throw CancellationException("추가 지시 적용 대기")
         requestTools?.validateGoalEditRead(call)
         toolInFlight=true
-        return try {val target=resolveRecipient(call);performTool(target.first,target.second).also {if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}
+        return try {val target=resolveRecipient(call);performTool(target.first,target.second).also {
+            localGoalEffects?.finish(it) // No-op unless performTool began this local goal effect.
+            if(pendingSteerRunId==request.runId)throw CancellationException("검증한 실행 뒤 추가 지시 적용")}}
         catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
             val failure=if(error is GoalAutopilotPaused)ToolResult(call.id,false,error.reason.description,VerificationState.FAILED,error.reason.description,effectNotApplied=true)
                 else com.user.localagent.notes.NotePatchFailureEvidence.result(call,error)
+            localGoalEffects?.finish(failure)
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,failure)
             requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,failure.verificationSummary,effectNotApplied=failure.effectNotApplied))
             persistStepEvidence();failure
@@ -2621,6 +2647,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         currentCoroutineContext().ensureActive()
         enforceGoalToolFence(checkNotNull(activeRequest),call)
         externalEffectGuard?.invoke() // Recheck cloud consent after a possibly long owner approval wait.
+        localGoalEffects?.let {effects->if(!effects.begin(call)) {
+            // Write-ahead refused: the effect never starts and the refusal is retained as a no-effect failure.
+            val refused=ToolResult(call.id,false,GOAL_JOURNAL_REFUSED,VerificationState.FAILED,GOAL_JOURNAL_REFUSED,effectNotApplied=true)
+            observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,refused)
+            requestSteps+=HarnessStep(call,StepEvidence(call.name,VerificationState.FAILED,GOAL_JOURNAL_REFUSED,effectNotApplied=true))
+            traceAttempt?.let{workTraceSession?.outcome(it,refused)}
+            persistStepEvidence()
+            return refused
+        }}
         val intent=tools.prepareIntent(call)
         if(intent != null) {
             withContext(Dispatchers.Main) { externalIntentLauncher?.invoke(intent)?:context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }

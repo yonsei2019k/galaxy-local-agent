@@ -2,7 +2,7 @@ use ziphap_core::*;
 
 fn binding(id: &str) -> RunBinding {
     RunBinding { run_id: id.into(), thread_id: "thread-a".into(), project_id: Some("project-a".into()),
-        branch_id: "branch-a".into(), scope_id: "project:project-a".into(), authorization_revision: 3 }
+        branch_id: "branch-a".into(), scope_id: "project:project-a".into(), authorization_revision: Some(3) }
 }
 fn profile() -> ExecutionProfile {
     ExecutionProfile { profile_id: "cloud-fast".into(), provider: ExecutionProvider::CodexCli,
@@ -71,7 +71,7 @@ fn expiry_revision_scope_and_permission_are_rechecked_after_approval() {
     let p = permit(&b, &a);
     assert_eq!(Err(CoreError::PermissionDenied), m.claim_effect("effect-a".into(), p, &live(&b), 102, |_| false));
     assert_eq!(None, m.effect_state("effect-a"));
-    let mut changed = b.clone(); changed.authorization_revision += 1;
+    let mut changed = b.clone(); changed.authorization_revision = Some(4);
     assert!(matches!(grant(&b, &a, 1).reserve(&a, &live(&changed), 102, |_| true), Err(CoreError::AuthorityChanged)));
     let mut other_project = b.clone(); other_project.project_id = Some("project-b".into());
     assert_eq!(Err(CoreError::AuthorityChanged), m.claim_effect("effect-a".into(), permit(&b, &a), &live(&other_project), 102, |_| true));
@@ -185,7 +185,7 @@ fn a_model_answer_or_journal_event_is_not_completion_evidence() {
 fn revoked_authority_does_not_erase_actual_effect_but_cannot_complete() {
     let b = binding("run-a"); let a = action("note-a"); let mut m = machine(&b);
     m.claim_effect("effect-a".into(), permit(&b, &a), &live(&b), 102, |_| true).unwrap();
-    let mut revoked = b.clone(); revoked.authorization_revision += 1;
+    let mut revoked = b.clone(); revoked.authorization_revision = Some(4);
     m.record_effect(&b, "effect-a", verified(), 103).unwrap();
     assert_eq!(Some(EffectState::Verified), m.effect_state("effect-a"));
     assert_eq!(Err(CoreError::AuthorityChanged), m.complete(&[CompletionRequirement { action: a, requires_effect_readback: true }], &live(&revoked), 104));
@@ -260,4 +260,21 @@ fn scheduler_preserves_binding_and_fifo_and_never_evicts_unknown_effects() {
     assert_eq!(Admission::AlreadyTerminal, scheduler.admit(a.clone(), 502).unwrap());
     scheduler.reconcile_terminal(&a, RunState::Failed, 503).unwrap();
     assert_eq!(Admission::Started, scheduler.admit(binding("run-d"), 504).unwrap());
+}
+
+#[test]
+fn local_phone_profile_never_claims_cloud_and_local_binding_has_explicit_null_revision() {
+    let local = r#"{"profileId":"local-goal","provider":"local_phone","modelId":"local-model","reasoning":null,"maxToolCalls":18,"deadlineMs":1800000,"cloudAuthorized":false}"#;
+    assert_eq!(ExecutionProvider::LocalPhone, ExecutionProfile::from_json(local).unwrap().provider);
+    assert_eq!(Err(CoreError::InvalidProfile), ExecutionProfile::from_json(&local.replace("\"cloudAuthorized\":false", "\"cloudAuthorized\":true")));
+    let pc = local.replace("local_phone", "local_pc");
+    assert_eq!(ExecutionProvider::LocalPc, ExecutionProfile::from_json(&pc).unwrap().provider);
+    let raw = r#"{"runId":"run-a","threadId":"thread-a","projectId":null,"branchId":"branch-a","scopeId":"scope-a","authorizationRevision":null}"#;
+    let parsed = RunBinding::from_json(raw).unwrap();
+    assert_eq!(None, parsed.authorization_revision);
+    assert_eq!(raw, serde_json::to_string(&parsed).unwrap());
+    // A missing revision is not silently a local binding.
+    assert!(RunBinding::from_json(&raw.replace(",\"authorizationRevision\":null", "")).is_err());
+    let mut cloud = parsed.clone(); cloud.authorization_revision = Some(0);
+    assert_ne!(parsed, cloud);
 }

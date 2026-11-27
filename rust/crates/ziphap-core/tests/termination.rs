@@ -3,7 +3,7 @@ use ziphap_core::*;
 
 fn binding() -> RunBinding {
     RunBinding { run_id: "run-t".into(), thread_id: "thread-t".into(), project_id: None,
-        branch_id: "branch-t".into(), scope_id: "scope-t".into(), authorization_revision: 1 }
+        branch_id: "branch-t".into(), scope_id: "scope-t".into(), authorization_revision: Some(1) }
 }
 fn profile() -> ExecutionProfile {
     ExecutionProfile { profile_id: "p".into(), provider: ExecutionProvider::CodexCli, model_id: "m".into(),

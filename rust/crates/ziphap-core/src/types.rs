@@ -53,8 +53,15 @@ pub(crate) fn digest(value: &str) -> bool {
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionProvider {
     LocalPc,
+    /// On-device phone inference. Like LocalPc it never carries a cloud prerequisite.
+    LocalPhone,
     CodexCli,
     ClaudeCli,
+}
+impl ExecutionProvider {
+    pub fn is_local(self) -> bool {
+        matches!(self, Self::LocalPc | Self::LocalPhone)
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -86,8 +93,8 @@ impl ExecutionProfile {
             || !identifier(&self.model_id, 100)
             || !(1..=128).contains(&self.max_tool_calls)
             || !(1_000..=1_800_000).contains(&self.deadline_ms)
-            || (self.provider != ExecutionProvider::LocalPc && !self.cloud_authorized)
-            || (self.provider == ExecutionProvider::LocalPc && self.cloud_authorized)
+            || (!self.provider.is_local() && !self.cloud_authorized)
+            || (self.provider.is_local() && self.cloud_authorized)
         {
             return Err(CoreError::InvalidProfile);
         }
@@ -111,7 +118,12 @@ pub struct RunBinding {
     pub project_id: Option<String>,
     pub branch_id: String,
     pub scope_id: String,
-    pub authorization_revision: u64,
+    /// Captured cloud authorization revision; an explicit null for a local-only run. Never omitted.
+    #[serde(deserialize_with = "required_revision")]
+    pub authorization_revision: Option<u64>,
+}
+fn required_revision<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+    Option::<u64>::deserialize(deserializer)
 }
 impl fmt::Debug for RunBinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
