@@ -896,7 +896,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         check(original.copy(runId=child.runId,queueOrder=child.queueOrder,previousSteps=emptyList(),
             browserAuthParentRunId=id,readbackObligations=null)==child)
         verifyBrowserAuthSource(parent,original)
-        check(com.user.localagent.integrations.AppWebAgent.get(context).isConfirmedBrowserCurrent(child.runId))
+        val current=com.user.localagent.integrations.AppWebAgent.get(context).isConfirmedBrowserCurrent(child.runId)
+        // A committed host-authenticated PC handoff can outlive this Android process.
+        // The first read still has to match the original private work session and site.
+        check(current || (child.runId==BrowserAuthContinuation.childId(parent.id)&&
+            pcBrowserWorkKey(child)==pcBrowserWorkKey(original)&&BrowserAuthContinuation.pcLoginOrigin(parent.contextJson)!=null))
     }
 
     private suspend fun verifyBrowserAuthSource(parent:com.user.localagent.data.ChatRunRecord,original:QueuedChatRequest) {
@@ -950,8 +954,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val hasWake=Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
                     if(wait!=null&&(goal.status==GoalStatus.WAITING||goal.status==GoalStatus.ACTIVE&&!hasWake)) {
                         val parked=requireGoalRunBinding(goal,parent)
-                        if(wait.matchesTransientParent(parent)) {
-                            scheduleTransientGoalRetry(access,goal,parent,parked,wait)
+                        if(wait.transientParentDigest!=null) {
+                            if(wait.matchesTransientParent(parent))scheduleTransientGoalRetry(access,goal,parent,parked,wait)
+                            else {
+                                app.goalWaits.cancel(wait)
+                                pauseApprovedGoal(access,goal,parent,GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+                            }
                             return@withLock
                         }
                         requireGoalSegmentScope(parked,access)
@@ -2324,19 +2332,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             val report=provider["report"]?.takeUnless{it is JsonNull}?.jsonObject
             if(report==null){
-                // Name why it stopped (PC provider code or phone session phase) so a pause is diagnosable from the run.
-                val code=(provider["errorCode"] as? JsonPrimitive)?.contentOrNull?.takeIf{Regex("[A-Z_]{1,64}").matches(it)}
-                val why=code?:"SESSION_${controller.phase.name}"
-                val stop=controller.stopMetadata()
-                FailureLog.cloudStop(context,why,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
-                if(stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&pauseForScreenSetup(request))return
-                val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
-                    "마지막 동작이 반영됐는지 확인하지 못했어요. 다시 시도하려면 현재 화면부터 확인해야 해요."
-                    else "작업이 도중에 멈췄어요. 확인한 내용은 남겨뒀어요."
-                val recoverable=request.goalSegment!=null&&stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&
-                    requestSteps.isNotEmpty()&&requestSteps.all {isReadTool(it.tool)||it.evidence.effectNotApplied}
-                publishActionFinal(request,requestAuthorizedTools,if(recoverable)"확인한 결과를 저장했어요. 남은 단계부터 이어갈게요." else message,
-                    true,if(recoverable)"partial_recoverable_provider" else why);return
+                publishMissingProviderReport(request,provider,controller,lastProviderState,bridgeStarted)
+                return
             }
             val dispatchedChild=verifiedGoalDispatchChild(requestSteps).takeIf {
                 request.goal==null&&plan!=null&&lastProviderState=="FINISHED"&&
@@ -2355,30 +2352,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             val resultState=report.getValue("state").jsonPrimitive.content
             if(resultState=="needs_input"){
-                if(pauseForScreenSetup(request))return
-                val question=report.getValue("question").jsonPrimitive.content
-                val readOnly=requestSteps.all{com.user.localagent.core.ToolReadPolicy.isReadOnly(it.tool)}
-                val goalRespondable=request.goalSegment!=null&&requestSteps.none {
-                    goalUnverifiedEffect(it)||goalUncertainFailure(it)||com.user.localagent.core.PreparedHandoff.pendingEffect(it)
-                }
-                val canAnswerInSameTest=(readOnly||goalRespondable)&&question.isNotBlank()&&runCatching {
-                    val evidence=client.taskEvidence()
-                    listOf("pcCalls","unresolvedCalls","preparedCalls").all{evidence.getValue(it).jsonArray.isEmpty()}&&
-                        evidence.getValue("phoneCalls").jsonArray.all{
-                            val call=it.jsonObject
-                            call.getValue("state").jsonPrimitive.content=="COMPLETED"&&
-                                (goalRespondable||com.user.localagent.core.ToolReadPolicy.isReadOnly(call.getValue("tool").jsonPrimitive.content))
-                        }
-                }.onFailure{if(it is CancellationException)throw it}.getOrDefault(false)
-                if(canAnswerInSameTest){
+                publishProviderQuestion(request,report,client) {
                     check(authority().permits(capture))
                     controller.close();closed=true
                     persistNativeState(nativeJournal.sealCheckpoint())
                 }
-                publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"이어서 하려면 정보가 조금 더 필요해요."},true,
-                    if(canAnswerInSameTest && goalRespondable)GOAL_OWNER_INPUT
-                    else if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE else "execution_not_verified",
-                    if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.readChoices(report["choices"]) else emptyList())
                 return
             }
             if(CloudAgentFinals.isToolFreeAnswer(resultState,plan!=null,actual.size,requestSteps.size)){
@@ -2471,6 +2449,47 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         app.repository.chat.updateRun(request.runId,"completed")
         workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.ANSWER_FINISHED)
         status.value="응답 완료"
+    }
+
+    private suspend fun publishMissingProviderReport(request:QueuedChatRequest,provider:JsonObject,
+        controller:ExternalAgentController,lastProviderState:String,bridgeStarted:Long) {
+        // Name why it stopped (PC provider code or phone session phase) so a pause is diagnosable from the run.
+        val code=(provider["errorCode"] as? JsonPrimitive)?.contentOrNull?.takeIf{Regex("[A-Z_]{1,64}").matches(it)}
+        val why=code?:"SESSION_${controller.phase.name}"
+        val stop=controller.stopMetadata()
+        FailureLog.cloudStop(context,why,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
+        if(stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&pauseForScreenSetup(request))return
+        val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
+            "마지막 동작이 반영됐는지 확인하지 못했어요. 다시 시도하려면 현재 화면부터 확인해야 해요."
+            else "작업이 도중에 멈췄어요. 확인한 내용은 남겨뒀어요."
+        val recoverable=request.goalSegment!=null&&stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&
+            requestSteps.isNotEmpty()&&requestSteps.all {isReadTool(it.tool)||it.evidence.effectNotApplied}
+        publishActionFinal(request,requestAuthorizedTools,if(recoverable)"확인한 결과를 저장했어요. 남은 단계부터 이어갈게요." else message,
+            true,if(recoverable)"partial_recoverable_provider" else why)
+    }
+
+    private suspend fun publishProviderQuestion(request:QueuedChatRequest,report:JsonObject,
+        client:PcExternalAgentClient,closeVerifiedSession:suspend ()->Unit) {
+        if(pauseForScreenSetup(request))return
+        val question=report.getValue("question").jsonPrimitive.content
+        val readOnly=requestSteps.all{com.user.localagent.core.ToolReadPolicy.isReadOnly(it.tool)}
+        val goalRespondable=request.goalSegment!=null&&requestSteps.none {
+            goalUnverifiedEffect(it)||goalUncertainFailure(it)||com.user.localagent.core.PreparedHandoff.pendingEffect(it)
+        }
+        val canAnswerInSameTest=(readOnly||goalRespondable)&&question.isNotBlank()&&runCatching {
+            val evidence=client.taskEvidence()
+            listOf("pcCalls","unresolvedCalls","preparedCalls").all{evidence.getValue(it).jsonArray.isEmpty()}&&
+                evidence.getValue("phoneCalls").jsonArray.all{
+                    val call=it.jsonObject
+                    call.getValue("state").jsonPrimitive.content=="COMPLETED"&&
+                        (goalRespondable||com.user.localagent.core.ToolReadPolicy.isReadOnly(call.getValue("tool").jsonPrimitive.content))
+                }
+        }.onFailure{if(it is CancellationException)throw it}.getOrDefault(false)
+        if(canAnswerInSameTest)closeVerifiedSession()
+        publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"이어서 하려면 정보가 조금 더 필요해요."},true,
+            if(canAnswerInSameTest && goalRespondable)GOAL_OWNER_INPUT
+            else if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE else "execution_not_verified",
+            if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.readChoices(report["choices"]) else emptyList())
     }
 
     private suspend fun publishVerifiedCloudAnswer(
@@ -3083,7 +3102,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         observedOutcomes.any {outcome->outcome.call.name in com.user.localagent.core.PcBrowserToolCatalog.names})
                         releasePcBrowserAfter(request)
                     withContext(Dispatchers.Main.immediate){
-                        com.user.localagent.integrations.AppWebAgent.get(context).finishWork(it.id,it.status,it.errorCode)
+                        val last=runCatching{ChatExecutionReport.read(Json.parseToJsonElement(it.contextJson).jsonObject).lines.lastOrNull()?.text}.getOrNull()
+                        com.user.localagent.integrations.AppWebAgent.get(context).finishWork(it.id,it.status,it.errorCode,last)
                     }
                 }
             }
@@ -4272,7 +4292,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         val retry=outcome.record.copy(id=UUID.randomUUID().toString(),
                             retryAt=outcome.atEpochMillis,observedEvent=event)
                         check(app.goalWaits.store.replace(retry,record))
-                        app.goalWaits.arm(retry)
+                        if(transientRetry)scheduleTransientGoalRetry(access,goal,parent,original,retry) else app.goalWaits.arm(retry)
                         return@withLock true
                     }
                     is WaitDecision.Rearm -> {

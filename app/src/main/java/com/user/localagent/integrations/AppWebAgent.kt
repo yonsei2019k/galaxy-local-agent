@@ -457,13 +457,17 @@ class AppWebAgent private constructor(private val context:Context) {
             steps=(prior.steps+"원래 요청 재개").takeLast(4),working=true))
     }
 
-    internal fun finishWork(runId:String,actualState:String,errorCode:String?) {
+    internal fun finishWork(runId:String,actualState:String,errorCode:String?,lastObservation:String?=null) {
         val prior=websiteWorks.value.lastOrNull{it.binding?.runId==runId} ?: return
+        val last=lastObservation?:prior.steps.lastOrNull()
         val label=when {
-            errorCode in setOf("waiting_browser_auth","waiting_goal_condition","browser_auth_on_phone") -> "재개 조건 확인 대기"
+            errorCode in setOf("waiting_browser_auth","browser_auth_on_phone") -> "사이트 로그인 대기 · 휴대폰에서 인증하면 원래 작업을 이어가요."
+            errorCode=="waiting_goal_condition" -> "다음 확인 시각이나 사이트 응답을 기다리고 있어요."
+            errorCode=="pc_browser_waiting_connection" -> "작업 PC에 연결되지 않아 페이지를 열지 못했어요."
+            errorCode in setOf("browser_auth_read_required","browser_auth_read_unavailable","browser_auth_read_unconfirmed") ->
+                "로그인 후 원래 페이지 확인 단계에서 멈췄어요."
             actualState=="completed" -> "웹 작업 응답 완료"
-            actualState=="paused" -> "일시 정지 · 채팅에서 마지막 확인 결과를 볼 수 있어요."
-            actualState=="failed" -> "웹 작업을 이어가지 못했어요. 채팅의 결과를 확인해 주세요."
+            actualState in setOf("paused","failed") -> last?.let {"최근 기록 · $it"}?:"사이트에서 첫 번째 동작 결과를 받기 전에 멈췄어요."
             actualState=="cancelled"||actualState=="interrupted" -> "웹 작업 중지"
             else -> return
         }

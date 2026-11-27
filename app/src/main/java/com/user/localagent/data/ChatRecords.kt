@@ -842,9 +842,17 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         check(dao.run(parent.id)==parent)
         checkBinding(parent)
         require(text.isNotBlank()&&text.length<=1000)
-        val id=UUID.nameUUIDFromBytes("goal-retry:${parent.id}:$key".toByteArray(Charsets.UTF_8)).toString()
-        if(local.messageById(id)==null)
-            insertMessage(MessageRecord(id=id,role="assistant",text=text,threadId=parent.threadId,branchId=parent.branchId),parent.userMessageId)
+        fun noticeId(kind:String)=UUID.nameUUIDFromBytes("goal-retry:${parent.id}:$kind".toByteArray(Charsets.UTF_8)).toString()
+        val id=noticeId(key)
+        val existing=local.messageById(id)
+        if(existing==null) {
+            val scheduled=if(key=="scheduled")null else local.messageById(noticeId("scheduled"))?.id
+            val after=scheduled?:dao.assistantForRun(parent.id)?.id?:parent.userMessageId
+            insertMessage(MessageRecord(id=id,role="assistant",text=text,threadId=parent.threadId,branchId=parent.branchId),after)
+        } else {
+            check(existing.role=="assistant" && existing.threadId==parent.threadId && existing.branchId==parent.branchId)
+            dao.checkpoint(id,text)
+        }
     }
 
     internal suspend fun writeGoalWaitOutcome(runId:String,text:String,errorCode:String)=database.withTransaction {

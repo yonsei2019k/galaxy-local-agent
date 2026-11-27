@@ -41,7 +41,8 @@ class GoalTransientRetryTest {
         for((tool,receipt,code) in listOf(
             Triple(PcBrowserToolCatalog.OPEN,WebsiteExecutionPolicy.RECONNECT_CODE,WebsiteExecutionPolicy.RECONNECT_CODE),
             Triple(PcBrowserToolCatalog.READ,"read_timeout_no_mutation",GOAL_BROWSER_READ_RETRY))) {
-            val failed=HarnessStep(tool,buildJsonObject {},StepEvidence(tool,VerificationState.FAILED,receipt,effectNotApplied=true))
+            val args=buildJsonObject {if(tool==PcBrowserToolCatalog.OPEN)put("url","https://example.org/")}
+            val failed=HarnessStep(tool,args,StepEvidence(tool,VerificationState.FAILED,receipt,effectNotApplied=true))
             val continued=decide("paused",code,retries=2,steps=listOf(failed)) as GoalSegmentDecision.Continue
             assertEquals(2,continued.binding.transientRetries)
             assertEquals(segment().budgetWindow,continued.binding.budgetWindow)
