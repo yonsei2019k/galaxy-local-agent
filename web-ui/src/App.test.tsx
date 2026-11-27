@@ -442,7 +442,7 @@ describe('native conversation', () => {
     expect(document.activeElement).toBe(input())
     expect(requests().length).toBe(before)
 
-    act(() => { chips[0].click() })
+    act(() => { chips[0].click(); chips[1].click() })
     act(() => { chips[0].click(); chips[1].click() })
     const sent = requests().slice(before)
     expect(sent).toHaveLength(1)

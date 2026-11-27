@@ -258,6 +258,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   // The question a choice was sent for, and which choice: every chip locks so one tap sends one answer.
   const [sentChoice, setSentChoice] = useState<string | null>(null)
   const [goalReply, setGoalReply] = useState<{ runId: string; text: string } | null>(null)
+  const dispatchedChoice = useRef<string | null>(null)
   const [chosenIndex, setChosenIndex] = useState<number | null>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
@@ -276,7 +277,10 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const replyBlocked = attachmentsBlockReply(snapshot)
   useEffect(() => {
     if (!sentChoice) return
-    const timer = window.setTimeout(() => setSentChoice(null), 8_000)
+    const timer = window.setTimeout(() => {
+      dispatchedChoice.current = null
+      setSentChoice(null)
+    }, 8_000)
     return () => window.clearTimeout(timer)
   }, [sentChoice])
   const empty = messages.length === 0 && tasks.length === 0 && !website && !approval && !payment
@@ -455,8 +459,12 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                     aria-label={choice.recommended ? `${choice.label}, 추천` : undefined} aria-pressed={chosen}
                     disabled={!enabled || hasDraft || replyBlocked || sentChoice === waitingInput.id}
                     onClick={() => {
-                      if (sentChoice === waitingInput.id) return
-                      if (onChooseReply(waitingInput.id, index)) { setSentChoice(waitingInput.id); setChosenIndex(index) }
+                      if (dispatchedChoice.current === waitingInput.id || sentChoice === waitingInput.id) return
+                      if (onChooseReply(waitingInput.id, index)) {
+                        dispatchedChoice.current = waitingInput.id
+                        setSentChoice(waitingInput.id)
+                        setChosenIndex(index)
+                      }
                     }}>
                     {withStickers(choice.label)}{choice.recommended && <span className="reply-recommended" aria-hidden="true">추천</span>}
                   </button>
