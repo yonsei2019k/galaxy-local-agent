@@ -19,8 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.user.localagent.AppContainer
 import com.user.localagent.DocumentSkillsScreen
-import com.user.localagent.core.CapabilityAvailability
-import com.user.localagent.core.ToolCapability
 import com.user.localagent.office.OfficeSheet
 import com.user.localagent.skills.BuiltinSkills
 import com.user.localagent.skills.EmailDocument
@@ -37,19 +35,18 @@ import kotlinx.serialization.json.JsonPrimitive
     Column(Modifier.fillMaxSize()) {
         ZipOutlinedButton(onClick={connectionContext.startActivity(Intent(connectionContext,com.user.localagent.connections.ConnectionsActivity::class.java))}){Text("계정·앱 연결 · 사진 글자 읽기")}
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            listOf("기본 문서","Word·Excel","이메일","음성","도구 상태","영상","사진 분석").forEachIndexed {index,label->
-                ZipFilterChip(selected=selected==index,onClick={selected=index},label={Text(label)})
+            mapOf(0 to "기본 문서",1 to "Word·Excel",2 to "이메일",3 to "음성",5 to "영상",6 to "사진 분석").forEach {(index,label)->
+                ZipFilterChip(selected=(if(selected==4)0 else selected)==index,onClick={selected=index},label={Text(label)})
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f).imePadding()){
             when(selected){
-                0->DocumentSkillsScreen(app.skills,onStatus,onAsk)
                 1->OfficeToolPanel(app,onStatus,onAsk)
                 2->EmailToolPanel(app,onStatus,onAsk)
                 3->VoiceToolPanel(app,onStatus,onAsk)
                 5->VideoToolPanel(app,onStatus)
                 6->PhotoAnalysisToolPanel(app,onStatus,onAsk)
-                else->CapabilityToolPanel(app,onStatus)
+                else->DocumentSkillsScreen(app.skills,onStatus,onAsk)
             }
         }
     }
@@ -218,30 +215,6 @@ import kotlinx.serialization.json.JsonPrimitive
     }
 }
 
-@Composable private fun CapabilityToolPanel(app:AppContainer,onStatus:(String)->Unit){
-    val scope=rememberCoroutineScope()
-    var entries by remember {mutableStateOf<List<ToolCapability>>(emptyList())}
-    var loading by remember {mutableStateOf(false)}
-    fun refresh(){if(loading)return;loading=true;scope.launch {
-        try{entries=app.capabilitySnapshot()}
-        catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){onStatus("현재 도구 상태를 확인하지 못했습니다.")}
-        finally{loading=false}
-    }}
-    LaunchedEffect(Unit){refresh()}
-    LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_tools,"현재 도구 상태","설치·권한·모델의 현재 조건을 표시합니다. 작업 성공 여부는 실제 실행 후 따로 확인합니다.",ZipTone.Neutral);ZipOutlinedButton(enabled=!loading,onClick={refresh()}){Text("상태 다시 확인")}}
-        if(loading)item {LinearProgressIndicator(Modifier.fillMaxWidth())}
-        items(entries,key={it.id}) {entry->ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(5.dp)){
-            Text(entry.title,style=MaterialTheme.typography.titleMedium)
-            Text(when(entry.availability){CapabilityAvailability.INSTALLED->"준비됨";CapabilityAvailability.REQUIRES_PERMISSION->"권한 또는 파일 선택 필요";CapabilityAvailability.REQUIRES_MODEL->"로컬 모델 필요";CapabilityAvailability.NOT_IMPLEMENTED->"미구현";CapabilityAvailability.UNVALIDATED->"검증 필요"},style=MaterialTheme.typography.labelLarge)
-            Text(entry.description,style=MaterialTheme.typography.bodySmall)
-            if(entry.requirements.isNotEmpty())Text("필요 조건: "+entry.requirements.joinToString(" · "),style=MaterialTheme.typography.bodySmall)
-            Text(entry.limitation,style=MaterialTheme.typography.bodySmall)
-        }}}
-    }
-}
-
 @Composable private fun PhotoAnalysisToolPanel(app:AppContainer,onStatus:(String)->Unit,onAsk:(String)->Unit){
     val scope=rememberCoroutineScope()
     var selected by remember {mutableStateOf<Uri?>(null)}
@@ -252,7 +225,7 @@ import kotlinx.serialization.json.JsonPrimitive
     val choose=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->if(uri!=null){selected=uri;result=null}}
     DisposableEffect(Unit){onDispose {if(operation?.isActive==true){app.imageUnderstanding.cancel();operation?.cancel()}}}
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_image,"사진 분석","선택한 사진 한 장을 기기의 검증된 Gemma 모델로 읽습니다. 전체 갤러리를 조회하거나 이미지를 서버로 보내지 않습니다.",ZipTone.Lilac)}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_image,"사진 분석","이 휴대폰에서 직접 고른 사진 한 장을 읽어요.",ZipTone.Lilac)}
         item {ZipOutlinedButton(enabled=!running,onClick={choose.launch(arrayOf("image/*"))}){Text(if(selected==null)"분석할 사진 선택"else"다른 사진 선택")}
             if(selected!=null)Text("사용자가 선택한 사진 1장",style=MaterialTheme.typography.labelSmall)}
         item {ZipOutlinedTextField(prompt,{if(it.length<=2000)prompt=it},label={Text("사진에 대한 질문")},modifier=Modifier.fillMaxWidth().heightIn(min=120.dp),enabled=!running)}

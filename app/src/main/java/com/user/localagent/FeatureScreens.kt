@@ -52,7 +52,7 @@ import com.user.localagent.ui.ZipInsetDivider
         }}
     }
     Text("사용 기록으로 도움 받기",style=MaterialTheme.typography.titleLarge)
-    Text("선택한 사용 기록을 살펴보고 도움이 될 기능을 제안해요. 제안은 내용을 확인한 뒤 적용할 수 있어요.")
+    Text("집순이가 참고할 사용 기록을 골라 주세요.")
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
         Text("집합의 작업 기록 살펴보기",Modifier.weight(1f)); Switch(state.settings.assistantPatternsEnabled,colors=zipSwitchColors(),onCheckedChange={state=controller.updateSettings(state.settings.copy(assistantPatternsEnabled=it))})
     }
@@ -65,12 +65,9 @@ import com.user.localagent.ui.ZipInsetDivider
         ZipFilledButton(onClick={runCatching {state=controller.startVisibleMode()}.onFailure {report(it.message?:"시작 실패")}},enabled=state.settings.assistantPatternsEnabled||state.settings.usageStatsEnabled){Text("자동 분석 시작")}
         ZipOutlinedButton(onClick={state=controller.stop()}){Text("중지")}
     }
-    Text("${if(state.enabled)"분석 켜짐" else "분석 꺼짐"} · 작업 ${state.recordedOutcomes}건 · ${state.lastStatus}",style=MaterialTheme.typography.bodySmall)
-    Text("Android가 프로세스를 종료하거나 강제 중지하면 상시 실행은 멈출 수 있습니다. 주기 작업은 시스템 일정에 따라 복원됩니다.",style=MaterialTheme.typography.bodySmall)
+    Text(if(state.enabled)"사용 기록 참고를 켰어요." else "사용 기록 참고를 껐어요.",style=MaterialTheme.typography.bodySmall)
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("충전 중 휴대폰에서 개선점 찾기",Modifier.weight(1f));Switch(reflectionState.enabled,colors=zipSwitchColors(),onCheckedChange={reflectionState=reflection.enable(it)})}
-    Text("충전 중 휴대폰 상태가 괜찮을 때 제안해요. ‘기억과 할 일’에서 확인하고 적용할 수 있어요.",style=MaterialTheme.typography.bodySmall)
-    Text(reflectionReadinessMessage(reflectionState.enabled,state.enabled,state.settings.assistantPatternsEnabled),style=MaterialTheme.typography.bodySmall)
-    Text("최근 제안 작업: ${reflectionStatusMessage(reflectionState.lastStatus)}",style=MaterialTheme.typography.bodySmall)
+    Text("휴대폰을 충전할 때 사용 기록을 참고해요.",style=MaterialTheme.typography.bodySmall)
     ZipInsetDivider(inset = 0.dp)
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
         Text("알림 도착 횟수 분석",Modifier.weight(1f));Switch(notificationOptIn,colors=zipSwitchColors(),onCheckedChange={notificationOptIn=it;AssistantNotificationListener.setEnabled(context,it)})
@@ -78,9 +75,6 @@ import com.user.localagent.ui.ZipInsetDivider
     Text("카카오톡 등 알림의 도착 횟수만 집계합니다. 메시지 본문·발신자·답장 동작은 읽거나 실행하지 않습니다.",style=MaterialTheme.typography.bodySmall)
     ZipOutlinedButton(onClick={open(AssistantNotificationListener.permissionIntent(context))}){Text("알림 접근 설정")}
     Text("${if(notificationGranted)"알림 접근 허용됨" else "알림 접근 꺼짐"} · 오늘 ${notificationCount}건")
-    state.recommendations.forEach {recommendation->
-        ZipCard(Modifier.fillMaxWidth(),color=ZipHapColors.SurfaceSunken) {Row(Modifier.padding(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){ZipIconTile(com.user.localagent.runtime.R.drawable.zi_sparkle,tone=ZipTone.Sun);Column(Modifier.weight(1f)){Text(recommendation.title);Text(recommendation.reason,style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)}}}
-    }
     ZipOutlinedButton(onClick={reflectionState=reflection.clearHistory();state=controller.clearLocalHistory();scope.launch {eraseProposals();report("패턴 집계와 승인 전 제안을 삭제했습니다.")}}){Text("분석 기록 지우기")}
 }
 

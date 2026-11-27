@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useSt
 import { MotionField } from './MotionField'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
-import { Illustration } from './icons/Illustration'
 import { StickerText, withStickers } from './icons/Sticker'
 import { RichAnswer } from './RichAnswer'
 import type { BookingPaymentAction, ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
@@ -17,14 +16,9 @@ import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
 import { websiteWorkFor, workHistory } from './work/workHistory'
 import { taskPhase, workPresentation } from './work/workPresentation'
+import { QuickJobs } from './QuickJobs'
 
 export { taskPhase }
-
-const exampleRequests: { label: string; text: string; icon: IconName; needsCalendar?: boolean; needsFile?: boolean }[] = [
-  { label: '오늘 일정 확인', text: '오늘 남은 일정을 시간순으로 알려줘.', icon: 'calendar', needsCalendar: true },
-  { label: '웹에서 정보 찾기', text: '이번 주말 서울 날씨를 찾아서 출처와 함께 알려줘.', icon: 'globe' },
-  { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', icon: 'file', needsFile: true },
-]
 
 /**
  * Empty-state suggestions (owner direction 2026-11-27): a tap sends the fixed sentence as an ordinary request. The chip
@@ -52,7 +46,7 @@ function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[]
   }))
 }
 
-function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onSendExample, onNavigate, onDismiss, onCalendar }: {
+function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onSendExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
   situation?: CharacterSituation
   onSendExample?(text: string): void
@@ -60,17 +54,15 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
   compact?: boolean
   calendarGranted: boolean
   hasDraft: boolean
-  onDraftExample(text: string, needsFile?: boolean): void
   onNavigate(panel: Panel): void
   onDismiss(): void
   onCalendar(): void
 }) {
   const [character] = useCharacter()
-  const [step, setStep] = useState(0)
   // The plain first screen only (staff rooms and the first-run guide keep their own flows).
   const suggestions = staff || guide || !onSendExample ? [] : roomSuggestions
   return (
-    <div className={compact ? "welcome welcome--compact" : "welcome"}>
+    <div className={`welcome${compact ? ' welcome--compact' : ''}${guide ? ' welcome--guide' : ''}`}>
       {!compact && <MotionField className="room-scene">
         <span className="room-window" aria-hidden="true" /><span className="room-beam" aria-hidden="true" /><span className="room-rug" aria-hidden="true" />
         {roomCast(character).map((guest, index) =>
@@ -85,33 +77,25 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
         {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
           onClick={() => onSendExample?.(example.text)}><Icon name={example.icon} />{example.text}</button>)}
       </div>}
-      {guide && <section className="office-guide" aria-label="집순이 처음 안내">
-        <div className="office-guide-steps" aria-hidden="true">{[0, 1, 2].map(index =>
-          <span key={index} className={index === step ? 'is-current' : undefined} />)}</div>
-        {step === 1 && <MotionField className="office-guide-art-wrap"><Illustration name="connections" className="office-guide-art art-float" /></MotionField>}
-        <div aria-live="polite">
-          {step === 0 && <p>방구석에서 하나하나 챙겨 드리는 비서 집순이예요! 일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
-          {step === 1 && <p>일정을 보려면 휴대폰 일정 읽기를 허용해 주세요. Google이나 컴퓨터는 필요할 때 연결해도 돼요.</p>}
-          {step === 2 && <p>해볼 일을 고르면 입력창에 문장을 써드릴게요. 고쳐 쓰거나 바로 보내도 돼요. 휴대폰 일정이 연결되지 않았으면 먼저 읽기 권한을 물어볼게요.</p>}
-        </div>
-        <div className={`office-guide-actions${step === 2 ? ' office-guide-actions--examples' : ''}`}>
-          {step === 0 && <button type="button" className="office-guide-next" onClick={() => setStep(1)}>필요한 설정 보기</button>}
-          {step === 1 && <>
-            {calendarGranted ? <span role="status" className="office-guide-done"><Icon name="check" />휴대폰 일정 읽기 연결됨</span> :
-              <button type="button" onClick={onCalendar}>휴대폰 일정 읽기 허용</button>}
-            <button type="button" onClick={() => onNavigate('connections')}>앱과 컴퓨터 연결</button>
-            <button type="button" className="office-guide-next" onClick={() => setStep(2)}>해볼 일 고르기</button>
-          </>}
-          {step === 2 && exampleRequests.map(example =>
-            <button type="button" key={example.label} className="example-chip" disabled={hasDraft} onClick={() => {
-              onDraftExample(example.text, example.needsFile)
-              if (example.needsCalendar && !calendarGranted) onCalendar()
-            }}><Icon name={example.icon} />{example.label}</button>
-          )}
+      {guide && <>
+        <p>바쁜 일을 하나씩 같이 챙겨요. 내일 일정을 정리하거나, 중요한 메일을 찾거나, 여행 숙소 가격을 비교해 드릴 수 있어요.</p>
+        <section className="office-guide" aria-label="앱과 서비스 연결">
+          <h2><Icon name="group" />앱과 서비스 연결</h2>
+          <p>자주 쓰는 앱부터 연결해 볼까요? 필요할 때 하나씩 연결해도 좋아요.</p>
+          <div className="office-guide-actions">
+            {calendarGranted ? <span className="office-guide-done"><Icon name="check" />캘린더 연결됨</span> :
+              <button type="button" onClick={onCalendar}><Icon name="calendar" />캘린더</button>}
+            <button type="button" onClick={() => onNavigate('email')}><Icon name="mail" />이메일</button>
+            <button type="button" onClick={() => onNavigate('contacts')}><Icon name="person" />연락처</button>
+            <button type="button" onClick={() => onNavigate('maps')}><Icon name="globe" />위치·지도</button>
+            <button type="button" className="office-guide-next" onClick={() => onNavigate('services')}>더보기<span className="sr-only"> · 전체 앱과 서비스</span></button>
+          </div>
+        </section>
+        {onSendExample && <QuickJobs disabled={hasDraft} onChoose={onSendExample} />}
+        <div className="office-guide-actions">
           <button type="button" className="office-guide-skip" onClick={onDismiss}>바로 대화하기</button>
         </div>
-        {step === 2 && hasDraft && <p>입력창에 작성한 내용을 먼저 확인해 주세요.</p>}
-      </section>}
+      </>}
     </div>
   )
 }
@@ -350,8 +334,8 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   }, [])
 
   useLayoutEffect(() => {
-    if (pinnedToEnd.current) scrollToEnd()
-  }, [scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight, approval?.id])
+    if (!empty && pinnedToEnd.current) scrollToEnd()
+  }, [empty, scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight, approval?.id])
 
   useLayoutEffect(() => {
     if (website?.inputHeight) view.current?.querySelector('[data-native-website-slot]')?.scrollIntoView?.({
@@ -367,18 +351,18 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
     const pane = view.current
     if (!pane || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
-      if (pane.clientHeight > 0 && pinnedToEnd.current) scrollToEnd()
+      if (!empty && pane.clientHeight > 0 && pinnedToEnd.current) scrollToEnd()
     })
     observer.observe(pane)
     return () => observer.disconnect()
-  }, [scrollToEnd])
+  }, [empty, scrollToEnd])
 
   return (
     <div className="conversation-wrap">
       <div className="sr-only" role="status" aria-live="polite">{spoken}</div>
       <main className="conversation" ref={view} aria-label="대화" tabIndex={0} onScroll={event => {
         const pane = event.currentTarget
-        if (!pane.clientHeight) return
+        if (empty || !pane.clientHeight) return
         const pinned = pane.scrollHeight - pane.clientHeight - pane.scrollTop < Math.min(96, pane.clientHeight / 3)
         pinnedToEnd.current = pinned
         setScrolledUp(!pinned)
@@ -391,7 +375,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
         </div> : empty ?
           <Welcome staff={staff} guide={guide} situation={situationForMood(mood)} onSendExample={onSendExample}
-            calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
+            calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
             <div className="messages" role="log" aria-label="메시지">
@@ -476,7 +460,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
               </div>}
             </div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
-              calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
+              onSendExample={onSendExample} calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
           </div>
         )}

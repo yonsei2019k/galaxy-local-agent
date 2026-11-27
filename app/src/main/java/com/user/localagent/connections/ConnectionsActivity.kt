@@ -11,8 +11,6 @@ import com.user.localagent.core.ToolCall
 import com.user.localagent.core.connections.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
-import java.time.ZoneId
-import java.time.ZonedDateTime
 
 /** Owner-operated setup. Credentials never enter the assistant conversation. */
 class ConnectionsActivity:Activity() {
@@ -45,7 +43,7 @@ class ConnectionsActivity:Activity() {
         fun label(text:String,size:Float=15f)=TextView(this).apply {this.text=text;textSize=size;setPadding(0,10,0,10)}.also(root::addView)
         fun button(text:String,action:()->Unit)=Button(this).apply {this.text=text;setOnClickListener {if(!busy)action()}}.also(root::addView)
         label("앱과 자료 연결",24f).typeface = resources.getFont(com.user.localagent.runtime.R.font.jua_regular)
-        label("계정 연결과 실제 자료 조회 성공을 따로 표시합니다. 구글 Chat·Keep·AI Studio·Home·Blogger·Books·Classroom·Meet는 포함하지 않습니다.")
+        label("사용할 서비스와 허용 범위를 선택해 주세요.")
         servicePicker=Spinner(this).apply {adapter=ArrayAdapter(this@ConnectionsActivity,android.R.layout.simple_spinner_dropdown_item,ConnectedService.entries.map {it.label})};root.addView(servicePicker)
         status=label("")
         connectRead=button("계정 연결 · 읽기") {val service=selected
@@ -60,28 +58,18 @@ class ConnectionsActivity:Activity() {
         saveToken=button("토큰 연결 확인·저장") {val service=selected;val secret=token.text.toString();val allowed=chat.text.toString().takeIf {it.isNotBlank()};token.text.clear();run {require(!service.google);if(service==ConnectedService.NAVER_MAIL)hub.privateReads.connectNaver(requireNotNull(allowed),secret) else hub.configureToken(service,secret,allowed);output.text="연결 정보를 서비스에서 확인하고 암호화 저장했습니다."}}
         button("이 앱의 연결 해제") {val service=selected;run {withContext(Dispatchers.IO){hub.disconnect(service)};output.text="이 앱의 접근과 캐시를 해제했습니다. 구글 계정에서의 권한 철회는 별도로 할 수 있습니다."}}
         button("구글 계정의 연결 권한 관리") {run {startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://myaccount.google.com/connections")))}}
-        button("구글 앱 등록 정보 확인") {run {output.text=hub.google.registration.publicRegistrationInfo()}}
-        input=EditText(this).apply {hint="검색어 또는 문서 ID";isSingleLine=true};root.addView(input)
-        button("실제 자료 조회로 연결 확인") {val service=selected;val query=input.text.toString();run {val result=hub.execute(testCall(service,query));output.text=(if(result.success)"조회 확인\n"else"연결 확인 필요\n")+result.content}}
+        input=EditText(this).apply {hint="찾을 장소, 작품 또는 상품";isSingleLine=true};root.addView(input)
         button("Google Photos에서 사진 선택") {run {require(selected==ConnectedService.PHOTOS);val uri=hub.createPhotoSelection();startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(uri)));output.text="사진 선택을 마친 뒤 이 화면으로 돌아와 선택 결과를 확인해주세요."}}
         button("선택한 Google Photos 목록 확인") {run {require(selected==ConnectedService.PHOTOS);output.text=hub.selectedPhotos()}}
         label("사진의 글자 읽기",19f)
         button("사진 선택 · 한글/영문 OCR") {startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),OCR_REQUEST)}
-        label("PC 데이터 분석 · NotebookLM",19f)
-        label("선택한 자료를 등록한 본인 PC로 보내 분석합니다. PC가 켜져 있고 분석 작업기가 실행 중이어야 합니다. NotebookLM은 PC의 전용 프로필 로그인이 필요합니다.")
-        button("PC 연결 파일 등록") {startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE),PC_PAIR_REQUEST)}
-        root.addView(CheckBox(this).apply {text="등록한 PC의 분석·NotebookLM 도구 사용 허용";isChecked=hub.pc.enabled();setOnCheckedChangeListener {_,checked->hub.pc.allow(checked)}})
-        button("PC 도구 실제 연결 확인") {run {output.text=hub.pc.verify()}}
-        button("PC 집합 에이전트 제어") { startActivity(Intent(this, PcOpenClawActivity::class.java)) }
-        button("현재 대화의 분석 파일 선택") {startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),DATA_REQUEST)}
-        button("선택한 파일의 표·통계 확인") {run {val result=hub.pc.execute(ToolCall(java.util.UUID.randomUUID().toString(),"analyze_selected_data",buildJsonObject {put("mode","statistics")}));output.text=result.content}}
-        button("NotebookLM 노트북 목록 조회") {run {val result=hub.pc.execute(ToolCall(java.util.UUID.randomUUID().toString(),"list_notebooklm_notebooks",buildJsonObject {}));output.text=result.content}}
-        button("최근 분석 차트 보기") {run {
-            val app=(application as com.user.localagent.LocalAgentApplication).container
-            check(hub.store.read("pc.chart.thread")==app.runs.selectedThreadId.value)
-            val uri=Uri.parse(hub.store.read("pc.chart.uri")?:error("먼저 차트를 만들어주세요."))
-            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri,"image/png").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-        }}
+        label("내 컴퓨터에서 파일 분석하기",19f)
+        root.addView(CheckBox(this).apply {
+            text="내가 고른 파일을 연결한 컴퓨터에서 분석하도록 허용"
+            isChecked=hub.pc.enabled()
+            setOnCheckedChangeListener {_,checked->hub.pc.allow(checked)}
+        })
+        button("분석할 파일 고르기") {startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),DATA_REQUEST)}
         label("티맵 · 넷플릭스 · 쿠팡 · 쿠팡이츠",19f)
         val consumerApps=ConsumerApps(this)
         label(ConsumerApp.entries.joinToString(" · "){it.label+if(it in consumerApps.installed())" 설치됨"else" 설치 필요"})
@@ -119,20 +107,15 @@ class ConnectionsActivity:Activity() {
     private fun refresh(){
         val service=selected
         val state=runCatching {hub.store.connection(service)}.getOrNull()
-        status.text=when {state==null->"연결 전";state.verifiedAt==0L->"계정 권한 연결됨 · 실제 자료 조회 검증 전";else->"실제 조회 성공 이력 있음 · 실행할 때 권한 다시 확인"}
+        status.text=when {state==null->"연결 전";state.verifiedAt==0L->"계정 연결됨";else->"이 계정으로 사용한 기록이 있어요."}
         if(service.outlook && !hub.outlook.configured)status.text="이 버전에는 Microsoft 계정 연결 설정이 아직 없어요."
         val x=service==ConnectedService.X_BOOKMARKS
-        if(x)status.text=if(!hub.privateReads.xConfigured)"이 배포판에는 X 개발자 앱이 연결되지 않았어요." else status.text.toString()+" · X API 사용량은 연결을 제공하는 개발자 계정에 집계돼요."
+        if(x&&!hub.privateReads.xConfigured)status.text="현재 X 계정을 연결할 수 없어요."
         connectRead.isEnabled=(!service.outlook || hub.outlook.configured) && (!x || hub.privateReads.xConfigured)
         connectRead.visibility=if(service.google||service.outlook||x)View.VISIBLE else View.GONE
         connectWrite.visibility=if(ConnectionCatalog.tools.values.any {it.service==service&&it.writes})View.VISIBLE else View.GONE
         token.visibility=if(service.google||service.outlook||x)View.GONE else View.VISIBLE
         saveToken.visibility=token.visibility
-        input.hint=when(service){
-            ConnectedService.GITHUB -> "저장소 소유자/저장소 이름"
-            ConnectedService.SLACK -> "Slack 채널 ID"
-            else -> "검색어 또는 문서 ID"
-        }
         if(token.visibility==View.VISIBLE)window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         val naver=service==ConnectedService.NAVER_MAIL
@@ -184,7 +167,6 @@ class ConnectionsActivity:Activity() {
         when(requestCode){
             OCR_REQUEST->{val uri=data.data?:return;run {val text=LocalOcr.read(this@ConnectionsActivity,uri);output.text="${text.blockCount}개 영역 · ${text.width}×${text.height}${if(text.truncated)" · 일부 표시"else""}\n${text.text}"}}
             DATA_REQUEST->{val uri=data.data?:return;run {output.text=hub.pc.select(uri)}}
-            PC_PAIR_REQUEST->{val uri=data.data?:return;run {com.user.localagent.compute.PcComputeSettings.get(this@ConnectionsActivity).importPairing(uri);output.text="PC 연결 정보를 암호화 저장했습니다. PC 도구 사용을 허용한 뒤 연결을 확인해주세요."}}
         }
     }
     override fun onSaveInstanceState(outState:Bundle){
@@ -196,33 +178,6 @@ class ConnectionsActivity:Activity() {
         super.onSaveInstanceState(outState)
     }
     private fun run(block:suspend ()->Unit){if(busy)return;busy=true;tasks.launch {try{block()}catch(cancel:CancellationException){throw cancel}catch(_:Exception){output.text="작업을 완료하지 못했습니다. 선택한 자료·계정 권한·PC 작업기 연결을 확인해주세요. OCR 첫 사용에는 Google Play의 인식 모듈 다운로드가 필요합니다."}finally{busy=false;refresh()}}}
-    private fun testCall(service:ConnectedService,input:String):ToolCall {
-        val args=linkedMapOf<String,String>()
-        val name=when(service){
-            ConnectedService.DRIVE->{args["query"]=input.ifBlank {"ZipHap"};"search_drive_files"}
-            ConnectedService.DOCS->{args["id"]=input;"read_google_document"}
-            ConnectedService.SHEETS->{args["id"]=input;"read_google_sheet"}
-            ConnectedService.SLIDES->{args["id"]=input;"read_google_presentation"}
-            ConnectedService.GMAIL->{args["query"]=input.ifBlank {"newer_than:7d"};"search_gmail_messages"}
-            ConnectedService.CALENDAR->{val start=ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toOffsetDateTime();args["start"]=start.toString();args["end"]=start.plusDays(7).toString();"list_google_calendar_events"}
-            ConnectedService.TASKS->"list_google_tasks"
-            ConnectedService.CONTACTS->{args["query"]=input;"search_google_contacts"}
-            ConnectedService.FORMS->{args["id"]=input;"read_google_form"}
-            ConnectedService.YOUTUBE->{args["query"]=input;if(input.isBlank())"list_youtube_playlists"else"search_youtube_videos"}
-            ConnectedService.TELEGRAM->"list_telegram_bot_updates"
-            ConnectedService.NOTION->{args["query"]=input;"search_notion_pages"}
-            ConnectedService.NAVER_MAIL->"list_naver_mail_inbox"
-            ConnectedService.X_BOOKMARKS->"list_x_bookmarks"
-            ConnectedService.OUTLOOK_MAIL->"list_outlook_inbox"
-            ConnectedService.OUTLOOK_CALENDAR->{val start=ZonedDateTime.now(ZoneId.systemDefault()).toOffsetDateTime()
-                args["start"]=start.toString();args["end"]=start.plusDays(7).toString();"list_outlook_calendar"}
-            ConnectedService.GITHUB->{args["repository"]=input;"list_github_repository_issues"}
-            ConnectedService.SLACK->{args["channel"]=input;"read_slack_channel_history"}
-            ConnectedService.TODOIST->"list_todoist_tasks"
-            ConnectedService.PHOTOS->error("사진 선택 버튼을 사용해주세요.")
-        }
-        return ToolCall(java.util.UUID.randomUUID().toString(),name,buildJsonObject {args.forEach {(k,v)->put(k,v)}})
-    }
     override fun onDestroy(){if(isFinishing)GoogleConsentRequests.store.cancel(pendingConsentToken);tasks.cancel();super.onDestroy()}
-    companion object {private const val OUTLOOK_REQUEST=9573;private const val GOOGLE_REQUEST=7301;private const val OCR_REQUEST=7302;private const val DATA_REQUEST=7303;private const val PC_PAIR_REQUEST=7304;private const val GOOGLE_ALL_REQUEST=7305}
+    companion object {private const val OUTLOOK_REQUEST=9573;private const val GOOGLE_REQUEST=7301;private const val OCR_REQUEST=7302;private const val DATA_REQUEST=7303;private const val GOOGLE_ALL_REQUEST=7305}
 }

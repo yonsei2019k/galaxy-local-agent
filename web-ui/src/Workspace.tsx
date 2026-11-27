@@ -11,10 +11,11 @@ import { runControls } from './composer'
 import { ComposerSheet } from './ComposerSheet'
 import { HeaderWorkLine } from './work/HeaderWorkLine'
 import { StickerText, withoutEmoji } from './icons/Sticker'
+import { QuickJobs } from './QuickJobs'
 
 const shortcuts: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'capabilities', label: '할 수 있는 일', icon: 'activity' },
-  { panel: 'connections', label: '앱과 컴퓨터 연결', icon: 'group' },
+  { panel: 'services', label: '앱과 서비스', icon: 'group' },
   { panel: 'images', label: '이미지 만들기', icon: 'image' },
   { panel: 'settings', label: '설정', icon: 'settings' },
 ]
@@ -36,7 +37,7 @@ export function BottomNavigation({ enabled, onNavigate }: { enabled: boolean; on
   </nav>
 }
 
-export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpenOffice, onNavigate, onClose }: {
+export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpenOffice, onNavigate, onClose, onChooseJob, jobsDisabled }: {
   snapshot: Snapshot | null
   enabled: boolean
   collaborationOpen: boolean
@@ -44,6 +45,8 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
   onOpenOffice(): void
   onNavigate(panel: Panel): void
   onClose?(): void
+  onChooseJob?(text: string): void
+  jobsDisabled?: boolean
 }) {
   const [character] = useCharacter()
   const staff = snapshot?.staffRooms
@@ -90,7 +93,11 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
             <Icon name={icon} /><span>{label}</span><Icon name="chevronRight" className="row-chevron" />
           </button>
         ))}
+        {single && <button type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate('services')}>
+          <Icon name="group" /><span>앱과 서비스</span><Icon name="chevronRight" className="row-chevron" />
+        </button>}
       </nav>
+      {single && onChooseJob && <QuickJobs disabled={jobsDisabled === true} onChoose={onChooseJob} />}
     </div>
   )
 }
@@ -110,13 +117,12 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOfficeProfile, onOpenWork }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOpenWork }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
   onManage(): void
   onRename(title: string): boolean
-  onOfficeProfile?(): void
   onOpenWork(): void
 }) {
   const currentThread = snapshot?.threads.find(thread => thread.selected)
@@ -141,8 +147,6 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
           <span className="topbar-title" title={currentThread?.title ? withoutEmoji(currentThread.title) : undefined}><StickerText text={currentThread?.title || '집순이'} /></span>
           <HeaderWorkLine snapshot={snapshot} onOpen={onOpenWork} />
         </div>
-        {snapshot?.singleConversation !== true && snapshot?.officeSelected === true && onOfficeProfile && <button type="button" className="rename-thread" disabled={!enabled}
-          onClick={onOfficeProfile}><Icon name="person" /><span className="rename-thread-label">직원 정보</span></button>}
         {snapshot?.singleConversation !== true && currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={() => setTitleDraft(currentThread.title)}><Icon name="edit" /><span className="rename-thread-label">이름 변경</span></button>}
         {titleDraft !== null && <form className="rename-thread-form" onSubmit={event => {

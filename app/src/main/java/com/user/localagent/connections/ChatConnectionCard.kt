@@ -18,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.user.localagent.compute.PcComputeSettings
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.user.localagent.core.connections.ConnectedService
 import com.user.localagent.core.connections.ConnectionCatalog
 import kotlinx.coroutines.*
@@ -35,10 +37,13 @@ import com.user.localagent.ui.zipShadow
 
 @Composable
 internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,onStatus:(String)->Unit,
-    onConnectNol:suspend ()->Boolean,modifier:Modifier=Modifier){
+    onConnectNol:suspend ()->Boolean,modifier:Modifier=Modifier,initialServiceId:String?=null){
     val hub=remember(context){ConnectionHub.get(context)}
     val scope=rememberCoroutineScope()
-    var serviceId by rememberSaveable {mutableStateOf(ConnectedService.entries.first().id)}
+    val lifecycle=LocalLifecycleOwner.current.lifecycle
+    var serviceId by rememberSaveable(initialServiceId) {
+        mutableStateOf(ConnectedService.entries.firstOrNull{it.id==initialServiceId}?.id?:ConnectedService.GMAIL.id)
+    }
     val service=ConnectedService.entries.first {it.id==serviceId}
     var choosing by remember {mutableStateOf(false)}
     var nolDetails by rememberSaveable {mutableStateOf(false)}
@@ -68,14 +73,18 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
             finally{busy=false}
         }
     }
-    LaunchedEffect(service){
-        status="연결 상태를 확인하고 있어요."
-        val state=withContext(Dispatchers.IO){runCatching{hub.store.connection(service)}.getOrNull()}
-        knownConnection=state
-        status=when {
-            state==null->"연결 전"
-            state.verifiedAt==0L->"계정 권한이 연결됐어요. 자료 조회는 확인 전이에요."
-            else->"이 계정으로 자료를 조회한 기록이 있어요."
+    LaunchedEffect(service,lifecycle){
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED){
+            val state=withContext(Dispatchers.IO){runCatching{hub.store.connection(service)}.getOrNull()}
+            if(!busy){
+                knownConnection=state
+                status=when {
+                    state==null->"연결 전"
+                    state.verifiedAt==0L->"계정 권한이 연결됐어요. 자료 조회는 확인 전이에요."
+                    else->"이 계정으로 자료를 조회한 기록이 있어요."
+                }
+            }
+            awaitCancellation()
         }
     }
     if(!service.google)DisposableEffect(window){
@@ -97,12 +106,6 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
             val authorization=hub.google.fromIntent(data)
             withContext(Dispatchers.IO){hub.google.accept(confirmedService,request.write,authorization);hub.clearCache()}
             "계정 권한이 연결됐어요. 채팅에서 자료 조회를 요청할 수 있어요."
-        }
-    }
-    val pair=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->
-        if(uri!=null)run("PC 연결 파일을 확인하고 있어요."){
-            withContext(Dispatchers.IO){PcComputeSettings.get(context).importPairing(uri)}
-            "PC 연결 파일을 저장했어요. 연결 확인을 눌러 상태를 확인할 수 있어요."
         }
     }
     fun authorize(write:Boolean)=run("Google 권한을 확인하고 있어요."){
@@ -143,7 +146,7 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
                 ZipIconTile(com.user.localagent.runtime.R.drawable.zi_link)
-                Text("앱과 컴퓨터 연결",style=MaterialTheme.typography.titleLarge)
+                Text("앱과 서비스 연결",style=MaterialTheme.typography.titleLarge)
             }
             ZipOutlinedButton(enabled=available,onClick={nolDetails=true;status=""}){Text("야놀자(NOL)") }
             Box {
@@ -170,7 +173,15 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
                 if(ConnectionCatalog.tools.values.any{it.service==service&&it.writes})
                     ZipOutlinedButton(onClick={authorize(true)},enabled=available){Text("계정 연결 · 읽기와 작성")}
             }else if(service.outlook){
-                key(service){OutlookConnectCard(hub,service){publish("Microsoft 권한이 연결됐어요. 채팅에서 자료 조회를 요청해 주세요.")}}
+                key(service){OutlookConnectCard(hub,service){
+                    run("연결을 확인하고 있어요."){"Microsoft 권한이 연결됐어요. 채팅에서 자료 조회를 요청해 주세요."}
+                }}
+            }else if(service==ConnectedService.X_BOOKMARKS){
+                if(!hub.privateReads.xConfigured)Text("현재 X 계정을 연결할 수 없어요.")
+                else ZipFilledButton(enabled=available,onClick={run("X 로그인 화면을 열고 있어요."){
+                    context.startActivity(hub.privateReads.startX())
+                    "X의 공식 로그인 화면에서 연결을 마쳐 주세요."
+                }}){Text("X 계정으로 연결")}
             }else if(naverMail){
                 Text("메일을 읽을 때만 연결해요. 네이버 검색은 연결 없이 쓸 수 있어요.")
                 ZipOutlinedTextField(naverAccount,{if(it.length<=74)naverAccount=it},Modifier.fillMaxWidth(),singleLine=true,
@@ -207,8 +218,10 @@ internal fun ChatConnectionCard(context:Context,window:Window,onClose:()->Unit,o
                     }
                 }){Text("연결 확인하고 저장")}
             }
-            ZipOutlinedButton(enabled=available,onClick={pair.launch(arrayOf("application/json"))}){Text("PC 연결 파일 선택")}
-            ZipOutlinedButton(enabled=available,onClick={run("PC에 연결하는 중이에요."){hub.pc.verify()}}){Text("PC 연결 확인")}
+            if(knownConnection!=null)TextButton(enabled=available,onClick={run("연결을 해제하고 있어요."){
+                withContext(Dispatchers.IO){hub.disconnect(service)}
+                "이 서비스의 연결을 해제했어요."
+            }}){Text("이 서비스 연결 해제")}
             TextButton(enabled=available,onClick=onClose){Text("채팅 입력으로 돌아가기",color=ZipHapTokens.CobaltText)}
         }
     }

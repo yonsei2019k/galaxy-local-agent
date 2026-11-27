@@ -157,7 +157,7 @@
      Focus rings are outlines and never transition, so they are unaffected. */
   :is(.character, .character *, .room-guest, .character-thinking, .character-thinking i, .art-float, .skeleton > span,
       .sheet, .sheet-body, .reply-options button, .sticker-art, .work-card, .work-icon, .work-progress span, .messages > .message,
-      .stay-chevron, .stay-actions a, .stay-actions button, .voice-avatar, .office-guide-steps span, .work-history-row),
+      .stay-chevron, .stay-actions a, .stay-actions button, .voice-avatar, .work-history-row),
   .skeleton > span::after, .voice-avatar::after, .sheet::backdrop {
     animation: none !important;
     transition: none !important;

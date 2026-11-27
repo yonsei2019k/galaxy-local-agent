@@ -4,7 +4,6 @@ import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
 import { Collaboration } from './Collaboration'
 import { BottomNavigation, Composer, Header, MobileSidebar, Sidebar } from './Workspace'
-import { OfficeProfileForm } from './OfficeProfile'
 
 import { VoiceTalk } from './VoiceTalk'
 import { NativeCharacterSetting } from './character/useCharacter'
@@ -16,10 +15,10 @@ export default function App() {
   const [connected, setConnected] = useState(hasNativeBridge)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [connectionError, setConnectionError] = useState(false)
-  const [officeProfileOpen, setOfficeProfileOpen] = useState(false)
   const [workHistoryScope, setWorkHistoryScope] = useState<string | null>(null)
   const [collaborationScope, setCollaborationScope] = useState<string | null>(null)
   const observedOpenRequest = useRef(0)
+  const exampleQueued = useRef(false)
   const sendAttempt = useRef<{ conversation: string; attachments: string; text: string; draftRevision: number; token: string } | null>(null)
 
   useEffect(() => {
@@ -89,6 +88,10 @@ export default function App() {
   const collaborationOpen = snapshot?.singleConversation !== true && collaborationScope === conversationKey
   const attachmentKey = JSON.stringify(snapshot?.attachments?.map(attachment => attachment.id) ?? [])
   useEffect(() => {
+    if (!pending) exampleQueued.current = false
+  }, [pending, conversationKey])
+
+  useEffect(() => {
     const attempt = sendAttempt.current
     if (attempt && (attempt.conversation !== conversationKey || attempt.text !== draft || attempt.draftRevision !== draftRevision ||
       attempt.attachments !== attachmentKey)) sendAttempt.current = null
@@ -117,6 +120,18 @@ export default function App() {
 
   const connectionNote = !connected ? 'Android 앱에서 대화를 열어 주세요.' : connectionError
     ? '앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.' : ''
+  const exampleBlocked = !snapshot?.ready || !enabled || !!pending || !!draft.trim() ||
+    !!snapshot.inlineLogin || !!snapshot.voiceTalk || !!snapshot.voicePrompt || !!snapshot.attachments?.length
+  function sendExample(text: string) {
+    if (!snapshot || exampleBlocked || exampleQueued.current) return
+    exampleQueued.current = true
+    if (!request({ action: 'send', payload: { text, submitToken: crypto.randomUUID() } })) {
+      exampleQueued.current = false
+      return
+    }
+    dispatch({ type: 'submit', scope: snapshot, text, kind: 'send' })
+    closeMobile()
+  }
   const sidebarProps: Parameters<typeof Sidebar>[0] = {
     snapshot,
     enabled,
@@ -124,6 +139,8 @@ export default function App() {
     onSelect: id => sidebarRequest({ action: 'selectThread', payload: { id } }),
     onOpenOffice: () => sidebarRequest({ action: 'openOffice' }),
     onNavigate: panel => sidebarRequest({ action: 'navigate', payload: { panel } }),
+    onChooseJob: sendExample,
+    jobsDisabled: exampleBlocked,
   }
   const openMenu = () => setMobileOpen(true)
 
@@ -141,11 +158,7 @@ export default function App() {
       <div className="main-column" hidden={collaborationOpen}>
         <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
-          onOpenWork={() => setWorkHistoryScope(conversationKey)}
-          onOfficeProfile={() => setOfficeProfileOpen(open => !open)} />
-        {officeProfileOpen && snapshot?.officeSelected === true && <OfficeProfileForm key={`office-profile:${conversationKey}`} initial={snapshot.officeProfile ?? {}} enabled={enabled}
-          onSave={entries => request({ action: 'saveOfficeProfile', payload: { entries } })}
-          onClear={() => request({ action: 'clearOfficeProfile' })} onClose={() => setOfficeProfileOpen(false)} />}
+          onOpenWork={() => setWorkHistoryScope(conversationKey)} />
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
           historyOpen={workHistoryScope === conversationKey}
           onHistoryChange={open => setWorkHistoryScope(open ? conversationKey : null)}
@@ -163,15 +176,9 @@ export default function App() {
           onChooseReply={(runId, index) => !pending && !draft.trim() &&
             request({ action: 'chooseReply', payload: { runId, index } })}
           onWriteOwnReply={() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="메시지"]')?.focus()}
-          onSendExample={text => {
-            // The same send intent as the composer, with only the fixed sentence: no draft, attachment or setting.
-            if (!snapshot?.ready || !enabled || pending || draft.trim() || snapshot.inlineLogin || snapshot.voiceTalk ||
-              snapshot.attachments?.length) return
-            if (!request({ action: 'send', payload: { text, submitToken: crypto.randomUUID() } })) return
-            dispatch({ type: 'submit', scope: snapshot, text, kind: 'send' })
-          }}
+          onSendExample={sendExample}
           onBookingPayment={(action, id) => request({ action, payload: { id } })}
-          hasDraft={!!draft.trim() || !enabled || !!pending || !!snapshot?.voiceTalk || snapshot?.inlineLogin === true} onDraftExample={(text, needsFile) => {
+          hasDraft={exampleBlocked} onDraftExample={(text, needsFile) => {
             if (!enabled || pending || draft.trim() || snapshot?.inlineLogin || snapshot?.voiceTalk) return
             editDraft(text)
             if (needsFile && !snapshot?.attachments?.length) request({ action: 'attach' })

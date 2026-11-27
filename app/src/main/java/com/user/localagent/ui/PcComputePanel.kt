@@ -21,7 +21,8 @@ import com.user.localagent.compute.PcPairingChallenge
 import kotlinx.coroutines.*
 
 @Composable fun PcComputePanel(busy:Boolean,
-    loadQaLessons:(suspend ()->Map<com.user.localagent.data.RemoteQaLesson,Long>)?=null,onStatus:(String)->Unit) {
+    loadQaLessons:(suspend ()->Map<com.user.localagent.data.RemoteQaLesson,Long>)?=null,
+    showDiagnostics:Boolean=false,onStatus:(String)->Unit) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
     val settings=remember{PcComputeSettings.get(context)}
     val state by settings.state.collectAsState()
@@ -70,7 +71,7 @@ import kotlinx.coroutines.*
                 Text(if(showConnectionOptions)"세부 설정 접기"else"세부 설정 더 보기")
             }
             if(showConnectionOptions){
-                Text(state.status,style=MaterialTheme.typography.bodySmall)
+                if(showDiagnostics)Text(state.status,style=MaterialTheme.typography.bodySmall)
                 Text("기존 PC 답변 연결",style=MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                     ZipFilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("내 PC")},modifier=Modifier.testTag("text_engine_local"))
@@ -82,7 +83,7 @@ import kotlinx.coroutines.*
                     ZipFilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("휴대폰에서 만들기")})
                 }
                 PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
-                SettingsDisclosure("연결 시험 도구","문제가 있을 때 시험 요청과 기록을 확인해요."){
+                if(showDiagnostics)SettingsDisclosure("연결 시험 도구","문제가 있을 때 시험 요청과 기록을 확인해요."){
                     val remote=remember{com.user.localagent.compute.PcRemoteTestSettings.get(context)}
                     var remoteOn by remember{mutableStateOf(remote.enabled())}
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){

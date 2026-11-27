@@ -6,21 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
-    private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
-    private fun requireOfficeEntries(element:JsonElement){
-        val entries=element.jsonObject
-        require(entries.keys.all{it in officeSeats})
-        for(value in entries.values){
-            val entry=value.jsonObject
-            require(entry.keys.all{it=="birthDate"||it=="schoolGrade"})
-            for((field,raw) in entry){
-                val p=raw.jsonPrimitive;require(p.isString)
-                require(p.content.none{it.isISOControl()})
-                require(p.content.length<=if(field=="birthDate")10 else 20)
-            }
-        }
-    }
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
     fun parse(raw:String):ReactUiCommand?=runCatching {
         require(raw.toByteArray(Charsets.UTF_8).size<=64*1024)
         val o=Json.parseToJsonElement(raw).jsonObject
@@ -46,16 +32,14 @@ internal object ReactBridgePolicy {
             "stop"->setOf("runId","actionEpoch")
             "steer"->setOf("runId","actionEpoch","text")
             "navigate"->setOf("panel")
-            "saveOfficeProfile"->setOf("entries")
             "setCharacter"->setOf("field","value")
             else->emptySet()
         }
         require(payload.keys==allowed)
         if(action=="stayPhoto"&&"kind" in payload)require(payload["kind"]==JsonPrimitive("map"))
         if(action=="navigate")require(payload.getValue("panel").jsonPrimitive.content in
-            setOf("chat","settings","images","tools","projects","history","collab","capabilities","connections","privacy","contacts","historySearch"))
-        if(action=="saveOfficeProfile")requireOfficeEntries(payload.getValue("entries"))
-        else for((key,value) in payload){
+            setOf("chat","settings","images","tools","projects","history","collab","capabilities","connections","privacy","contacts","historySearch","services","email","maps"))
+        for((key,value) in payload){
             val p=value.jsonPrimitive
             if(key=="index")require(!p.isString&&p.int in 0..(if(action=="chooseReply")3 else 5))
             else if(key in setOf("actionEpoch","bindingEpoch"))require(!p.isString&&p.long in 0..9007199254740991L)

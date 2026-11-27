@@ -252,7 +252,7 @@ describe('native conversation', () => {
     mount()
     snapshot({ ...base, singleConversation: true })
     expect(Array.from(host.querySelectorAll('.desktop-sidebar .destination-nav button'), button => button.textContent))
-      .toEqual(['기본 채팅', '연락처', '둘러보기', '보관함', '나의 집순이'])
+      .toEqual(['기본 채팅', '연락처', '둘러보기', '보관함', '나의 집순이', '앱과 서비스'])
     click('연락처')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'contacts' } })
     click('대화 검색')
@@ -523,27 +523,28 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'selectThread', payload: { id: 'thread-a' } })
   })
 
-  it('introduces 집순이, shows setup in order, and prepares an editable example without sending', () => {
+  it('introduces 집순이 and opens the matching service from the first-chat card', () => {
     mount()
     const emptyChat = { ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true, messages: [], tasks: [] }
+    snapshot(emptyChat)
+    const pane = host.querySelector('main.conversation') as HTMLElement
+    Object.defineProperty(pane, 'scrollHeight', { get: () => 900 })
     snapshot({ ...emptyChat, officeCalendarReadGranted: false })
     const input = host.querySelector('textarea') as HTMLTextAreaElement
     expect(input.disabled).toBe(false)
     expect(host.querySelector('h1')?.textContent).toBe('안녕하세요, 집순이예요!')
+    expect(pane.scrollTop).toBe(0)
     expect(requests().map(item => item.action)).not.toContain('requestOfficeCalendar')
-    click('필요한 설정 보기')
-    click('앱과 컴퓨터 연결')
-    expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'connections' } })
-    click('해볼 일 고르기')
-    click('오늘 일정 확인')
-    expect(input.value).toBe('오늘 남은 일정을 시간순으로 알려줘.')
-    expect(requests().slice(-2)).toMatchObject([
-      { action: 'draft', payload: { text: input.value } },
-      { action: 'requestOfficeCalendar', payload: {} },
-    ])
+    click('캘린더')
+    expect(requests().at(-1)).toMatchObject({ action: 'requestOfficeCalendar', payload: {} })
+    for (const [label, panel] of [['이메일', 'email'], ['연락처', 'contacts'], ['위치·지도', 'maps'], ['더보기 · 전체 앱과 서비스', 'services']]) {
+      const item = Array.from(host.querySelectorAll<HTMLButtonElement>('.office-guide button')).find(el => el.textContent === label)
+      expect(item).toBeDefined()
+      act(() => item?.click())
+      expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel } })
+    }
+    expect(input.value).toBe('')
     expect(requests().map(item => item.action)).not.toContain('send')
-    expect(Array.from(host.querySelectorAll<HTMLButtonElement>('.office-guide-actions button'))
-      .find(button => button.textContent === '웹에서 정보 찾기')?.disabled).toBe(true)
     click('바로 대화하기')
     expect(requests().at(-1)).toMatchObject({ action: 'dismissOfficeGuide', payload: {} })
     snapshot({ ...emptyChat, showOfficeGuide: false, officeCalendarReadGranted: true })
@@ -552,17 +553,20 @@ describe('native conversation', () => {
     expect(postIntent(base, { action: 'requestOfficeCalendar' })).toBe(false)
   })
 
-  it('opens the attachment picker with an editable summary draft', () => {
+  it.each([
+    ['안 쓴 구매후기 챙기기', '올리기 전에 보여 줘'],
+    ['오늘 출석 체크 챙기기', '직접 참여하거나 인증해야 하는 출석'],
+    ['안 쓰는 사이트 탈퇴 정리', '내가 확인한 뒤에 탈퇴'],
+  ])('sends %s as a normal scoped chat request once', (label, boundary) => {
     mount()
     snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true, messages: [], tasks: [] })
-    click('필요한 설정 보기')
-    click('해볼 일 고르기')
-    click('첨부한 자료 요약')
-    expect(requests().slice(-2)).toMatchObject([
-      { action: 'draft', payload: { text: '첨부한 자료에서 중요한 내용만 정리해줘.' } },
-      { action: 'attach' },
-    ])
-    expect(requests().map(item => item.action)).not.toContain('send')
+    const job = Array.from(host.querySelectorAll<HTMLButtonElement>('main .quick-jobs button')).find(el => el.textContent === label)
+    expect(job).toBeDefined()
+    act(() => { job?.click(); job?.click() })
+    const sends = requests().filter(item => item.action === 'send')
+    expect(sends).toHaveLength(1)
+    expect(sends[0]).toMatchObject({ threadId: base.threadId, branchId: base.branchId,
+      payload: { text: expect.stringContaining(boundary) } })
   })
 
   it('shows the one-time 집순이 introduction alongside existing conversation history', () => {
@@ -1275,45 +1279,11 @@ describe('native collaboration', () => {
   })
 })
 
-describe('office staff profile form', () => {
-  const office = { ...base, officeSelected: true, officeProfile: { CHAIR: { birthDate: '2000-01-01', schoolGrade: '초3' } } }
-
-  function setInput(label: string, value: string) {
-    const element = host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)
-    if (!element) throw new Error(`Input missing: ${label}`)
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(element, value)
-      element.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-  }
-
-  it('shows the button only in the Office room, prefills and posts a strict save', () => {
-    mount()
-    snapshot(base)
-    expect(() => button('직원 정보')).toThrow()
-    snapshot(office)
-    click('직원 정보')
-    expect(host.querySelector<HTMLInputElement>('input[aria-label="회장 이수빈 생년월일"]')?.value).toBe('2000-01-01')
-    setInput('대리 김규민 학년', '중1')
-    click('저장')
-    expect(requests().at(-1)).toMatchObject({ action: 'saveOfficeProfile', payload: {
-      entries: { CHAIR: { birthDate: '2000-01-01', schoolGrade: '초3' }, ASSOCIATE_GYUMIN: { schoolGrade: '중1' } } } })
-  })
-
-  it('refuses invalid input and unscoped or malformed snapshots and actions', () => {
-    mount()
-    snapshot(office)
-    click('직원 정보')
-    setInput('회장 이수빈 학년', '가'.repeat(21))
-    click('저장')
-    expect(requests().some(item => item.action === 'saveOfficeProfile')).toBe(false)
-    expect(readSnapshot({ ...base, officeProfile: {} })).toBeNull()
-    expect(readSnapshot({ ...office, officeProfile: { STRANGER: { schoolGrade: 'x' } } })).toBeNull()
-    expect(readSnapshot({ ...office, officeProfile: { CHAIR: { schoolGrade: 'x'.repeat(21) } } })).toBeNull()
-    expect(postIntent(base, { action: 'clearOfficeProfile' })).toBe(false)
-    expect(postIntent(office, { action: 'saveOfficeProfile', payload: { entries: { STRANGER: {} } } })).toBe(false)
-    expect(postIntent(office, { action: 'clearOfficeProfile' })).toBe(true)
-  })
+it('rejects chat snapshots carrying a stored staff profile', () => {
+  mount()
+  snapshot({ ...base, officeSelected: true })
+  expect(() => button('직원 정보')).toThrow()
+  expect(readSnapshot({ ...base, officeSelected: true, officeProfile: {} })).toBeNull()
 })
 
 it('offers only shown payment methods and drafts preparation for the exact booking', () => {

@@ -98,7 +98,6 @@ export interface Snapshot {
   officeSelected?: boolean
   showOfficeGuide?: boolean
   officeCalendarReadGranted?: boolean
-  officeProfile?: OfficeEntries
   tasks: Task[]
   models: Model[]
   activeModelLabel?: string
@@ -158,20 +157,9 @@ export interface CollaborationSnapshot {
   openRequest?: number
 }
 
-export type OfficeEntries = Record<string, { birthDate?: string; schoolGrade?: string }>
-
-const OFFICE_SEAT_KEYS = ['CHAIR', 'DIRECTOR', 'ASSOCIATE_GYUMIN', 'ASSOCIATE_SEOYUL']
-
-export function officeEntries(value: unknown): value is OfficeEntries {
-  return record(value) && Object.keys(value).length <= 4 && Object.entries(value).every(([seat, entry]) =>
-    OFFICE_SEAT_KEYS.includes(seat) && record(entry) && Object.keys(entry).every(key => key === 'birthDate' || key === 'schoolGrade') &&
-    (entry.birthDate === undefined || (typeof entry.birthDate === 'string' && entry.birthDate.length <= 10)) &&
-    (entry.schoolGrade === undefined || (typeof entry.schoolGrade === 'string' && entry.schoolGrade.length <= 20)))
-}
-
 export const MAX_COLLAB_TEXT = 8_000
 
-export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'historySearch' | 'collab' | 'capabilities' | 'connections' | 'privacy'
+export type Panel = 'chat' | 'contacts' | 'settings' | 'images' | 'tools' | 'projects' | 'history' | 'historySearch' | 'collab' | 'capabilities' | 'connections' | 'privacy' | 'services' | 'email' | 'maps'
 
 type Intent =
   | { action: 'chooseReply'; payload: { runId: string; index: number } }
@@ -190,8 +178,6 @@ type Intent =
   | { action: 'selectThread' | 'selectModel' | 'removeAttachment'; payload: { id: string } }
   | { action: 'renameThread'; payload: { title: string } }
   | { action: 'navigate'; payload: { panel: Panel } }
-  | { action: 'saveOfficeProfile'; payload: { entries: OfficeEntries } }
-  | { action: 'clearOfficeProfile' }
   | { action: 'openVoiceTalk' | 'closeVoiceTalk' | 'listenVoiceTalk' | 'sendVoiceTalk' }
   | { action: 'startVoicePrompt' | 'finishVoicePrompt' | 'cancelVoicePrompt' }
   | { action: 'openOffice' | 'dismissOfficeGuide' | 'requestOfficeCalendar' | 'attach' | 'manageThreads' | 'cancelPreparation' | 'openWaitingApproval' | 'ready' }
@@ -331,7 +317,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
     (value.showOfficeGuide && value.officeSelected !== true))) return null
   if (value.officeCalendarReadGranted !== undefined && (typeof value.officeCalendarReadGranted !== 'boolean' ||
     value.officeSelected !== true)) return null
-  if (value.officeProfile !== undefined && (value.officeSelected !== true || !officeEntries(value.officeProfile))) return null
+  if ('officeProfile' in value) return null
   if (value.staffRooms !== undefined && (!list(value.staffRooms, thread) || value.staffRooms.length > 4 ||
     value.staffRooms.some(room => !threads.some(item => item.id === room.id && item.selected === room.selected)))) return null
   if (value.activeModelLabel !== undefined && typeof value.activeModelLabel !== 'string') return null
@@ -422,9 +408,7 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
     !isCharacterChoice({ ...scope.character, [intent.payload.field]: intent.payload.value }))) return false
   if (intent.action === 'selectThread' && !scope?.threads.some(thread => thread.id === intent.payload.id)) return false
   if (intent.action === 'selectModel' && !scope?.models.some(model => model.id === intent.payload.id)) return false
-  if ((intent.action === 'saveOfficeProfile' || intent.action === 'clearOfficeProfile' ||
-    intent.action === 'dismissOfficeGuide' || intent.action === 'requestOfficeCalendar') && !scope?.officeSelected) return false
-  if (intent.action === 'saveOfficeProfile' && !officeEntries(intent.payload.entries)) return false
+  if ((intent.action === 'dismissOfficeGuide' || intent.action === 'requestOfficeCalendar') && !scope?.officeSelected) return false
   if ((intent.action === 'copy' || intent.action === 'stayPhoto' || intent.action === 'toggleAnswerSpeech') && !scope?.messages.some(message => message.role === 'assistant' && message.id === intent.payload.messageId)) return false
   if (intent.action === 'stop' || intent.action === 'steer') {
     const target = runTarget(scope)

@@ -2092,7 +2092,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             else ""
         return client.launchProvider(request.text,conversationContext,provider=ExternalAgentSettings.provider(request.modelId),
             beforeLaunch={verifyAuthority()},
-            officePersona=officePersona+wrapUp+(if(request.goalSegment!=null)
+            officePersona=officePersona+" "+AssistantPolicy.PUBLIC_ASSISTANT_ANSWER+wrapUp+(if(request.goalSegment!=null)
                 " This run is one segment of a saved goal. Plan get_goal and read_goal_progress when needed. Continue from host-recorded results, verify the exact current target, and include verify_goal_criterion for a typed proof. Consider a different authorized read after a known no-effect failure. Do not repeat confirmed writes." else if(authRead==null&&request.allowTools&&request.officeStage==null&&request.mode in setOf("act","debug"))
                 " When the user asks you to carry out a multi-step task that needs a wait or later resumption, use create_goal and start_goal before doing the business steps in this run. Create a new draft only if there is no saved goal. Preserve the original task, all constraints, and every required approval." else "")+if(authRead!=null)
                 " The owner completed login on the phone. Continue the original request. Include $authRead in the plan and execute it first on the authenticated browser. Do not replay previous effects."

@@ -295,10 +295,6 @@ class MainActivity : ComponentActivity() {
     private val modelOptions get()=app.runs.modelOptions
     private val preferredModelId get()=app.runs.preferredModelId
     private val requestedTab=MutableStateFlow<Int?>(null)
-    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result->
-        val actual=result.keys.associateWith{androidx.core.content.ContextCompat.checkSelfPermission(this,it)==android.content.pm.PackageManager.PERMISSION_GRANTED}
-        status.value=permissionResultMessage(actual)
-    }
     private val attachFiles=registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()){uris->
         prepareAttachmentUris(uris)
     }
@@ -400,7 +396,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun send(text:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text)}
-    private fun sendToThread(text:String,threadId:String):Boolean {if(attachmentPreparing.value){status.value="첨부 준비가 끝난 뒤 보내주세요.";return false};return app.runs.send(text,threadId)}
+    private fun openDefaultMap() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("geo:0,0")))
+        } catch (_:android.content.ActivityNotFoundException) {
+            status.value="휴대폰에서 지도 앱을 열 수 없어요. 채팅에 장소 이름을 알려주셔도 찾아드릴게요."
+        }
+    }
     private fun chooseModel(id:String)=app.runs.chooseModel(id)
     private val externalAgentConsentThread=mutableStateOf<Pair<String,String>?>(null)
     private fun chooseConversationModel(id:String,threadId:String){
@@ -422,9 +424,7 @@ class MainActivity : ComponentActivity() {
         app.runs.chooseModel(id,threadId)
         status.value="이 대화의 다음 요청에 선택한 모델을 사용합니다."
     }
-    private fun transcribe(uri:android.net.Uri,origin:com.user.localagent.audio.PrivateDataPickerOrigin)=app.runs.transcribe(uri,origin)
     private fun refreshVisibleHistory()=app.runs.refreshVisibleHistory()
-    private fun invalidateKnowledgeContext()=app.runs.invalidateKnowledgeContext()
     private fun actionSummary(action:ToolCall)=app.runs.actionSummary(action)
     @Composable private fun AppScreen() {
         externalAgentConsentThread.value?.let {(threadId,modelId)->AlertDialog(
@@ -441,11 +441,13 @@ class MainActivity : ComponentActivity() {
         var settingsPage by rememberSaveable {mutableStateOf(SettingsPage.HOME)}
         var panelFromSettings by rememberSaveable {mutableStateOf(false)}
         var manualSettings by rememberSaveable {mutableStateOf(false)}
+        var showServiceCatalog by rememberSaveable {mutableStateOf(false)}
         fun openPanel(destination:Int,fromSettings:Boolean=false){
             settingsPage=SettingsPage.HOME
             panelFromSettings=fromSettings
             manualSettings=fromSettings
-            tab=destination
+            showServiceCatalog=false
+            tab=when(destination){2,5,8->0;else->destination}
         }
         var chatScreenAttempt by remember {mutableIntStateOf(0)}
         var chatScreenUnavailable by remember {mutableStateOf(false)}
@@ -458,6 +460,7 @@ class MainActivity : ComponentActivity() {
         val websiteBinding by webAgent.ownerWorkBinding.collectAsState()
         val bookingPayment by webAgent.ownerPaymentCard.collectAsState()
         var connectionsOpen by rememberSaveable {mutableStateOf(false)}
+        var connectionServiceId by rememberSaveable {mutableStateOf<String?>(null)}
         var connectionStatus by remember {mutableStateOf<String?>(null)}
         LaunchedEffect(loginCard?.id){if(loginCard!=null){chatManagerOpen=false;openPanel(0)}}
         var composerEpoch by remember {mutableLongStateOf(0)}
@@ -472,8 +475,6 @@ class MainActivity : ComponentActivity() {
         val composerThreadId=selectedThreadId
         var attachmentPickerThread by rememberSaveable{mutableStateOf<String?>(null)}
         var attachmentPickerBranch by rememberSaveable{mutableStateOf<String?>(null)}
-        var officeProfileEntries by remember{mutableStateOf<Map<String,com.user.localagent.core.office.OfficePrivateProfile.Entry>>(emptyMap())}
-        var officeProfileRevision by remember{mutableIntStateOf(0)}
         val officeOpen=composerThreadId==ZipHapRoom.OFFICE.threadId
         val calendarGranted by officeCalendarReadGranted.collectAsState()
         val characterSettings=remember {getSharedPreferences("jipsooni-character",MODE_PRIVATE)}
@@ -486,9 +487,6 @@ class MainActivity : ComponentActivity() {
                 officeGuideDismissed=true
             }
         }
-        LaunchedEffect(officeOpen,officeProfileRevision){
-            officeProfileEntries=if(officeOpen)withContext(Dispatchers.IO){runCatching{app.officeProfile.read()?.entries}.getOrNull()}.orEmpty() else emptyMap()
-        }
         val roomDraft by chat.draft.collectAsState()
         val queuedRequests by chat.queued.collectAsState()
         val activeExecutions by chat.activeExecutions.collectAsState()
@@ -499,16 +497,6 @@ class MainActivity : ComponentActivity() {
         val roomActivities by chat.workActivities.collectAsState()
         var queueOpen by rememberSaveable{mutableStateOf(false)}
         var goalEditorThreadId by rememberSaveable{mutableStateOf<String?>(null)}
-        var skillLibraryOpen by rememberSaveable{mutableStateOf(false)}
-        var skillCapabilities by remember{mutableStateOf<List<com.user.localagent.core.ToolCapability>>(emptyList())}
-        LaunchedEffect(skillLibraryOpen){
-            if(skillLibraryOpen)lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED){
-                try{skillCapabilities=app.capabilitySnapshot()}
-                catch(cancel:CancellationException){throw cancel}
-                catch(_:Exception){skillCapabilities=emptyList()}
-                awaitCancellation()
-            }
-        }
         LaunchedEffect(selectedThreadId){if(goalEditorThreadId!=selectedThreadId)goalEditorThreadId=null}
         val roomThreads by app.repository.chat.threads.collectAsState(initial=emptyList())
         val currentBranchId=roomThreads.firstOrNull{it.id==selectedThreadId}?.activeBranchId.orEmpty()
@@ -681,9 +669,6 @@ class MainActivity : ComponentActivity() {
                     put("officeSelected",officeOpen)
                     put("showOfficeGuide",officeOpen&&!officeGuideDismissed)
                     if(officeOpen)put("officeCalendarReadGranted",calendarGranted)
-                    if(officeOpen)put("officeProfile",buildJsonObject{officeProfileEntries.forEach{(seat,entry)->put(seat,buildJsonObject{
-                        entry.birthDate?.let{put("birthDate",it)};entry.schoolGrade?.let{put("schoolGrade",it)}
-                    })}})
                     put("threads",buildJsonArray{if(composerThreadId.isNotBlank())add(buildJsonObject{
                         put("id",composerThreadId);put("title","집순이");put("selected",true)
                     })})
@@ -831,23 +816,6 @@ class MainActivity : ComponentActivity() {
                             }
                             "dismissOfficeGuide"->if(officeOpen)dismissOfficeGuide()
                             "requestOfficeCalendar"->if(officeOpen&&!officeCalendarReadGranted.value)officeCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
-                            "saveOfficeProfile","clearOfficeProfile"->if(officeOpen){
-                                val saving=command.action=="saveOfficeProfile"
-                                val entries=if(saving)runCatching{payload.getValue("entries").jsonObject.mapValues{(_,value)->
-                                    val o=value.jsonObject
-                                    com.user.localagent.core.office.OfficePrivateProfile.Entry(
-                                        o["birthDate"]?.jsonPrimitive?.content?.takeIf{it.isNotEmpty()},o["schoolGrade"]?.jsonPrimitive?.content?.takeIf{it.isNotEmpty()})
-                                }.filterValues{it.birthDate!=null||it.schoolGrade!=null}}.getOrNull() else emptyMap()
-                                this@MainActivity.lifecycleScope.launch{
-                                    val ok=entries!=null&&withContext(Dispatchers.IO){runCatching{
-                                        if(saving&&entries.isNotEmpty())app.officeProfile.write(com.user.localagent.core.office.OfficePrivateProfile(entries))
-                                        else app.officeProfile.clear()
-                                    }.isSuccess}
-                                    officeProfileRevision++
-                                    status.value=if(!ok)"직원 정보를 저장하지 못했습니다. 입력값을 확인해 주세요."
-                                        else if(saving&&entries!!.isNotEmpty())"직원 정보를 이 휴대폰에 암호화해 저장했습니다." else "직원 정보를 지웠습니다."
-                                }
-                            }
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
                             "attach"->if(currentBranchId.isNotBlank()&&attachmentScope==null&&!attachmentPreparing.value){
                                 attachmentPickerThread=composerThreadId
@@ -859,8 +827,15 @@ class MainActivity : ComponentActivity() {
                                     "collab"->Unit
                                     "contacts"->openPanel(CONTACTS_TAB)
                                     "capabilities"->openPanel(DISCOVER_TAB)
+                                    "services"->{openPanel(DISCOVER_TAB);showServiceCatalog=true}
                                     "historySearch"->openPanel(HISTORY_SEARCH_TAB)
-                                    "connections"->{openPanel(0);connectionsOpen=true}
+                                    "connections","email"->{
+                                        openPanel(0)
+                                        connectionServiceId=if(panel=="email")"gmail" else null
+                                        connectionStatus=null
+                                        connectionsOpen=true
+                                    }
+                                    "maps"->openDefaultMap()
                                     "privacy"->{openPanel(4);manualSettings=true;settingsPage=SettingsPage.PRIVACY}
                                     else->openPanel(when(panel){"chat"->0;"images"->7;"tools"->3;"projects"->10;"history"->6;else->4})
                                 }
@@ -964,6 +939,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,
+                        initialServiceId=connectionServiceId,
                         onClose={connectionsOpen=false},onStatus={connectionStatus=it},
                         onConnectNol={
                             if(!composerReady||chat.selectedThreadId.value!=composerThreadId||currentBranchId.isBlank()||
@@ -1019,12 +995,13 @@ class MainActivity : ComponentActivity() {
                 run {
                     val title=if(tab==4&&settingsPage==SettingsPage.HOME&&!manualSettings)"나의 집순이"
                         else if(tab==4)settingsPage.title
-                        else listOf("","음성을 글로 바꾸기","기억과 할 일","파일 작업","설정","연결된 자료","보관함","이미지 작업실","문자와 일정","웹·쇼핑 검색","프로젝트","연락처","둘러보기","대화 검색")[tab]
+                        else if(tab==DISCOVER_TAB&&showServiceCatalog)"앱과 서비스"
+                        else listOf("","음성을 글로 바꾸기","","파일 작업","설정","","보관함","이미지 작업실","","웹·쇼핑 검색","프로젝트","연락처","둘러보기","대화 검색")[tab]
                     ZipScreenTitle(title,Modifier.padding(start=4.dp,top=2.dp,bottom=12.dp))
                 }
                 val panelStatus=if(tab==7)imageStudioStatus else state
                 if(panelStatus.isNotBlank() && (tab!=4 || manualSettings))Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
-                when(tab){1->VoiceSettingsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->if(manualSettings) key(settingsPage){
+                when(tab){1->VoiceSettingsScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->if(manualSettings) key(settingsPage){
                     SettingsScreen(settingsPage,chatScreenUnavailable,{settingsPage=it}){openPanel(it,fromSettings=true)}
                 }else SettingsAssistantPanel(app,character,::showManual,moveToChat={request->
                     if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||
@@ -1034,11 +1011,14 @@ class MainActivity : ComponentActivity() {
                         openPanel(0)
                         true
                     }
-                },modifier=Modifier.weight(1f));5->Box(Modifier.weight(1f)){DataAnalysisPanel(app,{request,threadId->tab=0;sendToThread(request,threadId)},{uri,origin->tab=0;transcribe(uri,origin)})};6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};8->Box(Modifier.weight(1f)){SmsAnalysisPanel(app){status.value=it}};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}
+                },modifier=Modifier.weight(1f));6->Box(Modifier.weight(1f)){ConversationHistoryPanel(app){status.value=it}};7->Box(Modifier.weight(1f)){ImageStudioPanel(app,{imageStudioStatus=it})};9->Box(Modifier.weight(1f)){WebResearchPanel(app){status.value=it}};10->Box(Modifier.weight(1f)){ProjectWorkspacePanel(app,{status.value=it}){request->tab=0;send(request)}}
                     CONTACTS_TAB->ContactsDirectory(Modifier.weight(1f))
                     HISTORY_SEARCH_TAB->Box(Modifier.weight(1f)){ConversationHistoryPanel(app,searchOnly=true){status.value=it}}
                     DISCOVER_TAB->OfficeCapabilityShelf(app,
-                        onConnections={openPanel(0);connectionsOpen=true},
+                        startOnServices=showServiceCatalog,
+                        onConnections={serviceId->openPanel(0);connectionServiceId=serviceId;connectionStatus=null;connectionsOpen=true},
+                        onContacts={openPanel(CONTACTS_TAB)},
+                        onMaps=::openDefaultMap,
                         onImages={openPanel(7)},
                         calendarReadGranted=calendarGranted,onCalendarRead={
                             if(!officeCalendarReadGranted.value)officeCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
@@ -1112,7 +1092,6 @@ class MainActivity : ComponentActivity() {
                 ZipMenuRow("대화 기록",com.user.localagent.runtime.R.drawable.zi_history,tone=ZipTone.Neutral,onClick={chatManagerOpen=false;openPanel(6)})
                 ZipMenuRow("대기 중인 요청",com.user.localagent.runtime.R.drawable.zi_clock,tone=ZipTone.Sun,onClick={chatManagerOpen=false;queueOpen=true})
                 ZipMenuRow("대화의 목표",com.user.localagent.runtime.R.drawable.zi_compass,tone=ZipTone.Mint,onClick={chatManagerOpen=false;goalEditorThreadId=composerThreadId})
-                ZipMenuRow("도움 기능",com.user.localagent.runtime.R.drawable.zi_tools,tone=ZipTone.Lilac,onClick={chatManagerOpen=false;skillLibraryOpen=true})
             }
         }
         verifiedFiles[fileMessageId]?.let {files->
@@ -1152,7 +1131,6 @@ class MainActivity : ComponentActivity() {
             onDismiss={queueOpen=false},onEdit=chat::editQueued,onMove=chat::reorderQueued,onCancel=chat::cancelQueued,
             onManageGoal={threadId->if(threadId==composerThreadId){queueOpen=false;goalEditorThreadId=threadId}},
         )
-        if(skillLibraryOpen)SkillLibraryDialog(chat.bundledSkills,toolStatuses=skillCapabilities,onDismiss={skillLibraryOpen=false})
         goalEditorThreadId?.takeIf{it==selectedThreadId&&it.isNotBlank()}?.let {goalThread->
             GoalEditorDialog(goal=roomGoal?.takeIf{it.threadId==goalThread},threadId=goalThread,
                 projectId=roomThreads.firstOrNull{it.id==goalThread}?.projectId,
@@ -1185,6 +1163,7 @@ class MainActivity : ComponentActivity() {
         val thinkingThreadId=app.runs.selectedThreadId.collectAsState().value
         val thinkingReady by app.runs.selectionReady.collectAsState()
         var advancedModels by rememberSaveable {mutableStateOf(false)}
+        val developmentBuild=(applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0
         var endurance by remember { mutableStateOf(false) }
         var downloadJob by remember {mutableStateOf<Job?>(null)}
         var hashTarget by remember {mutableStateOf<String?>(null)}
@@ -1221,8 +1200,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }}
             }
-            item {TextButton(onClick={advancedModels=!advancedModels}){Text(if(advancedModels)"모델·성능 설정 접기"else"모델·성능 설정 더 보기")}}
-            if(advancedModels){
+            if(developmentBuild)item {TextButton(onClick={advancedModels=!advancedModels}){Text(if(advancedModels)"모델·성능 설정 접기"else"모델·성능 설정 더 보기")}}
+            if(developmentBuild&&advancedModels){
                 item { InfoCard("PC와 휴대폰에서 나누어 계산","연결한 PC가 계산 중이면 다른 대화의 작업 하나를 휴대폰에서 진행할 수 있습니다. 휴대폰에는 모델 하나씩만 올립니다. 모델 파일은 APK와 별도로 내려받습니다.") }
                 item {var routing by remember {mutableStateOf("실측 결과를 확인 중")};LaunchedEffect(installed){routing=app.orchestration.summary()};InfoCard("자동 오케스트레이션",routing)}
                 item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {ZipFilterChip(selected=options.backend=="CPU",onClick={modelOptions.value=options.copy(backend="CPU")},label={Text("CPU 측정")});ZipFilterChip(selected=options.backend=="GPU",onClick={modelOptions.value=options.copy(backend="GPU")},label={Text("GPU 실험 측정")});ZipFilterChip(selected=options.thinking,onClick={app.runs.setThinking(!options.thinking,thinkingThreadId)},enabled=thinkingReady,label={Text("이 대화 깊게 생각")})}}
@@ -1292,13 +1271,6 @@ class MainActivity : ComponentActivity() {
         }}catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){status.value=error.message?:"모델 파일 변경을 확인하지 못했습니다."}
     }
-    @Composable private fun ColumnScope.MemoryScreen() {
-        Box(Modifier.weight(1f)) {
-            KnowledgeScreen(app,{status.value=it},::invalidateKnowledgeContext) {
-                permissions.launch(arrayOf(Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR,Manifest.permission.READ_CONTACTS,Manifest.permission.POST_NOTIFICATIONS))
-            }
-        }
-    }
     @Composable private fun ColumnScope.SettingsScreen(
         page:SettingsPage,
         showChatRecoveryLinks:Boolean,
@@ -1326,11 +1298,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }}
                     item {
-                        SettingsDisclosure("저장한 자료와 기록","기억, 문자, 일정, 검색 자료를 찾아요.",com.user.localagent.runtime.R.drawable.zi_archive,ZipTone.Sun,flush=true){
+                        SettingsDisclosure("저장한 자료와 기록","파일 작업과 검색 기록을 찾아요.",com.user.localagent.runtime.R.drawable.zi_archive,ZipTone.Sun,flush=true){
                             ZipMenuRow("파일 작업",com.user.localagent.runtime.R.drawable.zi_file,{onOpen(3)},Modifier.padding(horizontal=12.dp))
-                            ZipMenuRow("기억과 할 일",com.user.localagent.runtime.R.drawable.zi_heart,{onOpen(2)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Coral)
-                            ZipMenuRow("연결된 자료",com.user.localagent.runtime.R.drawable.zi_link,{onOpen(5)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Mint)
-                            ZipMenuRow("문자와 일정",com.user.localagent.runtime.R.drawable.zi_calendar,{onOpen(8)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Sun)
                             ZipMenuRow("검색 기록",com.user.localagent.runtime.R.drawable.zi_search,{onOpen(9)},Modifier.padding(horizontal=12.dp),tone=ZipTone.Neutral)
                         }
                     }
@@ -1340,8 +1309,7 @@ class MainActivity : ComponentActivity() {
                         startActivity(Intent(this@MainActivity,com.user.localagent.connections.ConnectionsActivity::class.java))
                     }}
                     item {SettingsDisclosure("내 컴퓨터","컴퓨터를 추가하거나 연결 상태를 확인해요.",com.user.localagent.runtime.R.drawable.zi_chip,ZipTone.Lilac){
-                        PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),
-                            loadQaLessons=app.repository.chat::remoteQaLessons){status.value=it}
+                        PcComputePanel(assistantBusy||imageWork.running||RuntimeGate.benchmark.get(),showDiagnostics=false){status.value=it}
                     }}
                     item {SettingsDisclosure("메신저","카카오톡 등에서 받아볼 내용을 정해요.",com.user.localagent.runtime.R.drawable.zi_chat,ZipTone.Sun){
                         com.user.localagent.integrations.MessengerPanel(this@MainActivity,onAsk={request->onOpen(0);send(request)}){status.value=it}
@@ -1356,6 +1324,9 @@ class MainActivity : ComponentActivity() {
                     }}
                 }
                 SettingsPage.PRIVACY->{
+                    item {SettingsEntry("휴대폰 앱 권한","연락처와 캘린더 등에 허용한 접근을 관리해요.",com.user.localagent.runtime.R.drawable.zi_shield){
+                        startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.fromParts("package",packageName,null)))
+                    }}
                     item {SettingsDisclosure("다른 앱 화면 접근","화면을 읽거나 조작할 수 있는 범위를 정해요.",com.user.localagent.runtime.R.drawable.zi_native){
                         com.user.localagent.integrations.ScreenBridgePanel(this@MainActivity,{startActivity(it)}){status.value=it}
                     }}
@@ -1378,9 +1349,6 @@ class MainActivity : ComponentActivity() {
                 }
                 SettingsPage.UPDATES->{
                     item {com.user.localagent.updates.UpdatePanel(app.updates,{startActivity(it)},{status.value=it})}
-                    item {SettingsDisclosure("확장 기능 검사","직접 추가할 확장 파일의 정보를 확인해요.",com.user.localagent.runtime.R.drawable.zi_tools,ZipTone.Neutral){
-                        ExtensionInspectionPanel{status.value=it}
-                    }}
                     item {Text("버전 ${com.user.localagent.runtime.RuntimePackageMetadata(this@MainActivity).versionName}",Modifier.padding(start=4.dp),style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)}
                 }
             }

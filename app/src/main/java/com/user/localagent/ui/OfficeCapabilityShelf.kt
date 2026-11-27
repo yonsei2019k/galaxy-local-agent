@@ -13,15 +13,19 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.user.localagent.AppContainer
-import com.user.localagent.compute.PcComputeSettings
 import com.user.localagent.core.CapabilityAvailability
 import com.user.localagent.core.ToolCapability
 import com.user.localagent.core.connections.ConnectedService
 import com.user.localagent.core.connections.ConnectionCatalog
 import com.user.localagent.core.connections.ConsumerApp
 import com.user.localagent.core.connections.ConsumerAppCatalog
+import com.user.localagent.core.connections.GovernmentService
+import com.user.localagent.core.connections.LifeServiceCatalog
+import com.user.localagent.connections.ConnectionHub
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withContext
 
 private data class Example(val title:String,val request:String)
 
@@ -54,30 +58,28 @@ private fun capabilityIcon(id:String):Pair<Int,ZipTone> = when(id){
     else->com.user.localagent.runtime.R.drawable.zi_sparkle to ZipTone.Neutral
 }
 
-private fun ToolCapability.officeStatus()=when(availability){
-    CapabilityAvailability.INSTALLED->"기능 확인됨"
-    CapabilityAvailability.REQUIRES_PERMISSION->"연결 또는 접근 허용 필요"
-    CapabilityAvailability.REQUIRES_MODEL->"모델 준비 필요"
-    CapabilityAvailability.UNVALIDATED->"이 환경에서 확인 필요"
-    CapabilityAvailability.NOT_IMPLEMENTED->"아직 지원하지 않음"
-}
-
 @Composable internal fun OfficeCapabilityShelf(
-    app:AppContainer,onConnections:()->Unit,onImages:()->Unit,
+    app:AppContainer,startOnServices:Boolean,onConnections:(String?)->Unit,onContacts:()->Unit,onMaps:()->Unit,onImages:()->Unit,
     calendarReadGranted:Boolean,onCalendarRead:()->Unit,onDraft:(String)->Boolean,modifier:Modifier=Modifier
 ){
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     val context=LocalContext.current
-    val pc by remember(context){PcComputeSettings.get(context).state}.collectAsState()
     var capabilities by remember{mutableStateOf<List<ToolCapability>?>(null)}
-    var showAll by rememberSaveable { mutableStateOf(false) }
-    var connectionOnly by rememberSaveable{mutableStateOf(false)}
+    var usedAccounts by remember{mutableStateOf(emptySet<ConnectedService>())}
+    var connectionOnly by rememberSaveable(startOnServices){mutableStateOf(startOnServices)}
     var query by rememberSaveable{mutableStateOf("")}
     var failure by remember{mutableStateOf(false)}
     var draftPreserved by remember{mutableStateOf(false)}
     LaunchedEffect(app,lifecycle){
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED){
-            try{capabilities=app.capabilitySnapshot();failure=false}
+            try{
+                capabilities=app.capabilitySnapshot()
+                usedAccounts=withContext(Dispatchers.IO){
+                    val verified=ConnectionHub.get(context).verifiedServiceIds()
+                    ConnectedService.entries.filterTo(mutableSetOf()){it.id in verified}
+                }
+                failure=false
+            }
             catch(cancel:CancellationException){throw cancel}
             catch(_:Exception){failure=true}
             awaitCancellation()
@@ -90,17 +92,19 @@ private fun ToolCapability.officeStatus()=when(availability){
     val text=query.trim()
     fun matches(vararg fields:String)=text.isEmpty()||fields.any{it.contains(text,ignoreCase=true)}
     val showCalendar = matches("휴대폰 캘린더", "일정", "Android")
-    val showConnections = matches("앱과 컴퓨터 연결", "PC", "메일", "캘린더", "메신저", "Codex", "Claude")
-    val accounts = ConnectedService.entries.filter { matches(it.label, it.id) }
-    val phoneApps = ConsumerApp.entries.filter { matches(it.label, it.id) }
+    val showConnections = matches("앱과 서비스 연결", "메일", "캘린더", "야놀자", "NOL")
+    val showContacts = matches("연락처", "주소록")
+    val showMaps = matches("위치", "지도", "길찾기")
+    val accounts = ConnectedService.entries.filter { matches(it.label) }.sortedByDescending { it in usedAccounts }
+    val phoneApps = ConsumerApp.entries.filter { matches(it.label) }
+    val publicSites = (GovernmentService.entries.map { it.label } + LifeServiceCatalog.serviceLabels).filter { matches(it) }
     Column(modifier.fillMaxWidth().imePadding(),verticalArrangement=Arrangement.spacedBy(10.dp)){
         ZipOutlinedTextField(query,{query=it.take(100)},Modifier.fillMaxWidth(),
             label={Text("이름이나 하고 싶은 일 검색")}, singleLine=true,
             leadingIcon={ZipIcon(com.user.localagent.runtime.R.drawable.zi_search,null,tint=ZipHapColors.TextSecondary,size=22.dp)})
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            ZipFilterChip(!connectionOnly && !showAll,{connectionOnly=false;showAll=false},{Text("추천")})
-            ZipFilterChip(!connectionOnly && showAll,{connectionOnly=false;showAll=true},{Text("전체 기능")})
-            ZipFilterChip(connectionOnly,{connectionOnly=true},{Text("앱과 연결")})
+            ZipFilterChip(!connectionOnly,{connectionOnly=false},{Text("해볼 일")})
+            ZipFilterChip(connectionOnly,{connectionOnly=true},{Text("앱과 서비스")})
         }
         if(failure)ZipHapStatusTag("기능 목록을 확인하지 못했어요.", MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer)
         else if(capabilities==null)LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -120,18 +124,25 @@ private fun ToolCapability.officeStatus()=when(availability){
                     }
                 }
                 if(showConnections)item{
-                    SettingsEntry("앱과 컴퓨터 연결",
-                        if(pc.paired)"등록한 컴퓨터와 사용할 계정을 확인해요." else "계정, 컴퓨터, 메신저를 연결해요.",com.user.localagent.runtime.R.drawable.zi_link,onOpen=onConnections)
+                    SettingsEntry("앱과 서비스 연결",
+                        "야놀자(NOL)와 다른 서비스의 연결을 관리해요.",com.user.localagent.runtime.R.drawable.zi_link,onOpen={onConnections(null)})
+                }
+                if(showContacts)item{
+                    SettingsEntry("휴대폰 연락처","연락처를 연결하거나 찾아요.",com.user.localagent.runtime.R.drawable.zi_person,onOpen=onContacts)
+                }
+                if(showMaps)item{
+                    SettingsEntry("위치·지도","현재 위치 권한은 지도 앱에서 설정해요.",com.user.localagent.runtime.R.drawable.zi_compass,onOpen=onMaps)
                 }
                 items(accounts,key={"account-"+it.id}){service->
                     val all=accountTools.values.filter{it.service==service}.mapNotNull{byId[it.definition.name]}
                     val reads=all.filterNot{accountTools[it.id]?.writes==true}
                     val status=when{
+                        service in usedAccounts->"사용한 서비스"
                         reads.any{it.availability==CapabilityAvailability.INSTALLED}->"읽기 연결 확인됨"
                         all.any{it.availability==CapabilityAvailability.REQUIRES_PERMISSION}->"계정 연결 필요"
                         else->"연결 상태 확인 필요"
                     }
-                    SettingsEntry(service.label,status,com.user.localagent.runtime.R.drawable.zi_mail,ZipTone.Mint,onOpen=onConnections)
+                    SettingsEntry(service.label,status,com.user.localagent.runtime.R.drawable.zi_mail,ZipTone.Mint,onOpen={onConnections(service.id)})
                 }
                 items(phoneApps,key={"phone-"+it.id}){item->
                     val all=consumerTools.filterValues{it==item}.keys.mapNotNull(byId::get)
@@ -141,45 +152,40 @@ private fun ToolCapability.officeStatus()=when(availability){
                         ZipIconTile(com.user.localagent.runtime.R.drawable.zi_native,tone=ZipTone.Neutral)
                         Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
                             ZipHapSectionTitle(item.label)
-                            if(verified)ZipHapStatusTag("사용 가능한 동작 있음", ZipHapColors.Mint, ZipHapColors.MintSoft)
-                            else ZipHapStatusTag("휴대폰 앱과 지원 동작 확인 필요")
-                            all.forEach{Text(it.description,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                            if(verified)ZipHapStatusTag("휴대폰에서 이용 가능", ZipHapColors.Mint, ZipHapColors.MintSoft)
+                            else ZipHapStatusTag("휴대폰 앱 확인 필요")
+                            TextButton(onClick={draftPreserved=!onDraft("${item.label} 앱에서 할 일을 도와줘.")}){Text("채팅에서 요청하기")}
                         }
                         }
                     }
                 }
-                if(!showCalendar && !showConnections && accounts.isEmpty() && phoneApps.isEmpty())item{
+                items(publicSites,key={"public-"+it}){service->
+                    SettingsEntry(service,"공식 서비스 이용 방법을 채팅에서 확인해요.",com.user.localagent.runtime.R.drawable.zi_globe,
+                        onOpen={draftPreserved=!onDraft("${service}에서 필요한 일을 처리할 수 있게 안내해 줘.")})
+                }
+                if(!showCalendar && !showConnections && !showContacts && !showMaps && accounts.isEmpty() && phoneApps.isEmpty() && publicSites.isEmpty())item{
                     ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_connections,"검색 결과가 없어요.","")
                 }
             }else{
-                val rows=detected.filter{item->matches(examples[item.id]?.title.orEmpty(),item.title,item.description,item.limitation)}
-                    .sortedBy{if(it.id in examples)0 else if(it.availability==CapabilityAvailability.NOT_IMPLEMENTED)2 else 1}
-                val browsing = text.isEmpty() && !showAll
-                val visibleRows = if (browsing) rows.filter { it.id in examples && it.availability != CapabilityAvailability.NOT_IMPLEMENTED } else rows
-                items(visibleRows,key={it.id}){item->
-                    val example=examples[item.id]
-                    val (icon,tone)=capabilityIcon(item.id)
+                val visibleRows=examples.entries.filter{(id,example)->
+                    byId[id]?.availability!=CapabilityAvailability.NOT_IMPLEMENTED&&matches(example.title)
+                }
+                items(visibleRows,key={it.key}){item->
+                    val (id,example)=item
+                    val (icon,tone)=capabilityIcon(id)
                     ZipHapCard {
                         Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){
                         ZipIconTile(icon,tone=tone)
                         Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
-                            ZipHapSectionTitle(example?.title?:item.title)
-                            when(item.availability){
-                                CapabilityAvailability.INSTALLED -> ZipHapStatusTag(item.officeStatus(), ZipHapColors.Mint, ZipHapColors.MintSoft)
-                                CapabilityAvailability.REQUIRES_PERMISSION, CapabilityAvailability.REQUIRES_MODEL ->
-                                    ZipHapStatusTag(item.officeStatus(), ZipHapColors.SunText, ZipHapColors.SunSoft)
-                                else -> ZipHapStatusTag(item.officeStatus())
-                            }
-                            if(item.limitation.isNotBlank())Text(item.limitation,style=MaterialTheme.typography.bodySmall,
-                                color=MaterialTheme.colorScheme.onSurfaceVariant)
-                            if(item.id=="generate_image")TextButton(onClick=onImages){Text("이미지 작업실 열기")}
-                            else if(example!=null)TextButton(onClick={draftPreserved=!onDraft(example.request)}){Text("채팅에 예시 넣기")}
+                            ZipHapSectionTitle(example.title)
+                            if(id=="generate_image")TextButton(onClick=onImages){Text("이미지 작업실 열기")}
+                            else TextButton(onClick={draftPreserved=!onDraft(example.request)}){Text("채팅에 예시 넣기")}
                         }
                         }
                     }
                 }
                 if(visibleRows.isEmpty() && capabilities!=null)item {
-                    ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_web,if(browsing) "전체 기능에서 할 일을 찾아보세요." else "검색 결과가 없어요.","")
+                    ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_web,"검색 결과가 없어요.","")
                 }
             }
         }
