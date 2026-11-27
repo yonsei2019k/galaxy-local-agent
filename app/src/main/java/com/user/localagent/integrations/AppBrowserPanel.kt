@@ -37,6 +37,7 @@ import com.user.localagent.ui.zipSwitchColors
 import com.user.localagent.ui.ZipHapColors
 import com.user.localagent.ui.ZipHapTokens
 import com.user.localagent.ui.ZipIconTile
+import com.user.localagent.ui.ZipMetalLockTile
 import com.user.localagent.ui.ZipTone
 import com.user.localagent.ui.ZipBulletText
 import com.user.localagent.ui.zipShadow
@@ -66,7 +67,7 @@ import com.user.localagent.ui.zipShadow
             if(savedSites.isEmpty()&&vaultStatus==null)Text("이 휴대폰에 저장한 로그인이 없어요.")
             for(site in savedSites)Row(horizontalArrangement=Arrangement.spacedBy(12.dp),modifier=Modifier.fillMaxWidth(),
                 verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
-                ZipIconTile(com.user.localagent.runtime.R.drawable.zi_lock,tone=ZipTone.Neutral,size=36.dp,iconSize=20.dp)
+                ZipMetalLockTile(size=36.dp)
                 Text(site.host,Modifier.weight(1f))
                 TextButton(onClick={scope.launch {
                     try{browser.removeSavedWebsite(site);savedSites=browser.savedWebsiteOrigins();vaultStatus=null}
@@ -287,7 +288,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement=Arrangement.spacedBy(3.dp)){
                 Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
-                    ZipIconTile(com.user.localagent.runtime.R.drawable.zi_lock,size=36.dp,iconSize=20.dp)
+                    ZipMetalLockTile(size=36.dp)
                     Column(Modifier.weight(1f)){
                         Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
                         Text(login.host,style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)

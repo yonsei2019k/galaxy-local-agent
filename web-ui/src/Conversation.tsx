@@ -11,6 +11,8 @@ import { isLiveTaskPhase } from './composer'
 import { attachmentsBlockReply } from './bridge'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
+import { situationForMood, useCharacterMood } from './character/useCharacterMood'
+import { COLORS, VARIANTS, type CharacterChoice, type CharacterSituation } from './character/characterData'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
 import { websiteWorkFor, workHistory } from './work/workHistory'
@@ -24,8 +26,36 @@ const exampleRequests: { label: string; text: string; icon: IconName; needsCalen
   { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', icon: 'file', needsFile: true },
 ]
 
-function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
+/**
+ * Empty-state suggestions (owner direction 2026-11-27): a tap sends the fixed sentence as an ordinary request. The chip
+ * carries only text; the model interprets it like any typed message and any permission follows the normal flow.
+ */
+const roomSuggestions: { text: string; icon: IconName }[] = [
+  { text: '내일 오전 일정 정리해 줘', icon: 'calendar' },
+  { text: '이번 주말 서울 날씨 찾아 줘', icon: 'globe' },
+  { text: '오늘 할 일 같이 정리해 줘', icon: 'check' },
+]
+
+/**
+ * The other 집순이 in the room scene: different hoods and colors from the owner's choice, so the chosen one stays
+ * the only one in its look. Positions, blur (depth) and float timing live in styles.css (.room-guest--N).
+ */
+function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[] {
+  const colors = COLORS.map(item => item.id).filter(color => color !== host.color)
+  const variants = VARIANTS.map(item => item.id)
+  const start = variants.indexOf(host.variant) + 1
+  const looks: { expr: CharacterChoice['expr']; size: number }[] = [
+    { expr: 'smile', size: 64 }, { expr: 'wink', size: 56 }, { expr: 'sleepy', size: 48 }, { expr: 'surprise', size: 72 },
+  ]
+  return looks.map((look, index) => ({
+    variant: variants[(start + index) % variants.length], color: colors[(index * 2 + 1) % colors.length], ...look,
+  }))
+}
+
+function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onSendExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
+  situation?: CharacterSituation
+  onSendExample?(text: string): void
   guide: boolean
   compact?: boolean
   calendarGranted: boolean
@@ -37,21 +67,30 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
 }) {
   const [character] = useCharacter()
   const [step, setStep] = useState(0)
+  // The plain first screen only (staff rooms and the first-run guide keep their own flows).
+  const suggestions = staff || guide || !onSendExample ? [] : roomSuggestions
   return (
     <div className={compact ? "welcome welcome--compact" : "welcome"}>
-      {!compact && <MotionField className="mascot-field">
-        <Character choice={character} size={160} />
-        <span className="twinkle twinkle--1" aria-hidden="true" /><span className="twinkle twinkle--2" aria-hidden="true" />
-        <span className="twinkle twinkle--3" aria-hidden="true" />
+      {!compact && <MotionField className="room-scene">
+        <span className="room-window" aria-hidden="true" /><span className="room-beam" aria-hidden="true" /><span className="room-rug" aria-hidden="true" />
+        {roomCast(character).map((guest, index) =>
+          <span key={index} className={`room-guest room-guest--${index + 1}`} aria-hidden="true">
+            <Character choice={guest} size={guest.size} decorative />
+          </span>)}
+        <span className="room-host"><Character choice={character} situation={situation} size={160} /></span>
       </MotionField>}
       <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+      {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
+        {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
+          onClick={() => onSendExample?.(example.text)}><Icon name={example.icon} />{example.text}</button>)}
+      </div>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
         <div className="office-guide-steps" aria-hidden="true">{[0, 1, 2].map(index =>
           <span key={index} className={index === step ? 'is-current' : undefined} />)}</div>
         {step === 1 && <MotionField className="office-guide-art-wrap"><Illustration name="connections" className="office-guide-art art-float" /></MotionField>}
         <div aria-live="polite">
-          {step === 0 && <p>일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
+          {step === 0 && <p>방구석에서 하나하나 챙겨 드리는 비서 집순이예요! 일정 확인부터 웹 검색, 파일 정리까지 여기서 부탁해 주세요. 어떤 일부터 해볼까요?</p>}
           {step === 1 && <p>일정을 보려면 휴대폰 일정 읽기를 허용해 주세요. Google이나 컴퓨터는 필요할 때 연결해도 돼요.</p>}
           {step === 2 && <p>해볼 일을 고르면 입력창에 문장을 써드릴게요. 고쳐 쓰거나 바로 보내도 돼요. 휴대폰 일정이 연결되지 않았으면 먼저 읽기 권한을 물어볼게요.</p>}
         </div>
@@ -182,7 +221,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onWriteOwnReply, onSendExample, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -200,19 +239,26 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onChooseReply?(runId: string, index: number): boolean
   onGoalAnswer?(runId: string, text: string): boolean
   onPdfEmail?(messageId: string): void
+  /** "직접 입력" next to reply choices: only moves focus to the composer; nothing is sent. */
+  onWriteOwnReply?(): void
+  /** Empty-state suggestion: sends that fixed sentence as an ordinary request (the model interprets it as usual). */
+  onSendExample?(text: string): void
   onBookingPayment?(action: BookingPaymentAction, id: string): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
 }) {
   const view = useRef<HTMLElement>(null)
+  // The question a choice was sent for, and which choice: every chip locks so one tap sends one answer.
   const [sentChoice, setSentChoice] = useState<string | null>(null)
   const [goalReply, setGoalReply] = useState<{ runId: string; text: string } | null>(null)
+  const [chosenIndex, setChosenIndex] = useState<number | null>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [openWorkId, setOpenWorkId] = useState<string | null>(null)
   const [localHistoryOpen, setLocalHistoryOpen] = useState(false)
   const panelOpen = historyOpen ?? localHistoryOpen
   const setHistoryOpen = onHistoryChange ?? setLocalHistoryOpen
+  const mood = useCharacterMood(snapshot)
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim() || item.executionReport?.length) : []
   const website = snapshot?.websiteCard
   const approval = snapshot?.ready ? snapshot.approvalCard : undefined
@@ -333,7 +379,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           </div>
           <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
         </div> : empty ?
-          <Welcome staff={staff} guide={guide}
+          <Welcome staff={staff} guide={guide} situation={situationForMood(mood)} onSendExample={onSendExample}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
@@ -393,14 +439,25 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                 <button type="submit" disabled={!enabled || replyBlocked || sentChoice === waitingInput.id ||
                   goalReply?.runId !== waitingInput.id || !goalReply.text.trim()}>답변하고 계속</button>
               </form>}
-              {waitingInput.choices && onChooseReply && <div className="reply-options" role="group" aria-label="답변 선택지">
-                {waitingInput.choices.map((choice, index) => <button key={choice.label} type="button"
-                  disabled={!enabled || hasDraft || replyBlocked || sentChoice === waitingInput.id}
-                  onClick={() => {
-                    if (onChooseReply(waitingInput.id, index)) setSentChoice(waitingInput.id)
-                  }}>
-                  {withStickers(choice.label)}{choice.recommended && <span className="reply-recommended"><Icon name="sparkle" />추천</span>}
-                </button>)}
+              {waitingInput.choices && onChooseReply && <div className="reply-options reply-chips" role="group" aria-label="답변 선택지">
+                {/* Labels come from the model for this exact question; the recommended one is the ink pill. */}
+                {waitingInput.choices.map((choice, index) => {
+                  const chosen = sentChoice === waitingInput.id && chosenIndex === index
+                  return <button key={choice.label} type="button"
+                    className={`reply-chip${choice.recommended ? ' reply-chip--recommended' : ''}${chosen ? ' is-chosen' : ''}`}
+                    aria-label={choice.recommended ? `${choice.label}, 추천` : undefined} aria-pressed={chosen}
+                    disabled={!enabled || hasDraft || replyBlocked || sentChoice === waitingInput.id}
+                    onClick={() => {
+                      if (sentChoice === waitingInput.id) return
+                      if (onChooseReply(waitingInput.id, index)) { setSentChoice(waitingInput.id); setChosenIndex(index) }
+                    }}>
+                    {withStickers(choice.label)}{choice.recommended && <span className="reply-recommended" aria-hidden="true">추천</span>}
+                  </button>
+                })}
+                {onWriteOwnReply && <button type="button" className="reply-chip reply-chip--own"
+                  disabled={!enabled || sentChoice === waitingInput.id} onClick={onWriteOwnReply}>
+                  <Icon name="edit" />직접 입력
+                </button>}
               </div>}
             </div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide

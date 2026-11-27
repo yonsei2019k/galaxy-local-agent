@@ -3,6 +3,7 @@ import '../sheet.css'
 import './work.css'
 import { Character } from '../character/Character'
 import { useCharacter } from '../character/useCharacter'
+import { situationForPhase } from '../character/useCharacterMood'
 import { Icon } from '../Icon'
 import { StickerText, withStickers } from '../icons/Sticker'
 import type { Task } from '../bridge'
@@ -86,7 +87,7 @@ export function WorkSheet({ task, enabled, steps, history, onSelect, onBack, onC
         <Icon name="back" /> 작업 목록
       </button>}
       <header className={`work-sheet-head work-card--${presentation.tone}`}>
-        <Character choice={character} state={presentation.characterState} size={64} decorative />
+        <Character choice={character} situation={situationForPhase(task.phase)} size={64} decorative />
         <div className="work-text">
           <h2 className="work-sheet-title" dir="auto">{withStickers(task.label || '작업')}</h2>
           <p className="work-state">{[presentation.title, elapsed].filter(Boolean).join(' · ')}</p>

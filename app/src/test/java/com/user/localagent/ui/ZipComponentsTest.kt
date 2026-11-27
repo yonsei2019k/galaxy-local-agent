@@ -56,7 +56,23 @@ class ZipComponentsTest {
     }
 
     @Test
+    fun monochromeTilesAreGreyWithInkIconsExceptCoral() {
+        ZipTone.entries.forEach { tone ->
+            val (background, content) = zipTileColors(tone)
+            if (tone == ZipTone.Coral) {
+                assertEquals(ZipTone.Coral.soft to ZipTone.Coral.content, background to content)
+            } else {
+                assertEquals("ZipTone.${tone.name}", ZipHapColors.Soft to ZipHapColors.TextPrimary, background to content)
+            }
+            assertContrast(4.5, content, background, "tile ${tone.name}")
+        }
+    }
+
+    @Test
     fun buttonLabelsAreReadable() {
+        assertContrast(4.5, ZipHapColors.OnInk, ZipHapColors.Ink, "primary ink pill label")
+        assertContrast(3.0, ZipHapColors.Ink, ZipHapColors.Background, "primary ink pill on the page")
+        assertContrast(4.5, ZipHapTokens.NightText, ZipHapTokens.Night, "dark security card text")
         assertContrast(4.5, Color.White, ZipHapColors.Cobalt, "primary label")
         assertContrast(4.5, Color.White, ZipHapColors.Coral, "destructive label")
         assertContrast(4.5, ZipHapColors.TextPrimary, ZipHapColors.SurfaceSunken, "secondary label")

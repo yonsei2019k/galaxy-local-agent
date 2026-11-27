@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Generate ZipHap icons, illustrations and stickers from design/icons.json, design/illustrations.json
-and design/stickers.json.
+"""Generate ZipHap icons, illustrations, stickers and metal art from design/icons.json, design/illustrations.json,
+design/stickers.json and design/metal.json.
 
 Outputs:
   web-ui/src/icons/generated.ts                    path data for the React Icon, Illustration and Sticker parts
   app/src/main/res/drawable/zi_<snake>.xml          duotone icon vector drawables (tintable; icons marked "web": true are web only)
   app/src/main/res/drawable/zi_ill_<snake>.xml      full-color illustration vector drawables
+  app/src/main/res/drawable/zi_ill_metal_<snake>.xml metallic security art (gradients) for approval, payment and vault
 Stickers (24x24 full-color glyphs that replace emoji inside model text) are web only.
 
 Usage: python scripts/gen-icons.py [--check] [--sheet OUT.html]
@@ -25,11 +26,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ICONS_SRC = ROOT / "design" / "icons.json"
 ILLS_SRC = ROOT / "design" / "illustrations.json"
 STICKERS_SRC = ROOT / "design" / "stickers.json"
+METAL_SRC = ROOT / "design" / "metal.json"
 TS_OUT = ROOT / "web-ui" / "src" / "icons" / "generated.ts"
 DRAWABLE = ROOT / "app" / "src" / "main" / "res" / "drawable"
-HEADER = "Generated from design/icons.json, design/illustrations.json and design/stickers.json by scripts/gen-icons.py. Do not edit."
+HEADER = "Generated from design/icons.json, design/illustrations.json, design/stickers.json and design/metal.json by scripts/gen-icons.py. Do not edit."
 # Android drawables come only from icons and illustrations, so their header stays as before.
 DRAWABLE_HEADER = "Generated from design/icons.json and design/illustrations.json by scripts/gen-icons.py. Do not edit."
+METAL_HEADER = "Generated from design/metal.json by scripts/gen-icons.py. Do not edit."
 
 NAME = re.compile(r"^[a-z][a-zA-Z0-9]*$")
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -402,6 +405,139 @@ def load_stickers(src):
     return {name: {"label": labels[name], "shapes": shapes} for name, shapes in stickers.items()}
 
 
+# ---------------------------------------------------------------- metal art
+
+GRAD = re.compile(r"^grad:([a-z][a-zA-Z0-9]*)$")
+
+
+def _num(v, where):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ValueError(f"{where}: needs a number")
+    return v
+
+
+def load_metal(src):
+    """Metallic art with linear/radial gradients in viewBox coordinates (userSpaceOnUse on the web)."""
+    meta = src.get("meta", {})
+    w, h = meta.get("viewBox", [0, 0])
+    if (w, h) != (160, 160):
+        raise ValueError("metal viewBox must be 160x160")
+    arts = {}
+    for name, spec in src.get("metal", {}).items():
+        if not NAME.fullmatch(name) or not isinstance(spec, dict) or set(spec) - {"gradients", "shapes"}:
+            raise ValueError(f"bad metal art {name!r}")
+        grads = {}
+        for gname, g in spec.get("gradients", {}).items():
+            where = f"metal {name}.{gname}"
+            if not NAME.fullmatch(gname) or not isinstance(g, dict):
+                raise ValueError(f"{where}: bad gradient")
+            kind = g.get("type")
+            keys = {"linear": {"x1", "y1", "x2", "y2"}, "radial": {"cx", "cy", "r"}}.get(kind)
+            if keys is None or set(g) != keys | {"type", "stops"}:
+                raise ValueError(f"{where}: linear needs x1 y1 x2 y2, radial needs cx cy r, both need stops")
+            stops = g["stops"]
+            if not isinstance(stops, list) or len(stops) < 2:
+                raise ValueError(f"{where}: needs two or more stops")
+            last = -1
+            for off, color in stops:
+                if _num(off, where) < last or not 0 <= off <= 1 or not isinstance(color, str) or not HEX.fullmatch(color):
+                    raise ValueError(f"{where}: stops are [offset 0..1 ascending, #RRGGBB]")
+                last = off
+            grads[gname] = {"type": kind, **{k: _num(g[k], where) for k in sorted(keys)},
+                            "stops": [[off, color.upper()] for off, color in stops]}
+        shapes = spec.get("shapes")
+        if not isinstance(shapes, list) or not shapes:
+            raise ValueError(f"metal {name}: needs shapes")
+        used = set()
+        out = []
+        for i, el in enumerate(shapes):
+            where = f"metal {name}[{i}]"
+            if not isinstance(el, dict) or set(el) - (SHAPE_KEYS | {"fill", "stroke", "sw", "opacity"}):
+                raise ValueError(f"{where}: unknown keys")
+            item = {"d": shape_to_d(el, where)}
+            for role in ("fill", "stroke"):
+                val = el.get(role)
+                if val is None:
+                    continue
+                m = GRAD.fullmatch(val) if isinstance(val, str) else None
+                if m:
+                    if m.group(1) not in grads:
+                        raise ValueError(f"{where}: unknown gradient {val!r}")
+                    used.add(m.group(1))
+                    item[role] = val
+                elif isinstance(val, str) and HEX.fullmatch(val):
+                    item[role] = val.upper()
+                else:
+                    raise ValueError(f"{where}: {role} must be #RRGGBB or grad:<name>")
+            if "fill" not in item and "stroke" not in item:
+                raise ValueError(f"{where}: needs fill or stroke")
+            if "stroke" in item:
+                item["sw"] = _num(el.get("sw"), where)
+            elif "sw" in el:
+                raise ValueError(f"{where}: sw without stroke")
+            if "opacity" in el:
+                op = _num(el["opacity"], where)
+                if not 0 < op < 1:
+                    raise ValueError(f"{where}: opacity must be between 0 and 1")
+                item["opacity"] = op
+            margin = item.get("sw", 0) / 2
+            for px, py in sample_path(item["d"]):
+                if not (margin - 1e-6 <= px <= w - margin + 1e-6 and margin - 1e-6 <= py <= h - margin + 1e-6):
+                    raise ValueError(f"{where}: point ({px:.1f}, {py:.1f}) outside viewBox")
+            out.append(item)
+        if set(grads) - used:
+            raise ValueError(f"metal {name}: unused gradients {sorted(set(grads) - used)}")
+        arts[name] = {"gradients": grads, "shapes": out}
+    if not arts:
+        raise ValueError("no metal art")
+    return arts
+
+
+def gen_metal_xml(art):
+    def gradient(g):
+        if g["type"] == "linear":
+            attrs = (f'android:type="linear" android:startX="{fmt(g["x1"])}" android:startY="{fmt(g["y1"])}" '
+                     f'android:endX="{fmt(g["x2"])}" android:endY="{fmt(g["y2"])}"')
+        else:
+            attrs = (f'android:type="radial" android:centerX="{fmt(g["cx"])}" android:centerY="{fmt(g["cy"])}" '
+                     f'android:gradientRadius="{fmt(g["r"])}"')
+        items = [f'                <item android:offset="{fmt(off)}" android:color="#FF{color[1:]}" />' for off, color in g["stops"]]
+        return [f"            <gradient {attrs}>", *items, "            </gradient>"]
+    body = []
+    for s in art["shapes"]:
+        attrs = [f'android:pathData="{s["d"]}"']
+        children = []
+        for role, android_name in (("fill", "android:fillColor"), ("stroke", "android:strokeColor")):
+            val = s.get(role)
+            if val is None:
+                continue
+            if val.startswith("grad:"):
+                children += [f'        <aapt:attr name="{android_name}">', *gradient(art["gradients"][val[5:]]), "        </aapt:attr>"]
+            else:
+                attrs.append(f'{android_name}="{val}"')
+        if "stroke" in s:
+            attrs += [f'android:strokeWidth="{fmt(s["sw"])}"', 'android:strokeLineCap="round"', 'android:strokeLineJoin="round"']
+        if "opacity" in s:
+            attrs.append(f'android:{"fillAlpha" if "fill" in s else "strokeAlpha"}="{fmt(s["opacity"])}"')
+        if children:
+            body += ["    <path " + " ".join(attrs) + ">", *children, "    </path>"]
+        else:
+            body.append("    <path " + " ".join(attrs) + " />")
+    return "\n".join([
+        '<?xml version="1.0" encoding="utf-8"?>',
+        f"<!-- {METAL_HEADER} -->",
+        '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
+        '    xmlns:aapt="http://schemas.android.com/aapt"',
+        '    android:width="160dp"',
+        '    android:height="160dp"',
+        '    android:viewportWidth="160"',
+        '    android:viewportHeight="160">',
+        *body,
+        "</vector>",
+        "",
+    ])
+
+
 # ---------------------------------------------------------------- outputs
 
 def _shape_ts(s):
@@ -416,7 +552,7 @@ def _shape_ts(s):
     return "    { " + ", ".join(fields) + " },"
 
 
-def gen_ts(meta, icons, ills, stickers):
+def gen_ts(meta, icons, ills, stickers, metal):
     lines = [f"// {HEADER}", "",
              "export interface IconLayers { soft: string; accents: readonly { d: string; color: string }[]; line: string; dots: string }",
              "export interface IllustrationShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }",
@@ -440,7 +576,27 @@ def gen_ts(meta, icons, ills, stickers):
         lines.append(f"  {name}: {{ label: {json.dumps(st['label'], ensure_ascii=False)}, shapes: [")
         lines += ["  " + _shape_ts(s) for s in st["shapes"]]
         lines.append("  ] },")
-    lines += ["} satisfies Record<string, StickerArt>", ""]
+    lines += ["} satisfies Record<string, StickerArt>", "",
+              "export type MetalGradient =",
+              "  | { type: 'linear'; x1: number; y1: number; x2: number; y2: number; stops: readonly (readonly [number, string])[] }",
+              "  | { type: 'radial'; cx: number; cy: number; r: number; stops: readonly (readonly [number, string])[] }",
+              "export interface MetalShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }",
+              "export interface MetalArt { gradients: Readonly<Record<string, MetalGradient>>; shapes: readonly MetalShape[] }", "",
+              "export const METAL = {"]
+    for name, art in metal.items():
+        lines.append(f"  {name}: {{")
+        lines.append("    gradients: {")
+        for gname, g in art["gradients"].items():
+            keys = ("x1", "y1", "x2", "y2") if g["type"] == "linear" else ("cx", "cy", "r")
+            coords = ", ".join(f"{k}: {fmt(g[k])}" for k in keys)
+            stops = ", ".join(f"[{fmt(off)}, {json.dumps(color)}]" for off, color in g["stops"])
+            lines.append(f"      {gname}: {{ type: '{g['type']}', {coords}, stops: [{stops}] }},")
+        lines.append("    },")
+        lines.append("    shapes: [")
+        lines += ["    " + _shape_ts(s) for s in art["shapes"]]
+        lines.append("    ],")
+        lines.append("  },")
+    lines += ["} satisfies Record<string, MetalArt>", ""]
     return "\n".join(lines)
 
 
@@ -496,12 +652,15 @@ def build():
     meta, icons = load_icons(json.loads(ICONS_SRC.read_text(encoding="utf-8")))
     ills = load_illustrations(json.loads(ILLS_SRC.read_text(encoding="utf-8")))
     stickers = load_stickers(json.loads(STICKERS_SRC.read_text(encoding="utf-8")))
-    outputs = {TS_OUT: gen_ts(meta, icons, ills, stickers)}
+    metal = load_metal(json.loads(METAL_SRC.read_text(encoding="utf-8")))
+    outputs = {TS_OUT: gen_ts(meta, icons, ills, stickers, metal)}
     for name, ic in icons.items():
         if not ic["web"]:
             outputs[DRAWABLE / f"zi_{snake(name)}.xml"] = gen_icon_xml(meta, ic)
     for name, shapes in ills.items():
         outputs[DRAWABLE / f"zi_ill_{snake(name)}.xml"] = gen_ill_xml(shapes)
+    for name, art in metal.items():
+        outputs[DRAWABLE / f"zi_ill_metal_{snake(name)}.xml"] = gen_metal_xml(art)
     return meta, icons, ills, stickers, outputs
 
 

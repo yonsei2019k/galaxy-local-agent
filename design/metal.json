@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "viewBox": [160, 160],
+    "rules": "metallic security art for approval, payment and vault surfaces (owner-approved concept 2026-11-27); gradients are in viewBox coordinates so web and Android draw the same; fills are #RRGGBB or grad:<name>; no text"
+  },
+  "metal": {
+    "lock": {
+      "gradients": {
+        "shackle": {"type": "linear", "x1": 0, "y1": 22, "x2": 0, "y2": 80, "stops": [[0, "#D8D8DD"], [1, "#6B6B74"]]},
+        "body": {"type": "linear", "x1": 34, "y1": 70, "x2": 126, "y2": 142, "stops": [[0, "#EEEEF1"], [0.4, "#A3A3AC"], [0.65, "#CFCFD5"], [1, "#4B4B53"]]}
+      },
+      "shapes": [
+        {"d": "M52 74 V56 A28 28 0 0 1 108 56 V74", "stroke": "grad:shackle", "sw": 12},
+        {"rect": [34, 70, 92, 72, 20], "fill": "grad:body"},
+        {"rect": [40, 76, 80, 8, 4], "fill": "#FFFFFF", "opacity": 0.45},
+        {"circle": [80, 104, 9], "fill": "#1A1920"},
+        {"d": "M76 108 H84 L82 124 H78 Z", "fill": "#1A1920"}
+      ]
+    },
+    "key": {
+      "gradients": {
+        "bow": {"type": "linear", "x1": 14, "y1": 46, "x2": 66, "y2": 98, "stops": [[0, "#F4F4F6"], [0.35, "#9A9AA3"], [0.6, "#D9D9DE"], [1, "#55555D"]]},
+        "blade": {"type": "linear", "x1": 64, "y1": 64, "x2": 146, "y2": 104, "stops": [[0, "#F4F4F6"], [0.35, "#9A9AA3"], [0.6, "#D9D9DE"], [1, "#55555D"]]}
+      },
+      "shapes": [
+        {"circle": [40, 72, 26], "fill": "grad:bow"},
+        {"circle": [32, 66, 8], "fill": "#1A1920"},
+        {"rect": [58, 64, 84, 16, 6], "fill": "grad:blade"},
+        {"rect": [112, 78, 10, 18, 3], "fill": "grad:blade"},
+        {"rect": [128, 78, 8, 13, 3], "fill": "grad:blade"},
+        {"rect": [62, 66, 70, 3, 1.5], "fill": "#FFFFFF", "opacity": 0.6}
+      ]
+    },
+    "switch": {
+      "gradients": {
+        "trackTop": {"type": "linear", "x1": 0, "y1": 34, "x2": 0, "y2": 76, "stops": [[0, "#F2F2F5"], [0.5, "#9C9CA5"], [1, "#55555D"]]},
+        "trackBottom": {"type": "linear", "x1": 0, "y1": 88, "x2": 0, "y2": 130, "stops": [[0, "#F2F2F5"], [0.5, "#9C9CA5"], [1, "#55555D"]]},
+        "on": {"type": "linear", "x1": 0, "y1": 40, "x2": 0, "y2": 70, "stops": [[0, "#6C9BFF"], [1, "#2A55C8"]]},
+        "knobOn": {"type": "radial", "cx": 108, "cy": 48, "r": 20, "stops": [[0, "#FFFFFF"], [0.6, "#B9B9C0"], [1, "#5D5D66"]]},
+        "knobOff": {"type": "radial", "cx": 40, "cy": 102, "r": 20, "stops": [[0, "#FFFFFF"], [0.6, "#B9B9C0"], [1, "#5D5D66"]]}
+      },
+      "shapes": [
+        {"rect": [22, 34, 116, 42, 21], "fill": "grad:trackTop"},
+        {"rect": [28, 40, 104, 30, 15], "fill": "grad:on"},
+        {"circle": [114, 55, 18], "fill": "grad:knobOn"},
+        {"rect": [22, 88, 116, 42, 21], "fill": "grad:trackBottom"},
+        {"rect": [28, 94, 104, 30, 15], "fill": "#2B2A31"},
+        {"circle": [46, 109, 18], "fill": "grad:knobOff"}
+      ]
+    }
+  }
+}

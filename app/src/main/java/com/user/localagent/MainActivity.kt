@@ -343,6 +343,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var launchIntroPending by mutableStateOf(false)
+    private var launchIntroChatReady by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
@@ -738,7 +739,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()){
                 Box(Modifier.weight(1f).fillMaxWidth()){
                 key(chatScreenAttempt){ReactChatHost(snapshot,onUnavailable={launchIntroPending=false;chatScreenUnavailable=true},
-                    onFirstReady={launchIntroPending=false},modifier=Modifier.fillMaxSize(),nativeSlotId=nativeSlotId,
+                    onFirstReady={launchIntroChatReady=true},modifier=Modifier.fillMaxSize(),nativeSlotId=nativeSlotId,
                     onNativeSlot={nativeSlot=it},onCommand={command->
                     val sameRoom=command.threadId==chat.selectedThreadId.value&&command.threadId==composerThreadId&&command.branchId==currentBranchId&&chat.selectionReady.value
                     if(sameRoom){
@@ -978,7 +979,7 @@ class MainActivity : ComponentActivity() {
                         }, modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
                 }
                 }
-                if(launchIntroPending) LaunchIntro(Modifier.matchParentSize())
+                if(launchIntroPending) LaunchIntro(launchIntroChatReady,{launchIntroPending=false},Modifier.matchParentSize())
                 }
             }
             else Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().padding(horizontal=18.dp)) {

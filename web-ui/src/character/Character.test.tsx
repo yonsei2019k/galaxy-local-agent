@@ -3,7 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Character } from './Character'
 import { CharacterPicker } from './CharacterPicker'
-import { DEFAULT_CHARACTER, type CharacterChoice } from './characterData'
+import {
+  DEFAULT_CHARACTER, EXPR_OPTIONS, INK, SITUATION_LOOK, isCharacterChoice, mixHex,
+  type CharacterChoice, type CharacterSituation,
+} from './characterData'
 import { STORAGE_KEY, useCharacter, resetCharacterStoreForTest } from './useCharacter'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -57,6 +60,49 @@ describe('Character', () => {
     expect(host.querySelector('.character--state-wait')).not.toBeNull()
   })
 
+  it('drawsShapesWithoutDarkOutlines', () => {
+    for (const state of ['none', 'work', 'wait', 'done', 'alert'] as const) {
+      for (const variant of ['bear', 'cat', 'bunny'] as const) {
+        act(() => root.render(<Character choice={{ ...DEFAULT_CHARACTER, variant }} state={state} size={80} />))
+        // Only facial features (inside the expression layer) may use the ink color as a stroke.
+        const outlined = [...host.querySelectorAll('[stroke]')]
+          .filter(element => element.getAttribute('stroke')?.toUpperCase() === INK.toUpperCase())
+          .filter(element => !element.closest('[data-layer="expr"]'))
+        expect(outlined, `${variant}/${state}`).toHaveLength(0)
+      }
+    }
+    expect(host.querySelector('[data-layer="ground-shadow"]')).not.toBeNull()
+    expect(host.querySelector('[data-layer="gloss"]')).not.toBeNull()
+    expect(host.querySelector('[data-layer="drawstrings"]')).not.toBeNull()
+    expect(host.querySelector('[data-layer="face"]')).not.toBeNull()
+    // The mascot is not drawn as a person: no hair or skin layers.
+    expect(host.querySelector('[data-layer="hair"]')).toBeNull()
+    expect(mixHex('#000000', '#FFFFFF', 0.5)).toBe('#808080')
+  })
+
+  it('givesEachInstanceItsOwnGradientIds', () => {
+    act(() => root.render(<><Character choice={DEFAULT_CHARACTER} size={80} /><Character choice={DEFAULT_CHARACTER} size={80} /></>))
+    const ids = [...host.querySelectorAll('defs [id]')].map(element => element.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    const [first, second] = host.querySelectorAll('svg.character')
+    const firstIds = new Set([...first.querySelectorAll('defs [id]')].map(element => element.id))
+    for (const element of second.querySelectorAll('[fill^="url(#"], [filter^="url(#"]')) {
+      const ref = (element.getAttribute('fill') ?? element.getAttribute('filter'))!.slice(5, -1)
+      expect(firstIds.has(ref)).toBe(false)
+      expect(second.querySelector(`[id="${ref}"]`)).not.toBeNull()
+    }
+  })
+
+  it('skipsBlurFiltersAtSmallSizes', () => {
+    act(() => root.render(<Character choice={DEFAULT_CHARACTER} size={32} decorative />))
+    expect(host.querySelector('filter')).toBeNull()
+    expect(host.querySelector('[filter]')).toBeNull()
+    expect(host.querySelector('.character')?.getAttribute('data-filtered')).toBe('false')
+    act(() => root.render(<Character choice={DEFAULT_CHARACTER} size={64} />))
+    expect(host.querySelector('filter')).not.toBeNull()
+    expect(host.querySelectorAll('[filter]').length).toBeGreaterThan(0)
+  })
+
   it('storageFailureFallsBackToDefault', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied') })
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
@@ -102,5 +148,43 @@ describe('Character', () => {
     act(() => root.render(<><Probe log={a} /><Probe log={b} /></>))
     act(() => a.set!({ variant: 'bunny', color: 'cocoa', expr: 'wink' }))
     expect(b.value).toEqual({ variant: 'bunny', color: 'cocoa', expr: 'wink' })
+  })
+})
+
+describe('Character situations', () => {
+  const situations = Object.keys(SITUATION_LOOK) as CharacterSituation[]
+
+  it('marksEachSituationWithItsFacePropsAndLayers', () => {
+    const expected: Record<CharacterSituation, [string, string | null]> = {
+      idle: ['wink', null], greeting: ['wink', null], listening: ['basic', null], thinking: ['focus', 'think-dots'],
+      working: ['focus', 'prop-work'], waiting: ['sleepy', 'prop-wait'], confirm: ['surprise', 'prop-alert'],
+      done: ['smile', 'sparkles'], blocked: ['worried', null],
+    }
+    for (const situation of situations) {
+      act(() => root.render(<Character choice={{ ...DEFAULT_CHARACTER, expr: 'wink' }} situation={situation} size={120} />))
+      const svg = host.querySelector('svg.character')!
+      expect(svg.getAttribute('data-situation')).toBe(situation)
+      expect(svg.classList.contains(`character--sit-${situation}`)).toBe(true)
+      expect(svg.getAttribute('data-once')).toBe(String(SITUATION_LOOK[situation].once))
+      const [face, layer] = expected[situation]
+      expect(host.querySelector('[data-expr]')?.getAttribute('data-expr'), situation).toBe(face)
+      if (layer) expect(host.querySelector(`[data-layer="${layer}"]`), situation).not.toBeNull()
+      for (const name of ['pose', 'ears', 'gaze']) expect(host.querySelector(`[data-layer="${name}"]`)).not.toBeNull()
+    }
+    expect(situations.filter(situation => SITUATION_LOOK[situation].once).sort()).toEqual(['blocked', 'confirm', 'done', 'greeting'])
+  })
+
+  it('keepsTheWorriedFaceOutOfTheUserChoices', () => {
+    expect(EXPR_OPTIONS.map(option => option.id)).not.toContain('worried')
+    expect(isCharacterChoice({ variant: 'bear', color: 'butter', expr: 'worried' })).toBe(false)
+  })
+
+  it('showsAStaticPoseUnderReducedMotion', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    act(() => root.render(<Character choice={DEFAULT_CHARACTER} situation="done" size={120} />))
+    const svg = host.querySelector('svg.character')!
+    expect(svg.getAttribute('data-animated')).toBe('false')
+    expect(svg.getAttribute('data-situation')).toBe('done')
+    vi.unstubAllGlobals()
   })
 })

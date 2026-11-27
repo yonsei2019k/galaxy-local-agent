@@ -32,7 +32,7 @@ internal fun SettingsAssistantPanel(
     val runner = remember(app, context) { SettingsAssistantRunner(context, app) }
     val scope = rememberCoroutineScope()
     val messages = remember {
-        mutableStateListOf(false to SettingsReply("업데이트, 음성 인식, 앱 연결 같은 설정을 물어보세요."))
+        mutableStateListOf(false to SettingsReply("방구석 비서 집순이예요! 업데이트, 음성 인식, 앱 연결 같은 설정을 물어보세요."))
     }
     var question by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
@@ -146,7 +146,7 @@ private fun SettingsPortrait(character: CharacterPreference) {
         }
     }
     Box(
-        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.CobaltSoft),
+        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.Soft),
         contentAlignment = Alignment.Center,
     ) {
         bitmap?.let { Image(it, contentDescription = null, modifier = Modifier.size(36.dp)) }

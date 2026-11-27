@@ -1,4 +1,5 @@
 import type { BookingPayment, BookingPaymentAction } from './bridge'
+import { Metal } from './icons/Metal'
 import { StickerText } from './icons/Sticker'
 
 const won = new Intl.NumberFormat('ko-KR')
@@ -16,6 +17,7 @@ export function BookingPaymentCard({ payment, enabled, onAction }: {
 
   return <article className="booking-payment-card" aria-label="예약 결제 확인" aria-busy={busy}>
     <div className="booking-payment-heading">
+      <Metal name="lock" className="booking-payment-art" />
       <strong><StickerText text={payment.seller} /></strong>
       <span>{won.format(payment.amount)}원</span>
     </div>

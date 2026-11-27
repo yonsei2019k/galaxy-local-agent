@@ -81,6 +81,11 @@ object ZipHapColors {
     val SunSoft = ZipHapTokens.SunSoft
     val Lilac = ZipHapTokens.Lilac
     val LilacSoft = ZipHapTokens.LilacSoft
+    /** Monochrome UI (2026-11-27): the one action is an ink pill; icon tiles are grey with ink icons. */
+    val Ink = ZipHapTokens.Ink
+    val OnInk = ZipHapTokens.OnInk
+    val Soft = ZipHapTokens.Soft
+    val SoftStrong = ZipHapTokens.SoftStrong
     val Error = Color(0xFFC62828)
     val ErrorSoft = Color(0xFFFDE7E7)
 
@@ -97,10 +102,10 @@ object ZipHapColors {
  * for filled TextField/Card, surfaceContainerHigh for AlertDialog and surfaceContainerLow for ModalBottomSheet.
  */
 private val ZipHapScheme = lightColorScheme(
-    primary = ZipHapColors.Cobalt,
-    onPrimary = ZipHapColors.OnCobalt,
-    primaryContainer = ZipHapColors.CobaltSoft,
-    onPrimaryContainer = Color(0xFF1A2A8C),
+    primary = ZipHapColors.Ink,
+    onPrimary = ZipHapColors.OnInk,
+    primaryContainer = ZipHapColors.Soft,
+    onPrimaryContainer = ZipHapColors.TextPrimary,
     secondary = ZipHapColors.Coral,
     onSecondary = Color.White,
     secondaryContainer = ZipHapColors.CoralSoft,
@@ -115,7 +120,7 @@ private val ZipHapScheme = lightColorScheme(
     onSurface = ZipHapColors.TextPrimary,
     surfaceVariant = ZipHapColors.SurfaceSunken,
     onSurfaceVariant = ZipHapColors.TextSecondary,
-    surfaceTint = ZipHapColors.Cobalt,
+    surfaceTint = ZipHapColors.Ink,
     surfaceBright = Color.White,
     surfaceDim = Color(0xFFE6E8EF),
     surfaceContainerLowest = Color.White,
@@ -147,7 +152,7 @@ object ZipFonts {
         variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
     )
 
-    val ui: FontFamily = FontFamily(suit(400), suit(500), suit(600), suit(700))
+    val ui: FontFamily = FontFamily(suit(400), suit(500), suit(600), suit(700), suit(800))
     val display: FontFamily = FontFamily(Font(R.font.jua_regular))
 }
 
@@ -159,6 +164,10 @@ private fun zipStyle(size: Float, weight: Int, lineHeight: Float, tight: Boolean
         lineHeight = lineHeight.sp,
         letterSpacing = if (tight) ZipHapTokens.LsTight.em else 0.sp,
     )
+
+/** Large headings (2026-11-27): SUIT 800 at -0.035em. Jua stays only for the character's name. */
+private fun zipDisplay(size: Float, lineHeight: Float) =
+    zipStyle(size, ZipHapTokens.FwHeavy, lineHeight, tight = false).copy(letterSpacing = ZipHapTokens.LsDisplay.em)
 
 private fun headingLine(size: Float) = size * ZipHapTokens.LhTight
 
@@ -173,12 +182,12 @@ private val ZipHapTypography = run {
     val medium = ZipHapTokens.FwMedium
     val regular = ZipHapTokens.FwRegular
     Typography(
-        displayLarge = zipStyle(40f, bold, 48f, tight = true, family = ZipFonts.display),
-        displayMedium = zipStyle(34f, bold, 42f, tight = true, family = ZipFonts.display),
-        displaySmall = zipStyle(28f, bold, headingLine(28f), tight = true, family = ZipFonts.display),
-        headlineLarge = zipStyle(28f, bold, headingLine(28f), tight = true),
-        headlineMedium = zipStyle(26f, bold, headingLine(26f), tight = true),
-        headlineSmall = zipStyle(24f, bold, headingLine(24f), tight = true),
+        displayLarge = zipDisplay(40f, 48f),
+        displayMedium = zipDisplay(34f, 42f),
+        displaySmall = zipDisplay(28f, headingLine(28f)),
+        headlineLarge = zipDisplay(28f, headingLine(28f)),
+        headlineMedium = zipDisplay(26f, headingLine(26f)),
+        headlineSmall = zipDisplay(24f, headingLine(24f)),
         titleLarge = zipStyle(20f, bold, headingLine(20f), tight = true),
         titleMedium = zipStyle(17f, bold, 23f, tight = true),
         titleSmall = zipStyle(15f, bold, 21f, tight = false),

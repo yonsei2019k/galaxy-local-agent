@@ -7,9 +7,9 @@
 .character-preview:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 .choice-row { display: flex; gap: var(--space-2); }
 .choice-row--wrap { flex-wrap: wrap; }
-/* Filled chips; the chosen one turns soft cobalt with bold cobalt text. */
+/* Filled chips; the chosen one turns into an ink pill with white bold text. */
 .choice { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-width: 44px; min-height: 44px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-chip); background: var(--color-surface-sunken); color: var(--color-text); font: inherit; font-size: var(--fs-body); font-weight: var(--fw-medium); cursor: pointer; }
-.choice[aria-pressed="true"] { background: var(--color-cobalt-soft); color: var(--color-cobalt-text); font-weight: var(--fw-bold); }
+.choice[aria-pressed="true"] { background: var(--color-ink); color: var(--color-on-ink); font-weight: var(--fw-bold); }
 .choice:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 /* The swatch ring shows the palette's own dark shade (inline borderColor): it is color data, not a divider. */
 .swatch { width: 18px; height: 18px; border: 2px solid; border-radius: var(--radius-pill); }
