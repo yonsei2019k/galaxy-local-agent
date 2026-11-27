@@ -69,7 +69,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         internal suspend fun readPairedPdf(context:Context,key:String,snapshot:String,ref:String):PairedPdf {
             check(BrowserAgentSettings.pc(context).enabled())
             val transport=PcTransport(context)
-            val connection=transport.available()?:throw PcUnavailable()
+            val connection=transport.available()?:throw PcBrowserNotConnected()
             val (status,response)=transport.jsonWithStatus(connection,"/v1/browser/save-pdf",buildJsonObject {
                 put("work",key);put("snapshotId",snapshot);put("ref",ref)
             },30_000,maxResponseBytes=3*1024*1024)
@@ -93,49 +93,63 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 (page["media"] as? JsonObject)?.let(BrowserMediaSample::from))
         }
         fun pc(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?,
-                session:suspend ()->String?,recoverAuth:suspend ()->Boolean)=BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
-            val transport=PcTransport(context)
-            val config=transport.available(waitForRestart=true)?:throw PcUnavailable()
-            val workKey=checkNotNull(session()){"PC 브라우저 작업을 확인할 수 없어요."}
-            var result=transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
-            val restartRead=operation=="read"&&result["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE")&&recoverAuth()
-            val reopened=PairedWebsiteLogin.ORIGIN+"/member/"
-            if(restartRead)result=transport.jsonWithStatus(config,"/v1/browser/open",buildJsonObject {
-                put("work",workKey);put("url",reopened)
-            },28_000).second
-            if(restartRead&&result["loginRequired"]!=JsonPrimitive(true))
-                return@BrowserAgentTools buildJsonObject {put("error","OWNER_LOGIN_PAGE_CHANGED")}
-            val url=if(restartRead)reopened else body["url"]?.jsonPrimitive?.contentOrNull
-            val binding=work()
-            val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
-            if(binding!=null && observedUrl?.startsWith(PairedWebsiteLogin.ORIGIN+"/")==true &&
-                result["loginRequired"]==JsonPrimitive(false) && result["blocked"]!=JsonPrimitive(true) &&
-                result["snapshotId"] is JsonPrimitive) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
-                val path=URI(observedUrl).path
-                val media=result["media"] as? JsonObject
-                val stage=when {
-                    media?.get("ended")==JsonPrimitive(true) -> "영상 종료 확인 · 사이트 진도 확인 필요"
-                    media?.get("status")==JsonPrimitive("observed") -> "강의 플레이어 확인"
-                    path=="/cme/cme_ing.php" -> "로그인 확인 · 수강 목록 확인"
-                    path=="/cme/cme_detail_view.php" -> "강의 상세 확인"
-                    else -> "사이트 페이지 확인"
+                session:suspend ()->String?,recoverAuth:suspend ()->String?):BrowserAgentTools {
+            var authenticatedPageRead=false
+            return BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+                val transport=PcTransport(context)
+                val config=transport.available(waitForRestart=true)?:throw PcBrowserNotConnected()
+                val workKey=checkNotNull(session()){"PC 브라우저 작업을 확인할 수 없어요."}
+                var result=transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
+                val reopened=if(operation=="read"&&result["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE"))
+                    recoverAuth()?.let(PcLoginSite::entry) else null
+                val restartRead=reopened!=null
+                if(restartRead)result=transport.jsonWithStatus(config,"/v1/browser/open",buildJsonObject {
+                    put("work",workKey);put("url",reopened)
+                },28_000).second
+                if(restartRead&&result["loginRequired"]!=JsonPrimitive(true))
+                    return@BrowserAgentTools buildJsonObject {put("error","OWNER_LOGIN_PAGE_CHANGED")}
+                val url=if(restartRead)reopened else body["url"]?.jsonPrimitive?.contentOrNull
+                val binding=work()
+                val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
+                val observedOrigin=PcLoginSite.origin(observedUrl)
+                val expected=if(operation=="read"&&!authenticatedPageRead&&binding!=null)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                        com.user.localagent.integrations.AppWebAgent.get(context).confirmedPcOriginFor(binding)
+                    }?:recoverAuth()
+                else null
+                if(expected!=null && result["loginRequired"]!=JsonPrimitive(true) && result["error"]==null){
+                    if(result["loginRequired"]!=JsonPrimitive(false)||PcLoginSite.origin(result["url"]?.jsonPrimitive?.contentOrNull)!=expected||
+                        result["snapshotId"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()||result["blocked"]==JsonPrimitive(true)||
+                        result["externalHandoffBlocked"]==JsonPrimitive(true))
+                        return@BrowserAgentTools buildJsonObject { put("error","OWNER_LOGIN_PAGE_CHANGED") }
+                    authenticatedPageRead=true
                 }
-                com.user.localagent.integrations.AppWebAgent.get(context).recordPcWork(binding,stage,stage)
+                if(binding!=null && observedOrigin!=null &&
+                    result["loginRequired"]==JsonPrimitive(false) && result["blocked"]!=JsonPrimitive(true) &&
+                    result["snapshotId"] is JsonPrimitive) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                    val path=URI(observedUrl).path
+                    val media=result["media"] as? JsonObject
+                    val stage=when {
+                        media?.get("ended")==JsonPrimitive(true) -> "영상 종료 확인 · 사이트 진도 확인 필요"
+                        media?.get("status")==JsonPrimitive("observed") -> "강의 플레이어 확인"
+                        observedOrigin==PcLoginSite.KAIRB && path=="/cme/cme_ing.php" -> "수강 목록 확인"
+                        observedOrigin==PcLoginSite.KAIRB && path=="/cme/cme_detail_view.php" -> "강의 상세 확인"
+                        else -> "사이트 페이지 확인"
+                    }
+                    com.user.localagent.integrations.AppWebAgent.get(context).recordPcWork(binding,stage,stage,host=URI(observedOrigin).host)
+                }
+                val loginOrigin=result["loginOrigin"]?.jsonPrimitive?.contentOrNull?.takeIf {PcLoginSite.origin(it)==it}
+                    ?:observedOrigin
+                val offer=if(operation in setOf("open","read") && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
+                    loginOrigin!=null && (expected==null||expected==loginOrigin)) try {
+                    PairedWebsiteLogin.prepare(context,config,workKey,loginOrigin)
+                } catch(cancel:CancellationException){throw cancel}
+                  catch(_:Exception){null}
+                else null
+                if(offer!=null && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate){
+                        com.user.localagent.integrations.AppWebAgent.get(context).offerPcLogin(binding,offer)
+                    }) JsonObject(result+("nativeOwnerCard" to JsonPrimitive(true))) else result
             }
-            if(operation=="read" && !restartRead && result["loginRequired"]!=JsonPrimitive(true) && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
-                com.user.localagent.integrations.AppWebAgent.get(context).expectsPcReadback(binding)
-            } && (result["loginRequired"]!=JsonPrimitive(false) ||
-                result["url"]?.jsonPrimitive?.contentOrNull?.startsWith(PairedWebsiteLogin.ORIGIN+"/")!=true))
-                return@BrowserAgentTools buildJsonObject { put("error","OWNER_LOGIN_PAGE_CHANGED") }
-            val offer=if(operation in setOf("open","read") && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
-                (observedUrl?.startsWith(PairedWebsiteLogin.ORIGIN+"/")==true||result["loginOrigin"]==JsonPrimitive(PairedWebsiteLogin.ORIGIN))) try {
-                PairedWebsiteLogin.prepare(context,config,workKey)
-            } catch(cancel:CancellationException){throw cancel}
-              catch(_:Exception){null}
-            else null
-            if(offer!=null && binding!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate){
-                    com.user.localagent.integrations.AppWebAgent.get(context).offerPcLogin(binding,offer)
-                }) JsonObject(result+("nativeOwnerCard" to JsonPrimitive(true))) else result
         }
         fun app(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?={null},
                 deferLogin:()->Boolean={false})=BrowserAgentTools(AppBrowserToolCatalog,"앱 브라우저",{BrowserAgentSettings.app(context).enabled()}){operation,body->
@@ -174,6 +188,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         val action=call.arguments.getValue("action").jsonPrimitive.content
         val snapshot=last?.takeIf{it.first==call.arguments.getValue("snapshotId").jsonPrimitive.content}
         val element=call.arguments["ref"]?.jsonPrimitive?.content?.let{snapshot?.third?.get(it)}
+        // A stale PC action will only get an observation in execute, so do not ask the owner to approve it.
+        if(catalog==PcBrowserToolCatalog&&(snapshot==null||("ref" in call.arguments&&element==null)))return false to null
         val search=element!=null&&WebAgentPolicy.isSearchField(WebAgentPolicy.Element("",element.tag,type=element.type,label=element.label))
         val needs=when(action){
             "click"->element==null||element.needsApproval
@@ -211,7 +227,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             scope,page.string("url"),field.string("assessmentForm"),field.string("label")) }
     }
 
-    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null,
+    suspend fun execute(call:ToolCall,approvedSnapshot:String?=null,pcFallback:BrowserBackend?=null,canRefreshPage:Boolean=false,
         verifyRuleAccess:suspend ()->Unit={}):ToolResult {
         catalog.validate(call)
         check(enabled()){"설정에서 '$where 에이전트'가 꺼져 있습니다."}
@@ -232,6 +248,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         val pcAction=catalog==PcBrowserToolCatalog&&call.name==catalog.action
         val observed=last
         val ref=call.arguments["ref"]?.jsonPrimitive?.contentOrNull
+        if(pcAction&&(observed==null||observed.first!=call.arguments.string("snapshotId")||(ref!=null&&ref !in observed.third)))
+            return refreshAfterStaleAction(call,canRefreshPage,verifyRuleAccess)
         val attemptedControl=if(call.arguments["action"]==JsonPrimitive("click")&&
             call.arguments["snapshotId"]?.jsonPrimitive?.contentOrNull==observed?.first)
             ref?.let { observed?.third?.get(it)?.label } else null
@@ -313,6 +331,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                     navigationError=result.string("navigationError")),
                     VerificationState.UNVERIFIED,"$where 동작 결과 미확인")
             }
+            if(pcAction&&error=="SNAPSHOT_STALE")return refreshAfterStaleAction(call,canRefreshPage,verifyRuleAccess)
             if(error in setOf("SNAPSHOT_STALE","ELEMENT_OBSCURED")){last=null;lastPage=null}
             return refused(call,error,(result["phoneBrowserVisible"] as? JsonPrimitive)?.booleanOrNull,attemptedControl)
         }
@@ -585,6 +604,29 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
     private fun readablePage(url:String,result:JsonObject):Boolean =
         result["loginRequired"]!=JsonPrimitive(true)&&samePage(url,result)&&
             result["text"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true
+
+    private suspend fun refreshAfterStaleAction(call:ToolCall,canRead:Boolean,verifyAccess:suspend ()->Unit):ToolResult {
+        val previous=last?.second
+        last=null
+        lastPage=null
+        val failure=refused(call,"SNAPSHOT_STALE")
+        if(!canRead||pcApprovalOutcomeUncertain)return failure
+        val source=previous?.let(::origin)?:return failure
+        verifyAccess()
+        val page=try{backend("read",buildJsonObject {})}
+            catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){return failure}
+        verifyAccess()
+        if(!enabled()||!rulePage(page)||origin(page.string("url"))!=source||
+            page["loginRequired"]!=JsonPrimitive(false))return failure
+        remember(page)
+        val response=buildJsonObject {
+            put("error","SNAPSHOT_STALE")
+            put("hint","이전 버튼은 누르지 않았어요. 같은 사이트를 새로 읽었어요. 현재 화면에서 목표에 맞는 항목을 다시 선택하세요.")
+            put("currentPage",Json.parseToJsonElement(compact(page)))
+        }
+        return failure.copy(content=response.toString(),verificationSummary="이전 버튼은 누르지 않음 · 현재 페이지 다시 확인")
+    }
 
     private fun refused(call:ToolCall,error:String,shown:Boolean?=null,attemptedControl:String?=null)=ToolResult(call.id,false,
         browserFailure(error,shown,attemptedControl),

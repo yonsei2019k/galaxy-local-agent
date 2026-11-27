@@ -605,6 +605,8 @@ class MainActivity : ComponentActivity() {
                 val activitiesByRun=roomActivities.values.filter{
                     it.threadId==composerThreadId&&it.assistantMessageId in visibleMessageIds
                 }.associateBy{it.runId}
+                val reports=visibleMessages.mapNotNull { roomActivities[it.id] }.filter {it.threadId==composerThreadId && it.executionReport.isNotEmpty()}
+                    .associateBy {it.reportGroup?:it.runId}.values.associate {it.assistantMessageId to it.executionReport}
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
@@ -664,6 +666,7 @@ class MainActivity : ComponentActivity() {
                         val text = if (message.role == "assistant" || author != null)
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
                         val cleanText = text.replace(GoalPdfEmail.MARKER,"").trimEnd()
+                        reports[message.id]?.takeIf {message.role=="assistant"}?.let {put("executionReport",JsonArray(it.map(::JsonPrimitive)))}
                         pdfDrafts[message.id]?.let { put("pdfEmail",it) }
                         val files = verifiedFiles[message.id].orEmpty()
                         if (files.isEmpty()) put("text",cleanText.take(32000)) else {

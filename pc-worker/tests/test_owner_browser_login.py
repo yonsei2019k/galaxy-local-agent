@@ -94,6 +94,9 @@ class OwnerLogin(unittest.TestCase):
           <tr><td>1</td><td>Verified Fixture</td><td>3교시</td><td></td></tr>
           <tr hidden><td>2</td><td>Hidden Fixture</td><td>3</td><td></td></tr>
           <tr><td>3</td><td>Pending Fixture</td><td>0</td><td></td></tr>
+          <tr><td>4</td><td>Named Lesson Fixture</td><td>[7교시] 합성 차시</td><td><button>다시보기 &gt;</button></td></tr>
+          <tr><td>5</td><td>Unverified Fixture</td><td>[9교시] 합성 차시</td><td><button>수강 신청</button></td></tr>
+          <tr><td>6</td><td>Hidden Replay Fixture</td><td>[3교시] 합성 차시</td><td><button hidden>다시보기</button></td></tr>
         </table>"""
         agent = browser.BrowserAgent()
         try:
@@ -113,7 +116,7 @@ class OwnerLogin(unittest.TestCase):
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(observe)
                     official, unrelated = wait_for_worker(future, context.pages[0])
-                self.assertEqual(official['completedCourseTitles'], ['Verified Fixture'])
+                self.assertEqual(official['completedCourseTitles'], ['Verified Fixture', 'Named Lesson Fixture'])
                 self.assertNotIn('completedCourseTitles', unrelated)
         finally:
             agent.dispose()

@@ -225,6 +225,9 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
         }
     }
     val resultCheck=login.pairedPc && checkPending
+    var editingCredentials by remember(login.id,resultCheck){mutableStateOf(false)}
+    val action=OwnerLoginCardAction.forCard(login.pairedPc,checkPending,editingCredentials)
+    val checkOnly=action==OwnerLoginCardAction.CHECK_RESULT
     var account by remember(login.id){mutableStateOf("")}
     var password by remember(login.id){mutableStateOf("")}
     var submitting by remember {mutableStateOf(false)}
@@ -254,12 +257,12 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     var checkedFields by remember(login.id){mutableStateOf(false)}
     val missingAccount=checkedFields&&account.isBlank()
     val missingPassword=checkedFields&&password.isEmpty()
-    fun submit(checkOnly:Boolean=resultCheck){
+    fun submit(){
         if(submitting||authPending||waitingToRetry)return
         checkedFields=!checkOnly
         if(!checkOnly && (account.isBlank()||password.isEmpty()))return
-        val enteredAccount=account
-        val enteredPassword=password
+        val enteredAccount=if(checkOnly)"" else account
+        val enteredPassword=if(checkOnly)"" else password
         val keep=saveOnPhone
         submitting=true
         keyboard?.hide()
@@ -267,6 +270,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
             try {
                 val success=if(checkOnly)agent.checkPcLogin(login.id)
                     else agent.submitLoginCard(login.id,enteredAccount,enteredPassword,keep)
+                if(!checkOnly)editingCredentials=false
                 if(success){
                     account=""
                     password=""
@@ -291,31 +295,35 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 }
                 if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
                 if(!login.pairedPc)loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
-                if(hasSaved&&keyguard?.isDeviceSecure==true)ZipOutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
-                    Text("저장된 로그인 사용")
-                }
-                ZipOutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
-                    enabled=!submitting,label={Text("아이디")},isError=missingAccount,
-                    supportingText=if(missingAccount) ({Text("아이디를 입력해 주세요.")}) else null,
-                    keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
-                ZipOutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth(),singleLine=true,
-                    enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
-                    isError=missingPassword,supportingText=if(missingPassword) ({Text("비밀번호를 입력해 주세요.")}) else null,
-                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
-                    keyboardActions=KeyboardActions(onGo={submit()}))
-                if(!login.pairedPc&&keyguard?.isDeviceSecure==true)Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
-                    Checkbox(checked=saveOnPhone,onCheckedChange={saveOnPhone=it},enabled=!submitting&&!authPending)
-                    Text("이 휴대폰에 로그인 저장")
+                if(!checkOnly){
+                    if(hasSaved&&keyguard?.isDeviceSecure==true)ZipOutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
+                        Text("저장된 로그인 사용")
+                    }
+                    ZipOutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
+                        enabled=!submitting,label={Text("아이디")},isError=missingAccount,
+                        supportingText=if(missingAccount) ({Text("아이디를 입력해 주세요.")}) else null,
+                        keyboardOptions=KeyboardOptions(autoCorrectEnabled=false,imeAction=ImeAction.Next))
+                    ZipOutlinedTextField(password,{if(it.length<=1024)password=it},Modifier.fillMaxWidth(),singleLine=true,
+                        enabled=!submitting,label={Text("비밀번호")},visualTransformation=PasswordVisualTransformation(),
+                        isError=missingPassword,supportingText=if(missingPassword) ({Text("비밀번호를 입력해 주세요.")}) else null,
+                        keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
+                        keyboardActions=KeyboardActions(onGo={submit()}))
+                    if(!login.pairedPc&&keyguard?.isDeviceSecure==true)Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                        Checkbox(checked=saveOnPhone,onCheckedChange={saveOnPhone=it},enabled=!submitting&&!authPending)
+                        Text("이 휴대폰에 로그인 저장")
+                    }
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                     if(!login.pairedPc)TextButton(onClick={keyboard?.hide();agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
-                    if(resultCheck)TextButton(onClick={submit(checkOnly=false)},enabled=!submitting){Text("입력값 다시 제출")}
+                    if(resultCheck)TextButton(onClick={editingCredentials=!editingCredentials;checkedFields=false},enabled=!submitting){
+                        Text(if(editingCredentials)"결과 확인으로 돌아가기" else "아이디·비밀번호 수정")
+                    }
                     TextButton(onClick={keyboard?.hide();agent.foldOwnerLogin(login.id)},enabled=!submitting){Text("나중에")}
                 }
             }
             if(login.pairedPc)loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
             ZipFilledButton(onClick={submit()},modifier=Modifier.fillMaxWidth(),enabled=!submitting&&!authPending&&!waitingToRetry){
-                Text(when {submitting->"로그인 확인 중"; waitingToRetry->"재시도 대기 중"; resultCheck->"로그인 결과 다시 확인"; else->"로그인하고 계속"})
+                Text(when {submitting->"로그인 확인 중"; waitingToRetry->"재시도 대기 중"; else->action.label})
             }
         }
     }

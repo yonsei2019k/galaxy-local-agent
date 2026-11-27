@@ -87,18 +87,19 @@ class AppWebAgent private constructor(private val context:Context) {
         expiredLoginBinding="$loginProcess:$id"
         loginFolded.value=false
         loginReturnOrigin=null
-        loginCard.value=LoginCard(id,"www.kairb.org",pairedPc=true)
-        loginStatus.value="연결한 PC의 전용 브라우저에서 KAIRB 로그인이 필요해요."
+        loginCard.value=LoginCard(id,login.host,pairedPc=true)
+        loginStatus.value="연결된 PC에서 연 ${login.host}의 로그인 정보를 이 카드에 입력해 주세요."
         recordPcWork(binding,"사이트 로그인 대기","전용 PC 브라우저 연결",working=false)
         return true
     }
 
-    internal fun recordPcWork(binding:WorkBinding,status:String,step:String,working:Boolean=true) {
+    internal fun recordPcWork(binding:WorkBinding,status:String,step:String,working:Boolean=true,host:String?=null) {
         if(loginCard.value!=null && browserWorkBinding.value!=binding)return
         browserWorkBinding.value=binding
         val prior=websiteWorkFor(binding)?.takeIf { it.binding==binding }
         val steps=prior?.steps.orEmpty()
-        putWebsiteWork(WebsiteWork("www.kairb.org",status,(steps+step).distinct().takeLast(4),working,binding,
+        val site=host?:pendingPcLogin?.host?:prior?.host?:return
+        putWebsiteWork(WebsiteWork(site,status,(steps+step).distinct().takeLast(4),working,binding,
             prior?.anchorRunId?:binding.runId))
     }
     data class WebsiteLogin(val card:LoginCard,val url:String,val nolGuide:Boolean=false,val vaultSaveFailed:Boolean=false)
@@ -404,7 +405,8 @@ class AppWebAgent private constructor(private val context:Context) {
             (lastConfirmedOrigin!=null && secureOrigin(webView?.url)==lastConfirmedOrigin))
 
     internal fun confirmedReadTool()=if(confirmedPcLogin!=null)"read_pc_browser_page" else "read_app_browser_page"
-    internal fun expectsPcReadback(binding:WorkBinding)=browserWorkBinding.value==binding && confirmedPcLogin!=null
+    internal fun confirmedPcOriginFor(binding:WorkBinding)=confirmedPcLogin?.origin?.takeIf {browserWorkBinding.value==binding}
+    internal fun pendingPcOriginFor(runId:String)=pendingPcLogin?.origin?.takeIf {browserWorkBinding.value?.runId==runId}
 
     private suspend fun notifyGoalAuth(id:Long):Boolean {
         lastConfirmedCard=id
@@ -686,7 +688,7 @@ class AppWebAgent private constructor(private val context:Context) {
             }
             var pc=saved
             var result=if(checkOnly||pcLoginNeedsCheck.value)saved.checkResult(context) else null
-            if(!checkOnly && result?.stage!=PcLoginStage.SIGNED_IN && result?.stage!=PcLoginStage.OWNER_VERIFICATION){
+            if(!checkOnly && result?.stage !in setOf(PcLoginStage.SIGNED_IN,PcLoginStage.OWNER_VERIFICATION,PcLoginStage.OWNER_CODE_ON_SITE)){
                 val fresh=if(pcLoginNeedsNewForm)saved.freshForm(context) else saved
                 if(fresh==null){
                     loginStatus.value="PC에서 새 로그인 양식을 열지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
@@ -713,9 +715,9 @@ class AppWebAgent private constructor(private val context:Context) {
                 return false
             }
             confirmedPcLogin=pc
-            showWebsiteWork("www.kairb.org",waiting=true)
+            showWebsiteWork(pc.host,waiting=true)
             notifyGoalAuth(id)
-            loginStatus.value="PC 브라우저의 KAIRB 로그인을 확인했어요."
+            loginStatus.value="PC 브라우저에서 ${pc.host} 로그인을 확인했어요."
             pendingPcLogin=null
             loginCard.value=null
             return true
@@ -735,17 +737,18 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private suspend fun recordPcLoginResult(binding:WorkBinding,outcome:PcLoginResult){
-        pcLoginNeedsCheck.value=outcome.stage in setOf(PcLoginStage.OWNER_VERIFICATION,PcLoginStage.UNCONFIRMED,PcLoginStage.DISCONNECTED)
+        pcLoginNeedsCheck.value=outcome.stage in setOf(PcLoginStage.OWNER_VERIFICATION,PcLoginStage.OWNER_CODE_ON_SITE,PcLoginStage.UNCONFIRMED,PcLoginStage.DISCONNECTED)
         val message=when(outcome.stage){
-            PcLoginStage.CORRECT_INPUT->"KAIRB에서 입력 내용을 다시 확인해 달라고 했어요. 아이디와 비밀번호를 확인해 주세요."
-            PcLoginStage.OWNER_VERIFICATION->"KAIRB가 추가 본인 인증을 요청했어요. 휴대폰으로 승인 요청을 받으셨다면 승인 후 결과를 확인해 주세요."
+            PcLoginStage.CORRECT_INPUT->"사이트에서 입력 내용을 다시 확인해 달라고 해요. 아이디와 비밀번호를 확인해 주세요."
+            PcLoginStage.OWNER_VERIFICATION->"사이트가 추가 본인인증을 요청했어요. 휴대폰으로 승인 요청이 오면 승인한 뒤 결과를 확인해 주세요."
+            PcLoginStage.OWNER_CODE_ON_SITE->"사이트에서 열린 인증 화면에 번호를 직접 입력해야 해요. 이 작업은 해당 인증 단계에서 기다리고 있어요."
             PcLoginStage.RETRY_LATER->{
                 pcLoginRetryAt.value=System.currentTimeMillis()+(outcome.retryAfterSeconds?:300)*1_000L
                 pcLoginWaitMessage(pcLoginRetryAt.value)
             }
             PcLoginStage.FORM_EXPIRED->"이 로그인 창의 유효 시간이 끝났어요. 다시 제출하면 새 양식을 열어 이어갈게요."
             PcLoginStage.DISCONNECTED->"PC에서 로그인 결과를 받지 못했어요. PC가 연결되면 같은 작업에서 결과를 확인할 수 있어요."
-            PcLoginStage.UNCONFIRMED->"KAIRB의 로그인 완료 표시를 찾지 못했어요. 먼저 같은 창에서 로그인 결과를 다시 확인해 주세요."
+            PcLoginStage.UNCONFIRMED->"사이트의 로그인 완료 표시를 찾지 못했어요. 같은 창에서 결과를 다시 확인할 수 있어요."
             PcLoginStage.SIGNED_IN->return
         }
         loginStatus.value=message

@@ -46,6 +46,46 @@ def subject():
 
 
 class ServerAgentAdapterTests(unittest.TestCase):
+    def test_owner_login_routes_require_native_pairing_and_the_existing_work_session(self):
+        from browser_agent import BrowserAgent, BrowserError, BrowserWorkSessions
+
+        work = "a" * 64
+        for suffix in ("form", "submit", "status"):
+            path = "/v1/browser/owner-login-" + suffix
+            for peer, header, authorized, key, status in (
+                ("192.0.2.1", None, False, work, 401),
+                ("127.0.0.1", None, True, work, 403),
+                ("127.0.0.2", None, True, work, 403),
+                ("192.0.2.1", "X-ZipHap-Agent-Capability", True, work, 403),
+                ("192.0.2.1", "X-ZipHap-Phone-Capability", True, work, 403),
+                ("192.0.2.1", None, True, None, 400),
+                ("192.0.2.1", None, True, "malformed", 400),
+                ("192.0.2.1", None, True, "b" * 64, 409),
+                ("192.0.2.1", None, True, work, 200),
+            ):
+                with self.subTest(suffix=suffix, peer=peer, header=header, key=key, status=status):
+                    ns, _, request, response, limits = self.make(path, peer=peer, authorized=authorized,
+                        body={"work":key} if key is not None else {})
+                    if header:
+                        request.headers.add_header(header, CAP)
+                    # Real adapter and session registry; never launch or connect to a browser.
+                    ns["BrowserError"] = BrowserError
+                    ns["BROWSER"] = BrowserAgent(profile="unused")
+                    sessions = BrowserWorkSessions(factory=lambda: mock.Mock(spec=BrowserAgent))
+                    ns["BROWSER_WORK"] = sessions
+                    with sessions.borrow(OWNER, work, create=True) as target:
+                        operation = getattr(target, "owner_login_" + suffix)
+                        operation.return_value = {"fixture":True}
+                    ns["Handler"].dispatch(request)
+                    self.assertEqual(response[0][0], status)
+                    if status == 200:
+                        operation.assert_called_once_with({})
+                        self.assertEqual(response[0][1], {"fixture":True})
+                    else:
+                        operation.assert_not_called()
+                    if status in (401,403):
+                        self.assertEqual(limits,[])
+
     def test_public_search_dispatches_only_paired_requests_without_delegated_headers(self):
         for api in ("naver", "kopis", "tago_flights", "seoul_reservations"):
             for authorized, header, status in ((False, None, 401), (True, "X-ZipHap-Agent-Capability", 403),

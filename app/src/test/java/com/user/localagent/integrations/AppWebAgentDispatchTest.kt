@@ -23,6 +23,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppWebAgentDispatchTest {
+    @Test fun stalePcChoiceReadsNewControlsThenExecutesOnlyTheNewChoice()=runBlocking {
+        val operations=mutableListOf<String>()
+        val observed=snapshot(false)
+        val current=JsonObject(observed+mapOf("snapshotId" to JsonPrimitive("fresh"),"loginRequired" to JsonPrimitive(false)))
+        val browser=BrowserAgentTools(PcBrowserToolCatalog,"fixture",{true}){operation,body->
+            operations+=operation
+            if(operation=="act")assertEquals("fresh",body.getValue("snapshotId").jsonPrimitive.content)
+            if(operation=="open")observed else current
+        }
+        browser.execute(open("https://fixture.example.test").copy(name=PcBrowserToolCatalog.OPEN))
+        fun choose(id:String)=click(PcBrowserToolCatalog.ACTION).let {it.copy(arguments=JsonObject(it.arguments+("snapshotId" to JsonPrimitive(id))))}
+        assertFalse(browser.review(choose("obsolete")).first)
+        val refused=browser.execute(choose("obsolete"),canRefreshPage=true)
+        assertFalse(refused.success)
+        assertTrue(refused.effectNotApplied)
+        assertTrue(refused.content.contains("fresh"))
+        assertEquals(listOf("open","read"),operations)
+        assertTrue(browser.execute(choose("fresh")).success)
+        assertEquals(listOf("open","read","act"),operations)
+    }
     private fun open(url:String)=ToolCall("open",AppBrowserToolCatalog.OPEN,buildJsonObject{put("url",url)})
     private fun read()=ToolCall("read",AppBrowserToolCatalog.READ,buildJsonObject{})
 

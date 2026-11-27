@@ -47,9 +47,11 @@ data class GoalWaitRecord(
     val mediaPollAt: Long? = null,
     val lastMediaProgressAt: Long? = null,
     val lastMediaSampleAt: Long? = null,
+    val transientParentDigest: String? = null,
 ) {
     init {
         require(id.isNotBlank() && goalId.isNotBlank()) { "대기 기록에는 식별자가 필요합니다." }
+        require(transientParentDigest==null || condition is WaitCondition.AtTime && !condition.needsPlayback && transientParentDigest.matches(Regex("[0-9a-f]{64}")))
         require(wakesToday >= 0 && wakesTotal >= 0 && pcRetries >= 0) { "대기 횟수는 0 이상이어야 합니다." }
         require(anchorMinuteOfDay == null || anchorMinuteOfDay in 0..1439) { "기준 시각이 하루 범위를 벗어났습니다." }
     }

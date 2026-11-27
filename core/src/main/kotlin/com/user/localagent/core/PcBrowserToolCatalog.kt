@@ -72,7 +72,7 @@ open class BrowserToolCatalog(val open:String,val read:String,val action:String,
 
 /** Headless Chrome on the owner's paired PC. Authentication stays on the phone. */
 object PcBrowserToolCatalog:BrowserToolCatalog("open_pc_browser_page","read_pc_browser_page","act_on_pc_browser_page",
-    "the preferred paired PC background browser for site workflows (no PC window; works while the PC is on)",mediaRead=true,courseCompletion=true) {
+    "the paired PC headless browser for all interactive site workflows (no PC window; works while the PC is on)",mediaRead=true,courseCompletion=true) {
     const val COURSE_TITLE="completedCourseTitle"
     const val KAIRB_COMPLETED_URL="https://www.kairb.org/cme/cme_complete.php"
     const val OPEN="open_pc_browser_page";const val READ="read_pc_browser_page";const val ACTION="act_on_pc_browser_page" // "pc_" names are reserved for PC-side tools in the cloud bridge

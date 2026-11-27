@@ -30,10 +30,12 @@ class BrowserError(Exception):
 
 def url_allowed(url):
     if not isinstance(url, str) or len(url) > 2048: return False
-    try: parts = urllib.parse.urlsplit(url)
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port
     except ValueError: return False
     if parts.scheme not in ('http', 'https') or not parts.hostname or parts.username or parts.password: return False
-    if parts.port not in (None, 80, 443): return False
+    if port not in (None, 80, 443): return False
     host = parts.hostname.lower().rstrip('.')
     if host == 'localhost' or host.endswith(('.localhost', '.local', '.internal', '.lan', '.home.arpa')) or '.' not in host: return False
     try:
@@ -158,11 +160,29 @@ def login_notice(text):
     return 'unconfirmed'
 
 
+KAIRB_ORIGIN = 'https://www.kairb.org'
+HALLYM_ORIGIN = 'https://hallymedu.co.kr'
+HALLYM_CLASSROOM = HALLYM_ORIGIN + '/new_home/my/my/'
+HALLYM_LOGIN = HALLYM_ORIGIN + '/new_home/My/login/'
+HALLYM_POST = HALLYM_LOGIN + 'process.asp'
+
+
+def browser_origin(url):
+    if not url_allowed(url):
+        return None
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != 'https' or parts.port not in (None, 443):
+        return None
+    return 'https://' + (f'[{parts.hostname}]' if ':' in parts.hostname else parts.hostname)
+
+
 class _Page:
     def __init__(self, ws_url):
         self.ws = _Socket(ws_url); self.next_id = 0
         self.target_id = urllib.parse.urlsplit(ws_url).path.rsplit('/', 1)[-1]
         self.owner_login_dialogs = None
+        self.hallym_classroom_frame = None
+        self.hallym_login_required = False
 
     def call(self, method, params=None, timeout=30):
         self.next_id += 1; ident = self.next_id
@@ -171,12 +191,24 @@ class _Page:
         self.ws.sock.settimeout(timeout)
         while time.monotonic() < deadline:
             message = json.loads(self.ws.recv())
-            if message.get('method') == 'Page.javascriptDialogOpening' and self.owner_login_dialogs is not None:
+            if message.get('method') == 'Page.javascriptDialogOpening':
                 event = message.get('params', {})
-                if (event.get('type') == 'alert' and event.get('url', '').partition('?')[0] in
-                        ('https://www.kairb.org/member/login_reg.php', 'https://www.kairb.org/member/')):
-                    self.owner_login_dialogs += 1
-                    self.owner_login_notice = login_notice(event.get('message'))
+                classroom = (getattr(self, 'hallym_classroom_frame', None) is not None and
+                             self.hallym_classroom_frame == event.get('frameId') and
+                             event.get('url', '').lower() == HALLYM_CLASSROOM.lower() and
+                             event.get('message', '').strip() == '로그인 정보가 없습니다.\n다시 로그인 해주세요!')
+                response_url = event.get('url', '').partition('?')[0]
+                active_origin = getattr(self, 'owner_login_origin', KAIRB_ORIGIN)
+                login_response = self.owner_login_dialogs is not None and (
+                    active_origin == HALLYM_ORIGIN and response_url == HALLYM_POST or
+                    active_origin == KAIRB_ORIGIN and response_url in (
+                        'https://www.kairb.org/member/login_reg.php', 'https://www.kairb.org/member/'))
+                if event.get('type') == 'alert' and (classroom or login_response):
+                    if classroom:
+                        self.hallym_login_required = True
+                    if login_response:
+                        self.owner_login_dialogs += 1
+                        self.owner_login_notice = login_notice(event.get('message'))
                     self.next_id += 1
                     self.ws.send(json.dumps({'id': self.next_id, 'method': 'Page.handleJavaScriptDialog',
                                              'params': {'accept': True}}))
@@ -195,10 +227,20 @@ class _Page:
 
 SNAPSHOT_JS = r"""(() => {
   const MAX_ELEMENTS = %d, MAX_TEXT = %d;
+  // Never extract field values, page text or navigation targets from a credential/verification view.
+  if (/(?:[?&#])(?:access_token|id_token|refresh_token|samlresponse|authorization_code)=/i.test(location.search+location.hash) ||
+      /(?:[?&#])code=/i.test(location.search+location.hash) && /(?:[?&#])state=/i.test(location.search+location.hash) ||
+      location.origin === 'https://hallymedu.co.kr' && location.pathname.toLowerCase() === '/new_home/my/login/process.asp' ||
+      /\/(?:login|signin|sign-in|verify|authenticate)\/?$/i.test(location.pathname) ||
+      [...document.querySelectorAll('input')].some(e =>
+        e.type === 'password' || /one-time-code|current-password|new-password/i.test(e.autocomplete) ||
+        (e.type !== 'hidden' && /(?:^|[_. -])(?:otp|mfa|2fa)(?:$|[_. -])|인증\s*(번호|코드)/i.test([e.name,e.id,e.placeholder].join(' '))))) {
+    return {credentialView: true, url: location.origin + '/'};
+  }
   document.querySelectorAll('[data-ziphap-ref]').forEach(e => e.removeAttribute('data-ziphap-ref'));
   const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none' && r.bottom > 0 && r.top < innerHeight * 3; };
-  const label = e => (e.getAttribute('aria-label') || (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') || e.innerText || e.value && e.type !== 'password' && e.type !== 'hidden' && e.value || e.placeholder || e.title || e.alt || e.querySelector('img[alt]')?.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const label = e => (e.getAttribute('aria-label') || (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') || e.innerText || ['button','submit','reset'].includes(e.type) && e.value || e.placeholder || e.title || e.alt || e.querySelector('img[alt]')?.alt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const selector = 'a[href],button,input:not([type=hidden]),select,textarea,video,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=option],[onclick],[contenteditable=true]';
   const out = []; let n = 0;
   for (const e of document.querySelectorAll(selector)) {
@@ -301,6 +343,105 @@ KAIRB_LOGIN_FORM = r"""(args => {
 })"""
 
 KAIRB_COURSE_LIST = "https://www.kairb.org/cme/cme_ing.php"
+OWNER_POST_FORM = r"""(args => {
+    const [origin, marker] = args, pinned = origin === 'https://hallymedu.co.kr';
+    const page = new URL(location.href);
+    if (window !== top || location.protocol !== 'https:' || location.origin !== origin ||
+        page.username || page.password) return false;
+    const visible = e => e.getClientRects().length && getComputedStyle(e).visibility === 'visible' &&
+        !e.matches(':disabled') && !e.readOnly && !e.closest('[inert],[hidden],[aria-hidden=true]');
+    const passwords = [...document.querySelectorAll('input[type=password]')];
+    if (passwords.length !== 1 || !visible(passwords[0])) return false;
+    const pw = passwords[0], form = pw.form;
+    if (!form || !pw.name || form.method !== 'post' || form.target && form.target !== '_self' ||
+        document.querySelector('base[target]') || form.enctype !== 'application/x-www-form-urlencoded') return false;
+    const action = new URL(form.action);
+    if (action.origin !== origin || action.username || action.password || action.search || action.hash ||
+        !/^\/[a-z0-9_./~%-]*$/i.test(action.pathname)) return false;
+    const fields = [...form.elements];
+    if (fields.length > 30 || fields.some(e => !form.contains(e) || e.matches('[formaction],[formtarget],[formmethod],[formenctype]') ||
+        /(?:new-password|cc-[a-z]+|one-time-code)/i.test(e.autocomplete || ''))) return false;
+    const ids = fields.filter(e => e instanceof HTMLInputElement && ['text','email','tel'].includes(e.type) &&
+        e.name && visible(e));
+    const submits = fields.filter(e => e.type === 'submit' && visible(e));
+    if (ids.length !== 1 || submits.length !== 1) return false;
+    const id = ids[0], submit = submits[0];
+    if (pw.name === id.name) return false;
+    const hidden = fields.filter(e => e.type === 'hidden');
+    const remember = e => e.type === 'checkbox' && /^(?:remember(?:[_-]?me)?|remember[_-]?login)$/i.test(e.name) && visible(e);
+    if (fields.some(e => e !== id && e !== pw && e !== submit && !hidden.includes(e) && !remember(e)) ||
+        hidden.some(e => !/^(?:csrf(?:middlewaretoken|[_-]?token)?|_csrf(?:token)?|authenticity_token|__RequestVerificationToken|_token)$/i.test(e.name)) ||
+        new Set(fields.filter(e => e.name).map(e => e.name)).size !== fields.filter(e => e.name).length) return false;
+    if (pinned) {
+        if (location.href !== origin + '/new_home/My/login/' || action.href !== origin + '/new_home/My/login/process.asp' ||
+            form.getAttribute('id') !== 'form1' || id.name !== 'id' || id.id !== 'id_req' || pw.name !== 'passwd' || pw.id !== 'passwd_req') return false;
+    } else {
+        const label = (submit.getAttribute('aria-label') || submit.innerText || submit.value || '').trim();
+        const loginEndpoint = /(?:^|[/_.-])(?:login|log[-_]in|sign[-_]?in|sessions?|authenticate|authentication)(?:$|[/_.-])/i.test(action.pathname);
+        const currentIdentity = id.autocomplete === 'username' && pw.autocomplete === 'current-password';
+        if (form.hasAttribute('onsubmit') || submit.hasAttribute('onclick') ||
+            !/^(?:로그인(?:하기)?|sign[\s-]?in|log[\s-]?in)$/i.test(label) ||
+            !(loginEndpoint || currentIdentity) ||
+            /(?:delete|transfer|payment|checkout|purchase|register|signup|reset|change|revoke)/i.test(action.pathname) ||
+            !/^(?:text|email|tel)$/.test(id.type)) return false;
+    }
+    if (marker === null) return true;
+    const key = '__ziphapOwnerForm' + marker;
+    const bound = [form,id,pw,submit,location.href,action.href,id.name,pw.name,submit.name,submit.value,
+        form.acceptCharset, id.type, id.autocomplete, pw.autocomplete,
+        ...[id,pw].flatMap(e => ['required','pattern','maxlength','minlength'].map(k => e.getAttribute(k))),
+        ...hidden.flatMap(e => [e,e.name,e.value]), ...fields.filter(remember).flatMap(e => [e,e.name,e.value,e.checked])];
+    if (args.length === 2) { Object.defineProperty(document,key,{value:bound,configurable:true}); return true; }
+    const prior = document[key];
+    delete document[key];
+    if (!prior || prior.length !== bound.length || !bound.every((v,i) => v === prior[i])) return false;
+    // Submit the observed standard POST in the same tab/session. The disposable blank document
+    // keeps card values out of the site's DOM handlers. Chromium enforces the destination on redirects.
+    const frame = document.createElement('iframe');
+    frame.hidden = true;
+    frame.setAttribute('sandbox','allow-same-origin allow-forms allow-top-navigation');
+    document.body.append(frame);
+    const doc = frame.contentDocument, csp = doc.createElement('meta'), post = doc.createElement('form');
+    csp.httpEquiv = 'Content-Security-Policy'; csp.content = 'form-action ' + action.href;
+    doc.head.append(csp);
+    post.method = 'post'; post.action = action.href; post.target = '_top';
+    post.acceptCharset = form.acceptCharset || document.characterSet;
+    doc.body.append(post);
+    for (const source of fields) {
+        if (!source.name || source.disabled || source.type === 'checkbox' && !source.checked) continue;
+        const input = doc.createElement('input');
+        input.type = source === id || source === pw ? source.type : 'hidden';
+        input.name = source.name;
+        for (const attr of ['required','pattern','maxlength','minlength'])
+            if (source.hasAttribute(attr)) input.setAttribute(attr,source.getAttribute(attr));
+        input.value = source === id ? args[2] : source === pw ? args[3] : source.value;
+        post.append(input);
+    }
+    try {
+        if (!post.checkValidity()) { frame.remove(); return false; }
+        HTMLFormElement.prototype.submit.call(post);
+        return true;
+    } finally { for (const input of post.elements) input.value = ''; }
+})"""
+
+OWNER_POST_STAGE = r"""(origin => {
+    if (window !== top || location.origin !== origin || document.readyState !== 'complete') return 'unconfirmed';
+    const visible = e => e.getClientRects().length && getComputedStyle(e).visibility === 'visible' &&
+        !e.closest('[inert],[hidden],[aria-hidden=true]');
+    const fields = [...document.querySelectorAll('input')].filter(visible);
+    if (fields.some(e => /one-time-code/i.test(e.autocomplete) ||
+        /(?:\b(?:otp|mfa|2fa)\b|인증\s*(?:번호|코드)|verification[-_ ]?code)/i.test([e.name,e.id,e.placeholder].join(' '))))
+        return 'owner_code_on_site';
+    const notices = [...document.querySelectorAll('[role=alert],[role=status],main,p')].filter(visible);
+    if (notices.some(e => /휴대폰에서\s*승인|기기에서\s*승인|approve (?:the )?(?:sign.in|request) (?:on|in) your/i.test(e.innerText.slice(0,500))))
+        return 'owner_verification';
+    if (fields.some(e => e.type === 'password')) return fields.some(e => e.matches('[aria-invalid=true]')) ? 'correct_input' : 'unconfirmed';
+    const logout = [...document.querySelectorAll('a[href],button,[role=menuitem]')].some(e => visible(e) &&
+        (!e.href || e.origin === origin) &&
+        /^(?:로그아웃|log out|sign out)$/i.test((e.getAttribute('aria-label') || e.innerText || e.querySelector('img')?.alt || '').trim()));
+    return logout ? 'signed_in' : 'unconfirmed';
+})"""
+
 KAIRB_COMPLETED = "https://www.kairb.org/cme/cme_complete.php"
 KAIRB_COMPLETED_ROWS = r"""(() => {
   if (location.origin + location.pathname !== 'https://www.kairb.org/cme/cme_complete.php') return [];
@@ -314,8 +455,12 @@ KAIRB_COMPLETED_ROWS = r"""(() => {
     for (const row of [...table.rows].slice(1,101)) {
       if (!visible(row) || row.cells.length !== 4) continue;
       const [order,title,units] = [...row.cells].map(clean);
-      if (/^\d+$/.test(order) && /^(?:[1-9]\d{0,3})(?:\s*교시)?$/.test(units) && title.length > 0 && title.length <= 240)
-        titles.push(title);
+      if (!/^\d+$/.test(order) || !title || title.length > 240) continue;
+      const count = /^[1-9]\d{0,3}(?:\s*교시)?$/.test(units);
+      const namedLesson = /^\[\s*[1-9]\d{0,3}\s*교시\s*\]\s*\S/.test(units);
+      const replay = [...row.cells[3].querySelectorAll('button,a[href]')].some(control =>
+        visible(control) && !control.matches(':disabled,[aria-disabled=true]') && /^다시보기\s*[>›]?$/.test(clean(control)));
+      if (count || namedLesson && replay) titles.push(title);
     }
   }
   return titles.slice(0,100);
@@ -350,38 +495,54 @@ class BrowserAgent:
         self.owner_login_attempts = []
         self.owner_login_attempt = None
         self.owner_login_return_url = None
+        self.work_origin = None
 
     def owner_login_form(self, request):
-        """Native paired-phone UI only. Bind a single, explicitly supported site's official form."""
-        if set(request) != {'origin'} or request['origin'] != 'https://www.kairb.org':
+        """Bind a native paired-phone card to one form in this work session."""
+        if set(request) != {'origin'} or not request['origin'] or browser_origin(request['origin']) != request['origin']:
             raise BrowserError('OWNER_LOGIN_SITE_UNSUPPORTED', 400)
+        origin = request['origin']
         with self.lock:
             if self.page is None:
                 raise BrowserError('OWNER_LOGIN_PAGE_CHANGED', 409)
+            if origin != KAIRB_ORIGIN and self.work_origin != origin:
+                raise BrowserError('OWNER_LOGIN_SITE_UNSUPPORTED', 400)
+            if self.work_origin is not None and self.work_origin != origin and not (
+                    origin == KAIRB_ORIGIN and self.work_origin == 'https://kairb.org'):
+                raise BrowserError('OWNER_LOGIN_SITE_UNSUPPORTED', 400)
             token = secrets.token_hex(32)
             marker = secrets.token_hex(16)
 
             def bind_visible_form():
                 frame = self.page.call('Page.getFrameTree')['frameTree']['frame']['id']
                 world = self.page.call('Page.createIsolatedWorld', {'frameId': frame, 'worldName': 'ziphap-owner-input'})['executionContextId']
-                return world if self._owner_form(world, [marker]) else None
+                return world if self._owner_form(world, [marker], origin) else None
 
             world = bind_visible_form()
             if world is None:
                 current = self.page.evaluate('location.origin', timeout=4)
-                if current in ('https://www.kairb.org', 'https://kairb.org'):
-                    login = self.page.call('Page.navigate', {'url': 'https://www.kairb.org/member/'}, timeout=5)
+                target = None
+                if origin == KAIRB_ORIGIN and current in (KAIRB_ORIGIN, 'https://kairb.org'):
+                    target = KAIRB_ORIGIN + '/member/'
+                elif (origin == HALLYM_ORIGIN and current == HALLYM_ORIGIN and
+                      self.page.hallym_login_required and self.owner_login_return_url == HALLYM_CLASSROOM):
+                    target = HALLYM_LOGIN
+                if target:
+                    login = self.page.call('Page.navigate', {'url': target}, timeout=5)
                     if not login.get('errorText'):
                         self._settle(timeout=5)
                         world = bind_visible_form()
                 if world is None:
                     raise BrowserError('OWNER_LOGIN_FORM_UNAVAILABLE', 409)
-            self.owner_login = (token, time.monotonic() + 600, self.page, world, marker)
+            self.owner_login = (token, time.monotonic() + 600, self.page, world, marker, origin)
             self.owner_login_attempt = None
-            return {'challenge': token, 'origin': 'https://www.kairb.org'}
+            return {'challenge': token, 'origin': origin}
 
-    def _owner_form(self, world, args):
-        reply = self.page.call('Runtime.callFunctionOn', {'functionDeclaration': 'function(args){return ' + KAIRB_LOGIN_FORM + '(args)}',
+    def _owner_form(self, world, args, origin):
+        script = KAIRB_LOGIN_FORM if origin == KAIRB_ORIGIN else OWNER_POST_FORM
+        if origin != KAIRB_ORIGIN:
+            args = [origin, *args]
+        reply = self.page.call('Runtime.callFunctionOn', {'functionDeclaration': 'function(args){return ' + script + '(args)}',
             'arguments': [{'value': args}], 'executionContextId': world, 'returnByValue': True}, timeout=6)
         return 'exceptionDetails' not in reply and reply.get('result', {}).get('value') is True
 
@@ -408,11 +569,18 @@ class BrowserAgent:
             self.owner_login_attempts.append(now)
             self.page.owner_login_dialogs = 0
             self.page.owner_login_notice = 'unconfirmed'
-            self.owner_login_attempt = (token, pending[1], self.page)
+            origin = pending[5]
+            self.page.owner_login_origin = origin
+            self.owner_login_attempt = (token, pending[1], self.page, origin)
             try:
-                if not self._owner_form(pending[3], [pending[4], account, password]):
+                if origin == HALLYM_ORIGIN:
+                    self.page.hallym_login_required = False
+                    self._watch_classroom()
+                if not self._owner_form(pending[3], [pending[4], account, password], origin):
                     raise BrowserError('OWNER_LOGIN_FORM_CHANGED', 409)
                 self._settle()
+                if origin != KAIRB_ORIGIN:
+                    return self._owner_post_result(origin)
                 # An actual signed-in marker is required. A disappearing form is insufficient.
                 confirmed = self.page.evaluate(KAIRB_SIGNED_IN) is True
                 if not confirmed and self.page.owner_login_dialogs:
@@ -435,6 +603,30 @@ class BrowserAgent:
                 raise BrowserError(code, 409) from None
             finally:
                 self.page.owner_login_dialogs = None
+
+    def _owner_post_result(self, origin):
+        evidence = OWNER_POST_STAGE + '(' + json.dumps(origin) + ')'
+        stage = self.page.evaluate(evidence, timeout=4)
+        if stage == 'unconfirmed':
+            stage = getattr(self.page, 'owner_login_notice', 'unconfirmed')
+        if origin == HALLYM_ORIGIN and stage in ('unconfirmed', 'signed_in'):
+            url = self.page.evaluate('location.href', timeout=4)
+            if url in (HALLYM_ORIGIN + '/', HALLYM_ORIGIN + '/new_home/', HALLYM_POST):
+                self.page.hallym_login_required = False
+                self._watch_classroom()
+                navigation = self.page.call('Page.navigate', {'url': HALLYM_CLASSROOM}, timeout=5)
+                if navigation.get('errorText'):
+                    raise BrowserError('OWNER_LOGIN_READBACK_FAILED', 409)
+                self._settle(timeout=5)
+                stage = self.page.evaluate(evidence, timeout=4)
+            if stage == 'signed_in' and (self.page.hallym_login_required or
+                                         self.page.evaluate('location.href', timeout=4) != HALLYM_CLASSROOM):
+                stage = 'unconfirmed'
+        return {'signedIn': stage == 'signed_in', 'outcome': stage}
+
+    def _watch_classroom(self):
+        frame = self.page.call('Page.getFrameTree')['frameTree']['frame']['id']
+        self.page.hallym_classroom_frame = frame
 
     def _owner_login_stage(self):
         stage = self.page.evaluate(KAIRB_LOGIN_STAGE, timeout=4)
@@ -464,6 +656,8 @@ class BrowserAgent:
             if (not prior or not hmac.compare_digest(request['challenge'], prior[0])
                     or prior[2] is not self.page or time.monotonic() >= prior[1]):
                 raise BrowserError('OWNER_LOGIN_EXPIRED', 409)
+            if prior[3] != KAIRB_ORIGIN:
+                return self._owner_post_result(prior[3])
             if (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
                     self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True):
                 return self._owner_signed_in()
@@ -553,21 +747,32 @@ class BrowserAgent:
         self.snapshot = None
 
     def _read(self):
+        if getattr(self.page, 'hallym_login_required', False) and self.work_origin == HALLYM_ORIGIN:
+            if self.page.evaluate('location.origin', timeout=4) == HALLYM_ORIGIN:
+                self.snapshot = None
+                self.owner_login_return_url = HALLYM_CLASSROOM
+                return {'loginRequired': True, 'dataOnly': True, 'loginOrigin': HALLYM_ORIGIN}
         value = self.page.evaluate(SNAPSHOT_JS, timeout=20)
         if not isinstance(value, dict): raise BrowserError('PAGE_UNREADABLE', 502)
         if not url_allowed(value.get('url', '')):
             self.snapshot = None
             return {'url': '', 'blocked': True, 'message': '이 페이지는 브라우저 에이전트가 읽지 않습니다.'}
-        elements = value['elements']
+        elements = value.get('elements', [])
         path = urllib.parse.urlsplit(value['url']).path.lower().rstrip('/')
-        if path.rsplit('/', 1)[-1] in {'login', 'signin', 'sign-in', 'verify', 'authenticate'} or any(
+        if value.get('credentialView') or path.rsplit('/', 1)[-1] in {'login', 'signin', 'sign-in', 'verify', 'authenticate'} or any(
             e.get('editable') and sensitive_field(e) for e in elements
         ):
             self.snapshot = None
             result = {'loginRequired': True, 'dataOnly': True}
-            location = urllib.parse.urlsplit(value['url'])
-            if location.scheme == 'https' and location.netloc in ('www.kairb.org', 'kairb.org'):
+            origin = browser_origin(value['url'])
+            if (origin in (KAIRB_ORIGIN, 'https://kairb.org') and
+                    self.work_origin in (None, KAIRB_ORIGIN, 'https://kairb.org')):
                 result['loginOrigin'] = 'https://www.kairb.org'
+            elif origin and origin == self.work_origin:
+                frame = self.page.call('Page.getFrameTree')['frameTree']['frame']['id']
+                world = self.page.call('Page.createIsolatedWorld', {'frameId': frame, 'worldName': 'ziphap-owner-input'})['executionContextId']
+                if self._owner_form(world, [None], origin):
+                    result['loginOrigin'] = origin
             return result
         # Compare renderer observations on both sides. Display-only labels must not change the fingerprint.
         snapshot_id = signature(value['url'], elements, approval_context(value))
@@ -666,12 +871,24 @@ class BrowserAgent:
             self.owner_login = None
             self.owner_login_attempt = None
             requested = urllib.parse.urlsplit(request['url'])
+            self.work_origin = browser_origin(request['url'])
+            target = request['url']
+            self.page.hallym_login_required = False
+            self.page.hallym_classroom_frame = None
+            if self.work_origin == HALLYM_ORIGIN:
+                self._watch_classroom()
+                if requested.path.lower() in ('/new_home/my/', '/new_home/my/my/') and not requested.query and not requested.fragment:
+                    target = HALLYM_CLASSROOM
+                if requested.path.lower() == '/new_home/my/login/' and not requested.query and not requested.fragment:
+                    target = HALLYM_LOGIN
             if requested.netloc == 'www.kairb.org' and requested.scheme == 'https' and requested.path in ('/cme/cme_ing.php', '/cme/cme_complete.php'):
                 self.owner_login_return_url = request['url']
-            elif request['url'] != 'https://www.kairb.org/member/':
+            elif target == HALLYM_CLASSROOM:
+                self.owner_login_return_url = target
+            elif target not in (HALLYM_LOGIN, 'https://www.kairb.org/member/'):
                 self.owner_login_return_url = None
             self.snapshot = None
-            navigation = self.page.call('Page.navigate', {'url': request['url']})
+            navigation = self.page.call('Page.navigate', {'url': target})
             if navigation.get('errorText'):
                 raise BrowserError('PAGE_NAVIGATION_FAILED', 502)
             self._settle()
@@ -716,6 +933,15 @@ class BrowserAgent:
                 if AUTH_CONTROL.fullmatch(element.get('label', '').strip()):
                     self.snapshot = None
                     self.pending = None
+                    if action == 'click' and element.get('tag') == 'a' and re.fullmatch(
+                            r'로그인(?:하기)?|sign\s*in|log\s*in', element.get('label', '').strip(), re.I):
+                        link = next((e for e in fresh.get('elements', []) if e['ref'] == element['ref']), {})
+                        href = (link.get('actionBinding') or [''])[0]
+                        if self.work_origin and self.work_origin == browser_origin(current['url']) == browser_origin(href):
+                            nav = self.page.call('Page.navigate', {'url': href}, timeout=5)
+                            if not nav.get('errorText'):
+                                self._settle(timeout=5)
+                                return self._read()
                     return {'loginRequired': True, 'dataOnly': True}
             if action == 'click':
                 if element['needsApproval']:
@@ -823,6 +1049,17 @@ class BrowserAgent:
 
     def dispose(self):
         try:
+            # On Windows the Chrome launcher can exit before its actual browser process.
+            # Close only the disposable profile allocated by this work session.
+            if self._isolated_profile and self.process is not None:
+                try:
+                    port, endpoint = (self.profile / 'DevToolsActivePort').read_text(encoding='ascii').splitlines()[:2]
+                    if port.isdecimal() and endpoint.startswith('/devtools/browser/'):
+                        control = _Socket(f'ws://127.0.0.1:{int(port)}{endpoint}', timeout=3)
+                        try: control.send(json.dumps({'id': 1, 'method': 'Browser.close'}))
+                        finally: control.close()
+                except (BrowserError, OSError, ValueError):
+                    pass
             self.close({})
         finally:
             if self.process is not None and self.process.poll() is None:

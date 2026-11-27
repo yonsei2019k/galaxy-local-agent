@@ -200,8 +200,11 @@ class Handler(BaseHTTPRequestHandler):
    operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close,
      '/v1/browser/public-read':BROWSER.public_read,'/v1/browser/release':BROWSER_WORK.release,
      '/v1/browser/save-pdf':BROWSER.save_pdf}.get(path)
-   if path in ('/v1/browser/owner-login-form','/v1/browser/owner-login-submit','/v1/browser/owner-login-status'):
-    if self.client_address[0]=='127.0.0.1':self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
+   owner_login=path in ('/v1/browser/owner-login-form','/v1/browser/owner-login-submit','/v1/browser/owner-login-status')
+   if owner_login:
+    if (self.client_address[0].startswith('127.') or self.headers.get_all('X-ZipHap-Agent-Capability',[]) or
+        self.headers.get_all('X-ZipHap-Phone-Capability',[])):
+     self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
     operation={'form':BROWSER.owner_login_form,'submit':BROWSER.owner_login_submit,'status':BROWSER.owner_login_status}[path.rsplit('-',1)[1]]
    if self.command!='POST' or operation is None:raise ValueError('BROWSER_ROUTE')
    self.connection.settimeout(90)
@@ -211,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
     if path=='/v1/browser/release':
      if request or not isinstance(work,str) or not re.fullmatch(r'[a-f0-9]{64}',work):raise BrowserError('BROWSER_WORK_SHAPE')
      self.reply(BROWSER_WORK.release(owner,work))
-    elif path in ('/v1/browser/save-pdf','/v1/browser/owner-login-status') and work is None:
+    elif (owner_login or path=='/v1/browser/save-pdf') and work is None:
      raise BrowserError('BROWSER_WORK_SHAPE')
     elif work is None or path=='/v1/browser/public-read':
      if work is not None:raise BrowserError('BROWSER_WORK_SHAPE')

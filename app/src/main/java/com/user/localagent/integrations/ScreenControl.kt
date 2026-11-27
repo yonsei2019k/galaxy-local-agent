@@ -77,7 +77,7 @@ internal data class ScreenControlState(val enabled:Boolean,val selected:Boolean,
  * The owner turns it on twice: Android's accessibility consent and the in-app switch.
  * Every action re-reads the screen, refuses a changed snapshot, and returns the screen after the action.
  */
-class ScreenControl(context:Context) {
+class ScreenControl(context:Context,private val nativeAppsOnly:Boolean=false) {
     private val context=context.applicationContext
     private val prefs=this.context.getSharedPreferences("screen_control_v1",Context.MODE_PRIVATE)
 
@@ -633,9 +633,17 @@ class ScreenControl(context:Context) {
     }
 
     /** Accepts a package name or the app's launcher label ("계산기"); only launcher apps, never refused ones. */
+    /** Android identifies installed browsers that handle arbitrary HTTPS sites. */
+    private fun isWebsiteBrowser(packageName:String):Boolean {
+        val target=Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://example.invalid/"))
+            .addCategory(Intent.CATEGORY_BROWSABLE).setPackage(packageName)
+        return context.packageManager.queryIntentActivities(target,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).isNotEmpty()
+    }
+
     private fun openApp(requested:String) {
         val packageName=resolveApp(requested)?:error("설치되지 않았거나 열 수 없는 앱입니다: $requested")
         if(refusedPackage(packageName))throw ScreenRefused("이 앱은 화면 제어 대상이 아닙니다.")
+        if(nativeAppsOnly&&isWebsiteBrowser(packageName))throw ScreenRefused(com.user.localagent.core.WebsiteExecutionPolicy.HEADLESS_NOTICE)
         val intent=context.packageManager.getLaunchIntentForPackage(packageName)?:error("설치되지 않았거나 열 수 없는 앱입니다.")
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
@@ -695,6 +703,8 @@ class ScreenControl(context:Context) {
         val root=window.root?:throw ScreenObservationUnavailable("전경 앱 화면을 읽지 못했습니다.")
         val packageName=root.packageName?.toString()?:throw ScreenObservationUnavailable("전경 앱을 확인하지 못했습니다.")
         if(packageName==context.packageName)throw OwnAppForeground()
+        if(nativeAppsOnly&&!com.user.localagent.core.WebsiteExecutionPolicy.permitsNativeScreen(isWebsiteBrowser(packageName),false))
+            throw ScreenRefused(com.user.localagent.core.WebsiteExecutionPolicy.HEADLESS_NOTICE)
         if(refusedPackage(packageName))throw ScreenRefused("시스템·권한·설치·잠금 화면은 다루지 않습니다.")
         val texts=mutableListOf<String>();val elements=mutableListOf<Element>()
         val windowBounds=Rect().also(window::getBoundsInScreen)
@@ -709,6 +719,15 @@ class ScreenControl(context:Context) {
             if(visited>=600||depth>30){truncated=true;return}
             visited++
             if(!node.isVisibleToUser)return
+            // Keep native controls around small embedded ads while excluding their web content.
+            if(nativeAppsOnly&&node.className?.toString()=="android.webkit.WebView"){
+                val bounds=Rect().also(node::getBoundsInScreen)
+                val primary=bounds.intersect(windowBounds) &&
+                    bounds.width().toLong()*bounds.height() >= windowBounds.width().toLong()*windowBounds.height()/2
+                if(!com.user.localagent.core.WebsiteExecutionPolicy.permitsNativeScreen(false,primary))
+                    throw ScreenRefused(com.user.localagent.core.WebsiteExecutionPolicy.HEADLESS_NOTICE)
+                return
+            }
             if(sensitive(node)){
                 protectedForm=true
                 return

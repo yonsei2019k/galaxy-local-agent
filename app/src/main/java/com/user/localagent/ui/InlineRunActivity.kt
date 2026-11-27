@@ -62,6 +62,8 @@ data class UiRunActivity(
     val finishedAt:Long?=null,
     val canOpenOwnerLogin:Boolean=false,
     val goalOwnerReply:Boolean=false,
+    val executionReport:List<String> = emptyList(),
+    val reportGroup:String?=null,
 )
 internal data class UiWorkEvidenceCounts(val tools:Int,val verified:Int,val prepared:Int,val failed:Int)
 

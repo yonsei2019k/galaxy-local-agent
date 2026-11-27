@@ -176,6 +176,12 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
             val metadata=Json.parseToJsonElement(run.contextJson).jsonObject
             com.user.localagent.core.NextActionQuestion.readChoices(metadata[com.user.localagent.core.NextActionQuestion.CHOICES_KEY])
         }.getOrDefault(emptyList()) else emptyList()
+        val context=runCatching {Json.parseToJsonElement(run.contextJson).jsonObject}.getOrElse {JsonObject(emptyMap())}
+        val history=ChatExecutionReport.read(context)
+        val segment=context["goalSegment"] as? JsonObject
+        val reportGroup=context["browserWorkRootRunId"]?.jsonPrimitive?.contentOrNull
+            ?:segment?.get("rootRunId")?.jsonPrimitive?.contentOrNull
+            ?:context["browserAuthParentRunId"]?.jsonPrimitive?.contentOrNull?:run.id
         val mode=runCatching{val value=Json.parseToJsonElement(run.contextJson).jsonObject["mode"]?.jsonPrimitive?.content?:"act";AgentWorkMode.parse(value).wireName}.getOrDefault("act")
         put(target.messageId,UiRunActivity(run.id,threadId,target.messageId,run.status,mode,run.startedAt?:0L,
             maxOf(run.updatedAt,records.maxOfOrNull{it.atEpochMillis}?:0L),events,totalEvents=total,hasOlder=total>records.size,loadingOlder=run.id in loading,
@@ -183,6 +189,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
                 runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
             userMessageId=run.userMessageId,finishedAt=run.finishedAt,goalOwnerReply=waitingForReply&&run.errorCode==GOAL_OWNER_INPUT,
+            executionReport=ChatExecutionReport.display(history,run.status,run.errorCode,context),reportGroup=reportGroup,
             canOpenOwnerLogin=run.status=="paused" && (run.errorCode=="waiting_goal_condition"||run.errorCode in BrowserAuthContinuation.reopenablePauses) &&
                 runCatching { BrowserAuthContinuation.canReopenLogin(run.contextJson) || run.errorCode=="waiting_goal_condition" &&
                     Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalOwnerLogin"]==JsonPrimitive(true) }.getOrDefault(false)))

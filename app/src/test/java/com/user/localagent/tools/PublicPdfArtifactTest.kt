@@ -75,6 +75,18 @@ class PublicPdfArtifactTest {
         }
     }
 
+    @Test fun pcOfflineBeforeFetchingIsSafeToPauseAndAnUncertainPublicationCannotBeRetried() = runBlocking {
+        val policy=com.user.localagent.core.WebsiteExecutionPolicy
+        val progress=PdfSaveProgress()
+        val before=progress.execute("fixture") {throw com.user.localagent.compute.PcBrowserNotConnected()}
+        assertTrue(policy.waiting("save_browser_pdf",before))
+        progress.publicationPossible=true
+        val uncertain=progress.execute("fixture") {throw com.user.localagent.compute.PcBrowserNotConnected()}
+        assertFalse(policy.waiting("save_browser_pdf",uncertain))
+        assertFalse(uncertain.effectNotApplied)
+        assertEquals(com.user.localagent.core.VerificationState.UNVERIFIED,uncertain.verification)
+    }
+
     @Test fun exceptionAfterActualPublicationNeverMakesAReplaySafe() = runBlocking {
         val dir=tmp.newFolder()
         val progress=PdfSaveProgress()

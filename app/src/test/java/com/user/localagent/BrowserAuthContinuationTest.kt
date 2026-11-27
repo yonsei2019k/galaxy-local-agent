@@ -14,6 +14,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserAuthContinuationTest {
+    @Test fun authenticatedResumeUsesOriginalBrowserAndRequiresFreshInspectableSnapshot() {
+        val prior=step("open_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        assertEquals("read_pc_browser_page",BrowserAuthContinuation.readAfterAuth(prior))
+        assertNull(BrowserAuthContinuation.readAfterAuth(prior.copy(evidence=prior.evidence.copy(effectNotApplied=false))))
+        fun page(content:String)=com.user.localagent.core.ToolResult("read",true,content,VerificationState.VERIFIED)
+        assertTrue(BrowserAuthContinuation.verifiedPage(page("""{"snapshotId":"new","loginRequired":false}""")))
+        for(body in listOf("""{"snapshotId":null,"loginRequired":false}""","""{"snapshotId":"new","loginRequired":true}""",
+            """{"snapshotId":"new","loginRequired":false,"blocked":true}""","""{"snapshotId":"new","loginRequired":false,"externalHandoffBlocked":true}""")){
+            assertFalse(BrowserAuthContinuation.verifiedPage(page(body)))
+        }
+    }
     private val auth=step("open_app_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
     private fun step(tool:String,state:VerificationState,untouched:Boolean=false,note:String="fixture") =
         HarnessStep(tool,JsonObject(emptyMap()),StepEvidence(tool,state,note,effectNotApplied=untouched))
@@ -69,6 +80,21 @@ class BrowserAuthContinuationTest {
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("app_browser_action",VerificationState.VERIFIED),auth)))
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("read_webpage",VerificationState.UNVERIFIED),auth)))
         assertFalse(BrowserAuthContinuation.safeSteps(listOf(step("open_app_browser_page",VerificationState.FAILED),auth).dropLast(1)))
+    }
+
+    @Test fun pcLoginRestoresTheObservedPublicHttpsOriginWithoutGuessingAnotherSite() {
+        val read=step("read_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        val request=QueuedChatRequest("run","thread","branch",null,"fixture","model",false,emptyList(),"user",previousSteps=listOf(read))
+        val context=Json.parseToJsonElement(request.toJson()).jsonObject
+        fun bound(origin:String)=JsonObject(context+(BrowserAuthContinuation.PC_LOGIN_ORIGIN_KEY to JsonPrimitive(origin))).toString()
+        assertNull(BrowserAuthContinuation.pcLoginOrigin(request.toJson()))
+        for(origin in listOf("https://hallymedu.co.kr","https://courses.example.org")){
+            assertTrue(BrowserAuthContinuation.canReopenLogin(bound(origin)))
+            assertEquals(origin,BrowserAuthContinuation.pcLoginOrigin(bound(origin)))
+        }
+        for(origin in listOf("http://courses.example.org","https://localhost","https://user@courses.example.org","https://courses.example.org/?token=x")){
+            assertNull(BrowserAuthContinuation.pcLoginOrigin(bound(origin)))
+        }
     }
 
     @Test fun reopenUsesTheOriginalOfficialPcSiteAndOnlySettledReads() {

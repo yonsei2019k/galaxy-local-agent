@@ -43,6 +43,7 @@ object AgentWorkModePolicy {
         "search_memories","list_messenger_notifications","analyze_selected_data","query_selected_data","list_notebooklm_notebooks",
     )+GoalToolCatalog.contextReadNames
     fun allows(mode:AgentWorkMode,toolName:String):Boolean {
+        if(toolName in WebsiteExecutionPolicy.phoneWebTools)return false
         if(toolName in OfficeToolCatalog.names)return toolName in ToolRegistry.definitions
         if(toolName in contextReadTools)return true // Context only; ToolRegistry still validates actual registration.
         if(toolName !in ToolRegistry.definitions)return false

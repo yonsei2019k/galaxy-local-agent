@@ -744,7 +744,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         if(contextJson!=null)checkBinding(r)
         if(finalStatus !in TERMINAL)validRun(runId)
         val finalError=scheduledStop?:errorCode
-        r.copy(status=finalStatus,errorCode=finalError,contextJson=contextJson?:r.contextJson,updatedAt=now(),finishedAt=if(finalStatus in TERMINAL)now()else null).also {dao.run(it)}
+        val preserved=contextJson?.let {com.user.localagent.ChatExecutionReport.retain(r.contextJson,it)}?:r.contextJson
+        r.copy(status=finalStatus,errorCode=finalError,contextJson=preserved,updatedAt=now(),finishedAt=if(finalStatus in TERMINAL)now()else null).also {dao.run(it)}
     }
     /** A persisted parked goal can survive the gap between its checkpoint and the chat run transition. */
     internal suspend fun restoreInterruptedGoalWait(expected:ChatRunRecord):Boolean=database.withTransaction {
@@ -756,7 +757,10 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
 
     suspend fun updateRunContext(runId:String,contextJson:String):ChatRunRecord=database.withTransaction {
-        require(contextJson.length<=2_000_000);val r=validRun(runId);r.copy(contextJson=contextJson,updatedAt=now()).also {dao.run(it)}
+        require(contextJson.length<=2_000_000)
+        val run=validRun(runId)
+        val preserved=com.user.localagent.ChatExecutionReport.retain(run.contextJson,contextJson)
+        run.copy(contextJson=preserved,updatedAt=now()).also {dao.run(it)}
     }
     suspend fun checkpointRun(runId:String,contextJson:String)=updateRunContext(runId,contextJson)
     suspend fun switchRunToPrivateModel(runId:String,originalModel:String,contextJson:String,privateReadEvidence:JsonArray?=null)=database.withTransaction {
@@ -767,7 +771,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val local=Json.parseToJsonElement(contextJson).jsonObject
         // Keep the closed cloud session's checkpoint alongside the new local request envelope.
         val evidence=privateReadEvidence?.let {mapOf("privateResearchReadEvidence" to it)}.orEmpty()
-        val merged=JsonObject(before.filterKeys {it=="sharedEngineState"}+local+evidence).toString()
+        val merged=JsonObject(before.filterKeys {it=="sharedEngineState"||it==com.user.localagent.ChatExecutionReport.KEY}+local+evidence).toString()
         require(merged.length<=2_000_000)
         dao.run(run.copy(modelId=com.user.localagent.core.ConversationPrivacy.LOCAL_SELECTION,contextJson=merged,updatedAt=now()))
     }
@@ -832,6 +836,16 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
 
     internal suspend fun awaitOfficeRun(id: String): ChatRunRecord? =
         dao.observeRun(id).first { it == null || it.status !in setOf("queued", "running", "waiting_approval") }
+
+    /** A separate host notice leaves the finished parent and its checkpoint digest unchanged. */
+    internal suspend fun noteGoalRetry(parent:ChatRunRecord,key:String,text:String):Unit=database.withTransaction {
+        check(dao.run(parent.id)==parent)
+        checkBinding(parent)
+        require(text.isNotBlank()&&text.length<=1000)
+        val id=UUID.nameUUIDFromBytes("goal-retry:${parent.id}:$key".toByteArray(Charsets.UTF_8)).toString()
+        if(local.messageById(id)==null)
+            insertMessage(MessageRecord(id=id,role="assistant",text=text,threadId=parent.threadId,branchId=parent.branchId),parent.userMessageId)
+    }
 
     internal suspend fun writeGoalWaitOutcome(runId:String,text:String,errorCode:String)=database.withTransaction {
         val run=validRun(runId)

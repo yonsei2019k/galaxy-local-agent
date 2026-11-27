@@ -17,6 +17,7 @@ class PcLoginResultTest {
 
     @Test fun distinguishOwnerActionFromTransportOrCooldown() {
         assertEquals(PcLoginStage.OWNER_VERIFICATION, decode(200,"""{"signedIn":false,"outcome":"owner_verification"}""").stage)
+        assertEquals(PcLoginStage.OWNER_CODE_ON_SITE, decode(200,"""{"signedIn":false,"outcome":"owner_code_on_site"}""").stage)
         assertEquals(PcLoginStage.CORRECT_INPUT, decode(200,"""{"signedIn":false,"outcome":"correct_input"}""").stage)
         assertEquals(PcLoginStage.FORM_EXPIRED, decode(409,"""{"error":"OWNER_LOGIN_FORM_CHANGED"}""").stage)
         assertEquals(PcLoginResult(PcLoginStage.RETRY_LATER,17),

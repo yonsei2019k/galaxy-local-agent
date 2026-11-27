@@ -23,6 +23,7 @@ export interface ConversationMessage {
   text: string
   pdfEmail?: { to:string; subject:string; body:string; files:string[] }
   fileFormats?: string[]
+  executionReport?: string[]
   authorLabel?: string
   sentAt?: number
 }
@@ -231,6 +232,10 @@ function message(value: unknown): value is ConversationMessage {
   return record(value) && strings(value, 'id', 'text') &&
     (value.role === 'user' || value.role === 'assistant' || value.role === 'system' || value.role === 'tool') &&
     (value.sentAt === undefined || (epoch(value.sentAt) && value.sentAt <= 8.64e15)) &&
+    (value.executionReport === undefined || (value.role === 'assistant' && Array.isArray(value.executionReport) &&
+      value.executionReport.length > 0 && value.executionReport.length <= 40 &&
+      value.executionReport.every(line => typeof line === 'string' && line.trim().length > 0 && line.length <= 240 &&
+        !/[\u0000-\u001f\u007f]/.test(line)))) &&
     (value.pdfEmail === undefined || (value.role === 'assistant' && record(value.pdfEmail) &&
       strings(value.pdfEmail, 'to', 'subject', 'body') && Array.isArray(value.pdfEmail.files) &&
       value.pdfEmail.files.length > 0 && value.pdfEmail.files.length <= 16 &&

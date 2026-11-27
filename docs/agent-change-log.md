@@ -3168,3 +3168,11 @@ Branch-only source change; not integrated into galaxy-local-agent, not built int
 - Bounded (2) segment retry after resolved transient failures, 30 s × attempt wait outside goalMutation, new reason `goal_autopilot_transient_failure`. No cloud POST retry.
 - StepEvidence.observationDigest (host SHA-256 prefix of verified goal reads) makes a changed observation count as progress.
 Validation: see the agent report for this branch (JVM/Rust/lint/assemble results). Device and real workflow behaviour unverified.
+
+## 2026-11-27 C-090 채팅 실행 보고
+
+집순이 답변 아래에서 실제 도구 결과와 대기·인증·중단·완료의 순서를 볼 수 있다. 기본 답변이 아직 비어 있어도 보고가 보인다. 대화·분기·프로젝트·요청 권한이 일치하는 후속 구간만 이전 보고를 이어받는다. 최근 보고는 최초 단계와 최근 단계 등 최대 32행을 보존하며, 생략한 단계 수를 표시한다. 동일 재생 상태를 반복 관찰하면 기존 행의 확인 위치가 갱신된다. 같은 체크포인트를 다시 저장해도 새 메시지를 만들지 않는다.
+
+교육 보고는 작업 장부의 과정·강의명, 브라우저에서 관찰한 재생 위치와 길이, 사이트 완료 목록 재조회, 이수증 PDF 내용 확인을 구분한다. 목표의 마지막 보고에는 실행 근거와 소유자 확인, 미확인 기준 수를 표시한다. 도구 결과 원문·URL 경로·인증 입력을 보고에 복사하지 않는다.
+
+검증은 실행 보고 Kotlin/JUnit 8건, React/Vitest 160건, TypeScript 및 Vite 프로덕션 빌드 통과다. Kotlin 단독 시험에는 기존 Android 런타임 의존성을 사용했다. APK 통합·설치와 실제 교육 사이트 진행은 패키징 담당의 별도 검증 항목이다.

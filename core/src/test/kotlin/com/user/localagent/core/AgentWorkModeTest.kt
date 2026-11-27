@@ -17,7 +17,9 @@ class AgentWorkModeTest {
     }
     @Test fun actAndDebugKeepRegisteredWritesUnderExistingExecutorChecks(){
         for(mode in listOf(AgentWorkMode.ACT,AgentWorkMode.DEBUG)){
-            ToolRegistry.definitions.keys.forEach{assertTrue("$mode must not blanket-disable $it",AgentWorkModePolicy.allows(mode,it))}
+            ToolRegistry.definitions.keys.forEach{tool->
+                assertEquals("$mode $tool",tool !in WebsiteExecutionPolicy.phoneWebTools,AgentWorkModePolicy.allows(mode,tool))
+            }
             assertFalse(AgentWorkModePolicy.allows(mode,"unregistered_shell"))
         }
     }

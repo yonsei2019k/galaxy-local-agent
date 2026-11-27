@@ -599,13 +599,13 @@
       "title": "온라인 교육",
       "description": "맡긴 교육의 진도, 수료 요건과 이수증을 확인합니다.",
       "category": "automation",
-      "version": "5",
+      "version": "6",
       "asset": "skills/elearning-completion/SKILL.md",
-      "sha256": "4468cb55fe8c254f9bec56208eb2785c61f1c253507e776c07823c4fabaf500f",
+      "sha256": "7c873183b8be1083e7f9e0a7f3162e1d8b8a99e8123e3e31ef16ae88d8941fc5",
       "tools": [
-        "open_app_browser_page",
-        "read_app_browser_page",
-        "app_browser_action",
+        "open_pc_browser_page",
+        "read_pc_browser_page",
+        "act_on_pc_browser_page",
         "save_browser_pdf",
         "read_goal_progress",
         "update_goal_progress",
@@ -614,8 +614,8 @@
       ],
       "sourceUrls": [],
       "limitations": [
-        "영상 재개는 같은 플레이어 종료 관찰이 필요하고, 화면이 꺼진 상태의 재생은 기기에 따라 달라집니다.",
-        "직접 확인한 같은 사이트 PDF와 blob 링크에 한해 원본을 읽습니다. 인쇄형 화면은 Android 저장 창을 사용합니다."
+        "영상 재개는 같은 PC 세션에서 관찰한 재생 종료와 사이트 진도에 따릅니다.",
+        "같은 PC 세션에서 관찰한 원본 PDF를 저장합니다. 사이트가 원본을 제공하지 않으면 발급 상태를 보존합니다."
       ]
     }
   ]

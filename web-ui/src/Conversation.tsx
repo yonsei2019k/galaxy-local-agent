@@ -141,14 +141,18 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
       {assistant ? <div className="assistant-text">
-        <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />
+        {message.text.trim() && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
+        {!!message.executionReport?.length && <section className="execution-report" aria-label="작업 진행 보고">
+          <strong>작업 진행 보고</strong>
+          <ol>{message.executionReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
+        </section>}
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />
           {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
         </button>}
         {previews.map(preview => <ResultFigure key={preview.kind + preview.src} preview={preview} />)}
       </div> : <div className="message-text" dir="auto"><StickerText text={message.text} /></div>}
-      {(assistant || user) && (
+      {(assistant || user) && !!message.text.trim() && (
         <div className="message-actions">
           {assistant
             ? <>
@@ -209,7 +213,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const [localHistoryOpen, setLocalHistoryOpen] = useState(false)
   const panelOpen = historyOpen ?? localHistoryOpen
   const setHistoryOpen = onHistoryChange ?? setLocalHistoryOpen
-  const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
+  const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim() || item.executionReport?.length) : []
   const website = snapshot?.websiteCard
   const approval = snapshot?.ready ? snapshot.approvalCard : undefined
   const payment = snapshot?.ready ? snapshot.bookingPayment : undefined

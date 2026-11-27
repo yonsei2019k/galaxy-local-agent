@@ -39,7 +39,7 @@ object ToolUsePolicy {
         val verify=verificationTools.intersect(allowed).sorted()
         add("주어진 내용으로 답할 수 있으면 직접 답한다. 요청한 실행이나 현재 상태 확인에는 실제 도구 결과를 사용한다.")
         if(verify.isNotEmpty())add("계산·수치 검증·날짜 차이·현재 시각은 ${verify.joinToString(", ")}로 실제 계산한 값만 답에 쓴다. '확인해', '검증해' 요청에 도구 결과 없이 검증했다고 말하지 않는다.")
-        if(PcBrowserToolCatalog.OPEN in allowed)add("브라우저 작업은 연결된 PC 백그라운드 브라우저를 우선 사용하고 후속 조회는 같은 세션에서 한다. 문자·티맵 목적지 열기처럼 기기에서만 가능한 단계와 휴대폰 인증에는 해당 휴대폰 도구를 사용한다. 지원되는 기기 연동과 직접 열기 기능을 화면 조작보다 우선한다.")
+        if(PcBrowserToolCatalog.OPEN in allowed)add("웹사이트 열기·조회·조작은 연결된 PC 백그라운드 브라우저로만 진행하고 후속 조회는 같은 세션에서 한다. 문자·티맵 목적지 열기처럼 기기에서만 가능한 단계와 휴대폰 인증에는 해당 휴대폰 도구를 사용한다. 지원되는 기기 연동과 직접 열기 기능을 화면 조작보다 우선한다.")
         if("calculate" in allowed)add("숫자 결과만 필요하면 화면을 조작하지 않고 calculate를 사용한다. 여러 단계 계산은 단계마다 calculate를 부르거나 전체를 한 식으로 묶어 계산한다. 도구 결과가 없는 중간값·최종값을 쓰지 않는다.")
         if("read_skill" in allowed)add("절차 안내가 필요하면 목록에서 해당 스킬을 read_skill로 읽을 수 있다.")
     }

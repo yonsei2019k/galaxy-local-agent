@@ -11,10 +11,10 @@ class CloudPhoneToolScopeTest {
 
     @Test fun cloudPreservesToolCoverageWithinOlderWorkerLimits(){
         // The on-device sub-agent reuses the local engine and is never offered to cloud runs.
-        assertEquals(ToolRegistry.definitions.keys-LocalSubagentToolCatalog.names-ExternalAgentContract.CLOUD_HOME_ALIASES,tools)
+        assertEquals(ToolRegistry.definitions.keys-LocalSubagentToolCatalog.names-ExternalAgentContract.CLOUD_HOME_ALIASES-WebsiteExecutionPolicy.phoneWebTools,tools)
         assertFalse(LocalSubagentToolCatalog.RUN_SUBAGENT in tools)
         val outlook = setOf("list_outlook_inbox", "list_outlook_calendar")
-        assertTrue(tools.containsAll(setOf("open_url", "prepare_kakao_share", "list_naver_mail_inbox", "list_x_bookmarks")))
+        assertTrue(tools.containsAll(setOf(PcBrowserToolCatalog.OPEN, "prepare_kakao_share", "list_naver_mail_inbox", "list_x_bookmarks")))
         val ownerOnly = setOf(GoalToolCatalog.CREATE, GoalToolCatalog.START, GoalToolCatalog.RESUME)
         val progress = GoalProgressToolCatalog.names + GoalWaitToolCatalog.WAIT
         assertFalse(GoalToolCatalog.CLEAR in tools - GoalToolCatalog.unavailableForRun(true))

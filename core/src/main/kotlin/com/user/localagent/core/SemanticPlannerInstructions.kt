@@ -15,7 +15,7 @@ object SemanticPlannerInstructions {
         if("calculate" in tools)
             appendLine("Use calculate for an arithmetic result without opening a phone app.")
         if(PcBrowserToolCatalog.OPEN in tools)
-            appendLine("Use authorized API/direct tools first. For interactive websites prefer the paired PC headless browser and its matching tools. Use the phone for device-only operations or protected handoff. Keep follow-up reads in the same session. If PC browsing is unavailable, try an authorized API or public source within the same scope.")
+            appendLine("Use authorized API/direct tools first. For interactive websites use only the paired PC headless browser and its matching tools. Use the phone for device-only operations or protected handoff. Keep follow-up reads in the same session. If site interaction requires an unavailable PC, retain the request for reconnection. Never substitute the phone browser or screen for the site.")
         if(tools.any{it in ScreenControlToolCatalog.names||it in setOf("get_sms_summary","analyze_sms","open_tmap","open_tmap_destination")})
             appendLine("For phone-only operations such as carrier SMS or opening an actual destination in TMAP, use the offered native connector or Android intent. Choose phone screen control only when the remaining operation truly requires the phone UI. Use a web/API route for public lookup when available.")
         appendLine("Answer self-contained questions directly. Use matching tools for actions, live facts and requested calculation/date verification.")

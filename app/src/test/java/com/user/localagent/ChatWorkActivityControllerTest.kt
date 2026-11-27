@@ -15,6 +15,15 @@ class ChatWorkActivityControllerTest {
     private fun project(run:ChatRunRecord,records:List<WorkTraceRecord>,total:Long=records.size.toLong(),loading:Set<String> = emptySet())=
         mapWorkActivities("thread-a",listOf(WorkActivityTarget("assistant-a",run.id)),mapOf(run.id to "assistant-a"),mapOf(run.id to run),mapOf(run.id to records),mapOf(run.id to total),loading)
 
+    @Test fun reopeningTheConversationRebuildsTheVisibleReportOnTheBoundAssistantMessage(){
+        val history=ChatExecutionReport.History().append(ChatExecutionReport.Line("media:site:ended","영상 재생 종료"))
+        val actual=run("completed").copy(contextJson=kotlinx.serialization.json.JsonObject(mapOf(ChatExecutionReport.KEY to history.json())).toString())
+        val activity=project(actual,emptyList()).getValue("assistant-a")
+        assertEquals("영상 재생 종료",activity.executionReport.first())
+        assertEquals(actual.id,activity.reportGroup)
+        assertTrue(activity.executionReport.any {it.contains("진도율이나 이수 처리")})
+    }
+
     @Test fun onlyTheScopedReadOnlyClarificationWaitsForAReply(){
         val ask=run("paused").copy(errorCode="cloud_clarification_read_only")
         assertTrue(project(ask,emptyList()).getValue("assistant-a").waitingForReply)

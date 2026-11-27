@@ -144,6 +144,27 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('renders persisted execution changes in order on the same assistant reply, including before it has text', () => {
+    mount()
+    const report = ['영상 재생 중 (관찰 위치 1분 0초)', '사이트 진도 미확인']
+    const answer = { id: 'one-report', role: 'assistant' as const, text: '', executionReport: report }
+    const renderReport = (message: typeof answer) => snapshot({ ...base, messages: [message] })
+    renderReport(answer)
+    const first = host.querySelector('section[aria-label="작업 진행 보고"]')
+    expect([...first!.querySelectorAll('li')].map(li => li.textContent)).toEqual(report)
+    renderReport({ ...answer, executionReport: ['영상 재생 중 (관찰 위치 2분 0초)', report[1]] })
+    expect(host.querySelectorAll('article.message')).toHaveLength(1)
+    expect(host.querySelectorAll('.execution-report li')).toHaveLength(2)
+    expect(first).toBe(host.querySelector('.execution-report'))
+    expect(host.textContent).not.toContain(report[0])
+    expect(host.textContent).toContain('관찰 위치 2분 0초')
+    const done = { ...answer, text: '결과를 확인했어요.', executionReport: ['영상 재생 종료', '사이트 수강완료 목록에서 기초교육 확인'] }
+    snapshot({ ...base, messages: [] })
+    renderReport(done)
+    expect(host.querySelector('article.message')?.textContent).toContain(done.text)
+    expect([...host.querySelectorAll('.execution-report li')].map(li => li.textContent)).toEqual(done.executionReport)
+    expect(readSnapshot({ ...base, messages: [{ ...answer, role: 'user' }] })).toBeNull()
+  })
   it('opens the PDF email by its originating chat message and rejects untrusted file paths', () => {
     mount()
     const pdfEmail = {to:'sender@example.org',subject:'이수증',body:'첨부합니다.',files:['artifact-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf']}

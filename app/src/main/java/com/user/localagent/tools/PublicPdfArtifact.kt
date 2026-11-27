@@ -46,6 +46,9 @@ internal class PdfSaveProgress {
         ToolResult(id,true,save(),VerificationState.VERIFIED,"PDF 원본 저장·재조회 확인")
     } catch(cancel:CancellationException) {
         throw cancel
+    } catch(error:com.user.localagent.compute.PcBrowserNotConnected) {
+        if(publicationPossible)ToolResult(id,false,"PDF 저장 결과를 먼저 확인해 주세요.",VerificationState.UNVERIFIED,"PDF_PUBLISH")
+        else ToolResult(id,false,com.user.localagent.core.WebsiteExecutionPolicy.RECONNECT_NOTICE,VerificationState.FAILED,com.user.localagent.core.WebsiteExecutionPolicy.RECONNECT_CODE,effectNotApplied=true)
     } catch(_:Exception) {
         val message=if(publicationPossible)
             "PDF가 보관함에 들어갔을 수 있어요. 다시 내려받기 전에 저장 결과부터 확인해 주세요."

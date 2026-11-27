@@ -89,7 +89,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         }
     }
     private val reviewedTargets=mutableMapOf<String,Pair<String,Long>>()
-    private val phoneScreen by lazy { com.user.localagent.integrations.ScreenControl(context) }
+    private val phoneScreen by lazy { com.user.localagent.integrations.ScreenControl(context,nativeAppsOnly=true) }
     internal fun bindScreenVisualAccess(binding:String?) {
         phoneScreen.capturedVisualBinding=binding
         phoneScreen.isRunLive={connectionRunId!=null&&connectionIsRunLive()}
@@ -110,26 +110,18 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         connectionRunId?.let { repository.chat.run(it) }?.takeIf {it.threadId==connectionThreadId}?.let {
             com.user.localagent.pcBrowserWorkKey(com.user.localagent.QueuedChatRequest.fromJson(it.contextJson))
         }
-    private suspend fun mayRestorePcAuthSession():Boolean {
-        val row=connectionRunId?.let {repository.chat.run(it)}?:return false
+    private suspend fun restorablePcAuthOrigin():String? {
+        val row=connectionRunId?.let {repository.chat.run(it)}?:return null
         val request=com.user.localagent.QueuedChatRequest.fromJson(row.contextJson)
-        val parentId=request.goalSegment?.parentRunId?:request.browserAuthParentRunId?:return false
-        val original=repository.chat.run(parentId)?:return false
-        if(original.threadId!=row.threadId||original.branchId!=row.branchId||original.projectId!=row.projectId)return false
-        val checkpoint=Json.parseToJsonElement(original.contextJson).jsonObject
-        val wake=checkpoint["hostGoalWake"] as? JsonObject
-        if(request.goalSegment!=null&&wake?.get("event")!=JsonPrimitive(com.user.localagent.core.WakeEvent.OWNER_AUTH_DONE.name))return false
-        val last=com.user.localagent.QueuedChatRequest.fromJson(original.contextJson).previousSteps.lastOrNull()?:return false
-        return last.tool in setOf("open_pc_browser_page","read_pc_browser_page")&&last.evidence.effectNotApplied&&
-            last.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED&&connectionIsRunLive()
+        val original=com.user.localagent.BrowserAuthContinuation.source(request){repository.chat.run(it)}?:return null
+        return com.user.localagent.BrowserAuthContinuation.pcLoginOrigin(original.contextJson).takeIf {connectionIsRunLive()}
     }
     private val pcBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding,
-        ::pcBrowserSession,::mayRestorePcAuthSession)}
+        ::pcBrowserSession,::restorablePcAuthOrigin)}
     internal var deferBrowserLogin:()->Boolean={false}
     private val appBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.app(context,::browserWorkBinding){deferBrowserLogin()}}
     private fun browserFor(name:String)=when(name){
         in com.user.localagent.core.PcBrowserToolCatalog.names->pcBrowser
-        in com.user.localagent.core.AppBrowserToolCatalog.names->appBrowser
         else->null
     }
     internal fun delegatedAssessmentSnapshot(call:ToolCall,scope:com.user.localagent.core.DelegationScope):String? =
@@ -139,7 +131,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         ToolRegistry.validate(call)
         if (call.name == KakaoShare.TOOL) return "카카오톡에서 받을 대화방을 직접 고르게 돼요. 공유할 내용:\n\n" + call.s("message")
         if(call.name=="patch_note")return checkNotNull(noteReadPatch){"NOTE_REQUEST_HOST_REQUIRED"}.review(resolveOwnerText(call))
-        if(call.name==com.user.localagent.core.PcBrowserToolCatalog.ACTION||call.name==com.user.localagent.core.AppBrowserToolCatalog.ACTION)
+        if(call.name==com.user.localagent.core.PcBrowserToolCatalog.ACTION)
             return checkNotNull(browserFor(call.name)).review(call).second
         if(call.name==com.user.localagent.core.connections.CalendarTargetIntegrity.CREATE)return requestConnections.reviewForAction(call)
         val target=when(call.name){
@@ -187,6 +179,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         require(call.name != "prepare_email" || com.user.localagent.core.PdfMailAttachments.FIELD !in call.arguments) {
             "PDF 메일은 파일을 만든 대화에서 준비해 주세요."
         }
+        check(com.user.localagent.core.WebsiteExecutionPolicy.allows(call)){com.user.localagent.core.WebsiteExecutionPolicy.HEADLESS_NOTICE}
         ToolRegistry.validate(call)
         recipients.consume(call)
         if(call.name=="open_tmap_destination"){
@@ -203,12 +196,6 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             "prepare_sms"->Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",call.s("phoneNumber"),null)).putExtra("sms_body",call.s("message"))
             "prepare_email"->Intent(Intent.ACTION_SENDTO,Uri.parse("mailto:"+Uri.encode(call.s("to")))).putExtra(Intent.EXTRA_EMAIL,arrayOf(call.s("to"))).putExtra(Intent.EXTRA_SUBJECT,call.s("subject")).putExtra(Intent.EXTRA_TEXT,call.s("body"))
             "open_map"->Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q="+Uri.encode(call.s("query"))))
-            GovernmentServiceCatalog.OPEN -> Intent(Intent.ACTION_VIEW, Uri.parse(GovernmentServiceCatalog.target(call).url))
-                .addCategory(Intent.CATEGORY_BROWSABLE)
-            "open_url" -> {
-                val url = if ("service" in call.arguments) com.user.localagent.core.connections.LifeServiceCatalog.url(call) else call.s("url")
-                com.user.localagent.connections.CommerceListingIntent.prepare(context, Uri.parse(url))
-            }
             "list_messenger_notifications","reply_messenger_notification"->null
             else->null
         }
@@ -218,6 +205,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         else executeUnlocked(call,approvedScreenSnapshot,skillAvailableTools,verifyGrant)
     private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?,skillAvailableTools:Set<String>,verifyGrant:suspend ()->Unit):ToolResult = withContext(Dispatchers.IO) {
         try {
+            if(!com.user.localagent.core.WebsiteExecutionPolicy.allows(call))return@withContext ToolResult(call.id,false,
+                com.user.localagent.core.WebsiteExecutionPolicy.HEADLESS_NOTICE,VerificationState.FAILED,"phone_web_route_unavailable",effectNotApplied=true)
             ToolRegistry.validate(call)
             if(call.name==ScheduledReadToolCatalog.CREATE||call.name==ScheduledReadToolCatalog.CANCEL){
                 check(call.name in capturedAvailableTools){"현재 요청에서 허용된 예약 도구가 아닙니다."}
@@ -233,7 +222,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             }
             browserFor(call.name)?.let{browser->
                 check(connectionRunId==null||connectionIsRunLive()){"브라우저 요청이 중단됐습니다."}
-                return@withContext browser.execute(call,approvedScreenSnapshot,pairedBrowserFallback) {
+                return@withContext browser.execute(call,approvedScreenSnapshot,pairedBrowserFallback,
+                    canRefreshPage=com.user.localagent.core.PcBrowserToolCatalog.READ in capturedAvailableTools) {
                     check(connectionRunId!=null&&connectionIsRunLive()&&call.name in capturedAvailableTools)
                     connectionVerifyAccess()
                     check(connectionIsRunLive())
@@ -306,7 +296,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                     return@withContext progress.execute(call.id) {
                         if(call.name=="save_public_pdf")
                             PublicPdfArtifact.save(java.io.File(context.filesDir,"exports"),call.s("url"),progress=progress)
-                        else if(call.arguments["browser"]==JsonPrimitive("pc")) {
+                        else {
+                            check(call.arguments["browser"]==JsonPrimitive("pc"))
                             suspend fun current() {
                                 check(connectionRunId!=null&&connectionIsRunLive()&&call.name in capturedAvailableTools)
                                 verifyGrant()
@@ -323,18 +314,6 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                             if(pdf.officialKairbCoursePdf && "certificateCourse" in call.arguments)
                                 CertificateReadback.inspect(java.io.File(context.filesDir,"exports"),receipt)
                             else receipt
-                        } else {
-                            check(call.arguments["browser"] in setOf(null,JsonPrimitive("phone")))
-                            val id=call.s("snapshotId");val ref=call.s("ref")
-                            val web=com.user.localagent.integrations.AppWebAgent.get(context)
-                            val work=checkNotNull(browserWorkBinding())
-                            web.saveObservedPdf(id,ref,progress,work) {
-                                verifyGrant()
-                                check(connectionRunId!=null && connectionIsRunLive() && call.name in capturedAvailableTools)
-                                connectionVerifyAccess()
-                                appBrowser.requirePdfRef(id,ref)
-                                check(connectionIsRunLive())
-                            }
                         }
                     }
                 }
@@ -406,7 +385,11 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             val prepared=call.name=="reply_messenger_notification"
             ToolResult(call.id,true,result,if(prepared)VerificationState.PREPARED else VerificationState.VERIFIED,
                 if(prepared)"메신저 전송 요청 전달 확인 · 수신 완료는 확인되지 않음" else "기기 제공자 조회 또는 저장 후 재조회 확인")
-        }catch(cancel:CancellationException){throw cancel}catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패",effectNotApplied=error is ToolPreconditionRejected||ToolReadPolicy.isReadOnly(call.name))}
+        }catch(cancel:CancellationException){throw cancel}
+        catch(error:com.user.localagent.compute.PcBrowserNotConnected){
+            ToolResult(call.id,false,com.user.localagent.core.WebsiteExecutionPolicy.RECONNECT_NOTICE,VerificationState.FAILED,
+                com.user.localagent.core.WebsiteExecutionPolicy.RECONNECT_CODE,effectNotApplied=true)
+        }catch(error:Throwable){ToolResult(call.id,false,error.message?:"도구 실행 실패",VerificationState.FAILED,"후속 조건 확인 실패",effectNotApplied=error is ToolPreconditionRejected||ToolReadPolicy.isReadOnly(call.name))}
     }
     private fun ToolCall.optional(key:String)=arguments[key]?.jsonPrimitive?.content?.takeIf {it.isNotBlank()}
     private fun ToolCall.epoch(key:String)=optional(key)?.let {OffsetDateTime.parse(it).toInstant().toEpochMilli()}
