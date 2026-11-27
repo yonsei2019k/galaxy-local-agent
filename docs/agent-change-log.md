@@ -3168,3 +3168,10 @@ Branch-only source change; not integrated into galaxy-local-agent, not built int
 - Bounded (2) segment retry after resolved transient failures, 30 s × attempt wait outside goalMutation, new reason `goal_autopilot_transient_failure`. No cloud POST retry.
 - StepEvidence.observationDigest (host SHA-256 prefix of verified goal reads) makes a changed observation count as progress.
 Validation: see the agent report for this branch (JVM/Rust/lint/assemble results). Device and real workflow behaviour unverified.
+
+
+## 2026-11-27 — 집순이 일반 답변의 반복 문구 제거
+
+공식 2109의 공통 말투 지침에 있던 고정 한국어 예시와 진행 답변의 정형 서두를 삭제했다. 로컬·Codex·Claude의 일반 답변은 현재 질문의 답이나 실제 결과부터 시작하며 형식적인 맞장구, 반복 자기소개, 상투적인 마무리를 생략한다. 진행 답변에는 실제로 바뀐 상태와 판단에 필요한 다음 단계만 담는다. 작업 실패·승인·검증된 근거와 기존 직원 협업 지침은 유지한다.
+
+코어 JVM 1,184건과 릴리스 필수 lint 및 비서명 APK 조립을 통과했다. 배포 2109 DEX에 기존 한국어 두 예시와 정형 서두가 있었고 새 검증 APK에는 두 예시가 빠지며 새 스타일 지침이 포함됐다. 변경 없는 C++ 라이브러리 세 개를 서명 2109에서 가져와 해시를 대조했다. 실제 휴대폰 설치와 여러 턴의 응답 확인은 남았다.
