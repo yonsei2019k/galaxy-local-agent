@@ -18,6 +18,7 @@ import kotlinx.serialization.json.*
 internal object GoalPdfEmail {
     const val KEY = "preparedPdfEmail"
     const val MARKER = "[[prepared-pdf-email]]"
+    const val PROOFS = "verifiedChatPdfSourceProofs"
     const val DIGESTS = "verifiedChatPdfDigests"
     private const val MAX_FILE_BYTES = 10L * 1024 * 1024
     private const val MAX_TOTAL_BYTES = 25L * 1024 * 1024
@@ -92,40 +93,75 @@ internal object GoalPdfEmail {
         }
     }
 
-    suspend fun resolve(app: AppContainer, directory: File, request: QueuedChatRequest, names: List<String>): List<File> =
+    private data class Attachment(val file:File,val sourceProof:String?)
+
+    suspend fun resolve(app:AppContainer,directory:File,request:QueuedChatRequest,names:List<String>):List<File> =
+        attachments(app,directory,request,names).map {it.file}
+
+    private suspend fun attachments(app: AppContainer, directory: File, request: QueuedChatRequest, names: List<String>): List<Attachment> =
         withContext(Dispatchers.IO) {
             val remaining = names.toMutableSet()
-            val verified = mutableMapOf<String, File>()
+            val verified = mutableMapOf<String, Attachment>()
             for (sourceId in sourceIds(request)) {
                 val row = app.repository.chat.run(sourceId) ?: continue
                 if (!matchesScope(request, row)) continue
                 val metadata = Json.parseToJsonElement(row.contextJson).jsonObject
                 val saved = (metadata["verifiedChatFiles"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf { field -> field.isString }?.content }
                 val digests = metadata[DIGESTS] as? JsonObject
+                val sourceProofs = metadata[PROOFS] as? JsonObject
+                val audited=QueuedChatRequest.fromJson(row.contextJson).previousSteps.filter {it.tool in goalArtifactSaveTools &&
+                    it.evidence.state==VerificationState.VERIFIED && it.evidence.auditId!=null}.mapNotNull {it.evidence.outcomeProof}.toSet()
                 for (name in saved.intersect(remaining)) {
-                    verified[name] = verifyFile(directory, name, digests?.get(name)?.jsonPrimitive?.content)
+                    val sha=digests?.get(name)?.jsonPrimitive?.content
+                    val file=verifyFile(directory,name,sha)
+                    val source=sourceProofs?.get(name)?.jsonPrimitive?.content?.takeIf {sha!=null && it in audited}
+                    verified[name] = Attachment(file,source)
                     remaining.remove(name)
                 }
                 if (remaining.isEmpty()) break
             }
             require(remaining.isEmpty()) { "이 작업에서 저장한 PDF 목록과 일치하지 않아요. 원하는 파일을 다시 확인해 주세요." }
             names.map(verified::getValue).also { files ->
-                require(files.sumOf { it.length() } <= MAX_TOTAL_BYTES) { "첨부할 PDF의 합계가 25MB를 넘어요. 나누어 준비해 주세요." }
+                require(files.sumOf { it.file.length() } <= MAX_TOTAL_BYTES) { "첨부할 PDF의 합계가 25MB를 넘어요. 나누어 준비해 주세요." }
             }
         }
 
-    suspend fun prepare(app: AppContainer, context: Context, request: QueuedChatRequest, call: ToolCall): ToolResult {
+    suspend fun prepare(app: AppContainer, context: Context, request: QueuedChatRequest, call: ToolCall): Pair<ToolResult,String?> {
         val names = requireNotNull(PdfMailAttachments.requested(call))
         resolve(app, File(context.filesDir, "exports"), request, names)
         val row = requireNotNull(app.repository.chat.run(request.runId))
         require(row.status == "running" && matchesScope(request, row))
         val saved = Json.parseToJsonElement(row.contextJson).jsonObject
         require(saved[KEY] == null || saved[KEY] == call.arguments) { "이 단계에 이미 다른 첨부 초안이 있어요." }
-        val written = app.repository.chat.updateRunContext(row.id, JsonObject(saved + (KEY to call.arguments)).toString())
-        check(Json.parseToJsonElement(written.contextJson).jsonObject[KEY] == call.arguments)
+        app.repository.chat.updateRunContext(row.id, JsonObject(saved + (KEY to call.arguments)).toString())
+        val written=checkNotNull(app.repository.chat.run(row.id))
+        check(written.status=="running" && matchesScope(request,written) &&
+            Json.parseToJsonElement(written.contextJson).jsonObject[KEY] == call.arguments)
+        val proof=request.goal?.let {goal->
+            val observed=attachments(app,File(context.filesDir,"exports"),request,names)
+            verifiedDraftProof(goal,call,observed.map {it.sourceProof})
+        }
+        if(proof!=null)return ToolResult(call.id,true,"PDF "+names.size+"개를 첨부한 메일 초안을 대화에 저장하고 다시 확인했어요.",
+            VerificationState.VERIFIED,"대화에 저장한 PDF 첨부 초안 재확인") to proof
         return ToolResult(call.id, true, "PDF " + names.size + "개를 첨부한 메일을 대화에 준비했어요. 아래 카드에서 Gmail을 열고 내용을 확인한 뒤 보내 주세요.",
-            VerificationState.PREPARED, "대화에 PDF 첨부 초안 저장")
+            VerificationState.PREPARED, "대화에 PDF 첨부 초안 저장") to null
     }
+
+    internal fun verifiedDraftProof(goal:GoalDefinition,call:ToolCall,sourceProofs:List<String?>):String? {
+        val names=PdfMailAttachments.requested(call)?:return null
+        if(goal.status!=GoalStatus.ACTIVE || sourceProofs.size!=names.size || sourceProofs.any {it==null})return null
+        val sources=goal.criteria.mapNotNull {it.proofTarget}.filter {it.isPdfSource}.map(::goalOutcomeDigest)
+        if(sources.isEmpty() || sources.size!=names.size || sources.distinct().size!=sources.size ||
+            sourceProofs.toSet()!=sources.toSet())return null
+        val fields=JsonArray(listOf(call.arguments.getValue("to"),call.arguments.getValue("subject")))
+        val target=GoalProofTarget(GoalProofKind.PDF_EMAIL_DRAFT,fields.toString()).validate()
+        val reviewed=target.reviewedDraft(goal)
+        if(goal.criteria.none {it.proofTarget==reviewed && it.text==reviewed.connectorCriterion()})return null
+        return draftDigest(goal,reviewed)
+    }
+
+    internal fun draftDigest(goal:GoalDefinition,target:GoalProofTarget):String =
+        goalDigest(goal.id+"\n"+goalWorkDigest(goal)+"\n"+goalOutcomeDigest(target))
 
     suspend fun lookup(app: AppContainer, thread: String, branch: String, messageId: String): Pair<QueuedChatRequest,ToolCall>? {
         val room = app.repository.chat.thread(thread) ?: return null

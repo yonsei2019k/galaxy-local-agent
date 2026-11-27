@@ -6,6 +6,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import java.util.UUID
@@ -72,7 +75,7 @@ enum class GoalStatus {
 }
 
 @Serializable
-enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE, BROWSER_PDF_SOURCE, GMAIL_SENT, CALENDAR_EVENT, KAIRB_CERTIFICATE }
+enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE, BROWSER_PDF_SOURCE, PDF_EMAIL_DRAFT, GMAIL_SENT, CALENDAR_EVENT, KAIRB_CERTIFICATE }
 
 @Serializable
 data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
@@ -80,28 +83,62 @@ data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
     fun courseListCriterion():String="KAIRB 수강완료 목록에서 「$target」 확인"
     /** Exact readback facts produced only after the connector completed its approved operation. */
     fun connectorFields():List<String> {
-        val values=kotlinx.serialization.json.Json.parseToJsonElement(target) as? kotlinx.serialization.json.JsonArray
+        val values=kotlinx.serialization.json.Json.parseToJsonElement(target) as? JsonArray
             ?:error("대상 필드 배열이 필요합니다.")
         require(values.toString()==target)
         return values.map {field->
-            require(field is kotlinx.serialization.json.JsonPrimitive && field.isString)
+            require(field is JsonPrimitive && field.isString)
             field.content.also {require(it.isNotBlank()&&it==it.trim()&&it.none(Char::isISOControl))}
         }
     }
     fun connectorCriterion():String {
         val fields=connectorFields()
         return when(kind){
+            GoalProofKind.PDF_EMAIL_DRAFT->"「${fields[0]}」에게 보낼 「${fields[1]}」 메일에 지정한 PDF를 모두 첨부해 초안까지만 준비"
             GoalProofKind.GMAIL_SENT->"보낸편지함에서 「${fields[0]}」에게 보낸 「${fields[1]}」 확인"
             GoalProofKind.CALENDAR_EVENT->"캘린더 「${fields[0]}」에서 「${fields[1]}」 일정 확인 (${fields[2]} ~ ${fields[3]})"
             GoalProofKind.KAIRB_CERTIFICATE->"KAIRB ${fields[0]}년 「${fields[1]}」 이수증 PDF 확인"
             else->error("연결 서비스 근거가 아닙니다.")
         }
     }
+    val isPdfSource:Boolean get()=kind in setOf(GoalProofKind.PUBLIC_PDF_SOURCE,GoalProofKind.BROWSER_PDF_SOURCE,GoalProofKind.KAIRB_CERTIFICATE)
+
+    /** The full owner declaration names the draft and every source. Additional instructions cannot be silently discarded. */
+    fun matchesOwnerDraftScope(instruction:String,sources:List<GoalProofTarget>):Boolean {
+        if(kind!=GoalProofKind.PDF_EMAIL_DRAFT || sources.size !in 1..16 || sources.distinct().size!=sources.size || sources.any {!it.isPdfSource})return false
+        val sourceLines=sources.map {if(it.kind==GoalProofKind.KAIRB_CERTIFICATE)it.connectorCriterion() else it.target}
+        if(sourceLines.distinct().size!=sourceLines.size)return false
+        val lines=instruction.lines().map(String::trim).filter(String::isNotEmpty)
+        return lines.size==sourceLines.size+1 && lines.toSet()==(sourceLines+connectorCriterion()).toSet()
+    }
+    /** Host signature of the full work the owner reviewed. A model can submit only recipient and subject. */
+    fun reviewedDraft(goal:GoalDefinition):GoalProofTarget {
+        require(kind==GoalProofKind.PDF_EMAIL_DRAFT)
+        val fields=connectorFields().take(2)
+        val work=buildJsonArray {
+            add(JsonPrimitive(goal.id))
+            add(JsonPrimitive(goal.outcome))
+            add(JsonArray(goal.constraints.map(::JsonPrimitive)))
+            for(criterion in goal.criteria)add(buildJsonArray {
+                add(JsonPrimitive(criterion.id))
+                add(JsonPrimitive(criterion.text))
+                criterion.proofTarget?.let {proof->
+                    add(JsonPrimitive(proof.kind.name))
+                    val declared=if(proof.kind==GoalProofKind.PDF_EMAIL_DRAFT)proof.connectorFields().take(2) else listOf(proof.target)
+                    declared.forEach {add(JsonPrimitive(it))}
+                }
+            })
+        }
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(work.toString().toByteArray(Charsets.UTF_8))
+            .joinToString(""){"%02x".format(it)}
+        return copy(target=JsonArray((fields+hash).map {JsonPrimitive(it)}).toString()).validate()
+    }
+
     fun matchesOwnerConnectorFields(instruction: String): Boolean {
         val fields = connectorFields()
         if (!fields.all { it in instruction }) return false
         return when (kind) {
-            GoalProofKind.GMAIL_SENT -> {
+            GoalProofKind.PDF_EMAIL_DRAFT,GoalProofKind.GMAIL_SENT -> {
                 val mailbox = Regex.escape(fields.first())
                 val localChars = "[A-Za-z0-9.!#$%&'*+/=?^_`{|}~@-]"
                 Regex("(?<!$localChars)$mailbox(?![A-Za-z0-9@-]|\\.[A-Za-z0-9])").containsMatchIn(instruction)
@@ -118,9 +155,9 @@ data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
                 val fields=connectorFields()
                 require(fields.size==2 && fields[0].matches(Regex("[0-9]{4}")) && fields[1].length<=240)
             }
-            GoalProofKind.GMAIL_SENT->{
+            GoalProofKind.PDF_EMAIL_DRAFT,GoalProofKind.GMAIL_SENT->{
                 val fields=connectorFields()
-                require(fields.size==2)
+                require(fields.size==2 || kind==GoalProofKind.PDF_EMAIL_DRAFT && fields.size==3 && fields.last().matches(Regex("[a-f0-9]{64}")))
                 com.user.localagent.core.connections.GmailSendContract.mailbox(fields[0])
             }
             GoalProofKind.CALENDAR_EVENT->{
@@ -133,7 +170,8 @@ data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
             GoalProofKind.PROJECT_FILE->require(ProjectPaths.segments(target).joinToString("/")==target)
             GoalProofKind.KAIRB_COMPLETED_COURSE->require(target.length in 1..240&&target==target.trim()&&target.none(Char::isISOControl))
         }
-        require(target.length in 1..500)
+        val maxTarget=if(kind==GoalProofKind.PDF_EMAIL_DRAFT && connectorFields().size==3)570 else 500
+        require(target.length in 1..maxTarget)
         return this
     }
 }

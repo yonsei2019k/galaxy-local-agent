@@ -41,6 +41,36 @@ class GoalPdfEmailTest {
         assertThrows(IllegalArgumentException::class.java) { GoalPdfEmail.verifyFile(folder.root,name,sha) }
     }
 
+    @Test fun onlyTheReviewedDraftWithEveryOriginalCanCloseTheDraftCriterion() {
+        val a=GoalProofTarget(GoalProofKind.PUBLIC_PDF_SOURCE,"https://example.org/a.pdf")
+        val b=GoalProofTarget(GoalProofKind.BROWSER_PDF_SOURCE,"https://example.org/b.pdf")
+        val target=GoalProofTarget(GoalProofKind.PDF_EMAIL_DRAFT,"[\"owner@example.org\",\"증빙\"]")
+        val criterion=GoalCriterion(text=target.connectorCriterion(),proofTarget=target)
+        val goal=GoalDefinition("g","thread",outcome="첨부 초안",criteria=listOf(
+            GoalCriterion(text=a.target,proofTarget=a),GoalCriterion(text=b.browserPdfCriterion(),proofTarget=b),criterion),
+            status=GoalStatus.ACTIVE)
+        val reviewed=target.reviewedDraft(goal)
+        val frozen=goal.copy(criteria=goal.criteria.dropLast(1)+criterion.copy(proofTarget=reviewed))
+        val two=call(name+",artifact-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.pdf")
+        val sources=listOf(goalOutcomeDigest(a),goalOutcomeDigest(b))
+        val digest=checkNotNull(GoalPdfEmail.verifiedDraftProof(frozen,two,sources))
+        val evidence=HarnessStep(two,StepEvidence("prepare_email",VerificationState.VERIFIED,"초안 재조회",auditId="draft-audit",outcomeProof=digest))
+        assertTrue(goalCriterionMatches(frozen.criteria.last(),evidence,frozen))
+        assertNull(GoalPdfEmail.verifiedDraftProof(goal,two,sources))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen,call(name),sources.take(1)))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen,two,listOf(sources[0],null)))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen,two,listOf(sources[0],sources[0])))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen,two.copy(arguments=JsonObject(two.arguments+("subject" to JsonPrimitive("다른 제목")))),sources))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen,two.copy(arguments=JsonObject(two.arguments+("to" to JsonPrimitive("other@example.org")))),sources))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen.copy(id="other"),two,sources))
+        assertNull(GoalPdfEmail.verifiedDraftProof(frozen.copy(outcome="실제 전달"),two,sources))
+        val sent=target.copy(kind=GoalProofKind.GMAIL_SENT)
+        assertFalse(goalCriterionMatches(criterion.copy(text=sent.connectorCriterion(),proofTarget=sent),evidence,frozen))
+        assertTrue(target.matchesOwnerDraftScope(listOf(a.target,b.target,criterion.text).joinToString("\n"),listOf(a,b)))
+        assertFalse(target.matchesOwnerDraftScope("PDF 두 개를 실제로 발송해줘",listOf(a,b)))
+        assertFalse(target.matchesOwnerDraftScope(listOf(a.target,b.target,criterion.text,"그리고 실제로 전달해").joinToString("\n"),listOf(a,b)))
+    }
+
     @Test fun sourceMustBelongToCurrentRunOrSameGoalBranchAndProject() {
         val goal = GoalDefinition("goal","thread",outcome="서류 제출",criteria=listOf(GoalCriterion(text="준비")),linkedRunIds=listOf("before","now"))
         val request = QueuedChatRequest("now","thread","branch",null,"준비","model",false,emptyList(),"msg",goal=goal)

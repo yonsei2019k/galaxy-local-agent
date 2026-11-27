@@ -251,7 +251,8 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(assessment.blockers.isNotEmpty()||assessment.pending.isNotEmpty()&&recovery==null)
         return pause(GoalAutopilotPauseReason.REQUIRED_READBACK)
     val complete=goalCompletionProofsMatch(request,goal)&&recovery==null
-    val wrapUp=complete&&(!segment.artifactWrapUp||resumedArtifactAuth)&&
+    val draftFinished=goal.criteria.any {it.status==GoalCriterionStatus.VERIFIED && it.proofTarget?.kind==GoalProofKind.PDF_EMAIL_DRAFT}
+    val wrapUp=complete&&!draftFinished&&(!segment.artifactWrapUp||resumedArtifactAuth)&&
         ledger.any {it.step.tool in goalArtifactBrowserReads&&it.step.evidence.state==VerificationState.VERIFIED}
     if(complete&&!wrapUp)return GoalSegmentDecision.Complete
     if(parent.errorCode=="execution_not_verified"&&recovery==null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
