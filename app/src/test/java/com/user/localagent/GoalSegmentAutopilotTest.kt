@@ -263,6 +263,20 @@ class GoalSegmentAutopilotTest {
         assertEquals(GoalAutopilotPauseReason.SEGMENT_BUDGET,(runCatching {goalEntryBudget(goal(),listOf(source),started+100,renewBudget=true)}.exceptionOrNull() as GoalAutopilotPaused).reason)
         assertTrue(runCatching {segment().copy(budgetBaseToolCalls=1)}.isFailure)
     }
+    @Test fun historyLargerThanOneWindowPausesANonRenewingReentryOnTheToolBudget() {
+        val pastA=(0 until 130).map {GoalLedgerEntry("pa-${it/18}",it%18,step("pa-$it"))}
+        val pastB=(0 until 30).map {GoalLedgerEntry("pb-${it/18}",it%18,step("pb-$it"))}
+        val a=request(listOf(step("a")),segment().copy(consumedToolCalls=130),pastA)
+        val bGoal=goal((listOf("run-c")+pastB.map {it.sourceRunId}).distinct())
+        val b=QueuedChatRequest("run-c","thread","branch","project","QA request","cloud-model",false,emptyList(),"user-c",
+            previousSteps=listOf(step("b")),workspaceBinding="workspace",goal=bGoal,capturedPcRevision=5,allowExternalAgent=true,externalAgentRevision=7,
+            goalSegment=segment(bGoal).copy(rootRunId="run-c",consumedToolCalls=30),goalLedger=pastB)
+        val all=goal((listOf("run-a","run-c")+pastA.map {it.sourceRunId}+pastB.map {it.sourceRunId}).distinct())
+        val sources=listOf(a,b).map {GoalRunEvidenceSource(it.runId,it.threadId,it.projectId,"completed",context(it,100))}
+        val error=runCatching {collectGoalLedger(all,sources,"workspace","scope")}.exceptionOrNull()
+        assertEquals(GoalAutopilotPauseReason.TOOL_BUDGET,(error as GoalAutopilotPaused).reason)
+        assertEquals(162,collectGoalLedger(all,sources,"workspace","scope",renewBudget=true).size)
+    }
     @Test fun steeringAndAResumeInsideAGoalSegmentCannotRenewTheOriginalGoalBudget() {
         val parent=request(binding=segment().copy(totalSegments=7))
         val source=GoalRunEvidenceSource(parent.runId,parent.threadId,parent.projectId,"completed",context(parent,100))

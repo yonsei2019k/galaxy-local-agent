@@ -93,7 +93,8 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
             check(previous==null||previous.json()==entry.json()){"동일 실행 위치의 목표 검증 기록이 변경되었습니다."}
             entries[key]=entry
         }
-        check(entries.size<=cap)
+        // Owner-renewed windows can leave more history than one window holds; a non-renewing re-entry then pauses on the tool budget.
+        if(entries.size>cap)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)
     }
     return entries.values.toList()
 }
