@@ -1114,7 +1114,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         check(parent.id in goal.linkedRunIds&&parent.status in com.user.localagent.data.ChatStore.TERMINAL+"paused"&&goals.loadGuarded(access)==goal)
         val paused=goals.saveGuarded(access,goal.copy(status=com.user.localagent.core.GoalStatus.PAUSED))
         check(goals.loadGuarded(access)==paused)
-        app.repository.chat.updateRun(parent.id,parent.status,errorCode=reason.code)
+        app.repository.chat.updateRun(parent.id,parent.status,errorCode=reason.code,
+            contextJson=ChatExecutionReport.goalResult(parent.contextJson,paused))
         FailureLog.record(context,"goal_pause",null,reason.code) // Fixed code only; no goal text or evidence.
         if(selectedThreadId.value==access.threadId&&selectedProjectId.value==access.projectId.orEmpty())goalState.value=paused
         status.value=reason.description
@@ -4105,6 +4106,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val stored=Json.parseToJsonElement(row.contextJson).jsonObject
         app.repository.chat.updateRunContext(row.id,JsonObject(stored+buildJsonObject {
             put("hostGoalWaitDetail",detail)
+            (record.condition as? WaitCondition.AtTime)?.let {put("hostGoalWaitAt",it.atEpochMillis)}
             put("hostGoalWaitKind",when(record.condition){is WaitCondition.MediaEnd->"media";is WaitCondition.AtTime->"time";is WaitCondition.OwnerAuth->"auth"})
             if(record.reopenPairedLogin)put("hostGoalOwnerLogin",true)
         }).toString())

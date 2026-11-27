@@ -711,6 +711,31 @@
         "재개 예약은 실제 완료 근거와 구분합니다."
       ],
       "sha256": "81dac5ac6aba0055fe9aec4f872ec8eb75e8c91dd6d724a2c785abf9b43e5d91"
+    },
+    {
+      "id": "task-reporting",
+      "title": "장기 업무 상세 보고",
+      "description": "업무 중에 확인 결과와 다음 행동을 알리고, 최종 결과를 근거와 산출물별로 정리합니다.",
+      "category": "planning",
+      "version": "1",
+      "asset": "skills/task-reporting/SKILL.md",
+      "sha256": "ed027a72315dfd886ca19eae17efcbf15c285c263d1386e380f7f75e6f29755e",
+      "tools": [
+        "get_goal",
+        "read_goal_progress",
+        "read_pc_browser_page",
+        "read_gmail_message",
+        "read_project_file"
+      ],
+      "sourceUrls": [
+        "https://docs.openclaw.ai/concepts/progress-drafts",
+        "https://docs.openclaw.ai/tools/progress-card",
+        "https://www.anthropic.com/research/effective-harnesses-for-long-running-agents"
+      ],
+      "limitations": [
+        "업무 장부와 도구에서 확인한 정보만 완료 근거로 설명합니다.",
+        "예약 시각은 실제 등록된 경우만 보여 줍니다."
+      ]
     }
   ]
 }

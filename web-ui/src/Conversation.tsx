@@ -137,14 +137,21 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   const assistant = message.role === 'assistant'
   const author = assistant ? message.authorLabel ?? '집순이' : undefined
   const startsGroup = assistant && (previousHasCards || !(previous?.role === 'assistant' && (previous.authorLabel ?? '집순이') === author))
+  const report = message.executionReport ?? []
+  const recentReport = report.slice(-8)
+  const earlierReport = report.slice(0, -8)
   return (
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
       {assistant ? <div className="assistant-text">
         {message.text.trim() && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
-        {!!message.executionReport?.length && <section className="execution-report" aria-label="작업 진행 보고">
+        {!!report.length && <section className="execution-report" aria-label="작업 진행 보고">
           <strong>작업 진행 보고</strong>
-          <ol>{message.executionReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
+          <ol>{recentReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
+          {!!earlierReport.length && <details>
+            <summary>앞서 확인한 단계 {earlierReport.length}개</summary>
+            <ol>{earlierReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
+          </details>}
         </section>}
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />

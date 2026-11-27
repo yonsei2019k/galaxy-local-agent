@@ -4,6 +4,9 @@ import com.user.localagent.core.*
 import com.user.localagent.data.ChatRunRecord
 import com.user.localagent.ui.toolLabel
 import java.net.URI
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.serialization.json.*
 
 /** A local display history. It is never a capability, a completion proof or provider context. */
@@ -17,7 +20,8 @@ internal object ChatExecutionReport {
     private val className = Regex("[가-힣a-zA-Z0-9 ()·&._-]{1,80}")
     private val identifier = Regex("[0-9]{5,}|[A-Za-z0-9_-]{22,}")
     data class Line(val key:String,val text:String)
-    data class History(val lines:List<Line> = emptyList(),val omitted:Int=0,val lastCall:String?=null) {
+    data class History(val lines:List<Line> = emptyList(),val omitted:Int=0,val lastCall:String?=null,
+        val checklist:List<String> = emptyList()) {
         fun append(line:Line):History {
             if(lines.lastOrNull()?.key==line.key) {
                 return if(lines.last()==line)this else copy(lines=lines.dropLast(1)+line)
@@ -30,6 +34,7 @@ internal object ChatExecutionReport {
             put("omitted",omitted)
             lastCall?.let {put("lastCall",it)}
             put("lines",buildJsonArray {lines.forEach {add(buildJsonArray {add(it.key);add(it.text)})}})
+            if(checklist.isNotEmpty())put("checklist",JsonArray(checklist.map(::JsonPrimitive)))
         }
     }
     fun read(context:JsonObject):History {
@@ -40,8 +45,12 @@ internal object ChatExecutionReport {
             val text=(pair.getOrNull(1) as? JsonPrimitive)?.takeIf {it.isString}?.content
             if(key==null||key.length !in 1..180||text==null||text.length !in 1..240||text.any(Char::isISOControl))null else Line(key,text)
         }
+        val checklist=(data["checklist"] as? JsonArray).orEmpty().take(6).mapNotNull { item ->
+            (item as? JsonPrimitive)?.takeIf {it.isString}?.content
+                ?.takeIf {it.length in 1..240 && it.none(Char::isISOControl)}
+        }
         return History(lines,(data["omitted"] as? JsonPrimitive)?.intOrNull?.coerceIn(0,999_999)?:0,
-            data.str("lastCall")?.takeIf {it.length==64 && it.all {c->c in '0'..'9'||c in 'a'..'f'}})
+            data.str("lastCall")?.takeIf {it.length==64 && it.all {c->c in '0'..'9'||c in 'a'..'f'}},checklist)
     }
     /** Long-answer checkpoints replace the request envelope while the same run is writing. */
     fun retain(previous:String,replacement:String):String {
@@ -159,12 +168,13 @@ internal object ChatExecutionReport {
         }
         if(tool==GoalProgressToolCatalog.READ||tool==GoalProgressToolCatalog.UPDATE){
             val ledger=data["ledger"] as? JsonObject?:return history
-            val entries=(ledger["items"] as? JsonArray).orEmpty()
-            val item=entries.filterIsInstance<JsonObject>().lastOrNull {it.str("kind")=="lecture"&&it.str("status") in setOf("active","waiting")}?:return history
-            val course=safeClass(item.str("course"))?:return history
-            val unit=safeClass(item.str("unit"))?:return history
+            val entries=(ledger["items"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().take(GoalProgressLimits.MAX_ITEMS)
+            val updated=history.copy(checklist=checklist(entries))
+            val item=entries.lastOrNull {it.str("kind")=="lecture"&&it.str("status") in setOf("active","waiting")}?:return updated
+            val course=safeClass(item.str("course"))?:return updated
+            val unit=safeClass(item.str("unit"))?:return updated
             val line=Line("lesson:$course:$unit","작업 장부의 진행 대상 · $course / $unit")
-            return if(history.lines.lastOrNull {it.key.startsWith("lesson:")}==line)history else history.append(line)
+            return if(updated.lines.lastOrNull {it.key.startsWith("lesson:")}==line)updated else updated.append(line)
         }
         if(tool=="save_browser_pdf"){
             val course=safeClass(data.str("certificateCourse"))
@@ -175,6 +185,29 @@ internal object ChatExecutionReport {
         if(tool in setOf("get_goal","get_current_datetime","get_agent_capabilities","wait_for_goal_condition"))return history
         val key=if(ToolReadPolicy.isReadOnly(tool))tool else "$tool:${goalDigest(call.id).take(16)}"
         return history.append(Line(key,label+" 결과 확인"))
+    }
+
+    private fun checklist(entries:List<JsonObject>):List<String> {
+        if(entries.isEmpty())return emptyList()
+        fun status(item:JsonObject):String = item.str("status").orEmpty().let {
+            if(it=="done" && (item["evidence"] as? JsonArray).isNullOrEmpty())"todo" else it
+        }
+        val done=entries.count {status(it)=="done"}
+        val remaining=entries.size-done
+        val states=mapOf("blocked" to "막힌 항목", "waiting" to "대기 중", "active" to "진행 중",
+            "done" to "장부에서 확인한 항목", "todo" to "남은 항목")
+        return buildList {
+            add("작업 장부 %d개 항목 중 확인 %d개 · 남음 %d개".format(entries.size,done,remaining))
+            states.forEach { (state,label)->
+                val selected=entries.asReversed().firstNotNullOfOrNull {item->
+                    if(status(item)!=state)return@firstNotNullOfOrNull null
+                    val target=safeClass(item.str("course")) ?: return@firstNotNullOfOrNull null
+                    val unit=safeClass(item.str("unit")) ?: return@firstNotNullOfOrNull null
+                    if(target==unit)target else "$target / $unit"
+                }
+                if(selected!=null)add("$label · $selected")
+            }
+        }
     }
 
     private fun wake(context:JsonObject):Line? {
@@ -194,7 +227,7 @@ internal object ChatExecutionReport {
         return Line("wake:$event",text)
     }
     fun goalResult(contextJson:String,goal:GoalDefinition):String {
-        val context=Json.parseToJsonElement(contextJson).jsonObject
+        val context=runCatching {Json.parseToJsonElement(contextJson).jsonObject}.getOrNull() ?: return contextJson
         val verified=goal.criteria.count {it.status==GoalCriterionStatus.VERIFIED}
         val owner=goal.criteria.count {it.status==GoalCriterionStatus.USER_CONFIRMED}
         return JsonObject(context+("hostGoalCriteriaCounts" to buildJsonObject {
@@ -204,11 +237,15 @@ internal object ChatExecutionReport {
     fun state(status:String,error:String?,context:JsonObject):String? {
         if(error=="goal_verified_complete")return "목표의 모든 완료 기준을 확인했어요."
         GoalAutopilotPauseReason.entries.find {it.code==error}?.let {return it.description}
+        val due=(context["hostGoalWaitAt"] as? JsonPrimitive)?.longOrNull
+            ?.takeIf {it in 946684800000L..7258118400000L}
+            ?.let {Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M월 d일 HH:mm"))}
         return when {
         status=="waiting_approval"->"소유자의 실행 승인을 기다리고 있어요."
         status=="paused"&&context.str("hostGoalWaitKind")=="media"->"영상 종료를 기다리고 있어요. 종료 신호를 받으면 사이트 진도를 확인해요."
         status=="paused"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context || error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"인증 대기 · 공식 인증을 마친 뒤 같은 작업에서 로그인 결과를 확인해요."
         status=="paused"&&error==GOAL_OWNER_INPUT->"답변 대기 · 이 대화의 추가 질문에 답하면 이어가요."
+            status=="paused"&&error=="waiting_goal_condition"&&due!=null->"예약 대기 · $due 이후 다시 확인해요."
         status=="paused"&&error=="waiting_goal_condition"->"조건 대기 · 예약한 조건을 다시 확인한 뒤 이어가요."
         status=="paused"->"일시 정지 · 작업 기록을 확인한 뒤 이어갈 수 있어요."
         status=="interrupted"->"실행 중단 · 마지막 결과를 다시 확인해야 해요."
@@ -220,7 +257,7 @@ internal object ChatExecutionReport {
     }
     fun display(history:History,status:String,error:String?,context:JsonObject):List<String> {
         val ending=state(status,error,context)
-        if(history.lines.isEmpty() && "goalSegment" !in context && "hostGoalCriteriaCounts" !in context && (ending==null || status=="completed" || KEY !in context))return emptyList()
+        if(history.lines.isEmpty() && history.checklist.isEmpty() && "goalSegment" !in context && "hostGoalCriteriaCounts" !in context && (ending==null || status=="completed" || KEY !in context))return emptyList()
         return buildList {
             history.lines.forEachIndexed {i,line->
                 if(i==1&&history.omitted>0)add("중간 단계 ${history.omitted}개는 요약에서 생략했어요.")
@@ -240,7 +277,8 @@ internal object ChatExecutionReport {
             val resumed=wake(context)
             if(resumed!=null && history.lines.lastOrNull()!=resumed)add(resumed.text)
             if(context[GoalPdfEmail.KEY] is JsonObject)add("첨부 PDF가 있는 메일 초안을 준비했어요. 발송 여부는 확인되지 않았어요. 아래 초안에서 내용을 확인할 수 있어요.")
+            addAll(history.checklist)
             if(resumed==null || status!="paused")ending?.let {add(it)}
-        }
+        }.let { lines -> if(lines.size<=40)lines else listOf(lines.first())+lines.takeLast(39) }
     }
 }
