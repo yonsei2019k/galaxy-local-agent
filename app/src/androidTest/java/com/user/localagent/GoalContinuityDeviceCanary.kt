@@ -253,7 +253,12 @@ class GoalContinuityDeviceCanary {
             assertNull(goalBudgetStop(segment, 0, clock.activeMs(), 0, true))
         }
         var checks = 0
+        var previousCheck = SystemClock.elapsedRealtime()
+        var maxCheckGapMs = 0L
         while (true) {
+            val observed = SystemClock.elapsedRealtime()
+            maxCheckGapMs = maxOf(maxCheckGapMs, observed - previousCheck)
+            previousCheck = observed
             val activeMs = clock.activeMs()
             val stop = goalBudgetStop(segment, 0, activeMs, 0, true)
             if (stop != null) {
@@ -267,7 +272,11 @@ class GoalContinuityDeviceCanary {
         val wallMs = SystemClock.elapsedRealtime() - start
         assertTrue(waitingMs >= 2_500 && wallMs >= limit - baseline + waitingMs - 20 && checks > 0)
         instrumentation.sendStatus(0, android.os.Bundle().apply {
-            putString("c090ClockEvidence", "mode=$mode baselineMs=$baseline activeMs=${clock.activeMs()} approvalWaitMs=$waitingMs wallMs=$wallMs checks=$checks")
+            putString("c090ClockEvidence", "mode=$mode baselineMs=$baseline activeMs=${clock.activeMs()} approvalWaitMs=$waitingMs wallMs=$wallMs checks=$checks maxCheckGapMs=$maxCheckGapMs")
         })
+        if (mode == "full") {
+            assertTrue("Synthetic monitor did not keep executing throughout the 30-minute sample",
+                checks >= 1_620 && maxCheckGapMs <= 10_000)
+        }
     }
 }
