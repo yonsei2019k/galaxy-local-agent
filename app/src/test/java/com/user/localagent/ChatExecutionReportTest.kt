@@ -70,7 +70,10 @@ class ChatExecutionReportTest {
         val h=ChatExecutionReport.observe(fresh,ledger("기초 과정"))
         assertEquals("작업 장부의 진행 대상 · 기초 과정 / 1강",h.lines.single().text)
         assertEquals(h,ChatExecutionReport.observe(h,ledger("기초 과정")))
-        assertEquals(h,ChatExecutionReport.observe(h,ledger("OTP 123456")))
+        val redacted=ChatExecutionReport.observe(h,ledger("OTP 123456"))
+        assertEquals(h.lines,redacted.lines)
+        assertEquals(listOf("작업 장부 1개 항목 중 확인 0개 · 남음 1개"),redacted.checklist)
+        assertFalse(redacted.json().toString().contains("123456"))
         assertFalse(h.json().toString().contains("99%"))
     }
     @Test fun ownerAuthenticationAndInterruptedActionsReportOnlyHostFacts() {
