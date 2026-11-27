@@ -37,26 +37,29 @@ import com.user.localagent.runtime.R
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 
-/** Shortest time the intro stays up when animations are on; the chat keeps loading underneath. */
+/** Shortest time (from intro start) the intro stays up after the chat is ready when the video never started. */
 internal const val LAUNCH_INTRO_MIN_MS = 1400L
 
-/** Longest the intro may outlast the chat becoming ready. The minimum above is always shorter, so it bounds this too. */
-internal const val LAUNCH_INTRO_MAX_AFTER_READY_MS = 3000L
+/** Longest time (from intro start) the intro stays up after the chat is ready while the video is playing. */
+internal const val LAUNCH_INTRO_MAX_MS = 3000L
 
 /**
- * Whether the launch intro is still shown. It always waits for the chat; with animations on it also stays until
- * [LAUNCH_INTRO_MIN_MS] has passed or the video has finished, whichever is sooner. A tap ends it at once.
+ * Whether the launch intro is still shown. It always waits for the chat; a tap ends it at once. With animations on,
+ * once the chat is ready: if the video started rendering it stays until the video completes or [LAUNCH_INTRO_MAX_MS]
+ * after intro start; if the video never started it stays until [LAUNCH_INTRO_MIN_MS]. Animations off do not wait.
  */
 internal fun launchIntroVisible(
     elapsedMs: Long,
     chatReady: Boolean,
     animationsOn: Boolean,
     dismissed: Boolean,
+    videoStarted: Boolean = false,
     videoDone: Boolean = false,
 ): Boolean {
     if (dismissed) return false
     if (!chatReady) return true
-    return animationsOn && !videoDone && elapsedMs < LAUNCH_INTRO_MIN_MS
+    if (!animationsOn) return false
+    return if (videoStarted) !videoDone && elapsedMs < LAUNCH_INTRO_MAX_MS else elapsedMs < LAUNCH_INTRO_MIN_MS
 }
 
 /** Branding for the first chat render. It never owns input or delays WebView readiness. */
@@ -67,15 +70,17 @@ internal fun LaunchIntro(chatReady: Boolean, onDismiss: () -> Unit, modifier: Mo
     val animationsOn = remember { ValueAnimator.areAnimatorsEnabled() }
     var elapsedMs by remember { mutableStateOf(0L) }
     var videoDone by remember { mutableStateOf(false) }
+    var videoStarted by remember { mutableStateOf(false) }
+    var hasFrame by remember { mutableStateOf(false) }
     var dismissed by remember { mutableStateOf(false) }
     LaunchedEffect(animationsOn) {
         val start = SystemClock.uptimeMillis()
-        while (animationsOn && elapsedMs < LAUNCH_INTRO_MIN_MS) {
+        while (animationsOn && elapsedMs < LAUNCH_INTRO_MAX_MS) {
             delay(40)
             elapsedMs = SystemClock.uptimeMillis() - start
         }
     }
-    val visible = launchIntroVisible(elapsedMs, chatReady, animationsOn, dismissed, videoDone)
+    val visible = launchIntroVisible(elapsedMs, chatReady, animationsOn, dismissed, videoStarted, videoDone)
     LaunchedEffect(visible) { if (!visible) onDismiss() }
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -94,10 +99,11 @@ internal fun LaunchIntro(chatReady: Boolean, onDismiss: () -> Unit, modifier: Mo
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.padding(horizontal = 20.dp).widthIn(max = 440.dp).fillMaxWidth().aspectRatio(16f / 9f)) {
-            var hasFrame by remember { mutableStateOf(false) }
             if (play) {
                 AndroidView(
-                    factory = { context -> LaunchIntroVideo(context, { hasFrame = it }, { videoDone = true }) },
+                    factory = { context ->
+                        LaunchIntroVideo(context, { hasFrame = it; if (it) videoStarted = true }, { videoDone = true })
+                    },
                     modifier = Modifier.matchParentSize(),
                     onRelease = LaunchIntroVideo::dispose,
                     update = {},

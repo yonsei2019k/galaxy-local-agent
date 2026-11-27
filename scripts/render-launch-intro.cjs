@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Regenerates the app-open intro art from the web 집순이 drawing:
 //   app/src/main/res/drawable-nodpi/ziphap_launch_intro.webp  (960x540 poster)
-//   app/src/main/res/raw/ziphap_launch_intro.mp4              (~2.2s, 30fps, last frame == poster)
+//   app/src/main/res/raw/ziphap_launch_intro.mp4              (2.2s, 30fps, last frame == poster)
 // Usage (after `npm ci` in web-ui and scripts/browser-validation; ffmpeg on PATH):
 //   node scripts/render-launch-intro.cjs [--shots <dir>]
 // --shots also saves the poster PNG and a few frames for review (kept outside Git).
@@ -29,14 +29,28 @@ const seg = (t, a, b) => clamp((t - a) / (b - a))
 // Pose for time t (seconds). The last frames are the resting composition used by the poster.
 function pose(t) {
   const popT = seg(t, 0, 0.5)
-  // Pop in: grows past 1, settles with a small bounce.
-  const scale = popT >= 1 ? 1 : 0.55 + 0.45 * easeOut(popT) + 0.09 * Math.sin(Math.PI * popT) * (1 - popT)
-  const bounce = popT >= 1 ? 0 : -26 * Math.sin(Math.PI * popT) * (1 - popT)
+  // Pop in with squash and stretch: grows from small, wobbles tall then wide, settles at exactly 1.
+  const osc = popT >= 1 ? 0 : Math.sin(popT * Math.PI * 3) * (1 - popT)
+  const grow = popT >= 1 ? 1 : 0.5 + 0.5 * easeOut(popT)
+  let sx = grow * (1 - 0.13 * osc)
+  let sy = grow * (1 + 0.13 * osc)
+  let bounce = popT >= 1 ? 0 : -28 * Math.sin(Math.PI * popT) * (1 - popT)
   const opacity = clamp(popT * 3)
   const wordmark = easeOut(seg(t, 0.35, 0.7))
-  const armIn = easeOut(seg(t, 0.55, 0.75)) * (1 - easeOut(seg(t, 1.55, 1.78)))
-  const swing = t > 0.7 && t < 1.6 ? Math.sin(((t - 0.7) / 0.9) * Math.PI * 4) * 13 * Math.min(1, armIn * 2) : 0
-  return { scale, bounce, opacity, wordmark, armIn, swing }
+  // Two small hops (0.6-1.05 and 1.05-1.5s) with the body tilting about 6 degrees left, then right.
+  let tilt = 0
+  if (t >= 0.6 && t < 1.5) {
+    const second = t >= 1.05
+    const u = second ? (t - 1.05) / 0.45 : (t - 0.6) / 0.45
+    const arc = Math.sin(Math.PI * u)
+    bounce += -22 * arc
+    tilt = (second ? 6 : -6) * arc
+    // Slight squash near the ground, stretch in the air.
+    sx *= 1 - 0.03 * (2 * arc - 1)
+    sy *= 1 + 0.03 * (2 * arc - 1)
+  }
+  const wink = t >= 0.9 && t < 1.3
+  return { sx, sy, bounce, tilt, opacity, wordmark, wink }
 }
 
 async function main() {
@@ -56,25 +70,13 @@ async function main() {
     await page.evaluate(() => document.fonts.ready)
     const fontOk = await page.evaluate(() => document.fonts.check("800 56px 'SUIT Variable'"))
     if (!fontOk) throw new Error('SUIT font did not load')
-    // Move the alert-state arm onto the resting figure; everything else of the alert drawing stays hidden.
-    await page.evaluate(() => {
-      const figure = document.querySelector('#figure svg')
-      const arm = document.querySelector('#wave-source [data-layer="wave"]')
-      if (!figure || !arm) throw new Error('missing character layers')
-      const holder = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-      holder.id = 'arm'
-      holder.setAttribute('opacity', '0')
-      holder.appendChild(arm.cloneNode(true))
-      figure.appendChild(holder)
-    })
     const render = (t) => page.evaluate((p) => {
       const figure = document.getElementById('figure')
       figure.style.opacity = String(p.opacity)
-      figure.style.transform = `translateY(${p.bounce}px) scale(${p.scale})`
+      figure.style.transform = `translateY(${p.bounce}px) rotate(${p.tilt}deg) scale(${p.sx}, ${p.sy})`
       document.getElementById('wordmark').style.opacity = String(p.wordmark)
-      const arm = document.getElementById('arm')
-      arm.setAttribute('opacity', String(p.armIn))
-      arm.setAttribute('transform', `rotate(${p.swing} 150 160)`)
+      document.getElementById('rest').style.display = p.wink ? 'none' : 'block'
+      document.getElementById('wink').style.display = p.wink ? 'block' : 'none'
     }, pose(t))
 
     for (let i = 0; i < FRAMES; i++) {
@@ -95,7 +97,7 @@ async function main() {
     if (shotsDir) {
       fs.mkdirSync(shotsDir, { recursive: true })
       fs.copyFileSync(posterPng, path.join(shotsDir, 'poster.png'))
-      for (const i of [0, 12, 30, 45, FRAMES - 1]) fs.copyFileSync(path.join(frames, `f${String(i).padStart(3, '0')}.png`), path.join(shotsDir, `frame-${String(i).padStart(2, '0')}.png`))
+      for (const i of [0, 12, 20, 33, 40, FRAMES - 1]) fs.copyFileSync(path.join(frames, `f${String(i).padStart(3, '0')}.png`), path.join(shotsDir, `frame-${String(i).padStart(2, '0')}.png`))
     }
   } finally {
     await browser.close()
