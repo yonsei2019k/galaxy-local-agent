@@ -28,16 +28,7 @@ const mainDestinations: { panel: Panel; label: string; icon: IconName }[] = [
   { panel: 'settings', label: '나의 집순이', icon: 'person' },
 ]
 
-export function BottomNavigation({ enabled, onNavigate }: { enabled: boolean; onNavigate(panel: Panel): void }) {
-  return <nav className="bottom-nav" aria-label="빠른 이동">
-    {mainDestinations.filter(item => item.panel !== 'contacts').map(({ panel, label, icon }) =>
-      <button key={panel} type="button" disabled={!enabled} aria-current={panel === 'chat' ? 'page' : undefined}
-        onClick={() => onNavigate(panel)}><Icon name={icon} /><span>{label}</span></button>
-    )}
-  </nav>
-}
-
-export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpenOffice, onNavigate, onClose, onChooseJob, jobsDisabled }: {
+export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpenOffice, onNavigate, onClose, onChooseJob, jobsDisabled, onManage }: {
   snapshot: Snapshot | null
   enabled: boolean
   collaborationOpen: boolean
@@ -47,6 +38,7 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
   onClose?(): void
   onChooseJob?(text: string): void
   jobsDisabled?: boolean
+  onManage?(): void
 }) {
   const [character] = useCharacter()
   const staff = snapshot?.staffRooms
@@ -96,6 +88,9 @@ export function Sidebar({ snapshot, enabled, collaborationOpen, onSelect, onOpen
         {single && <button type="button" className="sidebar-row" disabled={!enabled} onClick={() => onNavigate('services')}>
           <Icon name="group" /><span>앱과 서비스</span><Icon name="chevronRight" className="row-chevron" />
         </button>}
+        {single && onManage && <button type="button" className="sidebar-row" disabled={!enabled} onClick={onManage}>
+          <Icon name="chat" /><span>이 대화</span><Icon name="chevronRight" className="row-chevron" />
+        </button>}
       </nav>
       {single && onChooseJob && <QuickJobs disabled={jobsDisabled === true} onChoose={onChooseJob} />}
     </div>
@@ -117,13 +112,14 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOpenWork }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOpenWork, onOpenTools }: {
   snapshot: Snapshot | null
   enabled: boolean
   onMenu(): void
   onManage(): void
   onRename(title: string): boolean
   onOpenWork(): void
+  onOpenTools(): void
 }) {
   const currentThread = snapshot?.threads.find(thread => thread.selected)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
@@ -132,12 +128,13 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOpenWo
   const mood = useCharacterMood(snapshot)
 
   return (
-    <header className="topbar">
+    <header className={snapshot?.singleConversation ? 'topbar topbar--centered' : 'topbar'}>
       <div className="topbar-context">
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
+        <div className="topbar-identity">
         {snapshot?.singleConversation && <>
           <button type="button" className="character-button" data-mood={mood} aria-label="집순이 모습 바꾸기" onClick={() => setPickerOpen(true)}>
-            <Character choice={character} situation={situationForMood(mood)} size={32} decorative />
+            <Character choice={character} situation={situationForMood(mood)} size={42} decorative />
             {mood === 'thinking' && <span className="character-thinking" aria-hidden="true"><i /><i /><i /></span>}
             {mood === 'done' && <span className="character-burst" aria-hidden="true"><i /><i /><i /><i /><i /></span>}
           </button>
@@ -146,6 +143,7 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOpenWo
         <div className="topbar-heading">
           <span className="topbar-title" title={currentThread?.title ? withoutEmoji(currentThread.title) : undefined}><StickerText text={currentThread?.title || '집순이'} /></span>
           <HeaderWorkLine snapshot={snapshot} onOpen={onOpenWork} />
+        </div>
         </div>
         {snapshot?.singleConversation !== true && currentThread && titleDraft === null && <button type="button" className="rename-thread" disabled={!enabled}
           onClick={() => setTitleDraft(currentThread.title)}><Icon name="edit" /><span className="rename-thread-label">이름 변경</span></button>}
@@ -161,7 +159,10 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOpenWo
         </form>}
       </div>
       <div className="topbar-actions">
-        <button type="button" className="icon-button" aria-label="이 대화" title="이 대화" disabled={!enabled} onClick={onManage}><Icon name="chat" /></button>
+        {snapshot?.singleConversation ? <button type="button" className="icon-button" aria-label="더하기 메뉴" aria-haspopup="dialog"
+          disabled={!enabled || !!snapshot.inlineLogin || !!snapshot.websiteCard?.inputHeight || !!snapshot.approvalCard ||
+            !!snapshot.voicePrompt || !!snapshot.voiceTalk} onClick={onOpenTools}><Icon name="plus" /></button>
+          : <button type="button" className="icon-button" aria-label="이 대화" title="이 대화" disabled={!enabled} onClick={onManage}><Icon name="chat" /></button>}
       </div>
     </header>
   )
@@ -187,7 +188,7 @@ function useBriefStatus(status: string) {
 const MAX_REQUEST_LENGTH = 12_000
 const MAX_STEER_LENGTH = 4_000
 
-export function Composer({ snapshot, enabled, draft, pending, connectionNote, onDraft, onSubmit, onAttach, onSelectModel, onStop, onRemoveAttachment,
+export function Composer({ snapshot, enabled, draft, pending, connectionNote, sheetOpen, onSheetChange: setSheetOpen, onDraft, onSubmit, onAttach, onSelectModel, onStop, onRemoveAttachment,
   onCancelPreparation, onOpenWaitingApproval, onVoice, onCancelVoice, onOpenTalk }: {
   snapshot: Snapshot | null
   enabled: boolean
@@ -195,6 +196,8 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
   pending: boolean
   /** Only a problem reaching the app; ordinary work status is shown by the header work line. */
   connectionNote: string
+  sheetOpen: boolean
+  onSheetChange(open: boolean): void
   onDraft(text: string): void
   onSubmit(kind: 'send' | 'steer'): void
   onAttach(): void
@@ -208,7 +211,6 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
   onOpenWaitingApproval(): void
 }) {
   const statusId = useId()
-  const [sheetOpen, setSheetOpen] = useState(false)
   const briefStatus = useBriefStatus(snapshot?.ready ? snapshot.status : '')
   const hasText = draft.trim().length > 0
   const attachments = snapshot?.ready ? snapshot.attachments ?? [] : []
@@ -246,7 +248,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
           <div className="editor">
             <div className="editor-size" aria-hidden="true">{draft}{'\n'}</div>
             <textarea aria-label="메시지" aria-describedby={note ? statusId : undefined} aria-invalid={tooLong || undefined}
-              placeholder="메시지를 입력하세요" dir="auto" rows={1} disabled={!enabled || voiceBusy} value={draft}
+              placeholder={snapshot?.singleConversation ? busy ? "추가로 말하기" : "메시지 보내기" : "메시지를 입력하세요"} dir="auto" rows={1} disabled={!enabled || voiceBusy} value={draft}
               onChange={event => onDraft(event.currentTarget.value)} onKeyDown={event => {
                 if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing &&
                   event.nativeEvent.keyCode !== 229 && !event.repeat) {
@@ -257,7 +259,7 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
           </div>
           <div className="composer-tools">
             <div className="composer-actions">
-              {!voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="더하기 메뉴" title="더하기 메뉴" aria-haspopup="dialog" onClick={() => setSheetOpen(true)}><Icon name="plus" /></button>}
+              {!snapshot?.singleConversation && !voiceBusy && <button type="button" className="icon-button attach-button" disabled={!enabled} aria-label="더하기 메뉴" title="더하기 메뉴" aria-haspopup="dialog" onClick={() => setSheetOpen(true)}><Icon name="plus" /></button>}
               {snapshot?.voiceDraftEpoch !== undefined && <button type="button" className="icon-button voice-button"
                 disabled={!enabled || pending || tooLong || voice === 'permission' || voice === 'finishing'}
                 aria-label={voiceLabel} title={voiceLabel} aria-pressed={voice === 'listening'} onClick={() => { setSheetOpen(false); onVoice() }}>

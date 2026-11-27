@@ -3,7 +3,7 @@ import { SNAPSHOT_EVENT, characterChange, hasNativeBridge, postIntent, readSnaps
 import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
 import { Collaboration } from './Collaboration'
-import { BottomNavigation, Composer, Header, MobileSidebar, Sidebar } from './Workspace'
+import { Composer, Header, MobileSidebar, Sidebar } from './Workspace'
 
 import { VoiceTalk } from './VoiceTalk'
 import { NativeCharacterSetting } from './character/useCharacter'
@@ -16,6 +16,7 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [connectionError, setConnectionError] = useState(false)
   const [workHistoryScope, setWorkHistoryScope] = useState<string | null>(null)
+  const [composerToolsScope, setComposerToolsScope] = useState<string | null>(null)
   const [collaborationScope, setCollaborationScope] = useState<string | null>(null)
   const observedOpenRequest = useRef(0)
   const exampleQueued = useRef(false)
@@ -84,12 +85,18 @@ export default function App() {
   function closeMobile() { setMobileOpen(false) }
 
   const enabled = connected && snapshot?.ready === true
+  const toolsBlocked = !!(snapshot?.inlineLogin || snapshot?.websiteCard?.inputHeight || snapshot?.approvalCard ||
+    snapshot?.voicePrompt || snapshot?.voiceTalk)
   const conversationKey = JSON.stringify([snapshot?.threadId, snapshot?.branchId])
   const collaborationOpen = snapshot?.singleConversation !== true && collaborationScope === conversationKey
   const attachmentKey = JSON.stringify(snapshot?.attachments?.map(attachment => attachment.id) ?? [])
   useEffect(() => {
     if (!pending) exampleQueued.current = false
   }, [pending, conversationKey])
+
+  useEffect(() => {
+    if (toolsBlocked) setComposerToolsScope(null)
+  }, [toolsBlocked])
 
   useEffect(() => {
     const attempt = sendAttempt.current
@@ -100,6 +107,7 @@ export default function App() {
   useEffect(() => {
     setCollaborationScope(current => current === conversationKey ? current : null)
     setWorkHistoryScope(current => current === conversationKey ? current : null)
+    setComposerToolsScope(current => current === conversationKey ? current : null)
   }, [conversationKey])
 
   const openRequest = snapshot?.collab?.openRequest
@@ -141,6 +149,7 @@ export default function App() {
     onNavigate: panel => sidebarRequest({ action: 'navigate', payload: { panel } }),
     onChooseJob: sendExample,
     jobsDisabled: exampleBlocked,
+    onManage: () => sidebarRequest({ action: 'manageThreads' }),
   }
   const openMenu = () => setMobileOpen(true)
 
@@ -155,10 +164,11 @@ export default function App() {
     <div className="workspace">
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
-      <div className="main-column" hidden={collaborationOpen}>
+      <div className={snapshot?.singleConversation ? 'main-column main-column--chat-design' : 'main-column'} hidden={collaborationOpen}>
         <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
-          onOpenWork={() => setWorkHistoryScope(conversationKey)} />
+          onOpenWork={() => setWorkHistoryScope(conversationKey)}
+          onOpenTools={() => setComposerToolsScope(conversationKey)} />
         <Conversation key={`conversation:${conversationKey}`} snapshot={snapshot} connected={connected} enabled={enabled}
           historyOpen={workHistoryScope === conversationKey}
           onHistoryChange={open => setWorkHistoryScope(open ? conversationKey : null)}
@@ -188,6 +198,7 @@ export default function App() {
           onListen={() => request({ action: 'listenVoiceTalk' })} onSend={() => request({ action: 'sendVoiceTalk' })}
           onClose={() => request({ action: 'closeVoiceTalk' })} />}
         {snapshot?.inlineLogin !== true && !snapshot?.voiceTalk && <Composer key={`composer:${conversationKey}`} snapshot={snapshot} enabled={enabled} draft={draft} pending={pending !== null} connectionNote={connectionNote}
+          sheetOpen={!toolsBlocked && composerToolsScope === conversationKey} onSheetChange={open => setComposerToolsScope(open ? conversationKey : null)}
           onDraft={editDraft} onSubmit={action => {
             if (!snapshot?.ready || pending) return
             if (action === 'steer') {
@@ -213,8 +224,6 @@ export default function App() {
           onCancelVoice={() => request({ action: 'cancelVoicePrompt' })}
           onOpenTalk={snapshot?.voiceDraftEpoch !== undefined && !snapshot?.websiteCard?.inputHeight && !snapshot?.approvalCard
             ? () => request({ action: 'openVoiceTalk' }) : undefined} />}
-        {snapshot?.singleConversation && !snapshot.inlineLogin &&
-          <BottomNavigation enabled={enabled} onNavigate={panel => sidebarRequest({ action: 'navigate', payload: { panel } })} />}
       </div>
       {snapshot?.singleConversation !== true && <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}

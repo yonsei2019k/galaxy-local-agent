@@ -46,12 +46,13 @@ function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[]
   }))
 }
 
-function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onSendExample, onNavigate, onDismiss, onCalendar }: {
+function Welcome({ staff, guide, compact, single, situation, calendarGranted, hasDraft, onSendExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
   situation?: CharacterSituation
   onSendExample?(text: string): void
   guide: boolean
   compact?: boolean
+  single?: boolean
   calendarGranted: boolean
   hasDraft: boolean
   onNavigate(panel: Panel): void
@@ -61,9 +62,11 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
   const [character] = useCharacter()
   // The plain first screen only (staff rooms and the first-run guide keep their own flows).
   const suggestions = staff || guide || !onSendExample ? [] : roomSuggestions
+  const quietChat = single && !guide && !compact
   return (
     <div className={`welcome${compact ? ' welcome--compact' : ''}${guide ? ' welcome--guide' : ''}`}>
-      {!compact && <MotionField className="room-scene">
+      {quietChat && <div className="welcome-character"><Character choice={character} situation={situation} size={130} /></div>}
+      {!compact && !quietChat && <MotionField className="room-scene">
         <span className="room-window" aria-hidden="true" /><span className="room-beam" aria-hidden="true" /><span className="room-rug" aria-hidden="true" />
         {roomCast(character).map((guest, index) =>
           <span key={index} className={`room-guest room-guest--${index + 1}`} aria-hidden="true">
@@ -71,7 +74,8 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
           </span>)}
         <span className="room-host"><Character choice={character} situation={situation} size={160} /></span>
       </MotionField>}
-      <h1>{staff ? `${staff}에게 말 걸기` : !guide ? '무엇을 도와드릴까요?' : compact ? '집순이와 해볼 일' : '안녕하세요, 집순이예요!'}</h1>
+      <h1>{staff ? `${staff}에게 말 걸기` : quietChat ? '무엇을 해 둘까요?' : !guide ? '무엇을 도와드릴까요?' : compact ? '집순이와 해볼 일' : '안녕하세요, 집순이예요!'}</h1>
+      {quietChat && <p>말만 하면 끝까지 챙길게요</p>}
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
       {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
         {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
@@ -166,7 +170,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   return (
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
-      {assistant ? <div className="assistant-text">
+      {assistant ? <div className="assistant-text conversation-bubble">
         {message.text.trim() && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
         {!!report.length && <section className="execution-report" aria-label="작업 진행 보고">
           <strong>작업 진행 보고</strong>
@@ -375,7 +379,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           </div>
           <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
         </div> : empty ?
-          <Welcome staff={staff} guide={guide} situation={situationForMood(mood)} onSendExample={onSendExample}
+          <Welcome staff={staff} guide={guide} single={snapshot?.singleConversation} situation={situationForMood(mood)} onSendExample={onSendExample}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">

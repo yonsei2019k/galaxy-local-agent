@@ -556,7 +556,8 @@ class MainActivity : ComponentActivity() {
         val attachments by app.chatAttachments.state.collectAsState()
         val steerRunId=chat.activeRunId
         val steerThreadId=chat.activeThreadId
-        Scaffold(containerColor=Background,contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
+        Scaffold(containerColor=if(tab==0&&!chatScreenUnavailable)ZipHapColors.Surface else Background,
+            contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top+WindowInsetsSides.Horizontal)) {padding->
             if(tab==0&&chatScreenUnavailable){
                 Column(Modifier.fillMaxSize().padding(padding).padding(24.dp),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){
                     ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_error,"대화를 열지 못했어요.","다시 열어 보고, 계속 안 되면 앱을 종료한 뒤 다시 실행해 주세요."){

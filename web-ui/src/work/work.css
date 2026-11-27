@@ -31,8 +31,16 @@
 }
 .work-card:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 .work-card:hover { box-shadow: 0 1px 2px rgba(23, 27, 51, .05), 0 8px 24px rgba(23, 27, 51, .08); }
+.main-column--chat-design .work-card {
+  background: var(--color-surface-sunken);
+  box-shadow: none;
+  border-radius: 20px;
+  padding: 12px;
+}
+.main-column--chat-design .work-card:hover { box-shadow: 0 0 0 1px var(--color-divider) inset; }
 .work-icon { display: grid; place-items: center; flex: none; width: var(--icon-tile); height: var(--icon-tile); border-radius: var(--radius-tile); background: var(--tone-bg); color: var(--tone-fg); }
-.work-icon svg { width: 22px; height: 22px; }
+.work-icon svg:not(.character) { width: 22px; height: 22px; }
+.work-card .work-icon:has(.character) { background: transparent; }
 .work-text { display: grid; gap: 1px; min-width: 0; }
 .work-title, .work-meta { min-width: 0; overflow-wrap: anywhere; }
 .work-title { font-size: var(--fs-body); font-weight: var(--fw-bold); line-height: var(--lh-tight); letter-spacing: var(--ls-tight); }
@@ -41,7 +49,7 @@
 .work-chevron { width: 18px; height: 18px; color: var(--color-text-faint); }
 .work-duration { white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Running: a thin track under the text, inside the card. */
-.work-progress { position: absolute; inset: auto 18px 5px 62px; height: 3px; border-radius: var(--radius-pill); background: var(--color-soft-strong); overflow: hidden; }
+.work-progress { display: block; margin-top: 5px; height: 6px; border-radius: var(--radius-pill); background: var(--color-soft-strong); overflow: hidden; }
 .work-progress span { display: block; width: 28%; height: 100%; background: var(--color-ink); border-radius: var(--radius-pill); }
 
 .work-cards { display: grid; gap: var(--space-2); min-width: 0; margin-top: var(--space-4); }

@@ -248,18 +248,21 @@ describe('native conversation', () => {
     expect(host.querySelector('main [role="progressbar"]')).toBeNull()
   })
 
-  it('routes the single chat menu and mobile shortcuts to the existing capabilities', () => {
+  it('routes app destinations through the menu and opens tools from the centered chat header', () => {
     mount()
     snapshot({ ...base, singleConversation: true })
     expect(Array.from(host.querySelectorAll('.desktop-sidebar .destination-nav button'), button => button.textContent))
-      .toEqual(['기본 채팅', '연락처', '둘러보기', '보관함', '나의 집순이', '앱과 서비스'])
+      .toEqual(['기본 채팅', '연락처', '둘러보기', '보관함', '나의 집순이', '앱과 서비스', '이 대화'])
     click('연락처')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'contacts' } })
     click('대화 검색')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'historySearch' } })
-    const shortcut = host.querySelector('.bottom-nav button:last-child') as HTMLButtonElement
-    act(() => { shortcut.click() })
+    click('나의 집순이')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'settings' } })
+    expect(host.querySelector('.topbar--centered .topbar-identity .character')).not.toBeNull()
+    click('더하기 메뉴')
+    expect(host.querySelector('.composer-sheet .sheet-action')).not.toBeNull()
+    click('닫기')
     snapshot({ ...running(), singleConversation: true })
     expect(host.querySelector('.header-work')?.textContent).toContain('테스트 작업')
     snapshot({ ...base, singleConversation: true, inlineLogin: true })
@@ -617,11 +620,13 @@ describe('native conversation', () => {
     expect(host.querySelectorAll('.message--assistant .message-label')).toHaveLength(2)
   })
 
-  it('assistantAnswerHasNoBubbleBox', () => {
+  it('lays out both speakers as distinct bubbles in the main chat', () => {
     mount()
-    snapshot({ ...base, messages: [{ id: 'a1', role: 'assistant', text: '답' }] })
-    expect(host.querySelector('.assistant-bubble')).toBeNull()
-    expect(host.querySelector('.assistant-text')).not.toBeNull()
+    snapshot({ ...base, singleConversation: true, messages: [
+      { id: 'u1', role: 'user', text: '질문' }, { id: 'a1', role: 'assistant', text: '답' },
+    ] })
+    expect(host.querySelector('.main-column--chat-design .message--user .message-text')?.textContent).toBe('질문')
+    expect(host.querySelector('.main-column--chat-design .message--assistant .conversation-bubble')?.textContent).toBe('답')
   })
 
   it('keepsSingleMenuAndRemovesCopyIcon', () => {
