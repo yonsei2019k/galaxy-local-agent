@@ -616,6 +616,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             candidate
                         }catch(cancel:CancellationException){throw cancel}
                         catch(error:Exception){
+                            if(candidate.goal!=null)FailureLog.record(context,"goal_launch",error,"GOAL_LAUNCH_REJECTED")
                             goalRunCallerJobs.remove(candidate.runId)
                             goalQueuedEpochs.remove(candidate.runId)
                             queued.value=queued.value.filterNot {it.runId==candidate.runId}
@@ -735,7 +736,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
             }
         }catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){
+        catch(error:Exception){
+            FailureLog.record(context,"goal_continue",error,"GOAL_CONTINUE_EXCEPTION")
             // A changed/deleted scope is never recreated to record a pause in another room.
             goalMutation.withLock {
                 runCatching {
@@ -756,6 +758,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val paused=goals.saveGuarded(access,goal.copy(status=com.user.localagent.core.GoalStatus.PAUSED))
         check(goals.loadGuarded(access)==paused)
         app.repository.chat.updateRun(parent.id,parent.status,errorCode=reason.code)
+        FailureLog.record(context,"goal_pause",null,reason.code) // Fixed code only; no goal text or evidence.
         if(selectedThreadId.value==access.threadId&&selectedProjectId.value==access.projectId.orEmpty())goalState.value=paused
         status.value=reason.description
     }
