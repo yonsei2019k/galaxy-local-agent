@@ -227,11 +227,12 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
 }
 
 /** Stores an unapplied proposal as quoted data; never writes drafts or creates a missing room. */
-internal suspend fun preserveUnappliedInstruction(repository:LocalRepository,threadId:String,text:String):Boolean {
+internal suspend fun preserveUnappliedInstruction(repository:LocalRepository,threadId:String,text:String,expectedBranchId:String?=null):Boolean {
     val thread=repository.chat.thread(threadId)?:return false
+    val branchId=expectedBranchId?:thread.activeBranchId
     val body="[아직 적용하지 않은 추가 지시]\n이 내용은 실행에 적용되지 않은 제안이며, 작업 완료나 새 실행 권한을 뜻하지 않습니다.\n\n"+
         buildJsonObject{put("quoted_owner_instruction",text);put("applied",false)}.toString()
-    val stored=repository.chat.addMessage(thread.id,thread.activeBranchId,"assistant",body)
-    check(stored.threadId==thread.id&&stored.branchId==thread.activeBranchId&&repository.chat.fullMessageText(stored.id)==body){"추가 지시 보존을 확인하지 못했습니다."}
+    val stored=repository.chat.addMessage(thread.id,branchId,"assistant",body)
+    check(stored.threadId==thread.id&&stored.branchId==branchId&&repository.chat.fullMessageText(stored.id)==body){"추가 지시 보존을 확인하지 못했습니다."}
     return true
 }

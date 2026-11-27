@@ -143,7 +143,8 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
             }?.let {it.browserWorkRootRunId?:it.goalSegment?.rootRunId}
             val readback=nextSegment?.readback?:ownerReadback
             var captured:QueuedChatRequest?=null
-            app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId){user,run->
+            app.repository.chat.enqueueUserRun(access.threadId,branchId,ownerInstruction,modelId,thinking,runId=runId,
+                expectedPreviousRunId=answered?.id){user,run->
                 QueuedChatRequest(run.id,access.threadId,branchId,access.projectId,ownerInstruction,modelId,thinking,emptyList(),user.id,
                     allowTools=capturedAllowTools,mode=capturedMode,previousSteps=readback?.steps.orEmpty(),
                     readbackObligations=readback?.forRun(runId),goalReadbackSeedCount=readback?.steps?.size?:0,

@@ -74,6 +74,21 @@ class ChatQueueValidation {
         }.isFailure)
         assertEquals(before,repo.chat.messages(thread.id).first().map{it.id})
     }}
+    @Test fun aGoalReplyCannotQueueTwiceOrAfterANewerUserTurn()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
+        for(replaced in listOf(false,true)){
+            val thread=repo.chat.createThread(title="Synthetic goal question")
+            val question=enqueue(repo,thread,"Synthetic long goal")
+            repo.chat.startRun(question.id)
+            repo.chat.writeRunAnswer(question.id,"Which course?")
+            repo.chat.updateRun(question.id,"paused",com.user.localagent.GOAL_OWNER_INPUT)
+            suspend fun reply()=repo.chat.enqueueUserRun(thread.id,thread.activeBranchId,"Course A","auto",false,
+                expectedPreviousRunId=question.id){_,_->"{}"}
+            if(replaced)enqueue(repo,thread,"Newer owner request") else reply()
+            val before=repo.chat.messages(thread.id).first().map{it.id}
+            assertTrue(runCatching{reply()}.isFailure)
+            assertEquals(before,repo.chat.messages(thread.id).first().map{it.id})
+        }
+    }}
     @Test fun queuedTurnsReservePrimaryOrderAndNativeAnswersShareThatSlot()=runBlocking(Dispatchers.IO){fixture{repo,_,_->
         val thread=repo.chat.createThread(title="Synthetic ordered queue")
         val allocated=UUID.randomUUID().toString()

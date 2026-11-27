@@ -590,8 +590,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 drain()
             }catch(cancel:CancellationException){throw cancel}
             catch(_:Exception) {
-                if(preserveUnappliedInstruction(app.repository,threadId,text))
-                    status.value="답변을 저장했어요. 이전 실행 결과나 권한을 확인한 뒤 이 작업을 이어갈 수 있어요."
+                val retained=try {preserveUnappliedInstruction(app.repository,threadId,text,branchId)}
+                    catch(cancel:CancellationException){throw cancel}
+                    catch(_:Exception){false}
+                status.value=if(retained)"답변을 저장했어요. 이전 실행 결과나 권한을 확인한 뒤 이 작업을 이어갈 수 있어요."
+                    else "이 작업에 답변을 적용하지 못했어요. 원래 대화의 작업 상태를 확인해 주세요."
             }
         }
     }

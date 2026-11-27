@@ -44,7 +44,7 @@ class ChatInstructionRecoveryValidation {
             val otherDraft=repository.chat.saveDraft(other.id,"SYNTHETIC_OTHER_DRAFT","qa-other-model",false)
             val instruction="Synthetic unapplied instruction\nKeep the selected model and draft. 한글🙂"
 
-            assertTrue(preserveUnappliedInstruction(repository,thread.id,instruction))
+            assertTrue(preserveUnappliedInstruction(repository,thread.id,instruction,selected.id))
             assertEquals("Existing draft text/model/thinking/scroll/revision remain unchanged",draft,repository.chat.readDraft(thread.id))
             assertEquals(otherDraft,repository.chat.readDraft(other.id))
             val recovery=repository.chat.messages(thread.id,selected.id).first().last()
@@ -54,6 +54,12 @@ class ChatInstructionRecoveryValidation {
             assertEquals(instruction,quoted.getValue("quoted_owner_instruction").jsonPrimitive.content)
             assertFalse(quoted.getValue("applied").jsonPrimitive.boolean)
             assertEquals(listOf(original.id),repository.chat.messages(thread.id,thread.activeBranchId).first().map{it.id})
+            assertEquals(1,repository.chat.messages(thread.id,selected.id).first().count{it.role=="assistant"})
+
+            assertTrue(preserveUnappliedInstruction(repository,thread.id,"Reply from the original goal card",thread.activeBranchId))
+            val originalMessages=repository.chat.messages(thread.id,thread.activeBranchId).first()
+            assertEquals(2,originalMessages.size)
+            assertTrue(originalMessages.last().text.contains("Reply from the original goal card"))
             assertEquals(1,repository.chat.messages(thread.id,selected.id).first().count{it.role=="assistant"})
 
             repository.chat.deleteThread(thread.id,true)
