@@ -59,6 +59,7 @@ import com.user.localagent.core.GoalDefinition
 import com.user.localagent.core.SkillToolCatalog
 import com.user.localagent.core.ScheduledReadPolicy
 import com.user.localagent.core.GoalCriterionStatus
+import com.user.localagent.core.GoalProofKind
 import com.user.localagent.core.GoalProgressToolCatalog
 import com.user.localagent.core.GoalStatus
 import com.user.localagent.core.GoalWaitRecord
