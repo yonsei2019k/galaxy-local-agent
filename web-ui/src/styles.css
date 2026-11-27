@@ -110,8 +110,8 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
   --color-divider: #e7e5ec;
   --color-soft-strong: #e7e5ec;
   --color-text: #141318;
-  --color-text-sub: #6f6c78;
-  --color-text-faint: #6f6c78;
+  --color-text-sub: #65626e;
+  --color-text-faint: #65626e;
   background: var(--color-surface);
   color: var(--color-text);
   font-family: var(--font-ui);
