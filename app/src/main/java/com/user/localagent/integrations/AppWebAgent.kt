@@ -247,7 +247,9 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private suspend fun persistWebsiteSession(){
-        val cookies=CookieManager.getInstance()
+        val cookies=webView?.takeIf {
+            androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)
+        }?.let { androidx.webkit.WebViewCompat.getProfile(it).cookieManager } ?: CookieManager.getInstance()
         withContext(Dispatchers.IO){
             runCatching{cookies.flush()}.onFailure{
                 com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"COOKIE_FLUSH_FAILED")
@@ -269,10 +271,19 @@ class AppWebAgent private constructor(private val context:Context) {
     internal suspend fun websiteAccessHistory():List<Pair<String,Long>> = withContext(Dispatchers.IO){websiteVault.recentAccess()}
 
     internal suspend fun savedWebsiteOrigins():List<URI> = withContext(Dispatchers.IO){websiteVault.sites()}
-    internal suspend fun removeSavedWebsite(origin:URI) = withContext(Dispatchers.IO){websiteVault.remove(origin)}
+    internal suspend fun removeSavedWebsite(origin:URI) = withContext(Dispatchers.IO){
+        com.user.localagent.compute.PairedWebsiteSessionKeys.remove(context,origin.toASCIIString())
+        websiteVault.remove(origin)
+    }
     internal suspend fun hasSavedWebsiteLogin(id:Long):Boolean {
-        val origin=nativeLoginOrigin(id)?:return false
+        val origin=savedLoginOrigin(id)?:return false
         return withContext(Dispatchers.IO){runCatching{websiteVault.has(origin)}.getOrDefault(false)}
+    }
+
+    private fun savedLoginOrigin(id:Long):URI? {
+        if(loginCard.value?.id!=id||websiteLogin.value!=null||loginFolded.value)return null
+        if(loginCard.value?.pairedPc!=true)return nativeLoginOrigin(id)
+        return pendingPcLogin?.takeIf { it.current(context) }?.let { URI(it.origin) }
     }
 
     private fun nativeLoginOrigin(id:Long):URI? {
@@ -282,16 +293,18 @@ class AppWebAgent private constructor(private val context:Context) {
 
     internal suspend fun submitSavedWebsiteLogin(id:Long):Boolean {
         if(!RuntimeGate.foreground.get()||loginSubmitting)return false
-        val origin=nativeLoginOrigin(id)?:return false
+        val origin=savedLoginOrigin(id)?:return false
         val binding=browserWorkBinding.value?:return false
+        val paired=pendingPcLogin
         val saved=try{withContext(Dispatchers.IO){websiteVault.readForOwner(origin)}}
             catch(cancel:CancellationException){throw cancel}
             catch(_:Exception){loginStatus.value="저장된 로그인을 열 수 없어요. 직접 입력해 주세요.";return false}
-        if(saved==null||nativeLoginOrigin(id)!=origin||browserWorkBinding.value!=binding){
+        if(saved==null||savedLoginOrigin(id)!=origin||browserWorkBinding.value!=binding||pendingPcLogin!==paired){
             loginStatus.value="로그인 화면이 바뀌었어요. 기존 자격 증명을 입력하지 않았어요."
             return false
         }
-        return submitLoginCard(id,saved.account,saved.password)
+        return if(paired!=null)submitPcLogin(id,saved.account,saved.password,rememberSession=true)
+        else submitLoginCard(id,saved.account,saved.password)
     }
 
     fun switchToWebsiteLogin(id:Long){
@@ -599,7 +612,7 @@ class AppWebAgent private constructor(private val context:Context) {
 
     /** Only the native, owner-operated secure card can call this method. */
     suspend fun submitLoginCard(id:Long,account:String,password:String,saveOnPhone:Boolean=false):Boolean {
-        if(loginCard.value?.let{it.id==id&&it.pairedPc}==true)return submitPcLogin(id,account,password)
+        if(loginCard.value?.let{it.id==id&&it.pairedPc}==true)return submitPcLogin(id,account,password,saveOnPhone=saveOnPhone)
         val origin=nativeLoginOrigin(id)?:return false
         val completion=loginCompletion
         if(!RuntimeGate.foreground.get()||loginCard.value?.id!=id||websiteLogin.value!=null||completion?.isCompleted==true||loginSubmitting||
@@ -658,7 +671,8 @@ class AppWebAgent private constructor(private val context:Context) {
 
     internal suspend fun checkPcLogin(id:Long)=submitPcLogin(id,"","",checkOnly=true)
 
-    private suspend fun submitPcLogin(id:Long,account:String,password:String,checkOnly:Boolean=false):Boolean {
+    private suspend fun submitPcLogin(id:Long,account:String,password:String,checkOnly:Boolean=false,saveOnPhone:Boolean=false,
+        rememberSession:Boolean=saveOnPhone):Boolean {
         if(loginSubmitting||!RuntimeGate.foreground.get()||loginCard.value?.id!=id)return false
         val saved=pendingPcLogin
         val binding=browserWorkBinding.value
@@ -691,6 +705,7 @@ class AppWebAgent private constructor(private val context:Context) {
                 return false
             }
             var pc=saved
+            var submittedCredentials=false
             var result=if(checkOnly||pcLoginNeedsCheck.value)saved.checkResult(context) else null
             if(!checkOnly && result?.stage !in setOf(PcLoginStage.SIGNED_IN,PcLoginStage.OWNER_VERIFICATION,PcLoginStage.OWNER_CODE_ON_SITE)){
                 val fresh=if(pcLoginNeedsNewForm)saved.freshForm(context) else saved
@@ -704,7 +719,8 @@ class AppWebAgent private constructor(private val context:Context) {
                 pcLoginNeedsNewForm=true
                 pcLoginNeedsCheck.value=true
                 com.user.localagent.FailureLog.record(context,"browser_owner_login",null,"PC_LOGIN_REQUEST_STARTED")
-                result=fresh.submit(context,account,password)
+                result=fresh.submit(context,account,password,rememberSession)
+                submittedCredentials=true
             }
             if(!canSubmit()){
                 if(loginCard.value?.id==id && browserWorkBinding.value==binding){
@@ -718,10 +734,21 @@ class AppWebAgent private constructor(private val context:Context) {
                 recordPcLoginResult(binding,outcome)
                 return false
             }
+            val savedToPhone=if(saveOnPhone&&submittedCredentials)try {
+                withContext(Dispatchers.IO){websiteVault.save(URI(pc.origin),account,password)}
+                true
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:Exception){com.user.localagent.FailureLog.record(context,"website_vault",null,"SAVE_FAILED");false}
+            else null
+            if(!canSubmit())return false
             confirmedPcLogin=pc
             showWebsiteWork(pc.host,waiting=true)
             notifyGoalAuth(id)
-            loginStatus.value="PC 브라우저에서 ${pc.host} 로그인을 확인했어요."
+            loginStatus.value=when(savedToPhone) {
+                true->"${pc.host} 로그인 정보를 이 휴대폰의 보안 금고에 저장했어요."
+                false->"${pc.host} 로그인은 확인했어요. 이 휴대폰에는 저장하지 못했어요."
+                null->"PC 브라우저에서 ${pc.host} 로그인을 확인했어요."
+            }
             pendingPcLogin=null
             loginCard.value=null
             return true

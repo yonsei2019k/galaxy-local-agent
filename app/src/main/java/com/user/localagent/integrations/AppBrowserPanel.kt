@@ -231,10 +231,10 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     var account by remember(login.id){mutableStateOf("")}
     var password by remember(login.id){mutableStateOf("")}
     var submitting by remember {mutableStateOf(false)}
-    var saveOnPhone by remember {mutableStateOf(false)}
+    val keyguard=LocalContext.current.getSystemService(KeyguardManager::class.java)
+    var saveOnPhone by remember(login.id) {mutableStateOf(keyguard?.isDeviceSecure==true)}
     var hasSaved by remember(login.id){mutableStateOf(false)}
     var authPending by remember(login.id){mutableStateOf(false)}
-    val keyguard=LocalContext.current.getSystemService(KeyguardManager::class.java)
     LaunchedEffect(login.id){hasSaved=agent.hasSavedWebsiteLogin(login.id)}
     val ownerAuth=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
         val wasPending=authPending
@@ -296,7 +296,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
                 if(!login.pairedPc)loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
                 if(!checkOnly){
-                    if(hasSaved&&keyguard?.isDeviceSecure==true)ZipOutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending){
+                    if(hasSaved&&keyguard?.isDeviceSecure==true)ZipOutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending&&!waitingToRetry){
                         Text("저장된 로그인 사용")
                     }
                     ZipOutlinedTextField(account,{if(it.length<=320)account=it},Modifier.fillMaxWidth(),singleLine=true,
@@ -308,9 +308,9 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                         isError=missingPassword,supportingText=if(missingPassword) ({Text("비밀번호를 입력해 주세요.")}) else null,
                         keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,imeAction=ImeAction.Go),
                         keyboardActions=KeyboardActions(onGo={submit()}))
-                    if(!login.pairedPc&&keyguard?.isDeviceSecure==true)Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                    if(keyguard?.isDeviceSecure==true)Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
                         Checkbox(checked=saveOnPhone,onCheckedChange={saveOnPhone=it},enabled=!submitting&&!authPending)
-                        Text("이 휴대폰에 로그인 저장")
+                        Text("로그인 저장하고 다음에도 사용")
                     }
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){

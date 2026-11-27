@@ -176,6 +176,78 @@ def browser_origin(url):
     return 'https://' + (f'[{parts.hostname}]' if ':' in parts.hostname else parts.hostname)
 
 
+def _vault_path(origin, key):
+    root = os.environ.get('LOCALAPPDATA')
+    if os.name != 'nt' or not root or not origin or not isinstance(key, str) or not re.fullmatch(r'[a-f0-9]{64}', key):
+        return None
+    slot = hashlib.sha256(f'{origin}\n{key}'.encode()).hexdigest()
+    return Path(root) / 'ZipHap' / 'WebsiteSessions' / (slot + '.dpapi')
+
+
+def _site_cookie_parameters(origin, cookies, now):
+    host = urllib.parse.urlsplit(origin).hostname
+    result = []
+    for cookie in cookies:
+        if cookie.get('domain', '').lstrip('.') != host or cookie.get('partitionKey') or cookie.get('partitionKeyOpaque'):
+            continue
+        expiry = cookie.get('expires', -1)
+        if expiry > 0 and expiry <= now:
+            continue
+        item = {name: cookie[name] for name in ('name', 'value', 'path', 'secure', 'httpOnly', 'sameSite') if name in cookie}
+        item['url'] = origin + '/'
+        if expiry > 0:
+            item['expires'] = expiry
+        result.append(item)
+    return result
+
+
+def _write_site_session(page, origin, key):
+    path = _vault_path(origin, key)
+    if path is None:
+        return False
+    from data_store import _dpapi
+    temporary = None
+    try:
+        now = time.time()
+        cookies = _site_cookie_parameters(origin, page.call('Storage.getCookies', timeout=4)['cookies'], now)
+        raw = json.dumps({'savedAt': now, 'cookies': cookies}).encode()
+        if len(raw) > 131072 or not cookies:
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            output.write(_dpapi(raw, True))
+        os.replace(temporary, path)
+        return True
+    except (BrowserError, KeyError, OSError, ValueError):
+        return False
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _restore_site_session(page, origin, key):
+    path = _vault_path(origin, key)
+    if path is None:
+        return
+    from data_store import _dpapi
+    try:
+        if path.stat().st_size > 262144:
+            return
+        saved = json.loads(_dpapi(path.read_bytes(), False))
+        now = time.time()
+        if not 0 <= now - saved['savedAt'] < 30 * 86400:
+            return
+        cookies = [item for item in saved['cookies'] if item['url'] == origin + '/' and item.get('expires', now + 1) > now]
+        if cookies:
+            page.call('Storage.setCookies', {'cookies': cookies}, timeout=4)
+    except (BrowserError, KeyError, OSError, TypeError, ValueError):
+        return
+
+
 class _Page:
     def __init__(self, ws_url):
         self.ws = _Socket(ws_url); self.next_id = 0
@@ -494,6 +566,7 @@ class BrowserAgent:
         self.owner_login = None
         self.owner_login_attempts = []
         self.owner_login_attempt = None
+        self.session_restore_checked = set()
         self.owner_login_return_url = None
         self.work_origin = None
 
@@ -536,7 +609,7 @@ class BrowserAgent:
                     raise BrowserError('OWNER_LOGIN_FORM_UNAVAILABLE', 409)
             self.owner_login = (token, time.monotonic() + 600, self.page, world, marker, origin)
             self.owner_login_attempt = None
-            return {'challenge': token, 'origin': origin}
+            return {'challenge': token, 'origin': origin, 'sessionVault': os.name == 'nt' and bool(os.environ.get('LOCALAPPDATA'))}
 
     def _owner_form(self, world, args, origin):
         script = KAIRB_LOGIN_FORM if origin == KAIRB_ORIGIN else OWNER_POST_FORM
@@ -547,7 +620,7 @@ class BrowserAgent:
         return 'exceptionDetails' not in reply and reply.get('result', {}).get('value') is True
 
     def owner_login_submit(self, request):
-        if set(request) != {'challenge', 'account', 'password'}:
+        if not {'challenge', 'account', 'password'} <= set(request) <= {'challenge', 'account', 'password', 'sessionKey'}:
             raise BrowserError('OWNER_LOGIN_FORMAT')
         token, account, password = (request[key] for key in ('challenge', 'account', 'password'))
         if (not isinstance(token, str) or not re.fullmatch('[0-9a-f]{64}', token) or
@@ -571,7 +644,7 @@ class BrowserAgent:
             self.page.owner_login_notice = 'unconfirmed'
             origin = pending[5]
             self.page.owner_login_origin = origin
-            self.owner_login_attempt = (token, pending[1], self.page, origin)
+            self.owner_login_attempt = (token, pending[1], self.page, origin, request.get('sessionKey'))
             try:
                 if origin == HALLYM_ORIGIN:
                     self.page.hallym_login_required = False
@@ -580,7 +653,7 @@ class BrowserAgent:
                     raise BrowserError('OWNER_LOGIN_FORM_CHANGED', 409)
                 self._settle()
                 if origin != KAIRB_ORIGIN:
-                    return self._owner_post_result(origin)
+                    return self._with_saved_session(self._owner_post_result(origin), origin)
                 # An actual signed-in marker is required. A disappearing form is insufficient.
                 confirmed = self.page.evaluate(KAIRB_SIGNED_IN) is True
                 if not confirmed and self.page.owner_login_dialogs:
@@ -594,7 +667,7 @@ class BrowserAgent:
                         self._settle(timeout=5)
                         confirmed = self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True
                 if confirmed:
-                    return self._owner_signed_in()
+                    return self._with_saved_session(self._owner_signed_in(), origin)
                 return self._owner_login_stage()
             except (BrowserError, OSError, ValueError) as failure:
                 if isinstance(failure, BrowserError) and failure.code == 'OWNER_LOGIN_FORM_CHANGED':
@@ -657,11 +730,21 @@ class BrowserAgent:
                     or prior[2] is not self.page or time.monotonic() >= prior[1]):
                 raise BrowserError('OWNER_LOGIN_EXPIRED', 409)
             if prior[3] != KAIRB_ORIGIN:
-                return self._owner_post_result(prior[3])
+                return self._with_saved_session(self._owner_post_result(prior[3]), prior[3])
             if (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
                     self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True):
-                return self._owner_signed_in()
+                return self._with_saved_session(self._owner_signed_in(), prior[3])
             return self._owner_login_stage()
+
+    def _with_saved_session(self, result, origin):
+        attempt = self.owner_login_attempt
+        if result.get('signedIn') is True and attempt and len(attempt) == 5 and attempt[4] and attempt[3] == origin:
+            try:
+                result['sessionSaved'] = (browser_origin(self.page.evaluate('location.href', timeout=4)) == origin
+                                          and _write_site_session(self.page, origin, attempt[4]))
+            except (BrowserError, OSError, ValueError):
+                result['sessionSaved'] = False
+        return result
 
     def _chrome(self):
         for candidate in ([self.chrome] if self.chrome else []) + CHROME_CANDIDATES:
@@ -865,13 +948,16 @@ class BrowserAgent:
     # -- public operations, each returns JSON-able dicts
 
     def open(self, request):
-        if set(request) != {'url'} or not url_allowed(request['url']): raise BrowserError('URL_NOT_ALLOWED')
+        if set(request) - {'url', 'sessionKey'} or not url_allowed(request.get('url')): raise BrowserError('URL_NOT_ALLOWED')
         with self.lock:
             self._ensure(); self.pending = None
             self.owner_login = None
             self.owner_login_attempt = None
             requested = urllib.parse.urlsplit(request['url'])
             self.work_origin = browser_origin(request['url'])
+            if request.get('sessionKey') and self.work_origin not in self.session_restore_checked:
+                _restore_site_session(self.page, self.work_origin, request['sessionKey'])
+                self.session_restore_checked.add(self.work_origin)
             target = request['url']
             self.page.hallym_login_required = False
             self.page.hallym_classroom_frame = None

@@ -2,6 +2,7 @@
 import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import ssl
@@ -48,6 +49,17 @@ def serve_fixture(directory, respond):
     keyfile.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                           serialization.NoEncryption()))
     spki = key.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(certfile,keyfile)
+    class FixtureServer(ThreadingHTTPServer):
+        def process_request_thread(self, request, client_address):
+            try:
+                request.settimeout(10)
+                with tls.wrap_socket(request, server_side=True) as connection:
+                    super().process_request_thread(connection, client_address)
+            except (OSError, ValueError):
+                request.close()
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -75,10 +87,7 @@ def serve_fixture(directory, respond):
                                           post_data=self.rfile.read(size).decode('ascii') if size else None)
             respond(SimpleNamespace(request=observation,fulfill=self.fulfill))
         do_POST = do_GET
-    server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
-    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    tls.load_cert_chain(certfile,keyfile)
-    server.socket = tls.wrap_socket(server.socket,server_side=True)
+    server = FixtureServer(('127.0.0.1',0),Handler)
     thread = threading.Thread(target=server.serve_forever,daemon=True)
     thread.start()
     rules = ','.join('MAP ' + h + ' 127.0.0.1:' + str(server.server_port) for h in hosts)
@@ -138,6 +147,40 @@ class HeadlessSiteLogin(unittest.TestCase):
                 agent.owner_login_submit({'challenge':card['challenge'],'account':'fixture','password':'fixture'})
         self.run_site(respond, flow)
         self.assertEqual(posts, [(browser.HALLYM_POST, True)])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI')
+    def test_new_work_profile_uses_the_verified_login_without_resubmitting(self):
+        key = 'a' * 64
+        posts = []
+        def respond(route):
+            if route.request.method == 'POST':
+                posts.append(route.request.url)
+                route.fulfill(content_type='text/html; charset=utf-8', body=LOGOUT, headers={
+                    'Set-Cookie':'authenticated=fixture; Path=/; Secure; HttpOnly; SameSite=Strict'})
+                return
+            signed_in = 'authenticated=fixture' in route.request.headers.get('Cookie', '')
+            route.fulfill(content_type='text/html; charset=utf-8', body='<h1>Course list</h1>' + LOGOUT if signed_in else LOGIN)
+
+        def login(agent):
+            self.assertTrue(agent.open({'url':GENERIC+'/course'})['loginRequired'])
+            card = agent.owner_login_form({'origin':GENERIC})
+            self.assertTrue(card['sessionVault'])
+            result = agent.owner_login_submit({'challenge':card['challenge'],'account':'fixture',
+                                               'password':'fixture','sessionKey':key})
+            self.assertTrue(result['signedIn'], result)
+            self.assertTrue(result['sessionSaved'])
+
+        def reopen(agent):
+            unrelated = agent.open({'url':OTHER+'/course','sessionKey':key})
+            self.assertTrue(unrelated['loginRequired'])
+            reopened = agent.open({'url':GENERIC+'/course','sessionKey':key})
+            self.assertFalse(reopened['loginRequired'])
+            self.assertIn('Course list', reopened['text'])
+
+        with tempfile.TemporaryDirectory() as vault, patch.dict(os.environ, {'LOCALAPPDATA':vault}):
+            self.run_site(respond, login)
+            self.run_site(respond, reopen)
+        self.assertEqual(posts, [GENERIC+'/session'])
 
     def test_generic_form_binding_and_verification_in_the_same_session(self):
         posted = []
