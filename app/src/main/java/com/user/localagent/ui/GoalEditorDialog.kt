@@ -77,6 +77,22 @@ fun GoalEditorDialog(
                             modifier=Modifier.weight(1f).testTag("goal_criterion_${criterion.id}"),label={Text("기준 ${index+1}")},minLines=1,maxLines=4)
                         TextButton(onClick={edited=invalidate(edited.copy(criteria=edited.criteria.filterNot{it.id==criterion.id}))}){Text("제거")}
                     }
+                    val proof=criterion.proofTarget
+                    if(proof?.kind==com.user.localagent.core.GoalProofKind.PDF_EMAIL_DRAFT && criterion.text==proof.connectorCriterion()) {
+                        val sources=edited.criteria.mapNotNull {it.proofTarget}.filter {it.isPdfSource}
+                        if(sources.isNotEmpty()) {
+                            val reviewed=proof.reviewedDraft(edited)
+                            Row(verticalAlignment=Alignment.CenterVertically) {
+                                Checkbox(checked=proof==reviewed,onCheckedChange={accept->
+                                    val next=if(accept)reviewed else proof.copy(target=kotlinx.serialization.json.JsonArray(
+                                        proof.connectorFields().take(2).map {kotlinx.serialization.json.JsonPrimitive(it)}).toString())
+                                    edited=invalidate(edited.copy(criteria=edited.criteria.map {if(it.id==criterion.id)it.copy(
+                                        proofTarget=next,status=GoalCriterionStatus.PENDING,evidence=emptyList()) else it}))
+                                })
+                                Text("위 원본 PDF "+sources.size+"개를 모두 첨부한 초안 저장까지만 확인",style=MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                     Row(verticalAlignment=Alignment.CenterVertically){
                         Checkbox(criterion.status==GoalCriterionStatus.USER_CONFIRMED,onCheckedChange={checked->
                             edited=invalidate(edited.copy(criteria=edited.criteria.map{if(it.id==criterion.id)it.copy(status=if(checked)GoalCriterionStatus.USER_CONFIRMED else GoalCriterionStatus.PENDING,evidence=emptyList())else it}))

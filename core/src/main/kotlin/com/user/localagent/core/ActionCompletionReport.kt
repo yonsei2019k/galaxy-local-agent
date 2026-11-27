@@ -26,7 +26,7 @@ object ActionCompletionReport {
             if(!result.success||result.verification in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)){
                 append("실행 결과 미확인 · ").append(result.content.take(1200));return@forEachIndexed
             }
-            if(call.name == "prepare_email" && PdfMailAttachments.FIELD in call.arguments && result.verification == VerificationState.PREPARED) {
+            if(call.name == "prepare_email" && PdfMailAttachments.FIELD in call.arguments && result.verification in setOf(VerificationState.PREPARED,VerificationState.VERIFIED)) {
                 append(result.content)
                 return@forEachIndexed
             }

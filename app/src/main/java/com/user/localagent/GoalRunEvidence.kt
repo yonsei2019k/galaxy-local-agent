@@ -160,12 +160,14 @@ internal fun goalOutcomeDigest(proof:GoalProofTarget):String=
     if(proof.kind==GoalProofKind.BROWSER_PDF_SOURCE)goalBrowserPdfDigest(goalDigest(proof.target))
     else goalDigest(proof.kind.name+"\n"+proof.target)
 
-internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep):Boolean =
+internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep,goal:GoalDefinition?=null):Boolean =
     criterion.proofTarget?.let {
+        (it.kind!=GoalProofKind.PDF_EMAIL_DRAFT || step.tool=="prepare_email" && step.evidence.state==VerificationState.VERIFIED && !step.evidence.effectNotApplied &&
+            goal!=null && it==it.reviewedDraft(goal) && criterion.text==it.connectorCriterion()) &&
         (it.kind !in setOf(GoalProofKind.GMAIL_SENT,GoalProofKind.CALENDAR_EVENT,GoalProofKind.KAIRB_CERTIFICATE)||criterion.text==it.connectorCriterion())&&
         (it.kind!=GoalProofKind.KAIRB_COMPLETED_COURSE||criterion.text==it.courseListCriterion())&&
             (it.kind!=GoalProofKind.BROWSER_PDF_SOURCE||criterion.text==it.browserPdfCriterion())&&
-            goalOutcomeDigest(it)==step.evidence.outcomeProof
+            (if(it.kind==GoalProofKind.PDF_EMAIL_DRAFT)goal?.let {work->GoalPdfEmail.draftDigest(work,it)} else goalOutcomeDigest(it))?.let {digest->digest==step.evidence.outcomeProof}==true
     }==true
 
 internal fun goalMilestoneKey(step:HarnessStep):String? =
@@ -178,7 +180,7 @@ internal fun goalMilestoneKey(step:HarnessStep):String? =
         goalProgressKey(step)
     else null
 
-internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("save_public_pdf","save_browser_pdf","write_project_file",PcBrowserToolCatalog.READ,"send_gmail_message","create_google_calendar_event")
+internal fun goalCriterionEvidenceTool(tool:String):Boolean=tool in setOf("prepare_email","save_public_pdf","save_browser_pdf","write_project_file",PcBrowserToolCatalog.READ,"send_gmail_message","create_google_calendar_event")
 
 internal fun goalCriterionEvidence(request:QueuedChatRequest,current:List<HarnessStep>):Map<String,HarnessStep> =
     (request.goalLedger.map {it.step}+current).mapNotNull {step->
@@ -190,7 +192,7 @@ internal fun goalCompletionProofsMatch(request:QueuedChatRequest,goal:GoalDefini
     val audits=goalCriterionEvidence(request,request.previousSteps)
     return goal.criteria.all {criterion->
         criterion.status==GoalCriterionStatus.USER_CONFIRMED||
-            criterion.evidence.any {ref->audits[ref.removePrefix("tool-run:")]?.let {goalCriterionMatches(criterion,it)}==true}
+            criterion.evidence.any {ref->audits[ref.removePrefix("tool-run:")]?.let {goalCriterionMatches(criterion,it,goal)}==true}
     }
 }
 

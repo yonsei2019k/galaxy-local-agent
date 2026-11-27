@@ -2576,7 +2576,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(name in setOf("read_skill","knowledge_capture","analyze_sms","inspect_messenger_sources"))
             workTraceSession?.stage(com.user.localagent.data.WorkTraceCode.CONTEXT_READY,"$name · $summary")
     }
-    private suspend fun persistStepEvidence(closedSubagentId: String? = null, verifiedFile:String?=null, verifiedPdfHash:String?=null, naverReturnPage:String?=null){
+    private suspend fun persistStepEvidence(closedSubagentId: String? = null, verifiedFile:String?=null, verifiedPdfHash:String?=null, verifiedPdfProof:String?=null, naverReturnPage:String?=null){
         val request=activeRequest?:return
         val run=app.repository.chat.run(request.runId)?:return
         if(run.status in com.user.localagent.data.ChatStore.TERMINAL||run.contextJson.isBlank())return
@@ -2602,7 +2602,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val saved = base + ("verifiedChatFiles" to JsonArray(names))
             val hashes = original[GoalPdfEmail.DIGESTS] as? JsonObject
             if (verifiedPdfHash == null || JsonPrimitive(verifiedFile) !in names) JsonObject(saved) else
-                JsonObject(saved + (GoalPdfEmail.DIGESTS to JsonObject(hashes.orEmpty() + (verifiedFile to JsonPrimitive(verifiedPdfHash)))))
+                JsonObject(saved + (GoalPdfEmail.DIGESTS to JsonObject(hashes.orEmpty() + (verifiedFile to JsonPrimitive(verifiedPdfHash)))) +
+                    (GoalPdfEmail.PROOFS to JsonObject((original[GoalPdfEmail.PROOFS] as? JsonObject).orEmpty()-verifiedFile +
+                        (verifiedPdfProof?.let {mapOf(verifiedFile to JsonPrimitive(it))}.orEmpty()))))
         }
         val next = when {
             closedSubagentId == null -> merged
@@ -3816,7 +3818,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 require(criterion.status !in setOf(GoalCriterionStatus.USER_CONFIRMED,GoalCriterionStatus.VERIFIED))
                 val auditId=call.arguments.getValue("auditId").jsonPrimitive.content
                 val observed=goalCriterionEvidence(request,requestSteps)[auditId]
-                require(observed!=null&&goalCriterionMatches(criterion,observed)) {
+                require(observed!=null&&goalCriterionMatches(criterion,observed,live)) {
                     "이 완료 조건의 원래 주소나 파일과 일치하는 실제 결과가 필요해요."
                 }
                 val saved=goals.saveGuarded(access,live.copy(criteria=live.criteria.map {
@@ -4394,6 +4396,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val codeHash=withContext(Dispatchers.IO){app.hostCodeHash}
         val tools=requestTools?:error("실행 범위가 연결되지 않았습니다.")
         var auditOk=false
+        var verifiedDraftProof:String?=null
         suspend fun commitObserved(observed:ToolResult) {
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
             val evidence=goalToolStepEvidence(call,observed)
@@ -4404,7 +4407,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             requestSteps+=HarnessStep(call,if(activeRequest?.goalSegment!=null)
                 evidence.copy(progressDigest=observedGoalProgress(call,observed),observationDigest=goalObservationDigest(call,observed),auditId=auditId,
-                    outcomeProof=auditId?.let {goalOutcomeProof(call,observed)}) else evidence)
+                    outcomeProof=auditId?.let {verifiedDraftProof?:goalOutcomeProof(call,observed)}) else evidence)
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
             if (recorded && observed.success && !observed.effectNotApplied &&
                 observed.verification==VerificationState.VERIFIED &&
@@ -4425,7 +4428,24 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val pdfHash = if (file?.endsWith(".pdf") == true && call.name in setOf("save_public_pdf","save_browser_pdf","create_document"))
                 runCatching { Json.parseToJsonElement(observed.content).jsonObject["sha256"]?.jsonPrimitive?.content }
                     .getOrNull()?.takeIf { it.matches(Regex("[0-9a-f]{64}")) } else null
-            persistStepEvidence(verifiedFile=file, verifiedPdfHash=pdfHash)
+            persistStepEvidence(verifiedFile=file, verifiedPdfHash=pdfHash, verifiedPdfProof=if(pdfHash!=null && auditId!=null)goalOutcomeProof(call,observed) else null)
+            if(verifiedDraftProof!=null && auditId!=null)goalMutation.withLock {
+                val request=checkNotNull(activeRequest)
+                val access=app.repository.chat.accessScope(request.threadId)
+                requireGoalSegmentScope(request,access)
+                val live=goals.loadGuarded(access)?:return@withLock
+                val row=app.repository.chat.run(request.runId)?:return@withLock
+                if(live.status!=GoalStatus.ACTIVE || !sameGoalWork(checkNotNull(request.goal),live) ||
+                    request.runId !in live.linkedRunIds || !GoalPdfEmail.matchesScope(request,row))return@withLock
+                val stored=QueuedChatRequest.fromJson(row.contextJson)
+                val step=goalCriterionEvidence(stored,stored.previousSteps)[auditId]?:return@withLock
+                val criterion=live.criteria.singleOrNull {it.proofTarget?.kind==GoalProofKind.PDF_EMAIL_DRAFT &&
+                    it.status==GoalCriterionStatus.PENDING && goalCriterionMatches(it,step,live)}?:return@withLock
+                val saved=goals.saveGuarded(access,live.copy(criteria=live.criteria.map {
+                    if(it.id==criterion.id)it.copy(status=GoalCriterionStatus.VERIFIED,evidence=listOf("tool-run:"+auditId)) else it
+                }))
+                if(selectedThreadId.value==access.threadId)goalState.value=saved
+            }
         }
         val phoneReview=try {
             tools.reviewPhoneScreenAction(call)
@@ -4494,7 +4514,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             return refused
         }}
         if (localPdfDraft) {
-            val prepared = GoalPdfEmail.prepare(app, context, toolRequest, call)
+            val (prepared,proof) = GoalPdfEmail.prepare(app, context, toolRequest, call)
+            verifiedDraftProof=proof
             withContext(NonCancellable) {
                 commitObserved(prepared)
                 answer(prepared.content)

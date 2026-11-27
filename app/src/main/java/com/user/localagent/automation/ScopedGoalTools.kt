@@ -36,9 +36,13 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                 val draft=GoalDraftReducer.create(scope.threadId,scope.projectId,call.arguments.getValue("outcome").jsonPrimitive.content,
                     strings(call,"criteria")!!,strings(call,"constraints").orEmpty())
                 authorize(call.name)
-                val proofs=GoalToolCatalog.parseProofTargets(call).filter { (index,proof)->
+                val proposed=GoalToolCatalog.parseProofTargets(call)
+                val proofs=proposed.filter { (index,proof)->
                     // A generated alternate target must not stand in for the owner's expected result.
-                    if(proof.kind==GoalProofKind.KAIRB_COMPLETED_COURSE)
+                    if(proof.kind==GoalProofKind.PDF_EMAIL_DRAFT)
+                        draft.criteria[index].text==proof.connectorCriterion() &&
+                            proof.matchesOwnerConnectorFields(ownerInstruction)
+                    else if(proof.kind==GoalProofKind.KAIRB_COMPLETED_COURSE)
                         draft.criteria[index].text==proof.courseListCriterion() &&
                             (ownerInstruction.lineSequence().any {it.trim()==proof.target} ||
                                 listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
@@ -54,7 +58,16 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                         draft.criteria[index].text==proof.connectorCriterion() && proof.matchesOwnerConnectorFields(ownerInstruction)
                     else proof.target in ownerInstruction
                 }
-                val typed=draft.copy(criteria=draft.criteria.mapIndexed {index,criterion->criterion.copy(proofTarget=proofs[index])})
+                val accepted=proofs.filterValues {proof->proof.kind!=GoalProofKind.PDF_EMAIL_DRAFT ||
+                    proposed.values.filter {it.isPdfSource}.toSet()==proofs.values.filter {it.isPdfSource}.toSet()}
+                val candidate=draft.copy(criteria=draft.criteria.mapIndexed {index,criterion->criterion.copy(proofTarget=accepted[index])})
+                val sources=accepted.values.filter {it.isPdfSource}
+                val typed=candidate.copy(criteria=candidate.criteria.map {criterion->
+                    val proof=criterion.proofTarget
+                    if(proof?.kind==GoalProofKind.PDF_EMAIL_DRAFT && proof.matchesOwnerDraftScope(ownerInstruction,sources))
+                        criterion.copy(proofTarget=proof.reviewedDraft(candidate))
+                    else criterion
+                })
                 val saved=store.save(scope,typed).also(::scoped)
                 check(saved.id==draft.id&&saved.status==GoalStatus.DRAFT&&saved.criteria.all {it.status==GoalCriterionStatus.PENDING&&it.evidence.isEmpty()}&&saved.linkedRunIds.isEmpty())
                 check(store.load(scope)==saved){"저장한 목표 초안을 다시 확인하지 못했습니다."}
