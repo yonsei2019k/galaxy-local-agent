@@ -2746,7 +2746,9 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         var auditOk=false
         suspend fun commitObserved(observed:ToolResult) {
             observedOutcomes+=com.user.localagent.core.ObservedToolOutcome(call,observed)
-            requestSteps+=HarnessStep(call,goalToolStepEvidence(call,observed))
+            val evidence=goalToolStepEvidence(call,observed)
+            // Goal segments only: the host digest of the actual read lets a changed observation count as progress.
+            requestSteps+=HarnessStep(call,if(activeRequest?.goalSegment==null)evidence else evidence.copy(observationDigest=goalObservationDigest(call,observed)))
             val recorded=traceAttempt?.let{workTraceSession?.outcome(it,observed)}==true
             auditOk=recordOutcomeSafely(call.name,observed.success,"${observed.verification.name} · ${observed.verificationSummary}",auditAlreadyStored=recorded)
             persistStepEvidence()

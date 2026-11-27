@@ -14,10 +14,11 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
         put("sourceRunId",sourceRunId);put("stepIndex",stepIndex);put("tool",step.tool);put("arguments",step.arguments)
         put("state",step.evidence.state.name);put("summary",step.evidence.summary);put("effectNotApplied",step.evidence.effectNotApplied)
         step.evidence.continuationId?.let {put("continuationId",it)}
+        step.evidence.observationDigest?.let {put("observationDigest",it)}
     }
     companion object {
         internal fun parse(o:JsonObject):GoalLedgerEntry {
-            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId")})
+            require(o.keys.all {it in setOf("sourceRunId","stepIndex","tool","arguments","state","summary","effectNotApplied","continuationId","observationDigest")})
             fun s(key:String)=o.getValue(key).jsonPrimitive.let {require(it.isString);it.content}
             val tool=s("tool");val args=o.getValue("arguments").jsonObject
             val state=VerificationState.valueOf(s("state"))
@@ -27,7 +28,8 @@ data class GoalLedgerEntry(val sourceRunId:String,val stepIndex:Int,val step:Har
             val index=o.getValue("stepIndex").jsonPrimitive.let {require(!it.isString);it.int}
             val noEffect=o.getValue("effectNotApplied").jsonPrimitive.let {require(!it.isString);it.boolean}
             return GoalLedgerEntry(s("sourceRunId"),index,HarnessStep(tool,args,StepEvidence(tool,state,s("summary"),
-                o["continuationId"]?.jsonPrimitive?.let {require(it.isString);it.content},noEffect)))
+                o["continuationId"]?.jsonPrimitive?.let {require(it.isString);it.content},noEffect,
+                o["observationDigest"]?.jsonPrimitive?.let {require(it.isString);it.content})))
         }
     }
 }
@@ -39,6 +41,15 @@ private fun goalCanonical(value:JsonElement):String=when(value) {
     else->value.toString()
 }
 internal fun goalCallDigest(step:HarnessStep):String=goalDigest(step.tool+":"+goalCanonical(step.arguments))
+/** Tools whose output differs on every call; their observation alone is never progress. */
+private val goalVolatileObservationTools=setOf("get_current_datetime")
+/** Computed by the host from the actual executor result of a verified read-only tool; null for anything else. */
+internal fun goalObservationDigest(call:ToolCall,result:ToolResult):String? =
+    if(ToolReadPolicy.isReadOnly(call.name)&&result.success&&result.verification==VerificationState.VERIFIED&&result.id==call.id)
+        goalDigest(result.content).take(16) else null
+/** A verified read is progress when its (call, observation) pair is new: same query, changed state, counts. */
+internal fun goalObservationKey(step:HarnessStep):Pair<String,String?> =
+    goalCallDigest(step) to step.evidence.observationDigest?.takeIf {step.tool !in goalVolatileObservationTools}
 internal fun goalUncertainFailure(step:HarnessStep):Boolean=step.evidence.state==VerificationState.FAILED&&
     !ToolReadPolicy.isReadOnly(step.tool)&&!step.evidence.effectNotApplied
 internal fun goalWorkDigest(goal:GoalDefinition):String=goalDigest(buildJsonObject {

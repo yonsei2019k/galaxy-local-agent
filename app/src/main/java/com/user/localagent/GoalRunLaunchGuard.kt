@@ -140,9 +140,10 @@ internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSou
 private fun goalNoProgressCount(request:QueuedChatRequest,goal:GoalDefinition):Int {
     val segment=checkNotNull(request.goalSegment)
     if(segment.noProgressSegments>=GoalSegmentBinding.MAX_NO_PROGRESS)return segment.noProgressSegments
-    val oldCalls=request.goalLedger.map {goalCallDigest(it.step)}.toSet()
+    // A repeated read whose host-observed result changed (for example a job's progress) is progress; an identical one is not.
+    val oldObservations=request.goalLedger.map {goalObservationKey(it.step)}.toSet()
     val progress=request.previousSteps.any {it.evidence.state==VerificationState.VERIFIED&&!it.evidence.effectNotApplied&&
-        it.tool !in GoalToolCatalog.names&&it.tool !in SkillToolCatalog.names&&goalCallDigest(it) !in oldCalls}||
+        it.tool !in GoalToolCatalog.names&&it.tool !in SkillToolCatalog.names&&goalObservationKey(it) !in oldObservations}||
         goal.criteria.any {now->now.status==GoalCriterionStatus.VERIFIED&&checkNotNull(request.goal).criteria.none {it.id==now.id&&it.status==now.status&&it.evidence==now.evidence}}
     return if(progress)0 else segment.noProgressSegments+1
 }
