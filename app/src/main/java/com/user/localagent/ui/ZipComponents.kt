@@ -647,3 +647,34 @@ fun ZipEmptyState(
         }
     }
 }
+
+/**
+ * Small ink pill for a security step that sits under the chat (concept match 2026-11-28, S7): the
+ * "사이트 로그인 다시 열기" strip is no longer a full-width grey band. The pill is centered on the white
+ * chat background and keeps the 48dp touch height; text and behavior come from the caller.
+ */
+object ZipInkPillStyle {
+    val Container = ZipHapColors.Ink
+    val Content = ZipHapColors.OnInk
+    val DisabledContainer = ZipHapTokens.SoftStrong
+    val DisabledContent = ZipHapColors.TextSecondary
+    val Background = ZipHapColors.Surface
+}
+
+@Composable
+fun ZipInkPillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp),
+        enabled = enabled,
+        shape = RoundedCornerShape(ZipHapTokens.RadiusPill),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = ZipInkPillStyle.Container,
+            contentColor = ZipInkPillStyle.Content,
+            disabledContainerColor = ZipInkPillStyle.DisabledContainer,
+            disabledContentColor = ZipInkPillStyle.DisabledContent,
+        ),
+        elevation = null,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+    ) { Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold) }
+}

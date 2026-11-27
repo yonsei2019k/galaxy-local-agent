@@ -947,8 +947,11 @@ class MainActivity : ComponentActivity() {
                 if(pausedLogin!=null&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null){
                     var loginNotice by remember(pausedLogin.runId){mutableStateOf<String?>(null)}
                     var openingLogin by remember(pausedLogin.runId){mutableStateOf(false)}
-                    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal=12.dp)){
-                        ZipOutlinedButton(onClick={lifecycleScope.launch {
+                    // Concept match S7: a small centered ink pill on the white chat background, not a full-width grey band.
+                    Column(Modifier.fillMaxWidth().background(com.user.localagent.ui.ZipInkPillStyle.Background)
+                        .navigationBarsPadding().padding(horizontal=12.dp,vertical=6.dp),
+                        horizontalAlignment=Alignment.CenterHorizontally){
+                        com.user.localagent.ui.ZipInkPillButton(text=if(openingLogin)"로그인 화면 확인 중" else "사이트 로그인 다시 열기",onClick={lifecycleScope.launch {
                             openingLogin=true
                             try {
                                 loginNotice=if(chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId))null
@@ -956,10 +959,8 @@ class MainActivity : ComponentActivity() {
                             }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
                             catch(_:Exception){loginNotice="로그인 화면을 열지 못했어요. PC 연결을 확인한 뒤 다시 눌러 주세요."}
                             finally{openingLogin=false}
-                        }},modifier=Modifier.fillMaxWidth(),enabled=!openingLogin){
-                            Text(if(openingLogin)"로그인 화면 확인 중" else "사이트 로그인 다시 열기")
-                        }
-                        loginNotice?.let {Text(it)}
+                        }},enabled=!openingLogin)
+                        loginNotice?.let {Text(it,style=MaterialTheme.typography.bodySmall,color=com.user.localagent.ui.ZipHapColors.TextSecondary)}
                     }
                 }
                 if(connectionsOpen) {
