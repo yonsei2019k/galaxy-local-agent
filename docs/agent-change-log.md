@@ -1,14 +1,16 @@
-## 2026-11-28 — 앱 시작 화면 3D 집순이 교체와 최소 표시 시간 (claude/design-3d, Codex 통합 대기)
+## 2026-11-28 — 앱 시작 화면 3D 집순이 교체와 영상 재생 기준 표시 시간 (claude/design-3d, Codex 통합 대기)
 
-- **문제:** 시작 화면이 채팅 준비(`onFirstReady`) 즉시 사라져 2.6초 영상의 캐릭터가 나오기 전에 끝났고, 그림도 옛 마스코트였다.
+- **문제:** 시작 화면이 채팅 준비(`onFirstReady`) 즉시 사라져 영상의 캐릭터가 나오기 전에 끝났고, 그림도 옛 마스코트였다. 첫 시안의 손 흔드는 팔은 몸 옆의 얇은 노란 관처럼 보여 소유자가 싫어했다.
+- **인사 동작(팔 없음):** 집순이는 기본적으로 팔이 없어 팔을 완전히 뺐다.
+  - 0~0.5초 눌렸다 늘어나는 튕김 등장, 0.6~1.5초 작은 두 번 뛰기(몸을 약 6도 왼쪽 후 오른쪽으로 기울임), 약 0.9~1.3초 기존 'wink' 표정, 이후 기본 자세.
+  - 캐릭터를 직전 시안의 1.35배(405px)로 키웠고 아래 "ZipHAP"(SUIT 800, 어두운 색) 글자는 유지했다. 배경 `#F3F4F8`, 바닥 그림자 유지.
 - **타이밍 규칙(`launchIntroVisible`, `LaunchIntro.kt`):**
-  - 탭하면 즉시 닫는다. 채팅이 준비되기 전에는 계속 보인다(WebView 생성·준비는 지연하지 않는다).
-  - 채팅이 준비된 뒤에는 애니메이션이 켜져 있을 때만 시작 후 1400ms 또는 영상 종료 중 빠른 쪽까지 유지한다.
-  - 애니메이션이 꺼져 있으면 기다리지 않는다. `onUnavailable`은 그대로 즉시 닫는다.
-  - 준비 후 3초 상한은 최소 시간 1.4초가 더 짧아 구조상 지켜진다(시험으로 고정).
-  - 접근성은 "집합 시작 화면, 누르면 넘어가요" 설명과 건너뛰기 동작 하나만 둔다.
-- **그림:** `scripts/render-launch-intro.cjs`(+`web-ui/scripts/launch-intro-page.tsx`)로 웹 집순이를 렌더해 포스터 webp(960x540, 9088B)와 mp4(2.2초 30fps, 23440B)를 다시 만들었다. 마지막 프레임은 포스터와 바이트 단위로 같다. 시작·시스템 스플래시 배경은 `#F3F4F8`로 통일했다.
-- **검증:** token/icon `--check` 통과. `:core:test`(1178), `:android-runtime:testDebugUnitTest`(1233, 새 시험 6개 포함), lintRelease 2종, assembleRelease 성공(서명 안 된 APK).
+  - 탭하면 즉시 닫는다. 채팅 준비 전에는 항상 보인다(WebView 생성·준비는 지연하지 않는다). `onUnavailable`은 즉시 닫는다.
+  - 채팅 준비 후 애니메이션이 꺼져 있으면 바로 닫는다.
+  - 애니메이션이 켜져 있고 영상이 한 번이라도 그려졌으면(`videoStarted`, `hasFrame`을 `LaunchIntro`로 올림) 영상 종료 또는 시작 후 3000ms 중 빠른 쪽까지 유지한다.
+  - 영상이 시작되지 않았으면 시작 후 1400ms까지 유지한다.
+- **그림:** `scripts/render-launch-intro.cjs`(+`web-ui/scripts/launch-intro-page.tsx`)로 포스터 webp(960x540, 11234B)와 mp4(2.2초 30fps 66프레임, H.264 yuv420p, +faststart, 소리 없음, 41855B)를 다시 만들었다. 마지막 프레임은 포스터와 바이트 단위로 같다(스크립트가 검사). 검토용 화면은 `.local/sdd/2026-11-27-design3d/shots/launch-intro`.
+- **검증:** token/icon `--check` 통과. `:core:test`(1178, 변경 없어 이전 결과 재사용), `:android-runtime:testDebugUnitTest`(1234, 실패 0, `LaunchIntroTimingTest` 7개), lintRelease 2종, assembleRelease 성공(서명 안 된 APK, 새 포스터·영상 포함 확인).
 - **미검증:** 실제 기기에서의 체감 시간, 영상 재생, 접근성 낭독, 애니메이션 끄기 동작.
 
 ## 2026-11-28 — 3D 집순이, 흑백 화면, 방구석 비서 페르소나, 간단한 선택지 칩 (claude/design-3d, Codex 통합 대기)
