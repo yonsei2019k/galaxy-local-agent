@@ -37,7 +37,7 @@ class ExternalAgentPhoneCompletionTest {
         assertFalse(ExternalAgentPhoneCompletion.matches(capture,plan,evidence(),listOf(actual()),proposal.callId))
     }
     @Test fun settledBrowserReadIsOnlyProgressWhenThePlannedSaveNeverRan(){
-        val tools=listOf("read_app_browser_page","save_browser_pdf")
+        val tools=listOf("read_pc_browser_page","save_browser_pdf")
         val scope=ExternalAgentCapture(capture.parentRunId,"thread","branch","project","binding",3,capture.requestDigest,
             tools.toSet(),true,pcWorkspaceProfile="phone-only",requirePlan=true)
         val plan=ExternalAgentPlan(AgentPlanState.ACCEPTED,ExternalAgentContract.planDigest(scope,"문서 확인",tools,emptyList()),

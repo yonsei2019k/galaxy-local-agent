@@ -31,6 +31,12 @@ class GoalSegmentAutopilotTest {
     private fun decide(request:QueuedChatRequest=request(),status:String="paused",errorCode:String?="reasoning_budget_exhausted",now:Long=started+100,
         unknown:Boolean=false,goal:GoalDefinition=checkNotNull(request.goal),active:Long?=100)=goalSegmentDecision(row(request,status,errorCode,active),goal,"scope",now,unknown)
     private fun pause(expected:GoalAutopilotPauseReason,actual:GoalSegmentDecision)=assertEquals(GoalSegmentDecision.Pause(expected),actual)
+    private fun assertReplanScheduled(request:QueuedChatRequest) {
+        assertTrue(goalTransientFailure(row(request)))
+        val next=decide(request) as GoalSegmentDecision.Continue
+        assertEquals(request.goalSegment!!.noProgressSegments,next.binding.noProgressSegments)
+        assertTrue(next.binding.transientRetries>0)
+    }
     private fun child(parent:QueuedChatRequest,next:GoalSegmentDecision.Continue)=parent.copy(runId="run-b",userMessageId="user-b",
         previousSteps=emptyList(),goal=goal(listOf("run-a","run-b")),goalSegment=next.binding,goalLedger=next.ledger)
 
@@ -100,9 +106,9 @@ class GoalSegmentAutopilotTest {
         val old=read("old-snapshot","Reservation pending")
         val history=listOf(GoalLedgerEntry("past",0,old))
         val binding=segment().copy(consumedToolCalls=1,noProgressSegments=2)
-        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(request(listOf(read("new-snapshot","Reservation pending")),binding,history)))
+        assertReplanScheduled(request(listOf(read("new-snapshot","Reservation pending")),binding,history))
         val changed=request(listOf(read("new-snapshot","Reservation confirmed")),binding,history)
-        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(changed))
+        assertReplanScheduled(changed)
         assertEquals(changed.toJson(),QueuedChatRequest.fromJson(changed.toJson()).toJson())
     }
 
@@ -420,10 +426,10 @@ class GoalSegmentAutopilotTest {
         assertEquals(144,next.ledger.size)
         pause(GoalAutopilotPauseReason.TOOL_BUDGET,decide(request((0 until 18).map {step("old-$it")},binding,history)))
     }
-    @Test fun threeSegmentsWithoutNewVerifiedHostCallsPause() {
+    @Test fun threeSegmentsOfRepeatedReadsScheduleAReplanWhileFreshEvidenceClearsStagnation() {
         val same=step()
         val history=listOf(GoalLedgerEntry("past",0,same))
-        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(request(listOf(same),segment().copy(consumedToolCalls=1,noProgressSegments=2),history)))
+        assertReplanScheduled(request(listOf(same),segment().copy(consumedToolCalls=1,noProgressSegments=2),history))
         val next=decide(request(listOf(step("different")),segment().copy(consumedToolCalls=1,noProgressSegments=2),history)) as GoalSegmentDecision.Continue
         assertEquals(0,next.binding.noProgressSegments)
     }
@@ -640,7 +646,7 @@ class GoalSegmentAutopilotTest {
         assertEquals(current,QueuedChatRequest.fromJson(current.toJson()))
         val repeated=current.copy(previousSteps=listOf(step("record-1-1")),
             goalSegment=current.goalSegment!!.copy(noProgressSegments=2))
-        pause(GoalAutopilotPauseReason.NO_PROGRESS,decide(repeated))
+        assertReplanScheduled(repeated)
         val task=TaskGoal("Save the document",listOf("Read it"),requiredTools=setOf(mutation.tool))
         val duplicate=ArchivedGoalWriteGuard(current,task,ToolCall("repeat",mutation.tool,mutation.arguments))
         assertThrows(IllegalStateException::class.java){sources.forEach(duplicate::inspect)}

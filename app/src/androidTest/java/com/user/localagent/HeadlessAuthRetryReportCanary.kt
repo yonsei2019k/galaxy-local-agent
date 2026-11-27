@@ -43,7 +43,7 @@ class HeadlessAuthRetryReportCanary {
             val preferences=context.getSharedPreferences(fixture,0)
             return GoalWaitStore({preferences.getString("wait",null)},{check(preferences.edit().putString("wait",it).commit())})
         }
-        fun envelope(request:QueuedChatRequest)=Json.parseToJsonElement(request.toJson()).jsonObject
+        fun envelope(request:QueuedChatRequest)=JsonObject(Json.parseToJsonElement(request.toJson()).jsonObject+("goalActiveMs" to JsonPrimitive(100)))
         fun step(call:ToolCall,result:ToolResult)=HarnessStep(call,StepEvidence(call.name,result.verification,
             result.verificationSummary,effectNotApplied=result.effectNotApplied))
         val now=System.currentTimeMillis()

@@ -81,8 +81,8 @@ class CloudAgentFinalsTest {
                 ToolResult(callId,true,body,VerificationState.VERIFIED))
         }
         val screen=observation(2,"read_screen","private-screen")
-        fun progress(count:String,askedToSave:Boolean):String?{
-            val page=observation(1,"read_app_browser_page","""{"sameSessionPdfCount":$count,"text":"private-page"}""")
+        fun progress(count:String,askedToSave:Boolean,pageTool:String="read_app_browser_page"):String?{
+            val page=observation(1,pageTool,"""{"sameSessionPdfCount":$count,"text":"private-page"}""")
             val reads=listOf(page,screen)
             val required=reads.map{it.proposal.tool}.toSet() + if(askedToSave)setOf("save_browser_pdf") else emptySet()
             val steps=reads.map{HarnessStep(it.proposal.tool,it.proposal.arguments,StepEvidence(it.proposal.tool,VerificationState.VERIFIED,""))}
@@ -90,6 +90,7 @@ class CloudAgentFinalsTest {
             return CloudAgentFinals.browserReadProgress(required,reads,steps)
         }
         val saved=progress("2",true)!!
+        assertTrue(progress("2",true,"read_pc_browser_page")!!.startsWith("PC 브라우저"))
         assertTrue(saved.contains("2개"));assertTrue(saved.contains("저장은 실행하지 않았어요"))
         assertFalse(saved.contains("private"))
         assertTrue(progress("0",true)!!.contains("마지막으로 읽은 화면"))

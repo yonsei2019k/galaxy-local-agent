@@ -37,9 +37,11 @@ class GoalObservationProgressTest {
         return decisions
     }
 
-    @Test fun repeatingTheSameStatusReadWithTheSameObservationPausesAfterThreeSegments() {
+    @Test fun repeatingTheSameStatusReadWaitsForAnotherAttemptWithoutClaimingProgress() {
         val decisions=chain(List(4) {"job: running 40%"})
-        assertEquals(GoalSegmentDecision.Pause(GoalAutopilotPauseReason.NO_PROGRESS),decisions.last())
+        val last=(decisions.last() as GoalSegmentDecision.Continue).binding
+        assertEquals(2,last.noProgressSegments)
+        assertEquals(1,last.transientRetries)
         assertEquals(4,decisions.size)
     }
     @Test fun aRepeatedReadWhoseActualObservationChangesIsProgress() {
@@ -49,7 +51,9 @@ class GoalObservationProgressTest {
     }
     @Test fun aToolWhoseOutputAlwaysChangesNeverCountsAsProgressByItself() {
         val decisions=chain(listOf("10:00","10:01","10:02","10:03"),tool="get_current_datetime")
-        assertEquals(GoalSegmentDecision.Pause(GoalAutopilotPauseReason.NO_PROGRESS),decisions.last())
+        val last=(decisions.last() as GoalSegmentDecision.Continue).binding
+        assertEquals(2,last.noProgressSegments)
+        assertEquals(2,last.transientRetries)
     }
     @Test fun observationDigestsAreHostComputedOnlyForVerifiedReadsAndSurviveTheLedger() {
         val call=ToolCall("w","save_note",buildJsonObject {put("content","QA")})

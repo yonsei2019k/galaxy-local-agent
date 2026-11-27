@@ -27,7 +27,8 @@ object CloudAgentFinals {
         return body
     }
 
-    internal val browserReadTools=setOf("read_app_browser_page","read_screen")
+    internal val browserPageReads=setOf("read_app_browser_page","read_pc_browser_page")
+    internal val browserReadTools=browserPageReads+"read_screen"
 
     internal fun unfinishedNotice(actual:Collection<PhoneAgentExecution>):String {
         val lastBrowser=actual.lastOrNull { it.proposal.tool in com.user.localagent.core.PcBrowserToolCatalog.names ||
@@ -97,13 +98,13 @@ object CloudAgentFinals {
                     step.evidence.effectNotApplied || local.withheldFromCloud || !local.result.success ||
                     local.result.verification!=VerificationState.VERIFIED || local.result.effectNotApplied
             })return null
-        val last=actual.lastOrNull { it.proposal.tool=="read_app_browser_page" } ?: return null
+        val last=actual.lastOrNull { it.proposal.tool in browserPageReads } ?: return null
         val count=runCatching {
             val field=Json.parseToJsonElement(last.result.content).jsonObject["sameSessionPdfCount"] as? JsonPrimitive
             field?.takeUnless { it.isString }?.intOrNull?.takeIf { it in 0..120 }
         }.getOrNull() ?: return null
         return buildString {
-            append("앱 브라우저에서 페이지를 읽었어요.")
+            append(if(last.proposal.tool=="read_pc_browser_page") "PC 브라우저에서 페이지를 읽었어요." else "앱 브라우저에서 페이지를 읽었어요.")
             if(actual.any { it.proposal.tool=="read_screen" })append(" 휴대폰 화면도 확인했어요.")
             if("save_browser_pdf" in required){
                 if(count==0)append(" 마지막으로 읽은 화면에서는 바로 저장할 수 있는 PDF 링크를 찾지 못했어요.")

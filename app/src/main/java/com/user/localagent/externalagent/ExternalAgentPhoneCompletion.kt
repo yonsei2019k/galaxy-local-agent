@@ -55,8 +55,8 @@ object ExternalAgentPhoneCompletion {
         }
         val required=if(browserReadsOnly){
             val observed=actual.map { it.proposal.tool }.toSet()
-            require(plan.requiredTools.all { it in CloudAgentFinals.browserReadTools || it in setOf("open_app_browser_page","app_browser_action","save_browser_pdf","save_public_pdf") })
-            require("read_app_browser_page" in observed && plan.requiredTools.containsAll(observed))
+            require(plan.requiredTools.all { it in CloudAgentFinals.browserReadTools || it in com.user.localagent.core.PcBrowserToolCatalog.names || it in setOf("open_app_browser_page","app_browser_action","save_browser_pdf","save_public_pdf") })
+            require(observed.any {it in CloudAgentFinals.browserPageReads} && plan.requiredTools.containsAll(observed))
             require(actual.all { it.proposal.tool in CloudAgentFinals.browserReadTools &&
                 !it.withheldFromCloud && it.result.success && !it.result.effectNotApplied &&
                 it.result.verification==com.user.localagent.core.VerificationState.VERIFIED })
