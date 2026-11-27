@@ -1,0 +1,1468 @@
+{
+ "meta": {
+  "viewBox": [
+   48,
+   48
+  ],
+  "rules": "soft 3D clay icons (owner direction 2026-11-28) for the bottom tabs, the composer and the menu rows: one character-palette color per icon; a ground shadow, a darker clay side (the body shifted down), a top-lit body gradient, a white highlight and dark details; gradients are in viewBox coordinates; no outlines, no text; legible at 20-24px"
+ },
+ "clay": {
+  "chat": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#DAECFF"
+      ],
+      [
+       0.45,
+       "#ACD5FF"
+      ],
+      [
+       1,
+       "#7BADE0"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#7FB1E3"
+      ],
+      [
+       1,
+       "#5B93CC"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "rect": [
+      6,
+      10.2,
+      36,
+      27,
+      13
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "d": "M13 32.2 L10.5 42.7 Q10.2 44.2 11.6 43.4 L24 35.2 Z",
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      6,
+      8,
+      36,
+      27,
+      13
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "d": "M13 30 L10.5 40.5 Q10.2 42 11.6 41.2 L24 33 Z",
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      16,
+      13,
+      7,
+      2.4
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "circle": [
+      16,
+      21.5,
+      2.8
+     ],
+     "fill": "#5B93CC"
+    },
+    {
+     "circle": [
+      24,
+      21.5,
+      2.8
+     ],
+     "fill": "#5B93CC"
+    },
+    {
+     "circle": [
+      32,
+      21.5,
+      2.8
+     ],
+     "fill": "#5B93CC"
+    }
+   ]
+  },
+  "explore": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#E4F2D3"
+      ],
+      [
+       0.45,
+       "#C4E39E"
+      ],
+      [
+       1,
+       "#91B769"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#95BB6D"
+      ],
+      [
+       1,
+       "#6F9A45"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "circle": [
+      24,
+      25.2,
+      17
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      24,
+      23,
+      17
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      16,
+      12,
+      6,
+      2.4
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "circle": [
+      24,
+      23,
+      11.5
+     ],
+     "fill": "#EEF7E2",
+     "opacity": 0.55
+    },
+    {
+     "d": "M24 12.5 L28.4 23 L19.6 23 Z",
+     "fill": "#E8664F"
+    },
+    {
+     "d": "M24 33.5 L19.6 23 L28.4 23 Z",
+     "fill": "#6F9A45"
+    },
+    {
+     "circle": [
+      24,
+      23,
+      2.6
+     ],
+     "fill": "#FFFFFF"
+    }
+   ]
+  },
+  "archive": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#FFEEBF"
+      ],
+      [
+       0.45,
+       "#FFD970"
+      ],
+      [
+       1,
+       "#DFB046"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#E1B44A"
+      ],
+      [
+       1,
+       "#C9952A"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "rect": [
+      9,
+      20.2,
+      30,
+      21,
+      6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      6,
+      11.2,
+      36,
+      11,
+      5
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      9,
+      18,
+      30,
+      21,
+      6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      6,
+      9,
+      36,
+      11,
+      5
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      15,
+      12.4,
+      6,
+      1.8
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "rect": [
+      18,
+      25,
+      12,
+      4.4,
+      2.2
+     ],
+     "fill": "#C9952A"
+    }
+   ]
+  },
+  "me": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#FFDEE8"
+      ],
+      [
+       0.45,
+       "#FFB5CC"
+      ],
+      [
+       1,
+       "#E88DA7"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#EA90AA"
+      ],
+      [
+       1,
+       "#D9728F"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "circle": [
+      12.5,
+      15.2,
+      6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      35.5,
+      15.2,
+      6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      24,
+      27.7,
+      16
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      12.5,
+      13,
+      6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      35.5,
+      13,
+      6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      24,
+      25.5,
+      16
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      15,
+      16,
+      4.5,
+      1.8
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "ellipse": [
+      24,
+      27.5,
+      11,
+      9
+     ],
+     "fill": "#FFF1E4"
+    },
+    {
+     "circle": [
+      20,
+      26.5,
+      1.9
+     ],
+     "fill": "#1D1B22"
+    },
+    {
+     "circle": [
+      28,
+      26.5,
+      1.9
+     ],
+     "fill": "#1D1B22"
+    },
+    {
+     "d": "M21.6 30.4 Q24 32.4 26.4 30.4",
+     "stroke": "#1D1B22",
+     "sw": 1.6
+    },
+    {
+     "ellipse": [
+      16.6,
+      30.6,
+      2.2,
+      1.2
+     ],
+     "fill": "#FF7D93",
+     "opacity": 0.45
+    },
+    {
+     "ellipse": [
+      31.4,
+      30.6,
+      2.2,
+      1.2
+     ],
+     "fill": "#FF7D93",
+     "opacity": 0.45
+    }
+   ]
+  },
+  "contacts": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#FFDFD0"
+      ],
+      [
+       0.45,
+       "#FFB797"
+      ],
+      [
+       1,
+       "#E89172"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#EA9475"
+      ],
+      [
+       1,
+       "#D9785A"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "circle": [
+      31.5,
+      16.2,
+      5.5
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      19,
+      18.2,
+      7
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      23,
+      24.2,
+      18,
+      15,
+      7
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      7,
+      27.2,
+      24,
+      15,
+      7.5
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      31.5,
+      14,
+      5.5
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      19,
+      16,
+      7
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      23,
+      22,
+      18,
+      15,
+      7
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      7,
+      25,
+      24,
+      15,
+      7.5
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      16,
+      12.5,
+      3.2,
+      1.6
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    }
+   ]
+  },
+  "attach": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#E9D6C8"
+      ],
+      [
+       0.45,
+       "#CFA484"
+      ],
+      [
+       1,
+       "#9E795E"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#A27C61"
+      ],
+      [
+       1,
+       "#7E5C44"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      43.5,
+      11,
+      2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "rect": [
+      19.5,
+      9.2,
+      9,
+      32,
+      4.5
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      8,
+      20.7,
+      32,
+      9,
+      4.5
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      19.5,
+      7,
+      9,
+      32,
+      4.5
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      8,
+      18.5,
+      32,
+      9,
+      4.5
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      22,
+      10.5,
+      1.6,
+      2.4
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    }
+   ]
+  },
+  "mic": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#FFDFD0"
+      ],
+      [
+       0.45,
+       "#FFB797"
+      ],
+      [
+       1,
+       "#E89172"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#EA9475"
+      ],
+      [
+       1,
+       "#D9785A"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      45,
+      11,
+      2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "rect": [
+      16,
+      7.2,
+      16,
+      25,
+      8
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      21.5,
+      35.2,
+      5,
+      6,
+      2
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      14,
+      40.2,
+      20,
+      4.5,
+      2.25
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      16,
+      5,
+      16,
+      25,
+      8
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      21.5,
+      33,
+      5,
+      6,
+      2
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      14,
+      38,
+      20,
+      4.5,
+      2.25
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      20,
+      9,
+      2.4,
+      1.6
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "d": "M10.5 20.5 C10.5 29.5 16 34.5 24 34.5 C32 34.5 37.5 29.5 37.5 20.5",
+     "stroke": "#D9785A",
+     "sw": 3.4
+    },
+    {
+     "rect": [
+      19.5,
+      13,
+      9,
+      2.4,
+      1.2
+     ],
+     "fill": "#D9785A",
+     "opacity": 0.45
+    },
+    {
+     "rect": [
+      19.5,
+      18,
+      9,
+      2.4,
+      1.2
+     ],
+     "fill": "#D9785A",
+     "opacity": 0.45
+    }
+   ]
+  },
+  "voice": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#E7DDFF"
+      ],
+      [
+       0.45,
+       "#C9B4FF"
+      ],
+      [
+       1,
+       "#A085E0"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#A389E3"
+      ],
+      [
+       1,
+       "#8466CC"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      45.5,
+      15,
+      2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "rect": [
+      5.5,
+      21.2,
+      6,
+      10,
+      3
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      13.5,
+      15.2,
+      6,
+      22,
+      3
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      21,
+      9.2,
+      6,
+      34,
+      3
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      28.5,
+      14.2,
+      6,
+      24,
+      3
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      36.5,
+      20.2,
+      6,
+      12,
+      3
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      5.5,
+      19,
+      6,
+      10,
+      3
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      13.5,
+      13,
+      6,
+      22,
+      3
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      21,
+      7,
+      6,
+      34,
+      3
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      28.5,
+      12,
+      6,
+      24,
+      3
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "rect": [
+      36.5,
+      18,
+      6,
+      12,
+      3
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      24,
+      10.5,
+      1.4,
+      1.6
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    }
+   ]
+  },
+  "sparkle": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#FFEEBF"
+      ],
+      [
+       0.45,
+       "#FFD970"
+      ],
+      [
+       1,
+       "#DFB046"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#E1B44A"
+      ],
+      [
+       1,
+       "#C9952A"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "circle": [
+      24,
+      25.7,
+      15
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      24,
+      23.5,
+      15
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      17,
+      13.5,
+      4,
+      1.6
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "d": "M24 12 Q25.6 21.9 35.5 23.5 Q25.6 25.1 24 35 Q22.4 25.1 12.5 23.5 Q22.4 21.9 24 12 Z",
+     "fill": "#FFFFFF"
+    },
+    {
+     "circle": [
+      33,
+      14,
+      2.4
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.85
+    }
+   ]
+  },
+  "image": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#DAECFF"
+      ],
+      [
+       0.45,
+       "#ACD5FF"
+      ],
+      [
+       1,
+       "#7BADE0"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#7FB1E3"
+      ],
+      [
+       1,
+       "#5B93CC"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      44.5,
+      13,
+      2.2
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "rect": [
+      6,
+      11.2,
+      36,
+      30,
+      8
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "rect": [
+      6,
+      9,
+      36,
+      30,
+      8
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      14,
+      13,
+      5,
+      1.6
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "d": "M9 35 L18 24 L25 31 L30 26 L39 35 Q39 36 38 36 H10 Q9 36 9 35 Z",
+     "fill": "#5B93CC"
+    },
+    {
+     "circle": [
+      31,
+      17,
+      3.6
+     ],
+     "fill": "#FFE08A"
+    }
+   ]
+  },
+  "settings": {
+   "gradients": {
+    "body": {
+     "type": "linear",
+     "x1": 10,
+     "y1": 6,
+     "x2": 30,
+     "y2": 42,
+     "stops": [
+      [
+       0,
+       "#EFEDEB"
+      ],
+      [
+       0.45,
+       "#DCD8D2"
+      ],
+      [
+       1,
+       "#ACA69D"
+      ]
+     ]
+    },
+    "side": {
+     "type": "linear",
+     "x1": 0,
+     "y1": 6,
+     "x2": 0,
+     "y2": 46,
+     "stops": [
+      [
+       0,
+       "#B0AAA2"
+      ],
+      [
+       1,
+       "#8C857A"
+      ]
+     ]
+    }
+   },
+   "shapes": [
+    {
+     "ellipse": [
+      24,
+      45.5,
+      14,
+      1.8
+     ],
+     "fill": "#2A1D14",
+     "opacity": 0.12
+    },
+    {
+     "circle": [
+      38.5,
+      25.2,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      34.25,
+      35.45,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      24.0,
+      39.7,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      13.75,
+      35.45,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      9.5,
+      25.2,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      13.75,
+      14.95,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      24.0,
+      10.7,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      34.25,
+      14.95,
+      4.6
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      24,
+      25.2,
+      14
+     ],
+     "fill": "grad:side"
+    },
+    {
+     "circle": [
+      38.5,
+      23.0,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      34.25,
+      33.25,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      24.0,
+      37.5,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      13.75,
+      33.25,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      9.5,
+      23.0,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      13.75,
+      12.75,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      24.0,
+      8.5,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      34.25,
+      12.75,
+      4.6
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "circle": [
+      24,
+      23,
+      14
+     ],
+     "fill": "grad:body"
+    },
+    {
+     "ellipse": [
+      17,
+      13,
+      4.5,
+      1.6
+     ],
+     "fill": "#FFFFFF",
+     "opacity": 0.6
+    },
+    {
+     "circle": [
+      24,
+      23,
+      5.4
+     ],
+     "fill": "#8C857A"
+    }
+   ]
+  }
+ }
+}
