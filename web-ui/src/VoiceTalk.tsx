@@ -2,6 +2,7 @@ import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import type { Snapshot } from './bridge'
 import { Icon } from './Icon'
+import { StickerText } from './icons/Sticker'
 
 type Talk = NonNullable<Snapshot['voiceTalk']>
 const stages: Record<Talk['stage'], string> = {
@@ -24,11 +25,13 @@ export function VoiceTalk({ talk, onListen, onSend, onClose }: {
     : talk.stage === 'listening' ? '말하기 완료' : talk.stage === 'review' ? '다시 말하기' : '말하기'
   return <section className="voice-talk" aria-label="집순이 음성 대화">
     <div className="voice-talk-heading">
-      <Character choice={character} size={40} state={talk.stage === 'thinking' ? 'work' : 'none'} decorative />
+      <span className="voice-avatar" data-stage={talk.stage} aria-hidden="true">
+        <Character choice={character} size={40} state={talk.stage === 'thinking' ? 'work' : 'none'} decorative />
+      </span>
       <div><strong>음성 대화</strong><div role="status">{talk.blocked && talk.stage === 'idle' ? '채팅의 작업이나 확인을 먼저 마쳐 주세요.' : stages[talk.stage]}</div></div>
       <button type="button" className="text-button" onClick={onClose}>끝내기</button>
     </div>
-    {(talk.transcript || talk.reply) && <div className="voice-caption" dir="auto">{talk.transcript || talk.reply}</div>}
+    {(talk.transcript || talk.reply) && <div className="voice-caption" dir="auto"><StickerText text={talk.transcript || talk.reply} /></div>}
     <div className="voice-talk-actions">
       <button type="button" className="text-button" onClick={onListen} disabled={!canListen}>
         <Icon name="microphone" />{listenLabel}

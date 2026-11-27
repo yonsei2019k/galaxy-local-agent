@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
+import { StickerText } from './icons/Sticker'
 import './cloud-images.css'
 
 export type CloudImageJobState = 'queued' | 'running' | 'cancelling' | 'unknown' | 'failed' | 'completed'
@@ -131,8 +132,8 @@ export function CloudImages({ state, onPromptChange, onPickReference, onGenerate
               <Icon name={jobInfo.icon} />
             </span>
             <div className="cloud-images-job-text">
-              <strong>{jobInfo.label}</strong>
-              {jobInfo.detail && <p>{jobInfo.detail}</p>}
+              <strong><StickerText text={jobInfo.label} /></strong>
+              {jobInfo.detail && <p><StickerText text={jobInfo.detail} /></p>}
             </div>
             {(job.state === 'queued' || job.state === 'running') && (
               <button type="button" className="cloud-images-secondary" onClick={() => onCancel(job.id)}>취소</button>

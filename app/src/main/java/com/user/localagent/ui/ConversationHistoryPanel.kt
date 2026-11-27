@@ -125,29 +125,29 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
     LazyColumn(Modifier.fillMaxSize().imePadding(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
             if(!searchOnly)ZipHapSectionTitle("저장된 대화")
-            OutlinedTextField(value=queryDraft,onValueChange={if(it.length<=500)queryDraft=it},label={Text("대화 내용 검색")},
-                modifier=Modifier.fillMaxWidth().focusRequester(searchFocus),singleLine=true,shape=MaterialTheme.shapes.medium,
+            ZipOutlinedTextField(value=queryDraft,onValueChange={if(it.length<=500)queryDraft=it},label={Text("대화 내용 검색")},
+                modifier=Modifier.fillMaxWidth().focusRequester(searchFocus),singleLine=true,
+                leadingIcon={ZipIcon(com.user.localagent.runtime.R.drawable.zi_search,null,tint=ZipHapColors.TextSecondary,size=22.dp)},
                 keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search), keyboardActions=KeyboardActions(onSearch={submitSearch()}))
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                Button(enabled=!busy,onClick=::submitSearch){Text("검색")}
-                OutlinedButton(enabled=!busy,onClick={queryDraft="";query="";revision++}){Text("전체")}
+                ZipFilledButton(enabled=!busy,onClick=::submitSearch,modifier=Modifier.weight(1f)){Text("검색")}
+                ZipOutlinedButton(enabled=!busy,onClick={queryDraft="";query="";revision++},modifier=Modifier.weight(1f)){Text("전체")}
             }
             if(pageLoaded)ZipHapStatusTag("기록 ${total}개 · ${messages.size}개 표시")
         }}}
-        if(!searchOnly)item {SettingsDisclosure("대화 내보내기", "검색 범위의 기록을 파일로 저장해요.") {
+        if(!searchOnly)item {SettingsDisclosure("대화 내보내기", "검색 범위의 기록을 파일로 저장해요.", com.user.localagent.runtime.R.drawable.zi_download, ZipTone.Neutral) {
             Text("최대 10,000개·20MiB까지 선택한 위치에 저장해요. 일부만 저장되면 파일에 표시해요.",
                 style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                FilterChip(selected=exportFormat==ConversationExportFormat.JSON,onClick={exportFormat=ConversationExportFormat.JSON},label={Text("JSON")})
-                FilterChip(selected=exportFormat==ConversationExportFormat.TEXT,onClick={exportFormat=ConversationExportFormat.TEXT},label={Text("텍스트")})
+                ZipFilterChip(selected=exportFormat==ConversationExportFormat.JSON,onClick={exportFormat=ConversationExportFormat.JSON},label={Text("JSON")})
+                ZipFilterChip(selected=exportFormat==ConversationExportFormat.TEXT,onClick={exportFormat=ConversationExportFormat.TEXT},label={Text("텍스트")})
             }
-            OutlinedButton(enabled=pageLoaded&&!busy&&exportToken==null,onClick={prepareExport()}){Text("대화 파일 저장")}
+            ZipOutlinedButton(enabled=pageLoaded&&!busy&&exportToken==null,onClick={prepareExport()}){Text("대화 파일 저장")}
         }}
         if(busy)item{LinearProgressIndicator(modifier=Modifier.fillMaxWidth())}
         if(loadFailed)item {
-            Column {
-                Text("대화 기록을 불러오지 못했어요.")
-                TextButton(onClick={revision++}) { Text("다시 불러오기") }
+            ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_error,"대화 기록을 불러오지 못했어요.","") {
+                ZipSecondaryButton("다시 불러오기",{revision++},fullWidth=false)
             }
         } else if(pageLoaded && messages.isEmpty())item {
             Text(if(query.isEmpty()) "아직 저장된 대화가 없어요." else "이 단어를 포함한 대화가 없어요.")
@@ -159,11 +159,11 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
                 SelectionContainer{Text(message.text,maxLines=if(expanded)Int.MAX_VALUE else 8,style=MaterialTheme.typography.bodyMedium)}
                 Row{
                     TextButton(onClick={expanded=!expanded}){Text(if(expanded)"접기" else "전체 보기")}
-                    TextButton(enabled=!busy,onClick={deleteTarget=message}){Text("이 기록 삭제")}
+                    TextButton(enabled=!busy,onClick={deleteTarget=message}){Text("이 기록 삭제",color=ZipTone.Coral.content)}
                 }
             }}
         }
-        if(pageLoaded && cursor!=null)item{OutlinedButton(enabled=!busy,onClick={if(!busy){val next=cursor;busy=true;scope.launch {
+        if(pageLoaded && cursor!=null)item{ZipOutlinedButton(enabled=!busy,onClick={if(!busy){val next=cursor;busy=true;scope.launch {
             try {
                 val page=app.repository.messagePage(next,limit=50,query=query)
                 val visibleIds=messages.mapTo(mutableSetOf()){it.id}
@@ -177,7 +177,7 @@ fun ConversationHistoryPanel(app:AppContainer,searchOnly:Boolean=false,onStatus:
             finally{busy=false}
         }}},modifier=Modifier.fillMaxWidth()){Text("이전 기록 더 보기")}}
         if(!busy&&messages.isEmpty())item{
-            ZipHapCard {ZipHapSectionTitle(if(query.isBlank())"저장된 대화가 없어요." else "검색 결과가 없어요.")}
+            ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_archive,if(query.isBlank())"저장된 대화가 없어요." else "검색 결과가 없어요.","")
         }
     }
     deleteTarget?.let {target->AlertDialog(onDismissRequest={deleteTarget=null},title={Text("이 대화 기록을 삭제할까요?")},text={Text("이 메시지와 연결된 기억을 삭제하고 대화 요약을 초기화합니다. 내보낸 파일은 별도로 관리해야 합니다.")},confirmButton={TextButton(onClick={scope.launch {

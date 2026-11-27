@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,6 +26,13 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.CircularProgressIndicator
 
 /** Concise owner-facing facts from actual host events; never model chain-of-thought. */
 enum class UiWorkEventKind { RATIONALE, PLAN, TOOL, FILE, VERIFICATION, ANSWER, CONTEXT }
@@ -125,15 +131,18 @@ private fun TranscriptRow(event:UiRunActivityEvent){
     val evidence=displayedWorkEvidence(event)
     val accent=when(evidence){UiWorkEvidence.FAILED->ZipHapColors.Error;UiWorkEvidence.VERIFIED->ZipHapColors.Mint;UiWorkEvidence.PREPARED->ZipHapColors.SunText;else->ZipHapColors.TextSecondary}
     Column(Modifier.fillMaxWidth().testTag("activity_event_${event.id}"),verticalArrangement=Arrangement.spacedBy(2.dp)){
-        Text("● ${event.label}",style=MaterialTheme.typography.bodyMedium,color=if(evidence==UiWorkEvidence.FAILED)ZipHapColors.Error else ZipHapColors.TextPrimary)
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+            Box(Modifier.padding(top=8.dp).size(7.dp).clip(CircleShape).background(accent))
+            Text(event.label,style=MaterialTheme.typography.bodyMedium,color=if(evidence==UiWorkEvidence.FAILED)ZipHapColors.Error else ZipHapColors.TextPrimary)
+        }
         val result=listOfNotNull(event.detail.takeIf{it.isNotBlank()},
             workEvidenceLabel(evidence).takeIf{event.kind==UiWorkEventKind.TOOL||evidence==UiWorkEvidence.FAILED}).joinToString(" · ")
-        if(result.isNotBlank())Text("└ $result",style=MaterialTheme.typography.bodySmall,
-            color=accent,modifier=Modifier.padding(start=14.dp))
+        if(result.isNotBlank())Text(result,style=MaterialTheme.typography.bodySmall,
+            color=accent,modifier=Modifier.padding(start=15.dp))
         event.fileChanges.forEach{file->
             val operation=when(file.operation){UiFileChangeOperation.CREATED->"생성";UiFileChangeOperation.UPDATED->"수정";UiFileChangeOperation.DELETED->"삭제"}
-            Text("└ $operation ${file.path}",style=MaterialTheme.typography.bodySmall,
-                color=ZipHapColors.TextSecondary,modifier=Modifier.padding(start=14.dp))
+            Text("$operation ${file.path}",style=MaterialTheme.typography.bodySmall,
+                color=ZipHapColors.TextSecondary,modifier=Modifier.padding(start=15.dp))
         }
     }
 }
@@ -158,8 +167,10 @@ fun InlineRunActivityCard(activity:UiRunActivity,modifier:Modifier=Modifier,onOp
     val elapsed=if(elapsedSeconds>0)" · ${elapsedSeconds/60}분 ${elapsedSeconds%60}초"else""
     // Transcript style: no card border, a quiet header, then the thought/action lines in order.
     Column(modifier.fillMaxWidth().padding(bottom=10.dp).testTag("inline_activity_${activity.runId}"),verticalArrangement=Arrangement.spacedBy(6.dp)){
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-            Text("${if(activity.status=="running")"◐" else "●"} $status$elapsed · 도구 ${counts.tools}"+(if(counts.failed>0)" · 실패 ${counts.failed}" else ""),
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically){
+            if(activity.status=="running")CircularProgressIndicator(Modifier.size(10.dp),color=ZipHapColors.Cobalt,strokeWidth=1.5.dp)
+            else Box(Modifier.size(7.dp).clip(CircleShape).background(if(activity.status=="failed")ZipHapColors.Error else ZipHapColors.TextFaint))
+            Text("$status$elapsed · 도구 ${counts.tools}"+(if(counts.failed>0)" · 실패 ${counts.failed}" else ""),
                 style=MaterialTheme.typography.labelMedium,color=if(activity.status=="failed")ZipHapColors.Error else ZipHapColors.TextSecondary,modifier=Modifier.weight(1f))
             if(events.isNotEmpty())TextButton(onClick={chosenExpansion=!expanded;onExpandedChange?.invoke(!expanded)},modifier=Modifier.testTag("toggle_activity_${activity.runId}")){Text(if(expanded)"접기"else"펼치기")}
         }

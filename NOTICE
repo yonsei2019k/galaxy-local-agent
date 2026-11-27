@@ -21,3 +21,6 @@ OkHttp 5.3.2: Copyright Square, Inc., Apache License 2.0.
 https://square.github.io/okhttp/
 
 jsoup HTML parser 1.18.3: MIT License. See app/src/main/assets/licenses/jsoup.txt.
+
+SUIT Variable 2.0.5 (Sunn): SIL Open Font License 1.1. See app/src/main/assets/licenses/SUIT-OFL.txt.
+Jua (Woowahan Brothers): SIL Open Font License 1.1. See app/src/main/assets/licenses/Jua-OFL.txt.

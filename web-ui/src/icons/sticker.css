@@ -1,0 +1,8 @@
+/* Stickers sit in a line of text like a glyph: 1.25em, baseline-aligned, the original emoji kept as invisible
+   selectable text on top (copying the answer still gives the original characters). */
+.sticker { position: relative; display: inline-block; width: 1.3em; height: 1.3em; margin: 0 .06em; vertical-align: -.28em; line-height: 1; }
+.sticker-art { display: block; width: 100%; height: 100%; overflow: visible; }
+.sticker-source { position: absolute; inset: 0; overflow: hidden; color: transparent; opacity: 0; font-size: 1em; line-height: 1.3; white-space: nowrap; pointer-events: none; }
+.sticker--neutral .sticker-art { opacity: .85; }
+/* Headings and titles get slightly smaller stickers so the line keeps its rhythm. */
+:is(h2, h3, h4, .work-title, .header-work) .sticker { width: 1.15em; height: 1.15em; vertical-align: -.2em; }

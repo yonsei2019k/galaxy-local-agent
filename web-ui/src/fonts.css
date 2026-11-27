@@ -1,0 +1,14 @@
+@font-face {
+  font-family: 'SUIT Variable';
+  src: url('/fonts/SUIT-Variable.woff2') format('woff2-variations'), url('/fonts/SUIT-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Jua';
+  src: url('/fonts/Jua-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

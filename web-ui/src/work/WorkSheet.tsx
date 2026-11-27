@@ -4,6 +4,7 @@ import './work.css'
 import { Character } from '../character/Character'
 import { useCharacter } from '../character/useCharacter'
 import { Icon } from '../Icon'
+import { StickerText, withStickers } from '../icons/Sticker'
 import type { Task } from '../bridge'
 import { detailLine, friendlyStep, taskSteps, verbatimSteps, workPresentation } from './workPresentation'
 import { useWorkDuration } from './workHistory'
@@ -18,10 +19,10 @@ function HistoryRow({ task, onSelect }: { task: Task; onSelect?(id: string): voi
       onClick={() => onSelect?.(task.id)}>
       <span className="work-icon" aria-hidden="true"><Icon name={state.icon} /></span>
       <span className="work-text">
-        <span className="work-title" dir="auto">{task.label || '작업'}</span>
-        <span className="work-list-state">{[state.title, elapsed, detailLine(task.detail)].filter(Boolean).join(' · ')}</span>
+        <span className="work-title" dir="auto">{withStickers(task.label || '작업')}</span>
+        <span className="work-list-state"><StickerText text={[state.title, elapsed, detailLine(task.detail)].filter(Boolean).join(' · ')} /></span>
       </span>
-      <span className="work-chevron" aria-hidden="true">›</span>
+      <Icon name="chevronRight" className="work-chevron" />
     </button>
   </li>
 }
@@ -82,19 +83,19 @@ export function WorkSheet({ task, enabled, steps, history, onSelect, onBack, onC
     </div>}
     {task && presentation && <div className="sheet-body">
       {history && <button type="button" className="work-history-back" onClick={onBack}>
-        <span aria-hidden="true">‹</span> 작업 목록
+        <Icon name="back" /> 작업 목록
       </button>}
       <header className={`work-sheet-head work-card--${presentation.tone}`}>
         <Character choice={character} state={presentation.characterState} size={64} decorative />
         <div className="work-text">
-          <h2 className="work-sheet-title" dir="auto">{task.label || '작업'}</h2>
+          <h2 className="work-sheet-title" dir="auto">{withStickers(task.label || '작업')}</h2>
           <p className="work-state">{[presentation.title, elapsed].filter(Boolean).join(' · ')}</p>
         </div>
       </header>
-      {task.detail && <p className="work-sheet-detail" dir="auto">{task.detail}</p>}
+      {task.detail && <p className="work-sheet-detail" dir="auto"><StickerText text={task.detail} /></p>}
       {stepList.length > 0 && <section aria-label="진행 단계">
         <h2>진행 단계</h2>
-        <ol className="work-steps">{stepList.map(step => <li key={step} dir="auto">{step}</li>)}</ol>
+        <ol className="work-steps">{stepList.map(step => <li key={step} dir="auto"><StickerText text={step} /></li>)}</ol>
       </section>}
       {hasTiming ? <section aria-label="시간순 작업 기록">
         <h2>시간순 작업 기록</h2>
@@ -102,14 +103,14 @@ export function WorkSheet({ task, enabled, steps, history, onSelect, onBack, onC
           {item.at !== undefined && <time dateTime={new Date(item.at).toISOString()}>
             {new Date(item.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
           </time>}
-          <div>{friendlyStep(item.label) && <strong dir="auto">{friendlyStep(item.label)}</strong>}
-            {item.detail && <p dir="auto">{item.detail}</p>}</div>
+          <div>{friendlyStep(item.label) && <strong dir="auto"><StickerText text={friendlyStep(item.label)} /></strong>}
+            {item.detail && <p dir="auto"><StickerText text={item.detail} /></p>}</div>
         </li>)}</ol>
       </section> : evidence.length > 0 && <section aria-label="확인한 내용">
         <h2>확인한 내용</h2>
         <ul className="work-evidence">{evidence.map(item => <li key={item.id}>
-          {friendlyStep(item.label) && <div className="evidence-label">{friendlyStep(item.label)}</div>}
-          <p dir="auto">{item.detail}</p>
+          {friendlyStep(item.label) && <div className="evidence-label"><StickerText text={friendlyStep(item.label)} /></div>}
+          <p dir="auto"><StickerText text={item.detail} /></p>
         </li>)}</ul>
       </section>}
       {task.phase === 'waiting_goal' && task.canCancel && enabled &&

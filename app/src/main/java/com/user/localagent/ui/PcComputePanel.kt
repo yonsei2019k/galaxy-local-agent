@@ -57,9 +57,12 @@ import kotlinx.coroutines.*
         }
     }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-        Text(if(state.paired)"연결을 등록했어요" else "아직 연결된 컴퓨터가 없어요.",style=MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){
+            ZipIconTile(com.user.localagent.runtime.R.drawable.zi_chip,tone=if(state.paired)ZipTone.Mint else ZipTone.Neutral)
+            Text(if(state.paired)"연결을 등록했어요" else "아직 연결된 컴퓨터가 없어요.",Modifier.weight(1f),style=MaterialTheme.typography.titleSmall)
+        }
         Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
-            OutlinedButton(enabled=!busy&&!checking,onClick={connect()},modifier=Modifier.testTag("pc_connect")){Text(if(checking)"확인 중"else if(state.paired)"연결 확인"else"컴퓨터 연결")}
+            ZipOutlinedButton(enabled=!busy&&!checking,onClick={connect()},modifier=Modifier.testTag("pc_connect")){Text(if(checking)"확인 중"else if(state.paired)"연결 확인"else"컴퓨터 연결")}
             if(state.paired)TextButton(enabled=!busy&&!checking,onClick={connect(true)}){Text("다른 컴퓨터 연결")}
         }
         if(state.paired){
@@ -70,13 +73,13 @@ import kotlinx.coroutines.*
                 Text(state.status,style=MaterialTheme.typography.bodySmall)
                 Text("기존 PC 답변 연결",style=MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    FilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("내 PC")},modifier=Modifier.testTag("text_engine_local"))
-                    FilterChip(selected=state.claudeText,onClick={settings.claudeText(true)},enabled=!busy,label={Text("Claude")},modifier=Modifier.testTag("text_engine_claude"))
+                    ZipFilterChip(selected=!state.claudeText,onClick={settings.claudeText(false)},enabled=!busy,label={Text("내 PC")},modifier=Modifier.testTag("text_engine_local"))
+                    ZipFilterChip(selected=state.claudeText,onClick={settings.claudeText(true)},enabled=!busy,label={Text("Claude")},modifier=Modifier.testTag("text_engine_claude"))
                 }
                 if(state.claudeText)Text("Claude를 쓰면 대화와 작업 결과가 Anthropic으로 전송되고 별도 요금이 듭니다.",style=MaterialTheme.typography.bodySmall)
                 Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
-                    FilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("컴퓨터에서 만들기")})
-                    FilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("휴대폰에서 만들기")})
+                    ZipFilterChip(selected=state.preferPcImages,onClick={settings.preferPcImages(true)},enabled=!busy,label={Text("컴퓨터에서 만들기")})
+                    ZipFilterChip(selected=!state.preferPcImages,onClick={settings.preferPcImages(false)},enabled=!busy,label={Text("휴대폰에서 만들기")})
                 }
                 PcImageModelSelector(state.imageModelId,{settings.imageModel(it)},enabled=!busy)
                 SettingsDisclosure("연결 시험 도구","문제가 있을 때 시험 요청과 기록을 확인해요."){
@@ -87,7 +90,7 @@ import kotlinx.coroutines.*
                             Text("컴퓨터에서 시험 요청 받기",style=MaterialTheme.typography.labelLarge)
                             Text("집합이 실행 중일 때 연결된 PC가 시험 요청을 보내고 결과를 받아요. 승인할 작업은 휴대폰에서 확인해요.",style=MaterialTheme.typography.bodySmall)
                         }
-                        Switch(checked=remoteOn,onCheckedChange={on->
+                        Switch(colors=zipSwitchColors(),checked=remoteOn,onCheckedChange={on->
                             remote.setEnabled(on)
                             remoteOn=remote.enabled()
                             onStatus(if(on)"PC 원격 시험 요청을 허용했습니다." else "PC 원격 시험 요청을 껐습니다.")
@@ -114,9 +117,9 @@ import kotlinx.coroutines.*
                         Text("PC에서 웹 작업",style=MaterialTheme.typography.labelLarge)
                         Text("PC 화면에 창을 띄우지 않고 웹 작업을 해요. 로그인과 인증은 휴대폰에서 직접 진행해요. 결제·주문·예약 확정·전송이나 검색 외 입력도 휴대폰에서 승인해요.",style=MaterialTheme.typography.bodySmall)
                     }
-                    Switch(checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
+                    Switch(colors=zipSwitchColors(),checked=browserOn,onCheckedChange={on->browser.setEnabled(on);browserOn=browser.enabled()},modifier=Modifier.testTag("pc_browser_agent"))
                 }
-                TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제")}
+                TextButton(enabled=!busy&&!checking,onClick={settings.forget();onStatus("PC 연결을 해제했습니다.")}){Text("PC 연결 해제",color=ZipTone.Coral.content)}
             }
         }
     }
@@ -140,15 +143,15 @@ import kotlinx.coroutines.*
         Text("같은 공유기의 PC를 찾은 뒤, 그 PC에 표시되는 일회용 코드를 입력합니다. 한 번 연결하면 다음부터 자동으로 확인합니다.")
         Text(status)
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-        if(challenge==null)candidates.forEach{candidate->OutlinedButton(enabled=!busy,onClick={scope.launch{
+        if(challenge==null)candidates.forEach{candidate->ZipOutlinedButton(enabled=!busy,onClick={scope.launch{
             busy=true
             try{challenge=client.start(candidate);code="";status="PC에 뜬 연결 창의 12자리 코드를 입력해주세요. 코드는 5분 동안 유효합니다."}
             catch(cancel:CancellationException){throw cancel}catch(_:Exception){status="PC에서 연결 코드를 준비하지 못했습니다. 잠시 후 다시 시도해주세요."}
             finally{busy=false}
         }},modifier=Modifier.fillMaxWidth()){Text(candidate.title)}}
         challenge?.let{pending->
-            OutlinedTextField(value=code,onValueChange={if(it.length<=18)code=it},label={Text("PC 연결 코드")},placeholder={Text("XXXX-XXXX-XXXX")},singleLine=true,enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("pc_pairing_code"))
-            Button(enabled=!busy&&code.replace("-","").count{!it.isWhitespace()}==12,onClick={scope.launch{
+            ZipOutlinedTextField(value=code,onValueChange={if(it.length<=18)code=it},label={Text("PC 연결 코드")},placeholder={Text("XXXX-XXXX-XXXX")},singleLine=true,enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("pc_pairing_code"))
+            ZipFilledButton(enabled=!busy&&code.replace("-","").count{!it.isWhitespace()}==12,onClick={scope.launch{
                 busy=true
                 try{client.finish(pending,code);onConnected()}
                 catch(cancel:CancellationException){throw cancel}catch(_:Exception){status="연결 코드를 확인하지 못했습니다. PC의 코드와 유효 시간을 확인해주세요."}
@@ -165,13 +168,13 @@ fun PcImageModelSelector(selectedId:String,onSelect:(String)->Unit,enabled:Boole
     Column(verticalArrangement=Arrangement.spacedBy(4.dp)){
         Text("PC 이미지 모델",style=MaterialTheme.typography.labelLarge)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID,
+            ZipFilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.SDXL_ID,
                 onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.SDXL_ID)},enabled=enabled,
                 label={Text("SDXL")},modifier=Modifier.testTag("pc_image_model_sdxl"))
-            FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,
+            ZipFilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.QUALITY_ID,
                 onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.QUALITY_ID)},enabled=enabled,
                 label={Text("Qwen · 20B")},modifier=Modifier.testTag("pc_image_model_qwen"))
-            FilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.FAST_ID,
+            ZipFilterChip(selected=selectedId==com.user.localagent.core.PcImageModelCatalog.FAST_ID,
                 onClick={onSelect(com.user.localagent.core.PcImageModelCatalog.FAST_ID)},enabled=enabled,
                 label={Text("FLUX · 4B")},modifier=Modifier.testTag("pc_image_model_flux"))
         }

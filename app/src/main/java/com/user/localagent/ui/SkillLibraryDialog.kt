@@ -48,9 +48,11 @@ import kotlinx.coroutines.withContext
         finally{loading=false}
     }
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)){
-        Surface(Modifier.fillMaxWidth(.95f).fillMaxHeight(.9f),shape=RoundedCornerShape(24.dp),tonalElevation=6.dp){
+        Surface(Modifier.fillMaxWidth(.95f).fillMaxHeight(.9f),shape=RoundedCornerShape(ZipHapTokens.RadiusSheet),color=ZipHapColors.Surface,tonalElevation=0.dp){
             Column(Modifier.fillMaxSize().padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                    ZipIconTile(com.user.localagent.runtime.R.drawable.zi_tools,tone=ZipTone.Lilac)
+                    Spacer(Modifier.width(12.dp))
                     Text(selected?.title?:"스킬 라이브러리",style=MaterialTheme.typography.titleLarge,modifier=Modifier.weight(1f))
                     if(selected!=null)TextButton(onClick={selected=null;error=null}){Text("목록")}
                     TextButton(onClick=onDismiss){Text("닫기")}
@@ -59,12 +61,13 @@ import kotlinx.coroutines.withContext
                 if(loading)LinearProgressIndicator(Modifier.fillMaxWidth())
                 error?.let {Text(it,color=MaterialTheme.colorScheme.error)}
                 if(selected==null){
-                    OutlinedTextField(query,{query=it.take(200)},Modifier.fillMaxWidth(),label={Text("이름·설명 검색")},singleLine=true)
+                    ZipOutlinedTextField(query,{query=it.take(200)},Modifier.fillMaxWidth(),label={Text("이름·설명 검색")},singleLine=true,
+                        leadingIcon={ZipIcon(com.user.localagent.runtime.R.drawable.zi_search,null,tint=ZipHapColors.TextSecondary,size=22.dp)})
                     val rows=metadata.filter {query.isBlank()||listOf(it.id,it.title,it.description,it.category).any {value->value.contains(query.trim(),ignoreCase=true)}}
                     Text("번들 ${metadata.size}개 · 표시 ${rows.size}개",style=MaterialTheme.typography.labelMedium)
                     LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)){
                         items(rows,key={it.id}){item->
-                            OutlinedCard(onClick={selected=item},modifier=Modifier.fillMaxWidth()){
+                            ZipCard(onClick={selected=item},modifier=Modifier.fillMaxWidth(),color=ZipHapColors.SurfaceSunken){
                                 Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
                                     Text(item.title,style=MaterialTheme.typography.titleMedium)
                                     Text(item.description,style=MaterialTheme.typography.bodyMedium)
@@ -91,11 +94,11 @@ import kotlinx.coroutines.withContext
                         if(entry.limitations.isNotEmpty())item {
                             Column(verticalArrangement=Arrangement.spacedBy(5.dp)){
                                 Text("지원 범위",style=MaterialTheme.typography.titleSmall)
-                                entry.limitations.forEach {Text("• $it",style=MaterialTheme.typography.bodySmall)}
+                                entry.limitations.forEach {ZipBulletText(it,style=MaterialTheme.typography.bodySmall)}
                             }
                         }
                         content?.let {read->item {
-                            HorizontalDivider()
+                            ZipInsetDivider(inset = 0.dp)
                             SelectionContainer {Text(read.body,style=MaterialTheme.typography.bodyMedium)}
                             Text("SHA-256 ${read.sha256}",style=MaterialTheme.typography.labelSmall)
                         }}

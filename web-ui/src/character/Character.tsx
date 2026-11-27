@@ -66,8 +66,8 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
       </g>
       </g>
       {exprKey === 'sleepy' && <g data-layer="zz">
-        <text x="150" y="74" fontSize="18" fill={c.dark} fontFamily="Jua, sans-serif">z</text>
-        <text x="162" y="58" fontSize="24" fill={c.dark} fontFamily="Jua, sans-serif">Z</text>
+        <text x="150" y="74" fontSize="18" fill={c.dark} style={{ fontFamily: 'var(--font-display)' }}>z</text>
+        <text x="162" y="58" fontSize="24" fill={c.dark} style={{ fontFamily: 'var(--font-display)' }}>Z</text>
       </g>}
       {state === 'work' && <g data-layer="prop-work">
         <path d="M60 150 H140 A6 6 0 0 1 146 156 V192 H54 V156 A6 6 0 0 1 60 150 Z" fill="#E9ECF5" stroke={INK} strokeWidth="4" strokeLinejoin="round" />
@@ -85,7 +85,7 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
         </g>
         <g data-layer="speech-bubble">
         <path d="M128 16 H182 A14 14 0 0 1 182 44 H150 L142 52 L144 44 H128 A14 14 0 0 1 128 16 Z" fill="#FFFFFF" stroke={INK} strokeWidth="3" strokeLinejoin="round" />
-        <text x="155" y="34" fontSize="15" textAnchor="middle" fill="#8A5A00">···</text>
+        <circle cx="145" cy="30" r="2.6" fill="#8A5A00" /><circle cx="155" cy="30" r="2.6" fill="#8A5A00" /><circle cx="165" cy="30" r="2.6" fill="#8A5A00" />
         </g>
       </g>}
       {state === 'done' && <g data-layer="prop-done">
@@ -103,7 +103,7 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
         </g>
         <g data-layer="exclamation">
         <circle cx="40" cy="40" r="17" fill="#FFE9E2" stroke="#C9401F" strokeWidth="3" />
-        <text x="40" y="49" fontSize="24" textAnchor="middle" fill="#C9401F" fontFamily="Jua, sans-serif">!</text>
+        <text x="40" y="49" fontSize="24" textAnchor="middle" fill="#C9401F" style={{ fontFamily: 'var(--font-display)' }}>!</text>
         </g>
       </g>}
     </svg>

@@ -27,14 +27,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DrawerValue
@@ -92,6 +89,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.material3.AssistChip
 
 /** Stable observable model label for accessibility and instrumentation assertions. */
 val ModelLabel = SemanticsPropertyKey<String>("ModelLabel")
@@ -306,9 +304,9 @@ fun ChatWorkspace(
                 color = ZipHapColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             WorkspaceModelSelector(selectedModelId, onModelChange,composerReady)
         }
-        HorizontalDivider(color = ZipHapColors.OutlineSoft, thickness = 1.dp)
+        ZipInsetDivider(inset = 0.dp)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            AssistChip(onClick=onProjectClick,label={Text("프로젝트 · ${projectName.take(28)}",maxLines=1,overflow=TextOverflow.Ellipsis)},modifier=Modifier.testTag("project_selector"))
+            ZipAssistChip(onClick=onProjectClick,label={Text("프로젝트 · ${projectName.take(28)}",maxLines=1,overflow=TextOverflow.Ellipsis)},modifier=Modifier.testTag("project_selector"))
             if(branches.isNotEmpty())WorkspaceBranchSelector(branches,currentBranchId,onSelectBranch)
         }
         val workSummary=summaryActivity(activityByMessageId.values.filter{activityMatchesMessage(it,composerKey,it.assistantMessageId)&&it.assistantMessageId in activeIds},composerKey,activeRunKey,busy)
@@ -366,9 +364,9 @@ fun ChatWorkspace(
                             if(line.role=="assistant") {
                                 GeneratedImageChatPreview(render.artifactText)
                                 FileArtifactChatPreview(render.artifactText)
-                                if("[[screen:sms-schedules]]" in render.artifactText)TextButton(onClick={navigate(8)}){Text("일정 후보 확인·저장 ›")}
-                                if("[[screen:imports]]" in render.artifactText)TextButton(onClick={navigate(5)}){Text("대화 자료 연결 ›")}
-                                if("[[screen:web-research]]" in render.artifactText)TextButton(onClick={navigate(9)}){Text("검색 결과·판매 링크 열기 ›")}
+                                if("[[screen:sms-schedules]]" in render.artifactText)TextButton(onClick={navigate(8)}){Text("일정 후보 확인·저장");ZipIcon(com.user.localagent.runtime.R.drawable.zi_chevron_right,null,size=18.dp)}
+                                if("[[screen:imports]]" in render.artifactText)TextButton(onClick={navigate(5)}){Text("대화 자료 연결");ZipIcon(com.user.localagent.runtime.R.drawable.zi_chevron_right,null,size=18.dp)}
+                                if("[[screen:web-research]]" in render.artifactText)TextButton(onClick={navigate(9)}){Text("검색 결과·판매 링크 열기");ZipIcon(com.user.localagent.runtime.R.drawable.zi_chevron_right,null,size=18.dp)}
                                 AnswerContinuationStatus(line.id,render.answer,onContinue)
                             }
                             if(line.text.isNotEmpty())MessageActionRow(line.id,line.text,line.role=="user",messageActions,busy)
@@ -393,7 +391,7 @@ fun ChatWorkspace(
                                 automaticScroll = true
                                 try { listState.animateScrollToItem(anchorIndex) } finally { automaticScroll = false }
                             }
-                        }) { Text("최근 답변 ↓", color = ZipHapColors.TextPrimary) }
+                        }) { Text("최근 답변", color = ZipHapColors.TextPrimary); ZipIcon(com.user.localagent.runtime.R.drawable.zi_arrow_down, null, tint = ZipHapColors.TextPrimary, size = 18.dp) }
                     }
                 }
             }
@@ -412,14 +410,14 @@ fun ChatWorkspace(
             }
         }
         if(attachments.isNotEmpty())Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            attachments.forEach {item->AssistChip(enabled=composerReady,onClick={if(composerReady)attachmentInfo=item},label={Text("${item.kind} · ${item.label.take(32)}",maxLines=1,overflow=TextOverflow.Ellipsis)},trailingIcon={
-                IconButton(enabled=composerReady&&!busy,onClick={onRemoveAttachment(item.id)},modifier=Modifier.size(24.dp).semantics {contentDescription="첨부 제거 · ${item.label}"}){Text("×")}
+            attachments.forEach {item->ZipAssistChip(enabled=composerReady,onClick={if(composerReady)attachmentInfo=item},label={Text("${item.kind} · ${item.label.take(32)}",maxLines=1,overflow=TextOverflow.Ellipsis)},trailingIcon={
+                IconButton(enabled=composerReady&&!busy,onClick={onRemoveAttachment(item.id)},modifier=Modifier.size(24.dp).semantics {contentDescription="첨부 제거 · ${item.label}"}){ZipIcon(com.user.localagent.runtime.R.drawable.zi_close,null,size=16.dp)}
             })}
         }
         if(busy)Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                if(onQueue!=null)FilterChip(enabled=composerReady,selected=!steering,onClick={applyToActiveRun=false},label={Text("다음 작업으로 예약")},modifier=Modifier.testTag("submit_mode_queue"))
-                if(onSteer!=null)FilterChip(selected=steering,onClick={applyToActiveRun=true},enabled=canSteer,label={Text("현재 작업에 반영")},modifier=Modifier.testTag("submit_mode_steer"))
+                if(onQueue!=null)ZipFilterChip(enabled=composerReady,selected=!steering,onClick={applyToActiveRun=false},label={Text("다음 작업으로 예약")},modifier=Modifier.testTag("submit_mode_queue"))
+                if(onSteer!=null)ZipFilterChip(selected=steering,onClick={applyToActiveRun=true},enabled=canSteer,label={Text("현재 작업에 반영")},modifier=Modifier.testTag("submit_mode_steer"))
             }
             TextButton(onClick=onStop,modifier=Modifier.testTag("stop_button")){Text("중지",color=ZipHapColors.Error)}
         }
@@ -518,13 +516,13 @@ private fun WorkspaceBranchSelector(branches:List<UiChatBranch>,selectedId:Strin
     val index=branches.indexOfFirst{it.id==selectedId}
     val selected=branches.getOrNull(index)
     Box {
-        AssistChip(onClick={expanded=true},label={Text(if(selected==null)"대화 버전"else "버전 ${index+1} · ${selected.title.take(22)}",maxLines=1,overflow=TextOverflow.Ellipsis)},
+        ZipAssistChip(onClick={expanded=true},label={Text(if(selected==null)"대화 버전"else "버전 ${index+1} · ${selected.title.take(22)}",maxLines=1,overflow=TextOverflow.Ellipsis)},
             modifier=Modifier.testTag("branch_selector").semantics{contentDescription="보존된 대화 버전 선택";stateDescription=selected?.title?:"불러오는 중"})
         DropdownMenu(expanded=expanded,onDismissRequest={expanded=false},modifier=Modifier.heightIn(max=360.dp)){
             branches.forEachIndexed{position,branch->DropdownMenuItem(
                 text={Text("${position+1}. ${branch.title}",maxLines=2,overflow=TextOverflow.Ellipsis)},
                 onClick={expanded=false;if(branch.id!=selectedId)onSelect(branch.id)},
-                trailingIcon={if(branch.id==selectedId)Text("✓")},modifier=Modifier.testTag("branch_option_${branch.id}"),
+                trailingIcon={if(branch.id==selectedId)ZipIcon(com.user.localagent.runtime.R.drawable.zi_check,"선택됨",tint=ZipHapTokens.CobaltText,size=20.dp)},modifier=Modifier.testTag("branch_option_${branch.id}"),
             )}
         }
     }
@@ -560,7 +558,7 @@ private fun WorkspaceModelSelector(selectedId: String, onModelChange: (String) -
                 text = { Text("자동") },
                 onClick = { expanded = false; onModelChange("auto") },
                 modifier = Modifier.testTag("model_option_auto"),
-                trailingIcon = { if (selectedId == "auto") Text("✓", color = ZipHapColors.TextSecondary) },
+                trailingIcon = { if (selectedId == "auto") ZipIcon(com.user.localagent.runtime.R.drawable.zi_check, "선택됨", tint = ZipHapColors.TextSecondary, size = 20.dp) },
             )
             DropdownMenuItem(text={Text(com.user.localagent.externalagent.ExternalAgentSettings.TITLE)},
                 onClick={expanded=false;onModelChange(com.user.localagent.externalagent.ExternalAgentSettings.MODEL_ID)},
@@ -596,7 +594,7 @@ private fun isNearBottom(state: LazyListState, threshold: Float): Boolean {
 
 @Composable
 private fun PromptChip(label: String, enabled:Boolean=true, onClick: () -> Unit) {
-    AssistChip(enabled=enabled,onClick = onClick, label = { Text(label, color = ZipHapColors.TextSecondary) },
+    AssistChip(enabled=enabled,onClick = onClick, label = { Text(label, color = ZipHapColors.TextSecondary) }, border = null,
         colors = AssistChipDefaults.assistChipColors(containerColor = Color.Transparent))
 }
 

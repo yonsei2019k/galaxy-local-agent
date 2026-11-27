@@ -74,7 +74,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
         Text("삼성 전화가 저장한 새 통화 녹음을 기기 안에서 분석하고, 일정·메모·메일 답장 후보를 전용 대화에 보고합니다. 원본 녹음은 유지합니다.",style=MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Text("새 통화 녹음 자동 정리")
-            Switch(checked=state?.enabled==true,enabled=state!=null&&!busy,onCheckedChange={enabled->
+            Switch(colors=zipSwitchColors(),checked=state?.enabled==true,enabled=state!=null&&!busy,onCheckedChange={enabled->
                 if(enabled&&!sourceSelected){pendingGeneration=state?.generation;picker.launch(null)}
                 else launchWork {app.callFollowUp.setEnabled(enabled)}
             })
@@ -90,17 +90,17 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
             CallFollowUpReadiness.SOURCE_REVIEW_REQUIRED->"녹음 파일 또는 폴더 상태를 확인해주세요."
             CallFollowUpReadiness.READY->"새 녹음 대기 · 저장 완료 확인 후 분석"
         },style=MaterialTheme.typography.bodyMedium)
-        OutlinedButton(enabled=!busy&&state!=null,onClick={pendingGeneration=state?.generation;picker.launch(null)}){Text(if(sourceSelected)"통화 녹음 폴더 변경" else "통화 녹음 폴더 연결")}
+        ZipOutlinedButton(enabled=!busy&&state!=null,onClick={pendingGeneration=state?.generation;picker.launch(null)}){Text(if(sourceSelected)"통화 녹음 폴더 변경" else "통화 녹음 폴더 연결")}
         Text("전화 앱의 녹음 목록에서 저장 위치를 확인한 뒤 해당 폴더만 선택하세요. 새로 켠 시점 이전 녹음과 다른 폴더는 자동 수집하지 않습니다.",style=MaterialTheme.typography.bodySmall)
-        OutlinedButton(enabled=!busy,onClick={permissions.launch(arrayOf(Manifest.permission.READ_PHONE_STATE,Manifest.permission.POST_NOTIFICATIONS))}){Text("통화와 알림 권한 확인")}
+        ZipOutlinedButton(enabled=!busy,onClick={permissions.launch(arrayOf(Manifest.permission.READ_PHONE_STATE,Manifest.permission.POST_NOTIFICATIONS))}){Text("통화와 알림 권한 확인")}
         TextButton(enabled=!busy&&state?.enabled==true,onClick={launchWork {app.callFollowUp.requestReconciliation("owner_refresh");refresh()}}){Text("새 녹음 확인")}
-        OutlinedButton(enabled=!busy&&sourceSelected&&state?.enabled==true,onClick={selectedRecordingGeneration=state?.generation;recordingPicker.launch(arrayOf("audio/*"))}){Text("기존 통화 녹음 선택")}
+        ZipOutlinedButton(enabled=!busy&&sourceSelected&&state?.enabled==true,onClick={selectedRecordingGeneration=state?.generation;recordingPicker.launch(arrayOf("audio/*"))}){Text("기존 통화 녹음 선택")}
         Text("파일 저장과 Android의 백그라운드 실행 일정에 따라 지연될 수 있습니다. 전사 구간 시각은 단어 시각이 아니며, 날짜·이름·수신자·부정·정정은 원음과 대조해야 합니다. 실제 일정 등록과 메일 발송은 별도로 확인합니다.",style=MaterialTheme.typography.bodySmall)
         SettingsDisclosure("음성 인식 세부 정보","통화 정리에서 사용하는 인식 방법을 확인해요."){
             Text("자동 통화 전사는 별도 Qwen 경로를 사용합니다. 기기 내 ML Kit는 화면을 연 상태의 비교 후보이며 일반 음성 인식 선택은 바꾸지 않습니다.",style=MaterialTheme.typography.bodySmall)
         }
         jobs.forEach {job->
-            HorizontalDivider()
+            ZipInsetDivider(inset = 0.dp)
             Text("${callJobLabel(job.status.name)} · 전사 ${job.completedChunks}구간 / 분석 ${job.analyzedChunks}구간",style=MaterialTheme.typography.bodyMedium)
             callModelProgress(job)?.let {Text(it,style=MaterialTheme.typography.bodySmall)}
             callFailureDetail(job.errorCode)?.let {Text(it,style=MaterialTheme.typography.bodySmall)}
@@ -122,7 +122,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
                     transcriptStart=0;transcriptChunks=app.callFollowUpPipeline.transcriptForReview(job.queueId,0,5);transcriptJob=job.queueId
                 }}){Text("녹음에서 만든 글 보기")}
             }
-            TextButton(enabled=!busy,onClick={forgetTarget=job.queueId}){Text("이 녹음의 분석 기록 삭제")}
+            TextButton(enabled=!busy,onClick={forgetTarget=job.queueId}){Text("이 녹음의 분석 기록 삭제",color=ZipTone.Coral.content)}
         }
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
             TextButton(enabled=!busy&&jobsOffset>0,onClick={jobsOffset=(jobsOffset-20).coerceAtLeast(0)}){Text("더 최근 기록")}
@@ -132,7 +132,7 @@ fun CallFollowUpPanel(app:AppContainer,onStatus:(String)->Unit,onOpenReport:(Str
     transcriptJob?.let {id->AlertDialog(onDismissRequest={transcriptJob=null},title={Text("녹음에서 만든 글 · ${transcriptStart+1}구간부터")},text={
         Column(Modifier.heightIn(max=460.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text("자동 인식 원문입니다. 교정된 정답이 아니며 표시 시간은 조각 범위입니다.",style=MaterialTheme.typography.bodySmall)
-            SelectionContainer {Column {transcriptChunks.forEach {chunk->Text("[${chunk.startMillis/1000}–${chunk.endMillis/1000}초]\n${chunk.text}");HorizontalDivider()}}}
+            SelectionContainer {Column {transcriptChunks.forEach {chunk->Text("[${chunk.startMillis/1000}–${chunk.endMillis/1000}초]\n${chunk.text}");ZipInsetDivider(inset = 0.dp)}}}
         }
     },confirmButton={TextButton(onClick={transcriptJob=null}){Text("닫기")}},dismissButton={Row {
         TextButton(enabled=!busy&&transcriptStart>0,onClick={launchWork {val next=(transcriptStart-5).coerceAtLeast(0);transcriptChunks=app.callFollowUpPipeline.transcriptForReview(id,next,5);transcriptStart=next}}){Text("이전")}
