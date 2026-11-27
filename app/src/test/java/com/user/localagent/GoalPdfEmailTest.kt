@@ -56,6 +56,22 @@ class GoalPdfEmailTest {
         val digest=checkNotNull(GoalPdfEmail.verifiedDraftProof(frozen,two,sources))
         val evidence=HarnessStep(two,StepEvidence("prepare_email",VerificationState.VERIFIED,"초안 재조회",auditId="draft-audit",outcomeProof=digest))
         assertTrue(goalCriterionMatches(frozen.criteria.last(),evidence,frozen))
+        val done=frozen.copy(criteria=frozen.criteria.map {item->
+            if(item.id==criterion.id)item.copy(status=GoalCriterionStatus.VERIFIED,evidence=listOf("tool-run:draft-audit"))
+            else item.copy(status=GoalCriterionStatus.USER_CONFIRMED)
+        })
+        val checkpoint=QueuedChatRequest("run","thread","branch",null,"초안","local-model",false,emptyList(),"user",previousSteps=listOf(evidence))
+        assertTrue(goalCompletionProofsMatch(checkpoint,done))
+        assertFalse(goalCompletionProofsMatch(checkpoint.copy(previousSteps=emptyList()),done))
+        val delivery=GoalCriterion(text="수신자에게 실제로 전달")
+        assertFalse(goalCompletionProofsMatch(checkpoint,done.copy(criteria=done.criteria+delivery)))
+        val forged=ToolCall("create",GoalToolCatalog.CREATE,buildJsonObject {
+            put("outcome","초안");put("criteria",buildJsonArray {add(criterion.text)})
+            put("proofTargets",buildJsonArray {add(buildJsonObject {
+                put("criterionIndex",0);put("kind",reviewed.kind.name);put("target",reviewed.target)
+            })})
+        })
+        assertThrows(IllegalArgumentException::class.java){GoalToolCatalog.parseProofTargets(forged)}
         assertNull(GoalPdfEmail.verifiedDraftProof(goal,two,sources))
         assertNull(GoalPdfEmail.verifiedDraftProof(frozen,call(name),sources.take(1)))
         assertNull(GoalPdfEmail.verifiedDraftProof(frozen,two,listOf(sources[0],null)))

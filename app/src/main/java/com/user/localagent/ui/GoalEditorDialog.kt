@@ -89,7 +89,13 @@ fun GoalEditorDialog(
                                     edited=invalidate(edited.copy(criteria=edited.criteria.map {if(it.id==criterion.id)it.copy(
                                         proofTarget=next,status=GoalCriterionStatus.PENDING,evidence=emptyList()) else it}))
                                 })
-                                Text("위 원본 PDF "+sources.size+"개를 모두 첨부한 초안 저장까지만 확인",style=MaterialTheme.typography.bodySmall)
+                                Column {
+                                    Text("이 메일은 발송 전 초안 저장까지만 완료로 확인",style=MaterialTheme.typography.bodySmall)
+                                    sources.forEach {source->
+                                        val label=if(source.kind==com.user.localagent.core.GoalProofKind.KAIRB_CERTIFICATE)source.connectorCriterion() else source.target
+                                        Text(label,style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
+                                    }
+                                }
                             }
                         }
                     }
