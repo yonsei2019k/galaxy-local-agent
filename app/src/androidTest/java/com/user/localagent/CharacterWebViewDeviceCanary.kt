@@ -166,6 +166,14 @@ class CharacterWebViewDeviceCanary {
     }
 
     private fun saveDisplay(name: String) {
+        val painted = CountDownLatch(1)
+        instrumentation.runOnMainSync {
+            web.postVisualStateCallback(1, object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) { painted.countDown() }
+            })
+        }
+        assertTrue("WebView paint timed out", painted.await(5, TimeUnit.SECONDS))
+        Thread.sleep(350)
         val result = CountDownLatch(1)
         val bitmap = android.graphics.Bitmap.createBitmap(840, 1440, android.graphics.Bitmap.Config.ARGB_8888)
         var code = -1

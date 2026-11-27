@@ -37,6 +37,9 @@ import com.user.localagent.runtime.R
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 
+internal fun shouldShowLaunchIntro(restoring: Boolean, fromLauncher: Boolean, requestedTab: Int?): Boolean =
+    !restoring && fromLauncher && (requestedTab == null || requestedTab == 0)
+
 /** Shortest time (from intro start) the intro stays up after the chat is ready when the video never started. */
 internal const val LAUNCH_INTRO_MIN_MS = 1400L
 

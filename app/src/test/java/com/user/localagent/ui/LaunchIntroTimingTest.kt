@@ -5,6 +5,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LaunchIntroTimingTest {
+    @Test
+    fun ordinaryLauncherIntentOpensChatWithGreeting() {
+        assertTrue(shouldShowLaunchIntro(false, true, null))
+        assertTrue(shouldShowLaunchIntro(false, true, 0))
+        assertFalse(shouldShowLaunchIntro(false, true, 4))
+        assertFalse(shouldShowLaunchIntro(true, true, null))
+        assertFalse(shouldShowLaunchIntro(false, false, null))
+    }
+
     private fun visible(
         elapsedMs: Long,
         chatReady: Boolean = true,

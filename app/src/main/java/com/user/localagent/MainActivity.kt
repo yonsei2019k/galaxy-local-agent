@@ -350,9 +350,11 @@ class MainActivity : ComponentActivity() {
         cameraAttachmentName=savedInstanceState?.getString("camera-attachment-name")
         savedInstanceState?.let {saved->saved.getString("attachment-thread-id")?.let {id->saved.getString("attachment-branch-id")?.let {branch->attachmentScope=Triple(id,saved.getLong("attachment-thread-revision"),branch)}}}
         if(intent.hasExtra("open_tab"))requestedTab.value=intent.getIntExtra("open_tab",0).coerceIn(0,10)
-        launchIntroPending = savedInstanceState == null && intent.action == Intent.ACTION_MAIN &&
-            intent.hasCategory(Intent.CATEGORY_LAUNCHER) && requestedTab.value == 0 &&
-            launchIntroClaimed.compareAndSet(false,true)
+        launchIntroPending = shouldShowLaunchIntro(
+            restoring = savedInstanceState != null,
+            fromLauncher = intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER),
+            requestedTab = requestedTab.value,
+        ) && launchIntroClaimed.compareAndSet(false,true)
         val lightBars=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
         enableEdgeToEdge(lightBars,lightBars)
         WindowCompat.getInsetsController(window,window.decorView).apply {isAppearanceLightStatusBars=true;isAppearanceLightNavigationBars=true}
