@@ -12,7 +12,7 @@ import { attachmentsBlockReply } from './bridge'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { situationForMood, useCharacterMood } from './character/useCharacterMood'
-import { COLORS, VARIANTS, type CharacterChoice, type CharacterSituation } from './character/characterData'
+import type { CharacterSituation } from './character/characterData'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
 import { websiteWorkFor, workHistory } from './work/workHistory'
@@ -30,27 +30,7 @@ const exampleRequests: { label: string; text: string; icon: IconName; needsCalen
  * Empty-state suggestions (owner direction 2026-11-27): a tap sends the fixed sentence as an ordinary request. The chip
  * carries only text; the model interprets it like any typed message and any permission follows the normal flow.
  */
-const roomSuggestions: { text: string; icon: IconName }[] = [
-  { text: '내일 오전 일정 정리해 줘', icon: 'calendar' },
-  { text: '이번 주말 서울 날씨 찾아 줘', icon: 'globe' },
-  { text: '오늘 할 일 같이 정리해 줘', icon: 'check' },
-]
-
-/**
- * The other 집순이 in the room scene: different hoods and colors from the owner's choice, so the chosen one stays
- * the only one in its look. Positions, blur (depth) and float timing live in styles.css (.room-guest--N).
- */
-function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[] {
-  const colors = COLORS.map(item => item.id).filter(color => color !== host.color)
-  const variants = VARIANTS.map(item => item.id)
-  const start = variants.indexOf(host.variant) + 1
-  const looks: { expr: CharacterChoice['expr']; size: number }[] = [
-    { expr: 'smile', size: 64 }, { expr: 'wink', size: 56 }, { expr: 'sleepy', size: 48 }, { expr: 'surprise', size: 72 },
-  ]
-  return looks.map((look, index) => ({
-    variant: variants[(start + index) % variants.length], color: colors[(index * 2 + 1) % colors.length], ...look,
-  }))
-}
+const roomSuggestions: string[] = ['내일 오전 일정 정리해 줘', '이번 주말 서울 날씨 찾아 줘', '오늘 할 일 같이 정리해 줘']
 
 function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onSendExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
@@ -69,21 +49,20 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
   const [step, setStep] = useState(0)
   // The plain first screen only (staff rooms and the first-run guide keep their own flows).
   const suggestions = staff || guide || !onSendExample ? [] : roomSuggestions
+  const plain = !staff && !guide
   return (
-    <div className={compact ? "welcome welcome--compact" : "welcome"}>
-      {!compact && <MotionField className="room-scene">
-        <span className="room-window" aria-hidden="true" /><span className="room-beam" aria-hidden="true" /><span className="room-rug" aria-hidden="true" />
-        {roomCast(character).map((guest, index) =>
-          <span key={index} className={`room-guest room-guest--${index + 1}`} aria-hidden="true">
-            <Character choice={guest} size={guest.size} decorative />
-          </span>)}
-        <span className="room-host"><Character choice={character} situation={situation} size={160} /></span>
-      </MotionField>}
-      <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
-      {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+    <div className={compact ? "welcome welcome--compact" : plain ? "welcome welcome--plain" : "welcome"}>
+      {/* Concept match (2026-11-28): one big 집순이 on white, no room scene; the situation still drives its motion. */}
+      {!compact && <div className="welcome-hero">
+        <MotionField className="welcome-character"><Character choice={character} situation={situation} size={120} /></MotionField>
+        <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 해 둘까요?'}</h1>
+        {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+        {plain && <p>말만 하면 끝까지 챙길게요</p>}
+      </div>}
+      {compact && <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 해 둘까요?'}</h1>}
       {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
-        {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
-          onClick={() => onSendExample?.(example.text)}><Icon name={example.icon} />{example.text}</button>)}
+        {suggestions.map(example => <button type="button" key={example} className="suggestion-chip" disabled={hasDraft}
+          onClick={() => onSendExample?.(example)}>{example}</button>)}
       </div>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
         <div className="office-guide-steps" aria-hidden="true">{[0, 1, 2].map(index =>
@@ -184,7 +163,9 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
       {assistant ? <div className="assistant-text">
         {message.text.trim() && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
+        {/* The host's structured run report (not model text) as a grey card with a resting 집순이 face. */}
         {!!report.length && <section className="execution-report" aria-label="작업 진행 보고">
+          <span className="execution-report-face" aria-hidden="true"><Character choice={character} size={40} decorative /></span>
           <strong>작업 진행 보고</strong>
           <ol>{recentReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           {!!earlierReport.length && <details>

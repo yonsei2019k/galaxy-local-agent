@@ -379,27 +379,54 @@ describe('native conversation', () => {
     mount(false)
     snapshot(base)
     expect(host.textContent).toContain('Android 앱에서 대화를 열어 주세요.')
-    expect(host.textContent).toContain('무엇을 도와드릴까요?')
+    expect(host.textContent).toContain('무엇을 해 둘까요?')
     expect(input().disabled).toBe(true)
     expect(button('사무실').disabled).toBe(true)
     expect(host.querySelector('.desktop-sidebar')?.textContent).not.toContain('새 대화')
     expect(requests()).toEqual([])
   })
 
-  it('opens an empty conversation on the room scene with the chosen 집순이 among a few others', () => {
+  it('opens an empty conversation on one big 집순이 with the concept question and full-width suggestions', () => {
     mount()
-    snapshot(base)
-    const scene = host.querySelector('.welcome .room-scene')!
-    expect(scene).not.toBeNull()
-    const host집순이 = scene.querySelector('.room-host svg.character')!
-    expect(host집순이.getAttribute('role')).toBe('img')
-    const guests = [...scene.querySelectorAll('.room-guest svg.character')]
-    expect(guests.length).toBeGreaterThanOrEqual(3)
-    expect(guests.length).toBeLessThanOrEqual(4)
-    for (const guest of guests) expect(guest.getAttribute('aria-hidden')).toBe('true')
-    expect(host.querySelector('.welcome h1')?.textContent).toBe('무엇을 도와드릴까요?')
+    snapshot({ ...base, singleConversation: true })
+    expect(host.querySelector('.welcome .room-scene')).toBeNull()
+    const hero = host.querySelector('.welcome .welcome-hero')!
+    const characters = [...hero.querySelectorAll('svg.character')]
+    expect(characters).toHaveLength(1)
+    expect(characters[0].getAttribute('role')).toBe('img')
+    expect(characters[0].getAttribute('width')).toBe('120')
+    expect(host.querySelector('.welcome h1')?.textContent).toBe('무엇을 해 둘까요?')
+    expect(hero.querySelector('p')?.textContent).toBe('말만 하면 끝까지 챙길게요')
+    expect(input().placeholder).toBe('메시지 보내기')
+    // Header (S1): menu, the small 집순이 over its name, and the round conversation button keep their names.
+    expect(host.querySelector('.topbar--center .topbar-who .character-button svg.character')?.getAttribute('width')).toBe('36')
+    expect(host.querySelector('.topbar--center .topbar-round')?.getAttribute('aria-label')).toBe('이 대화')
     const chips = [...host.querySelectorAll('.room-suggestions button')].map(item => item.textContent)
     expect(chips).toEqual(['내일 오전 일정 정리해 줘', '이번 주말 서울 날씨 찾아 줘', '오늘 할 일 같이 정리해 줘'])
+  })
+
+  it('draws runs as grey cards with the run phase face while the header face stays calm (concept S1, S5, S8)', () => {
+    mount()
+    snapshot({ ...base, singleConversation: true,
+      messages: [{ id: 'u1', role: 'user', text: '자료를 정리해줘.' },
+        { id: 'a1', role: 'assistant', text: '', executionReport: ['read_screen 단계에서 멈췄어요.'] }],
+      tasks: [{ id: 'run-p', messageId: 'u1', phase: 'paused', label: '자료 정리', detail: '화면 연결을 기다려요', canCancel: true }] })
+    expect(input().placeholder).toBe('추가로 말하기')
+    const card = host.querySelector('#work-run-p')!
+    expect(card.querySelector('.work-icon svg.character')?.getAttribute('data-situation')).toBe('blocked')
+    expect(card.querySelector('.work-state')?.textContent).toBe('일시 정지')
+    expect(card.querySelector('[role="progressbar"]')).toBeNull()
+    // The header 집순이 keeps its motion state but never shows the worried face.
+    expect(host.querySelector('.character-button')?.getAttribute('data-mood')).toBe('blocked')
+    expect(host.querySelector('.character-button svg.character')?.getAttribute('data-situation')).toBe('idle')
+    // The run report keeps its list and gains a decorative face only.
+    const report = host.querySelector('.execution-report')!
+    expect(report.querySelector('.execution-report-face svg.character')?.getAttribute('aria-hidden')).toBe('true')
+    expect(report.querySelector(':scope > ol li')?.textContent).toBe('read_screen 단계에서 멈췄어요.')
+    // The work line moves into a round header button with the same accessible name and text.
+    const work = host.querySelector<HTMLButtonElement>('.topbar .header-work--round')!
+    expect(work.getAttribute('aria-label')).toBe('작업 목록 열기')
+    expect(work.textContent).toBe('최근 작업')
   })
 
   it('sends an empty-state suggestion right away as plain text with no permission fields', () => {

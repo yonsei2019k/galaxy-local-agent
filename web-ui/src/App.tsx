@@ -135,7 +135,7 @@ export default function App() {
 
   return (
     <NativeCharacterSetting.Provider value={appearance ? [appearance, setAppearance] : null}>
-    <div className="workspace">
+    <div className={snapshot?.singleConversation ? "workspace workspace--single" : "workspace"}>
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
       <div className="main-column" hidden={collaborationOpen}>

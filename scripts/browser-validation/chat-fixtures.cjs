@@ -98,6 +98,20 @@ function choices() {
     choices: [{ label: `12월 20일 본식 ${cap}`, recommended: true }, { label: '12월 19일 예행연습', recommended: false }, { label: '둘 다 넣어 줘', recommended: false }] }] };
 }
 
+// 시안 오른쪽 화면과 같은 장면(2026-11-28): 요청, 답변, 진행 중인 작업과 끝난 확인. 카드는 구조화된 작업 기록만 쓴다.
+const conceptRunning = { ...base, busy: true, activeRunId: 'cr1', actionEpoch: 2,
+  messages: [user('cu1', '교육 영상 끝까지 듣고 이수증 저장해 줘'),
+    assistant('ca1', '맡겨 주세요. 영상이 끝날 때까지 지켜보고, 수료되면 이수증을 저장해 둘게요.')],
+  tasks: [task('cr1', 'running', '교육 영상 재생', '3강 중 2강 · 진행률 확인 중'),
+    task('cr2', 'completed', '로그인 확인 완료', '직접 입력하신 뒤 이어서 진행했어요')] };
+
+// 지금 폰 화면(device-now.png)과 같은 장면: 일시 정지 안내와 호스트의 작업 진행 보고.
+const devicePaused = { ...base,
+  messages: [user('du1', '채팅 비우기 메뉴가 있는지 확인해 줘'),
+    assistant('da1', '휴대폰 화면 연결이 준비되지 않아 요청을 일시정지했어요. 휴대폰 설정 > 접근성 > 설치된 앱에서 ‘ZipHap.Agent 화면 연결’을 켜 주세요. 설정한 뒤 이 대화에서 다시 요청하면 이어서 확인할 수 있어요.',
+      { executionReport: ['read_screen 단계에서 멈췄고 변경은 적용되지 않았어요.', '일시 정지 · 작업 기록을 확인한 뒤 이어갈 수 있어요.'] })],
+  tasks: [{ ...task('dp1', 'paused', '휴대폰 화면 확인', '화면 연결을 기다려요'), messageId: 'du1' }] };
+
 // 휴대폰이 그리는 승인 카드 자리(웹은 빈 자리만 그린다).
 const approval = { ...base, messages: [user('ap1', '내일 오전 회의를 일정에 넣어 줘')],
   approvalCard: { id: '00000000-0000-4000-8000-000000000001', messageId: 'ap1' } };
@@ -122,5 +136,7 @@ module.exports = {
   camping: camping(),
   choices: choices(),
   approval,
+  conceptRunning,
+  devicePaused,
   guide: { ...base, showOfficeGuide: true, officeSelected: true },
 };

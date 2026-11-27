@@ -133,6 +133,7 @@ const expectations = {
   camping: { messages: 4, cards: 1 },
   choices: { messages: 2, cards: 0 }, approval: { messages: 1, cards: 1 },
   guide: { messages: 0, cards: 0 },
+  conceptRunning: { messages: 2, cards: 2 }, devicePaused: { messages: 2, cards: 1 },
 };
 
 for (const [name, snapshot] of Object.entries(fixtures)) {
