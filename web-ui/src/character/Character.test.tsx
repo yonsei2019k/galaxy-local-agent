@@ -3,7 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Character } from './Character'
 import { CharacterPicker } from './CharacterPicker'
-import { DEFAULT_CHARACTER, INK, mixHex, type CharacterChoice } from './characterData'
+import {
+  DEFAULT_CHARACTER, EXPR_OPTIONS, INK, SITUATION_LOOK, isCharacterChoice, mixHex,
+  type CharacterChoice, type CharacterSituation,
+} from './characterData'
 import { STORAGE_KEY, useCharacter, resetCharacterStoreForTest } from './useCharacter'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -145,5 +148,43 @@ describe('Character', () => {
     act(() => root.render(<><Probe log={a} /><Probe log={b} /></>))
     act(() => a.set!({ variant: 'bunny', color: 'cocoa', expr: 'wink' }))
     expect(b.value).toEqual({ variant: 'bunny', color: 'cocoa', expr: 'wink' })
+  })
+})
+
+describe('Character situations', () => {
+  const situations = Object.keys(SITUATION_LOOK) as CharacterSituation[]
+
+  it('marksEachSituationWithItsFacePropsAndLayers', () => {
+    const expected: Record<CharacterSituation, [string, string | null]> = {
+      idle: ['wink', null], greeting: ['wink', null], listening: ['basic', null], thinking: ['focus', 'think-dots'],
+      working: ['focus', 'prop-work'], waiting: ['sleepy', 'prop-wait'], confirm: ['surprise', 'prop-alert'],
+      done: ['smile', 'sparkles'], blocked: ['worried', null],
+    }
+    for (const situation of situations) {
+      act(() => root.render(<Character choice={{ ...DEFAULT_CHARACTER, expr: 'wink' }} situation={situation} size={120} />))
+      const svg = host.querySelector('svg.character')!
+      expect(svg.getAttribute('data-situation')).toBe(situation)
+      expect(svg.classList.contains(`character--sit-${situation}`)).toBe(true)
+      expect(svg.getAttribute('data-once')).toBe(String(SITUATION_LOOK[situation].once))
+      const [face, layer] = expected[situation]
+      expect(host.querySelector('[data-expr]')?.getAttribute('data-expr'), situation).toBe(face)
+      if (layer) expect(host.querySelector(`[data-layer="${layer}"]`), situation).not.toBeNull()
+      for (const name of ['pose', 'ears', 'gaze']) expect(host.querySelector(`[data-layer="${name}"]`)).not.toBeNull()
+    }
+    expect(situations.filter(situation => SITUATION_LOOK[situation].once).sort()).toEqual(['blocked', 'confirm', 'done', 'greeting'])
+  })
+
+  it('keepsTheWorriedFaceOutOfTheUserChoices', () => {
+    expect(EXPR_OPTIONS.map(option => option.id)).not.toContain('worried')
+    expect(isCharacterChoice({ variant: 'bear', color: 'butter', expr: 'worried' })).toBe(false)
+  })
+
+  it('showsAStaticPoseUnderReducedMotion', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    act(() => root.render(<Character choice={DEFAULT_CHARACTER} situation="done" size={120} />))
+    const svg = host.querySelector('svg.character')!
+    expect(svg.getAttribute('data-animated')).toBe('false')
+    expect(svg.getAttribute('data-situation')).toBe('done')
+    vi.unstubAllGlobals()
   })
 })

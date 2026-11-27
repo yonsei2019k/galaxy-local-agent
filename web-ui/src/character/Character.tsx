@@ -2,8 +2,8 @@ import { useId } from 'react'
 import './character.css'
 import { useVisibleMotion } from '../motion'
 import {
-  CHEEK, EXPRESSIONS, INK, PALETTES, STATE_EXPR, mixHex,
-  type CharacterChoice, type CharacterState,
+  CHEEK, EXPRESSIONS, INK, PALETTES, SITUATION_LOOK, STATE_EXPR, mixHex,
+  type CharacterChoice, type CharacterFace, type CharacterSituation, type CharacterState,
 } from './characterData'
 
 /** Blur filters are skipped at or below 32px: they cost paint time and only smear a tiny avatar. */
@@ -12,15 +12,19 @@ export const CHARACTER_FILTER_MIN_SIZE = 33
 // Shapes follow the approved concept's critter(): shaded by gradients and soft shadows, never outlined.
 const HOOD = 'M100 34 C152 34 178 66 178 116 C178 164 150 188 100 188 C50 188 22 164 22 116 C22 66 48 34 100 34Z'
 
-export function Character({ choice, state = 'none', size, decorative, wiggle = 0 }: {
+export function Character({ choice, state: stateProp = 'none', situation, size, decorative, wiggle = 0 }: {
   choice: CharacterChoice
   state?: CharacterState
+  /** Situation from real app state; when given it picks the prop layer, face and motion. */
+  situation?: CharacterSituation
   size: number
   decorative?: boolean
   wiggle?: number
 }) {
   const c = PALETTES[choice.color] ?? PALETTES.butter
-  const exprKey = state === 'none' ? choice.expr : STATE_EXPR[state]
+  const look = situation ? SITUATION_LOOK[situation] : undefined
+  const state = look?.state ?? stateProp
+  const exprKey: CharacterFace = look?.face ?? (state === 'none' ? choice.expr : STATE_EXPR[state])
   const e = EXPRESSIONS[exprKey]
   const a11y = decorative ? { 'aria-hidden': true as const } : { role: 'img' as const, 'aria-label': '집순이' }
   const { ref, reduced, visible } = useVisibleMotion<SVGSVGElement>()
@@ -35,9 +39,9 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
   const inner = mixHex(c.light, '#FFFFFF', 0.25)
   const face = choice.color === 'snow' || choice.color === 'grey' ? '#FFF8EF' : '#FFF1E4'
   return (
-    <svg ref={ref} className={`character character--state-${state}${size > 32 ? ' character--full-motion' : ''}`}
+    <svg ref={ref} className={`character character--state-${state}${situation ? ` character--sit-${situation}` : ''}${size > 32 ? ' character--full-motion' : ''}`}
       viewBox="0 0 200 210" width={size} height={size} data-animated={!reduced} data-paused={!visible}
-      data-filtered={filtered} data-variant={choice.variant} focusable="false" {...a11y}>
+      data-filtered={filtered} data-situation={situation} data-once={look ? look.once : undefined} data-variant={choice.variant} focusable="false" {...a11y}>
       <defs>
         <radialGradient id={id('hood')} cx="34%" cy="26%" r="82%">
           <stop offset="0" stopColor={glow} /><stop offset=".46" stopColor={c.fill} /><stop offset="1" stopColor={shade} />
@@ -57,7 +61,9 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
         {filtered && <filter id={id('soft')} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="3.2" /></filter>}
       </defs>
       <ellipse data-layer="ground-shadow" cx="100" cy="196" rx="66" ry="10" fill={url('ground')} />
+      <g data-layer="pose">
       <g data-layer="figure">
+      <g data-layer="ears">
       <g key={wiggle} className={wiggle > 0 ? 'character-ears--wiggle' : undefined}>
       {choice.variant === 'bear' && <g data-layer="ears-bear">
         <circle cx="54" cy="50" r="22" fill={url('hood')} />
@@ -78,6 +84,7 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
         <ellipse cx="128" cy="36" rx="7" ry="28" transform="rotate(12 128 36)" fill={inner} opacity=".7" />
       </g>}
       </g>
+      </g>
       <g data-layer="body">
         <path d={HOOD} fill={url('hood')} />
         <path data-layer="hood-shade" d={HOOD} fill={url('ao')} />
@@ -88,10 +95,12 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
       </g>
       <g data-layer="expr" data-expr={exprKey}>
         <path d={e.brow} fill="none" stroke={INK} strokeWidth="3.5" strokeLinecap="round" />
+        <g data-layer="gaze">
         <g data-layer="eyes">
           <path d={e.eyeStroke} fill="none" stroke={INK} strokeWidth="5" strokeLinecap="round" />
           <path d={e.eyeFill} fill={INK} />
           <path d={e.shine} fill="#FFFFFF" />
+        </g>
         </g>
         <path d={e.mouthStroke} fill="none" stroke={INK} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
         <path d={e.mouthFill} fill={e.mouthColor} />
@@ -106,6 +115,17 @@ export function Character({ choice, state = 'none', size, decorative, wiggle = 0
         <ellipse cx="58" cy="58" rx="6" ry="3" transform="rotate(-32 58 58)" fill="#FFFFFF" opacity=".85" />
       </g>
       </g>
+      </g>
+      {situation === 'thinking' && <g data-layer="think-dots">
+        <circle cx="150" cy="30" r="5" fill={shade} />
+        <circle cx="165" cy="20" r="6" fill={shade} />
+        <circle cx="182" cy="8" r="7" fill={shade} />
+      </g>}
+      {situation === 'done' && <g data-layer="sparkles">
+        {[[34, 44, 1], [170, 40, .8], [24, 118, .7], [182, 112, .9], [100, 6, .75]].map(([x, y, k], index) =>
+          <path key={index} d={`M${x} ${y - 10 * k} L${x + 3 * k} ${y - 3 * k} L${x + 10 * k} ${y} L${x + 3 * k} ${y + 3 * k} L${x} ${y + 10 * k} L${x - 3 * k} ${y + 3 * k} L${x - 10 * k} ${y} L${x - 3 * k} ${y - 3 * k} Z`}
+            fill={index % 2 ? '#FFC94D' : '#FF9FB4'} />)}
+      </g>}
       {exprKey === 'sleepy' && <g data-layer="zz">
         <text x="150" y="74" fontSize="18" fill={c.dark} style={{ fontFamily: 'var(--font-display)' }}>z</text>
         <text x="162" y="58" fontSize="24" fill={c.dark} style={{ fontFamily: 'var(--font-display)' }}>Z</text>

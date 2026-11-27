@@ -10,6 +10,8 @@ import { BookingPaymentCard } from './BookingPaymentCard'
 import { isLiveTaskPhase } from './composer'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
+import { situationForMood, useCharacterMood } from './character/useCharacterMood'
+import type { CharacterSituation } from './character/characterData'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
 import { websiteWorkFor, workHistory } from './work/workHistory'
@@ -23,8 +25,9 @@ const exampleRequests: { label: string; text: string; icon: IconName; needsCalen
   { label: '첨부한 자료 요약', text: '첨부한 자료에서 중요한 내용만 정리해줘.', icon: 'file', needsFile: true },
 ]
 
-function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
+function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
+  situation?: CharacterSituation
   guide: boolean
   compact?: boolean
   calendarGranted: boolean
@@ -39,7 +42,7 @@ function Welcome({ staff, guide, compact, calendarGranted, hasDraft, onDraftExam
   return (
     <div className={compact ? "welcome welcome--compact" : "welcome"}>
       {!compact && <MotionField className="mascot-field">
-        <Character choice={character} size={160} />
+        <Character choice={character} situation={situation} size={160} />
         <span className="twinkle twinkle--1" aria-hidden="true" /><span className="twinkle twinkle--2" aria-hidden="true" />
         <span className="twinkle twinkle--3" aria-hidden="true" />
       </MotionField>}
@@ -205,6 +208,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const [localHistoryOpen, setLocalHistoryOpen] = useState(false)
   const panelOpen = historyOpen ?? localHistoryOpen
   const setHistoryOpen = onHistoryChange ?? setLocalHistoryOpen
+  const mood = useCharacterMood(snapshot)
   const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim()) : []
   const website = snapshot?.websiteCard
   const approval = snapshot?.ready ? snapshot.approvalCard : undefined
@@ -324,7 +328,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           </div>
           <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
         </div> : empty ?
-          <Welcome staff={staff} guide={guide}
+          <Welcome staff={staff} guide={guide} situation={situationForMood(mood)}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">

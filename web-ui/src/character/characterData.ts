@@ -4,6 +4,10 @@ export type CharacterVariant = 'bear' | 'cat' | 'bunny'
 export type CharacterColor = 'butter' | 'peach' | 'strawberry' | 'sky' | 'matcha' | 'grey' | 'cocoa' | 'snow'
 export type CharacterExpr = 'basic' | 'smile' | 'focus' | 'surprise' | 'sleepy' | 'wink'
 export type CharacterState = 'none' | 'work' | 'wait' | 'done' | 'alert'
+/** Faces the drawing can show. 'worried' is situation-only and never offered or stored as a user choice. */
+export type CharacterFace = CharacterExpr | 'worried'
+/** What the app is doing right now, chosen from real app state (useCharacterMood). */
+export type CharacterSituation = 'idle' | 'greeting' | 'listening' | 'thinking' | 'working' | 'waiting' | 'confirm' | 'done' | 'blocked'
 
 export interface CharacterChoice { variant: CharacterVariant; color: CharacterColor; expr: CharacterExpr }
 
@@ -55,18 +59,35 @@ const eyes = (left: { fill: string; shine: string }, right: { fill: string; shin
   ({ eyeFill: `${left.fill} ${right.fill}`, shine: `${left.shine} ${right.shine}` })
 const arc = (x: number, y: number) => `M${x - 9} ${y + 3} Q${x} ${y - 9} ${x + 9} ${y + 3}`
 
-export const EXPRESSIONS: Record<CharacterExpr, ExprPaths> = {
+export const EXPRESSIONS: Record<CharacterFace, ExprPaths> = {
   basic: { brow: '', eyeStroke: '', ...eyes(eye(80, 112), eye(120, 112)), mouthStroke: 'M94 129 Q100 134 106 129', mouthFill: '', mouthColor: 'none' },
   smile: { brow: '', eyeStroke: `${arc(80, 116)} ${arc(120, 116)}`, eyeFill: '', shine: '', mouthStroke: '', mouthFill: 'M92 128 Q100 138 108 128 Z', mouthColor: INK },
   focus: { brow: '', eyeStroke: '', ...eyes(eye(83, 108, 8, 10.5), eye(123, 108, 8, 10.5)), mouthStroke: 'M94 132 L106 130', mouthFill: '', mouthColor: 'none' },
   surprise: { brow: '', eyeStroke: '', ...eyes(eye(80, 112, 10, 12.5), eye(120, 112, 10, 12.5)), mouthStroke: '', mouthFill: 'M95 134 a5 6 0 1 0 10 0 a5 6 0 1 0 -10 0', mouthColor: INK },
   sleepy: { brow: '', eyeStroke: 'M71 116 Q80 121 89 116 M111 116 Q120 121 129 116', eyeFill: '', shine: '', mouthStroke: '', mouthFill: 'M96 132 a4 3 0 1 0 8 0 a4 3 0 1 0 -8 0', mouthColor: INK },
   wink: { brow: '', eyeStroke: arc(120, 116), ...eyes(eye(80, 112), { fill: '', shine: '' }), mouthStroke: 'M93 130 Q100 136 107 130', mouthFill: '', mouthColor: 'none' },
+  worried: { brow: 'M70 98 L87 93 M130 98 L113 93', eyeStroke: '', ...eyes(eye(80, 114, 7, 9), eye(120, 114, 7, 9)), mouthStroke: 'M95 134 Q100 131 105 134', mouthFill: '', mouthColor: 'none' },
 }
 
 /** A working state shows its own face; the chosen expression applies when there is no state. */
 export const STATE_EXPR: Record<Exclude<CharacterState, 'none'>, CharacterExpr> = {
   work: 'focus', wait: 'sleepy', done: 'smile', alert: 'surprise',
+}
+
+/**
+ * Look for each situation: the prop layer (state), the face, and whether its motion plays once.
+ * One-shot motions are CSS animations without repetition, so they do not replay while the situation lasts.
+ */
+export const SITUATION_LOOK: Record<CharacterSituation, { state: CharacterState; face?: CharacterFace; once: boolean }> = {
+  idle: { state: 'none', once: false },
+  greeting: { state: 'none', face: 'wink', once: true },
+  listening: { state: 'none', face: 'basic', once: false },
+  thinking: { state: 'none', face: 'focus', once: false },
+  working: { state: 'work', face: 'focus', once: false },
+  waiting: { state: 'wait', face: 'sleepy', once: false },
+  confirm: { state: 'alert', face: 'surprise', once: true },
+  done: { state: 'done', face: 'smile', once: true },
+  blocked: { state: 'none', face: 'worried', once: true },
 }
 
 export const VARIANTS: { id: CharacterVariant; label: string }[] = [

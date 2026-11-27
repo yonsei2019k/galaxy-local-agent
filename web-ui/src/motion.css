@@ -28,8 +28,46 @@
   .character--full-motion.character--state-done[data-animated="true"] [data-layer="steam"] { animation: character-float 2s ease-out infinite; }
   .character--full-motion.character--state-alert[data-animated="true"] [data-layer="wave"] { animation: character-wave .6s ease-in-out 2; }
   .character--full-motion.character--state-alert[data-animated="true"] [data-layer="exclamation"] { animation: character-notice .6s ease-in-out 2; }
+
+  /* Situations (owner direction 2026-11-27). Each moves the pose, ears, gaze or a small layer; one-shot ones
+     (greeting, confirm, done, blocked) run once and keep their end pose, so they never replay while the
+     situation lasts. Reduced motion shows the plain drawing with the situation's face and props. */
+  .character--full-motion[data-animated="true"] :is([data-layer="pose"], [data-layer="ears"], [data-layer="gaze"],
+      [data-layer="think-dots"] > *, [data-layer="sparkles"] > *) {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+  }
+  .character--full-motion[data-animated="true"] :is([data-layer="gaze"], [data-layer="sparkles"] > *) { transform-origin: center; }
+  .character--full-motion.character--sit-idle[data-animated="true"] [data-layer="pose"] { animation: sit-tilt 9s ease-in-out infinite; }
+  .character--full-motion.character--sit-listening[data-animated="true"] [data-layer="pose"] { animation: sit-lean .5s var(--ease-out) forwards; }
+  .character--full-motion.character--sit-listening[data-animated="true"] [data-layer="ears"] { animation: sit-perk 1.6s ease-in-out infinite; }
+  .character--full-motion.character--sit-thinking[data-animated="true"] [data-layer="gaze"] { animation: sit-scan 2.6s ease-in-out infinite; }
+  .character--full-motion.character--sit-thinking[data-animated="true"] [data-layer="think-dots"] > * { animation: sit-dot 1.8s ease-in-out infinite backwards; }
+  .character--full-motion.character--sit-thinking[data-animated="true"] [data-layer="think-dots"] > :nth-child(2) { animation-delay: .3s; }
+  .character--full-motion.character--sit-thinking[data-animated="true"] [data-layer="think-dots"] > :nth-child(3) { animation-delay: .6s; }
+  .character--full-motion.character--sit-working[data-animated="true"] [data-layer="pose"] { animation: sit-tap .42s ease-in-out infinite alternate; }
+  .character--full-motion.character--sit-waiting[data-animated="true"] [data-layer="figure"] { animation-duration: 6.4s; }
+  .character--full-motion.character--sit-confirm[data-animated="true"] [data-layer="pose"] { animation: sit-hop .6s var(--ease-spring) 1; }
+  .character--full-motion.character--sit-done[data-animated="true"] [data-layer="pose"] { animation: sit-hop-high .8s var(--ease-spring) 1; }
+  .character--full-motion.character--sit-done[data-animated="true"] [data-layer="sparkles"] > * { animation: sit-sparkle .9s var(--ease-out) 1 forwards; }
+  .character--full-motion.character--sit-done[data-animated="true"] [data-layer="sparkles"] > :nth-child(even) { animation-delay: .12s; }
+  .character--full-motion.character--sit-blocked[data-animated="true"] [data-layer="pose"] { animation: sit-shrink .7s var(--ease-out) 1 forwards; }
+  .character--full-motion.character--sit-blocked[data-animated="true"] [data-layer="gaze"] { animation: sit-bow .7s var(--ease-out) 1 forwards; }
+  .character--full-motion.character--sit-greeting[data-animated="true"] [data-layer="pose"] { animation: sit-sway 1s ease-in-out 1; }
   .character[data-paused="true"], .character[data-paused="true"] * { animation-play-state: paused !important; }
 }
+@keyframes sit-tilt { 0%, 80%, 100% { transform: rotate(0); } 86%, 92% { transform: rotate(-4deg); } }
+@keyframes sit-lean { to { transform: translateY(3px) scale(1.03, .98) rotate(2deg); } }
+@keyframes sit-perk { 0%, 100% { transform: translateY(0) scaleY(1); } 40% { transform: translateY(-4px) scaleY(1.06); } }
+@keyframes sit-scan { 0%, 100% { transform: translate(-3px, -3px); } 50% { transform: translate(3px, -3px); } }
+@keyframes sit-dot { 0% { opacity: 0; transform: translateY(6px) scale(.6); } 40%, 70% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes sit-tap { to { transform: translateY(-3px); } }
+@keyframes sit-hop { 30% { transform: translateY(3px) scale(1.06, .92); } 60% { transform: translateY(-16px) scale(.96, 1.04); } }
+@keyframes sit-hop-high { 25% { transform: translateY(4px) scale(1.08, .9); } 55% { transform: translateY(-32px) scale(.94, 1.06); } }
+@keyframes sit-sparkle { 0% { opacity: 0; transform: scale(.2); } 40% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0; transform: scale(.8); } }
+@keyframes sit-shrink { to { transform: translateY(5px) scale(.95, .93); } }
+@keyframes sit-bow { to { transform: translateY(4px); } }
+@keyframes sit-sway { 25% { transform: rotate(-7deg); } 75% { transform: rotate(7deg); } }
 
 @keyframes sheet-enter { from { transform: translateY(100%); } }
 @keyframes sheet-dim { from { opacity: 0; } }
@@ -76,8 +114,11 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .character-button[data-mood="answered"] > .character { animation: mood-bounce 700ms var(--ease-spring); }
-  .character-button[data-mood="thinking"] > .character { animation: mood-think 1.8s ease-in-out infinite; transform-origin: 50% 90%; }
-  .character-button[data-mood="celebrate"] > .character { animation: mood-hop 560ms var(--ease-spring) 2; }
+  .character-button:is([data-mood="thinking"], [data-mood="working"]) > .character { animation: mood-think 1.8s ease-in-out infinite; transform-origin: 50% 90%; }
+  .character-button[data-mood="done"] > .character { animation: mood-hop 560ms var(--ease-spring) 2; }
+  .character-button[data-mood="confirm"] > .character { animation: mood-hop 560ms var(--ease-spring) 1; }
+  .character-button[data-mood="greeting"] > .character { animation: mood-think 1s ease-in-out 1; transform-origin: 50% 90%; }
+  .character-button[data-mood="blocked"] > .character { animation: mood-shrink 700ms var(--ease-out) 1 forwards; transform-origin: 50% 100%; }
   .character-thinking { animation: pop-in 240ms var(--ease-spring) backwards; }
   .character-thinking i { animation: dot-wave 1.2s ease-in-out infinite; }
   .character-thinking i:nth-child(2) { animation-delay: .15s; }
@@ -130,6 +171,7 @@
 @keyframes mood-bounce { 30% { transform: translateY(-5px) scale(1.04, .97); } 60% { transform: translateY(0) scale(.98, 1.02); } }
 @keyframes mood-think { 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }
 @keyframes mood-hop { 40% { transform: translateY(-6px); } }
+@keyframes mood-shrink { to { transform: translateY(1px) scale(.94); } }
 @keyframes dot-wave { 0%, 60%, 100% { transform: translateY(0); opacity: .55; } 30% { transform: translateY(-2px); opacity: 1; } }
 @keyframes burst { 0% { opacity: 0; transform: translate(0, 0) rotate(45deg) scale(.4); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--bx), var(--by)) rotate(45deg) scale(1); } }
 @keyframes mascot-float { 50% { transform: translateY(-6px); } }

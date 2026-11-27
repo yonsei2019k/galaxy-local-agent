@@ -5,7 +5,7 @@ import type { IconName } from './Icon'
 import { Character } from './character/Character'
 import { CharacterPicker } from './character/CharacterPicker'
 import { useCharacter } from './character/useCharacter'
-import { useCharacterMood } from './character/useCharacterMood'
+import { situationForMood, useCharacterMood } from './character/useCharacterMood'
 import type { Panel, Snapshot } from './bridge'
 import { runControls } from './composer'
 import { ComposerSheet } from './ComposerSheet'
@@ -131,9 +131,9 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
         {snapshot?.singleConversation && <>
           <button type="button" className="character-button" data-mood={mood} aria-label="집순이 모습 바꾸기" onClick={() => setPickerOpen(true)}>
-            <Character choice={character} size={32} decorative />
+            <Character choice={character} situation={situationForMood(mood)} size={32} decorative />
             {mood === 'thinking' && <span className="character-thinking" aria-hidden="true"><i /><i /><i /></span>}
-            {mood === 'celebrate' && <span className="character-burst" aria-hidden="true"><i /><i /><i /><i /><i /></span>}
+            {mood === 'done' && <span className="character-burst" aria-hidden="true"><i /><i /><i /><i /><i /></span>}
           </button>
           <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={() => setPickerOpen(false)} />
         </>}
