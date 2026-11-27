@@ -480,10 +480,12 @@ class MainActivity : ComponentActivity() {
         val characterSettings=remember {getSharedPreferences("jipsooni-character",MODE_PRIVATE)}
         var character by remember {mutableStateOf(com.user.localagent.ui.CharacterPreference.load(characterSettings))}
         val guideSettings=remember{getSharedPreferences("jipsooni-introduction",MODE_PRIVATE)}
-        var officeGuideDismissed by remember{mutableStateOf(guideSettings.getBoolean("dismissed",false))}
+        // The previous greeting flag does not acknowledge the new service and job cards.
+        val serviceGuideKey="services-and-jobs-dismissed"
+        var officeGuideDismissed by remember{mutableStateOf(guideSettings.getBoolean(serviceGuideKey,false))}
         fun dismissOfficeGuide(){
             if(!officeGuideDismissed){
-                guideSettings.edit().putBoolean("dismissed",true).apply()
+                guideSettings.edit().putBoolean(serviceGuideKey,true).apply()
                 officeGuideDismissed=true
             }
         }
@@ -796,7 +798,6 @@ class MainActivity : ComponentActivity() {
                                 else if(token !in submittedTokens&&chat.sendFromReact(text,composerThreadId,currentBranchId,token)){
                                     submittedTokens+=token;while(submittedTokens.size>128)submittedTokens.remove(submittedTokens.first())
                                     if(chat.draft.value==text)chat.updateDraft("",composerThreadId)
-                                    if(officeOpen)dismissOfficeGuide()
                                 }
                                 composerEpoch++
                             }

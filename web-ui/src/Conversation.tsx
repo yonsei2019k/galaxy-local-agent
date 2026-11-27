@@ -71,7 +71,7 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
           </span>)}
         <span className="room-host"><Character choice={character} situation={situation} size={160} /></span>
       </MotionField>}
-      <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
+      <h1>{staff ? `${staff}에게 말 걸기` : !guide ? '무엇을 도와드릴까요?' : compact ? '집순이와 해볼 일' : '안녕하세요, 집순이예요!'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
       {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
         {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
@@ -93,7 +93,7 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
         </section>
         {onSendExample && <QuickJobs disabled={hasDraft} onChoose={onSendExample} />}
         <div className="office-guide-actions">
-          <button type="button" className="office-guide-skip" onClick={onDismiss}>바로 대화하기</button>
+          <button type="button" className="office-guide-skip" onClick={onDismiss}>{compact ? '안내 닫기' : '바로 대화하기'}</button>
         </div>
       </>}
     </div>
@@ -269,6 +269,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   }, [sentChoice])
   const empty = messages.length === 0 && tasks.length === 0 && !website && !approval && !payment
   const guide = enabled && snapshot?.showOfficeGuide === true
+  const showGuideInTranscript = guide && !snapshot?.inlineLogin && !website?.inputHeight && !approval && !payment
   const activeTask = liveTasks.find(task => task.id === snapshot?.activeRunId) ?? liveTasks[0]
   const visibleUserIds = new Set(messages.filter(item => item.role === 'user').map(item => item.id))
   const websiteAnchor = website?.messageId && visibleUserIds.has(website.messageId) ? website.messageId : null
@@ -335,7 +336,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
 
   useLayoutEffect(() => {
     if (!empty && pinnedToEnd.current) scrollToEnd()
-  }, [empty, scrollToEnd, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight, approval?.id])
+  }, [empty, scrollToEnd, showGuideInTranscript, snapshot?.messages, snapshot?.tasks, website?.id, website?.inputHeight, approval?.id])
 
   useLayoutEffect(() => {
     if (website?.inputHeight) view.current?.querySelector('[data-native-website-slot]')?.scrollIntoView?.({
@@ -459,7 +460,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                 </button>}
               </div>}
             </div>}
-            {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide
+            {showGuideInTranscript && <Welcome compact guide
               onSendExample={onSendExample} calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft}
               onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} />}
           </div>

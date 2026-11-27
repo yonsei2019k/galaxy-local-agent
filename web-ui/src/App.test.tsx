@@ -569,12 +569,22 @@ describe('native conversation', () => {
       payload: { text: expect.stringContaining(boundary) } })
   })
 
-  it('shows the one-time 집순이 introduction alongside existing conversation history', () => {
+  it('keeps the service and job guide reachable in an existing conversation with a job running', () => {
     mount()
-    snapshot({ ...base, singleConversation: true, officeSelected: true, showOfficeGuide: true,
+    const existing = running({ singleConversation: true, officeSelected: true, showOfficeGuide: true,
       messages: [{ id: 'prior-answer', role: 'assistant', text: 'Saved answer' }] })
+    snapshot(existing)
     expect(host.querySelector('.transcript .messages .message')).not.toBeNull()
-    expect(host.querySelector('.transcript .welcome--compact h1')?.textContent).toBe('안녕하세요, 집순이예요!')
+    expect(host.querySelector('.transcript .welcome--compact h1')?.textContent).toBe('집순이와 해볼 일')
+    expect(host.querySelector('.transcript .quick-jobs')).not.toBeNull()
+    snapshot({ ...existing, inlineLogin: true })
+    expect(host.querySelector('.transcript .welcome--compact')).toBeNull()
+    snapshot(existing)
+    click('안내 닫기')
+    expect(requests().at(-1)).toMatchObject({ action: 'dismissOfficeGuide' })
+    snapshot({ ...existing, showOfficeGuide: false })
+    expect(host.querySelector('.transcript .welcome--compact')).toBeNull()
+    expect(host.querySelector('.transcript .messages .message')).not.toBeNull()
   })
 
   it('renders assistant output and evidence as text and opens the answer menu by native identity', () => {
