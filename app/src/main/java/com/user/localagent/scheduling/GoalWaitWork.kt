@@ -202,7 +202,8 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val channel="goal-media-progress"
         manager.createNotificationChannel(NotificationChannel(channel,"교육 재생 확인",NotificationManager.IMPORTANCE_LOW))
         val notice=Notification.Builder(applicationContext,channel)
-            .setSmallIcon(applicationContext.applicationInfo.icon)
+            // The launcher icon is a full-color picture; the status bar needs the monochrome mark the other notices use.
+            .setSmallIcon(com.user.localagent.runtime.R.drawable.ic_agent)
             .setContentTitle("교육 영상이 끝나는지 확인 중")
             .setContentText("집합 앱 브라우저에서 실제 재생 상태를 확인하고 있어요.")
             .setOngoing(true).setOnlyAlertOnce(true).build()

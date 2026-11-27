@@ -1,4 +1,0 @@
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:insetLeft="17dp" android:insetTop="17dp" android:insetRight="17dp" android:insetBottom="17dp">
-    <bitmap android:src="@drawable/ziphap_mascot_v1" android:gravity="fill" android:filter="true" />
-</inset>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer (Android 13+): the 집순이 bear hood as one silhouette with the face cut out and two eyes and a
+     smile inside it. Paths use the web character's coordinates (web-ui/src/character/Character.tsx, viewBox 200x210);
+     the group scales them into the 108dp adaptive canvas, centered inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="24" android:translateY="21.6" android:scaleX="0.3" android:scaleY="0.3">
+        <path android:fillColor="#FFFFFF"
+            android:pathData="M32 50 A22 22 0 1 0 76 50 A22 22 0 1 0 32 50 Z M124 50 A22 22 0 1 0 168 50 A22 22 0 1 0 124 50 Z" />
+        <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
+            android:pathData="M100 34 C152 34 178 66 178 116 C178 164 150 188 100 188 C50 188 22 164 22 116 C22 66 48 34 100 34 Z M50 116 A50 42 0 1 0 150 116 A50 42 0 1 0 50 116 Z" />
+        <path android:fillColor="#FFFFFF"
+            android:pathData="M72 112 A8 8 0 1 0 88 112 A8 8 0 1 0 72 112 Z M112 112 A8 8 0 1 0 128 112 A8 8 0 1 0 112 112 Z M86 128 Q100 142 114 128 Q100 136 86 128 Z" />
+    </group>
+</vector>
