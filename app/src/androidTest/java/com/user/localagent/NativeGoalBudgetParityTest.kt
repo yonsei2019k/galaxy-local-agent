@@ -15,11 +15,11 @@ class NativeGoalBudgetParityTest {
                 "root", null, null, 1, start, 0, 0, segments,
             )
             for (calls in listOf(0, 143, 144)) {
-                for (now in listOf(start - 1, start, start + 1_799_999, start + 1_800_000)) {
+                for (active in listOf(0L, 1L, 1_799_999L, 1_800_000L, Long.MAX_VALUE)) {
                     for (progress in listOf(0, 2, 3)) {
                         assertEquals(
-                            goalBudgetStop(binding, calls, now, progress, useNative = false),
-                            goalBudgetStop(binding, calls, now, progress, useNative = true),
+                            goalBudgetStop(binding, calls, active, progress, useNative = false),
+                            goalBudgetStop(binding, calls, active, progress, useNative = true),
                         )
                     }
                 }

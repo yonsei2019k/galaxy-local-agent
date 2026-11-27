@@ -1,3 +1,8 @@
+## 2026-11-27 — C-090 장기 목표 통합
+
+- dbb8e4e 기준의 권한, 로그인, 완료 근거, 단계별 예산과 장부 보관 검사를 유지하며 899dd85의 로컬 실행 전 저널, 실제 활동 시간, 소유자 재개, 관찰 변화와 제한 재시도를 통합했다. 앱 시작 때 저장한 대기 조건과 마지막 실행을 같은 복구 경로에서 확인한다. 개인 내용은 실패 기록에 넣지 않는다.
+- Rust core/Android 호스트 테스트 63건 통과. Kotlin 및 Android 기기 검증은 합친 빌드에서 별도로 확인한다.
+
 ## 2026-11-27 — 장기 목표 이어가기와 로그인 후 복구
 
 - 호스트가 새로운 진척을 확인하면 같은 목표의 다음 구간을 예약한다. 완료 조건, 권한, 작업 대상, 중단 요청을 다시 검사한다. 긴 이력은 암호화한 원본 실행 기록에 남기고 모델에는 현재 조건과 근거 개수를 전달한다. 예약·발송 등 앞서 시도한 변경은 원본 실행 기록을 대조한다.
@@ -3106,3 +3111,14 @@ PC 재시작 후 재조립한 0.1.71-next-action-test의 서명과 권한이 기
 ## 한림에듀 로그인 화면 복구
 
 집순이 대화에서 로그인 안내만 남는 경우, 마지막 읽기 전용 브라우저 요청에 저장된 인증 근거로 사이트 로그인 화면을 다시 연다. 같은 대화와 분기, 실행 권한을 확인한 후 Android에서 확인된 로그인만 기존 요청의 재개 조건으로 사용한다. 숨은 PC 시험 방의 인증 입력은 별도로 종료한다. 기기 2084에서 로그인 필요 응답을 관찰했다. 수정 버전의 설치와 강의 재생·진도 반영은 별도 검증 항목이다.
+
+## 2026-11-27 — SOURCE goal continuity (claude/goal-continuity worktree, base cb99358)
+Branch-only source change; not integrated into galaxy-local-agent, not built into an installed APK, no device evidence. Spec: ignored `.local/sdd/2026-11-27-goal-continuity/spec.md`. Commits in order 6→7→3→2→1→4→5.
+- Fixed-code FailureLog for goal continue/launch/pause stops (no goal text or results).
+- Local goal-bound runs now write the same SQLCipher write-ahead shared journal as cloud runs (shared GoalEffectRecorder; begin right before the effect after approvals; sealed before every terminal write). Rust adds ExecutionProvider `local_phone`; RunBinding.authorizationRevision is an explicit, never-omitted `null` for local runs. Contract change for every reader of `sharedEngineState`.
+- One effect rule `goalRunEffectsUnresolved`: an `interrupted` run needs a resolved (not closed) record; `interrupted/process_restarted` is a continuable checkpoint. Startup re-tracks restored goal requests and continues or pauses orphan ACTIVE segment goals (new reason `goal_autopilot_process_restarted`).
+- GoalSegmentBinding gains `activeElapsedMs`, `budgetWindow`, `budgetBaseToolCalls`, `transientRetries` (strict key set; legacy key set accepted conservatively). Run context key `goalActiveMs` (host active time, approval/queue waits excluded). Rust `goal_budget_stop(segments,tools,active_elapsed_ms,no_progress)`; 30 min/144/8/3 unchanged.
+- Only an owner action (UI start of a PAUSED goal, RESUME from a non-goal run) opens a new budget window; ledger checks and duplicate-write guards are unchanged; only old read-only ledger entries may be dropped to make room.
+- Bounded (2) segment retry after resolved transient failures, 30 s × attempt wait outside goalMutation, new reason `goal_autopilot_transient_failure`. No cloud POST retry.
+- StepEvidence.observationDigest (host SHA-256 prefix of verified goal reads) makes a changed observation count as progress.
+Validation: see the agent report for this branch (JVM/Rust/lint/assemble results). Device and real workflow behaviour unverified.

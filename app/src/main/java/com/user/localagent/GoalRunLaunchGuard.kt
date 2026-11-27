@@ -24,6 +24,14 @@ data class GoalSegmentBinding(
     val startedAtMs:Long,val consumedToolCalls:Int,val noProgressSegments:Int,val totalSegments:Int=segmentIndex,
     val phaseStartSegments:Int=0,val phaseStartCalls:Int=0,val artifactWrapUp:Boolean=false,
     val artifactAuthResumed:Boolean=false,val archivedCalls:Int=0,val archivedObservations:String="",
+    /** Active time of all earlier segments, carried by the host; never derived from the wall clock of a later read. */
+    val activeElapsedMs:Long=0,
+    /** Owner-renewed budget window (0 = original). Only an owner action opens the next one; the ledger is never reset. */
+    val budgetWindow:Int=0,
+    /** Ledger size when this window opened; this window's tool budget counts only later calls. */
+    val budgetBaseToolCalls:Int=0,
+    /** Consecutive host retries after a resolved transient failure; a normal checkpoint resets it. */
+    val transientRetries:Int=0,
 ) {
     init {
         require(listOf(goalId,scopeKey,rootRunId).all {it.isNotBlank()&&it.length<=256&&it.none {c->c.code<32}})
@@ -35,6 +43,8 @@ data class GoalSegmentBinding(
         require(phaseStartSegments in 0 until totalSegments && phaseStartCalls in 0..consumedToolCalls)
         require(startedAtMs>=0&&startedAtMs<=Long.MAX_VALUE-MAX_DURATION_MS)
         require(!artifactAuthResumed||artifactWrapUp)
+        require(budgetWindow in 0..MAX_BUDGET_WINDOWS&&budgetBaseToolCalls in 0..consumedToolCalls&&transientRetries in 0..MAX_TRANSIENT_RETRIES)
+        require(activeElapsedMs in 0..MAX_DURATION_MS)
         require((segmentIndex==1)==(parentRunId==null&&parentCheckpointDigest==null))
         if(segmentIndex>1)require(parentRunId!=null&&parentRunId.isNotBlank()&&parentRunId.length<=100&&
             parentRunId.none {it.code<32}&&parentCheckpointDigest?.matches(Regex("[a-f0-9]{64}"))==true)
@@ -48,6 +58,8 @@ data class GoalSegmentBinding(
         if(artifactWrapUp)put("artifactWrapUp",true)
         if(artifactAuthResumed)put("artifactAuthResumed",true)
         if(phaseStartSegments!=0||phaseStartCalls!=0){put("phaseStartSegments",phaseStartSegments);put("phaseStartCalls",phaseStartCalls)}
+        put("activeElapsedMs",activeElapsedMs);put("budgetWindow",budgetWindow);put("budgetBaseToolCalls",budgetBaseToolCalls)
+        put("transientRetries",transientRetries)
     }
     companion object {
         const val PHASE_SEGMENTS=8
@@ -55,8 +67,13 @@ data class GoalSegmentBinding(
         const val MAX_LEDGER_ENTRIES=576
         const val MAX_DURATION_MS=30*60*1000L
         const val MAX_NO_PROGRESS=3
-        internal fun parse(o:JsonObject):GoalSegmentBinding {
-            require(o.keys-setOf("archivedCalls","archivedObservations","phaseStartSegments","phaseStartCalls","artifactWrapUp","artifactAuthResumed")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
+        const val MAX_BUDGET_WINDOWS=100
+        const val MAX_TRANSIENT_RETRIES=2
+        private val clockKeys=setOf("activeElapsedMs","budgetWindow","budgetBaseToolCalls","transientRetries")
+        internal fun parse(o:JsonObject,nowMs:Long=System.currentTimeMillis()):GoalSegmentBinding {
+            val legacy=o.keys.none {it in clockKeys}
+            require(legacy || o.keys.containsAll(clockKeys))
+            require(o.keys-clockKeys-setOf("archivedCalls","archivedObservations","phaseStartSegments","phaseStartCalls","artifactWrapUp","artifactAuthResumed")==setOf("version","goalId","originalGoalVersion","workDigest","scopeKey","scopeRevision","useOwnerMemory","memoryEnabled","rootRunId","parentRunId","parentCheckpointDigest","segmentIndex","startedAtMs","consumedToolCalls","noProgressSegments","totalSegments"))
             fun s(k:String)=o.getValue(k).jsonPrimitive.let {require(it.isString);it.content}
             fun l(k:String)=o.getValue(k).jsonPrimitive.let {require(!it.isString);it.long}
             fun b(k:String)=o.getValue(k).jsonPrimitive.let {require(!it.isString);it.boolean}
@@ -75,7 +92,11 @@ data class GoalSegmentBinding(
                 o["artifactWrapUp"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false,
                 o["artifactAuthResumed"]?.jsonPrimitive?.let {require(!it.isString);it.boolean}?:false,
                 if("archivedCalls" in o)l("archivedCalls").also {require(it in 1..count)}.toInt() else 0,
-                if("archivedObservations" in o)s("archivedObservations") else "")
+                if("archivedObservations" in o)s("archivedObservations") else "",
+                if(legacy)(nowMs-l("startedAtMs")).coerceIn(0,MAX_DURATION_MS)else l("activeElapsedMs"),
+                if(legacy)0 else l("budgetWindow").also {require(it in 0..MAX_BUDGET_WINDOWS.toLong())}.toInt(),
+                if(legacy)0 else l("budgetBaseToolCalls").also {require(it in 0..count)}.toInt(),
+                if(legacy)0 else l("transientRetries").also {require(it in 0..MAX_TRANSIENT_RETRIES.toLong())}.toInt())
         }
     }
 }
@@ -87,6 +108,8 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
     SEGMENT_BUDGET("goal_autopilot_segment_budget"), TOOL_BUDGET("goal_autopilot_tool_budget"),
     TIME_BUDGET("goal_autopilot_time_budget"), NO_PROGRESS("goal_autopilot_no_progress"),
     INVALID_CHECKPOINT("goal_autopilot_invalid_checkpoint"),
+    PROCESS_RESTARTED("goal_autopilot_process_restarted"),
+    TRANSIENT_FAILURE("goal_autopilot_transient_failure"),
     ;
     val description:String get()=when(this) {
         SEGMENT_BUDGET->"이번 목표에서 이어서 실행할 구간 한도에 도달했어요. 확인한 결과는 남겨뒀어요."
@@ -100,6 +123,8 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
         LEGACY_CONTEXT->"기존 요청에는 자동 연속 실행 연결이 없어 일시 정지했습니다. 이전 권한을 확대하지 않았습니다."
         INVALID_CHECKPOINT->"저장된 실제 실행 근거를 확인하지 못해 일시 정지했습니다. 근거를 버리고 다시 실행하지 않습니다."
         STOPPED->"목표 실행이 중지되었거나 원래 실행 조건을 유지하지 않아 일시 정지했습니다."
+        PROCESS_RESTARTED->"앱이 다시 시작되어 목표를 일시 정지했습니다. 확인된 결과를 보존했고 재개할 수 있습니다."
+        TRANSIENT_FAILURE->"연결 지연 같은 일시 장애가 반복되어 목표를 일시 정지했습니다. 확인된 결과를 보존했으며 연결 상태를 확인한 뒤 재개할 수 있습니다."
     }
 }
 internal sealed interface GoalSegmentDecision {
@@ -109,30 +134,47 @@ internal sealed interface GoalSegmentDecision {
 }
 internal class GoalAutopilotPaused(val reason:GoalAutopilotPauseReason):IllegalStateException(reason.description)
 internal data class GoalEntryBudget(val originalGoalVersion:Long,val startedAtMs:Long,val totalSegments:Int,val noProgressSegments:Int,
-    val phaseStartSegments:Int=0,val phaseStartCalls:Int=0)
+    val phaseStartSegments:Int=0,val phaseStartCalls:Int=0,val activeElapsedMs:Long=0,val budgetWindow:Int=0,val budgetBaseToolCalls:Int=0)
 
 /** Explicit START/RESUME/steer is not a budget-renewal receipt. Count every earlier goal run. */
 internal fun goalEntryBudget(goal:GoalDefinition,sources:List<GoalRunEvidenceSource>,nowMs:Long,
-    ownerWaitMs:Long=0):GoalEntryBudget {
+    ownerWaitMs:Long=0,renewBudget:Boolean=false):GoalEntryBudget {
     if(sources.isEmpty())return GoalEntryBudget(goal.updatedAt,nowMs,1,0)
-    val requests=sources.map {QueuedChatRequest.fromJson(it.contextJson)}
-    val consumed=maxOf(sources.size,requests.maxOf {it.goalSegment?.totalSegments?:1})
-    val latest=requests.last()
+    val requests=sources.map {QueuedChatRequest.fromJson(it.contextJson,nowMs)}
+    val original=requests.first().let {it.goalSegment?.originalGoalVersion?:checkNotNull(it.goal).updatedAt}
+    val window=requests.maxOf {it.goalSegment?.budgetWindow?:0}
+    if(renewBudget) {
+        if(window>=GoalSegmentBinding.MAX_BUDGET_WINDOWS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.SEGMENT_BUDGET)
+        return GoalEntryBudget(original,nowMs,1,0,budgetWindow=window+1)
+    }
+    val current=requests.indices.filter {(requests[it].goalSegment?.budgetWindow?:0)==window}
+    val consumed=maxOf(current.size,current.maxOf {requests[it].goalSegment?.totalSegments?:1})
+    val latest=requests[current.last()]
     val phase=latest.goalSegment
     if(consumed-(phase?.phaseStartSegments?:0)>=GoalSegmentBinding.PHASE_SEGMENTS)
         throw GoalAutopilotPaused(GoalAutopilotPauseReason.SEGMENT_BUDGET)
-    val started=(phase?.startedAtMs?:requests.minOf {it.queueOrder})+ownerWaitMs
-    if(started<=0||nowMs<started||nowMs-started>=GoalSegmentBinding.MAX_DURATION_MS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TIME_BUDGET)
+    val started=phase?.startedAtMs?:requests[current.first()].queueOrder
+    val last=sources[current.last()]
+    val active=if(phase!=null)phase.activeElapsedMs+goalRunActiveMs(last.contextJson,last.startedAt,last.finishedAt)
+        else current.sumOf {i->sources[i].let {goalRunActiveMs(it.contextJson,it.startedAt,it.finishedAt)}}
+    if(started<=0||active>=GoalSegmentBinding.MAX_DURATION_MS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.TIME_BUDGET)
     val noProgress=phase?.let {if(ownerWaitMs>0||hasNewGoalProgress(latest,goal)) 0 else it.noProgressSegments+1}?:0
     if(noProgress>=GoalSegmentBinding.MAX_NO_PROGRESS)throw GoalAutopilotPaused(GoalAutopilotPauseReason.NO_PROGRESS)
-    val original=requests.minBy {it.goalSegment?.startedAtMs?:it.queueOrder}.let {it.goalSegment?.originalGoalVersion?:checkNotNull(it.goal).updatedAt}
-    return GoalEntryBudget(original,started,consumed+1,noProgress,phase?.phaseStartSegments?:0,phase?.phaseStartCalls?:0)
+    return GoalEntryBudget(original,started,consumed+1,noProgress,phase?.phaseStartSegments?:0,
+        maxOf(phase?.phaseStartCalls?:0,phase?.budgetBaseToolCalls?:0),active,window,phase?.budgetBaseToolCalls?:0)
 }
 
 private fun hasNewGoalProgress(request:QueuedChatRequest,goal:GoalDefinition):Boolean {
-    val seen=request.goalLedger.mapNotNull {goalMilestoneKey(it.step)}.toSet()
+    val prior=request.goalLedger.map {it.step}
+    val fresh=request.previousSteps.drop(request.goalReadbackSeedCount)
+    val seen=prior.mapNotNull(::goalMilestoneKey).toSet()
     val archived=GoalObservationIndex.decode(request.goalSegment?.archivedObservations.orEmpty())
-    return request.previousSteps.drop(request.goalReadbackSeedCount).mapNotNull(::goalMilestoneKey).any {it !in seen && !archived.contains(it)} ||
+    return fresh.mapNotNull(::goalMilestoneKey).any {it !in seen && !archived.contains(it)} ||
+        fresh.any {step->
+            val key=goalRepeatedReadKey(step)
+            key!=null && !archived.contains(key) && prior.any {it.tool==step.tool && it.arguments==step.arguments && goalRepeatedReadKey(it)!=null} &&
+                prior.none {goalRepeatedReadKey(it)==key}
+        } ||
         goal.criteria.any {now->now.status==GoalCriterionStatus.VERIFIED &&
             checkNotNull(request.goal).criteria.none {it.id==now.id&&it.status==GoalCriterionStatus.VERIFIED}}
 }
@@ -148,7 +190,7 @@ internal fun goalMayResumeFrom(row:ChatRunRecord):Boolean =
 /** Pure host decision. unknownEffects must come from the real runtime journal, never model prose. */
 internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
     useNativeBudget:Boolean=false):GoalSegmentDecision {
-    val request=try {QueuedChatRequest.fromJson(parent.contextJson)}catch(_:Exception) {
+    val request=try {QueuedChatRequest.fromJson(parent.contextJson,nowMs)}catch(_:Exception) {
         return GoalSegmentDecision.Pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
     }
     val segment=request.goalSegment?:return GoalSegmentDecision.Pause(GoalAutopilotPauseReason.LEGACY_CONTEXT)
@@ -165,7 +207,9 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(ledger.any {goalUnverifiedEffect(it.step)})return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
     if(ledger.any {goalUncertainFailure(it.step)})return pause(GoalAutopilotPauseReason.FAILED_STEP)
     if(ledger.any {PreparedHandoff.pendingEffect(it.step)})return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
-    if(!goalMayResumeFrom(parent)&&parent.status!="paused")return pause(GoalAutopilotPauseReason.STOPPED)
+    val transient=goalTransientFailure(parent)
+    if(transient&&segment.transientRetries>=GoalSegmentBinding.MAX_TRANSIENT_RETRIES)return pause(GoalAutopilotPauseReason.TRANSIENT_FAILURE)
+    if(!transient&&!goalMayResumeFrom(parent)&&parent.status!="paused")return pause(GoalAutopilotPauseReason.STOPPED)
     var completedMedia=false
     var resumedArtifactAuth=false
     val clockShift = if (parent.status=="paused" && parent.errorCode=="waiting_goal_condition") {
@@ -194,7 +238,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         }
         wokeAt-parkedAt
     } else {
-        if(!goalMayResumeFrom(parent)&&parent.errorCode!="execution_not_verified")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
+        if(!transient&&!goalMayResumeFrom(parent)&&parent.errorCode!="execution_not_verified")return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
         0L
     }
     val assessment=assessGoalReadback(request,scopeKey)
@@ -209,7 +253,8 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     val progressed=wrapUp||completedMedia||recovery==null&&hasNewGoalProgress(request,goal)
     val noProgress=if(progressed)0 else segment.noProgressSegments+1
     val budget=segment.copy(startedAtMs=segment.startedAtMs+clockShift)
-    val limit=goalBudgetStop(budget,totalCalls,nowMs,noProgress,useNativeBudget)
+    val active=(segment.activeElapsedMs+goalRunActiveMs(parent.contextJson,parent.startedAt,parent.finishedAt)).coerceAtMost(GoalSegmentBinding.MAX_DURATION_MS)
+    val limit=goalBudgetStop(budget,totalCalls,active,noProgress,useNativeBudget)
     val observedMilestones=request.goalLedger.mapNotNull {goalMilestoneKey(it.step)}.toSet()
     val earnedPhase=completedMedia || goal.criteria.any {criterion->
         criterion.status==GoalCriterionStatus.VERIFIED&&request.goal.criteria.none {it.id==criterion.id&&it.status==GoalCriterionStatus.VERIFIED}
@@ -218,7 +263,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         earnedPhase && recovery==null && nowMs>=budget.startedAtMs
     if(limit!=null&&!renew)return if(complete)GoalSegmentDecision.Complete else pause(limit)
     val nextStart=if(renew)maxOf(budget.startedAtMs,parent.finishedAt?:parent.updatedAt) else budget.startedAtMs
-    if(nextStart>nowMs)return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+    if(renew&&nextStart>nowMs)return pause(GoalAutopilotPauseReason.INVALID_CHECKPOINT)
     val retained=compactGoalLedger(ledger,archive)?:return pause(GoalAutopilotPauseReason.TOOL_BUDGET)
     val archivedCalls=totalCalls-retained.size
     return GoalSegmentDecision.Continue(budget.copy(parentRunId=request.runId,parentCheckpointDigest=goalDigest(parent.contextJson),
@@ -226,16 +271,48 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         archivedCalls=archivedCalls,archivedObservations=if(archivedCalls>0)archive.encode() else "",noProgressSegments=noProgress,
         startedAtMs=nextStart,phaseStartSegments=if(renew)segment.totalSegments else segment.phaseStartSegments,
         phaseStartCalls=if(renew)totalCalls else segment.phaseStartCalls,artifactWrapUp=wrapUp,
+        activeElapsedMs=if(renew)0L else active,transientRetries=if(transient)segment.transientRetries+1 else 0,
         artifactAuthResumed=wrapUp&&resumedArtifactAuth),retained,recovery)
 }
 
 internal fun goalToolRoom(segment:GoalSegmentBinding,steps:Int):Int =
-    GoalSegmentBinding.PHASE_TOOL_CALLS-(segment.consumedToolCalls-segment.phaseStartCalls)-steps
+    GoalSegmentBinding.PHASE_TOOL_CALLS-(segment.consumedToolCalls-maxOf(segment.phaseStartCalls,segment.budgetBaseToolCalls))-steps
 
-internal fun goalBudgetStop(segment:GoalSegmentBinding,toolCount:Int,nowMs:Long,noProgress:Int,useNative:Boolean):GoalAutopilotPauseReason? {
+/** Fixed codes the host itself writes for a connection/PC-availability failure. Never model text or a provider message. */
+private val transientFailureCodes=setOf("SocketTimeoutException","ConnectException","PcUnavailable","PcBusy","PcAgentProviderBusy")
+private val transientPauseCodes=setOf("planning_pc_busy","planning_pc_unavailable","tool_call_truncated")
+internal fun goalTransientFailure(parent:ChatRunRecord):Boolean {
+    val code=parent.errorCode?:return false
+    return when(parent.status) {
+        "failed"->code in transientFailureCodes||code.matches(Regex("PC_BRIDGE_TIMEOUT_[A-Z_]{1,64}"))
+        "paused"->code in transientPauseCodes||code.matches(Regex("planning_[a-z_]{1,48}_timeout"))
+        else->false
+    }
+}
+internal fun goalTransientRetryDelayMs(attempt:Int):Long=30_000L*attempt.coerceIn(1,GoalSegmentBinding.MAX_TRANSIENT_RETRIES)
+
+internal fun goalParentRestarted(parent:ChatRunRecord)=parent.status=="interrupted"&&parent.errorCode=="process_restarted"
+
+/**
+ * The one effect rule every goal caller uses. An interrupted run can never start another effect, so its record
+ * need not be closed; it still needs no in-flight call and no uncertainty. Every other run needs a closed record.
+ */
+internal fun goalRunEffectsUnresolved(row:ChatRunRecord,scopeKey:String):Boolean=goalNativeEffectsUnresolved(row,scopeKey,requireClosed=!goalParentRestarted(row))
+
+/** Startup decision for an ACTIVE goal whose last linked run ended while the app was not running. */
+internal fun goalRestartDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
+    useNativeBudget:Boolean=false):GoalSegmentDecision = try {
+    when(val decision=goalSegmentDecision(parent,goal,scopeKey,nowMs,unknownEffects,useNativeBudget)) {
+        GoalSegmentDecision.Complete, is GoalSegmentDecision.Continue->decision
+        is GoalSegmentDecision.Pause->if(decision.reason==GoalAutopilotPauseReason.STOPPED)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)else decision
+    }
+}catch(_:Exception){GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)}
+
+/** activeElapsedMs is the carried plus current segment active time, never a wall-clock difference. */
+internal fun goalBudgetStop(segment:GoalSegmentBinding,toolCount:Int,activeElapsedMs:Long,noProgress:Int,useNative:Boolean):GoalAutopilotPauseReason? {
     if(useNative){
-        return when(uniffi.ziphap_android.nativeGoalBudgetStop((segment.totalSegments-segment.phaseStartSegments).toUInt(),(toolCount-segment.phaseStartCalls).toUInt(),
-            segment.startedAtMs.toULong(),nowMs.toULong(),noProgress.toUInt())){
+        return when(uniffi.ziphap_android.nativeGoalBudgetStop((segment.totalSegments-segment.phaseStartSegments).toUInt(),(toolCount-maxOf(segment.phaseStartCalls,segment.budgetBaseToolCalls)).toUInt(),
+            activeElapsedMs.toULong(),noProgress.toUInt())){
             uniffi.ziphap_android.NativeGoalBudgetStop.SEGMENTS->GoalAutopilotPauseReason.SEGMENT_BUDGET
             uniffi.ziphap_android.NativeGoalBudgetStop.TOOLS->GoalAutopilotPauseReason.TOOL_BUDGET
             uniffi.ziphap_android.NativeGoalBudgetStop.TIME->GoalAutopilotPauseReason.TIME_BUDGET
@@ -246,8 +323,8 @@ internal fun goalBudgetStop(segment:GoalSegmentBinding,toolCount:Int,nowMs:Long,
     // Reference policy for JVM tests without the Android native library.
     return when {
         segment.totalSegments-segment.phaseStartSegments>=GoalSegmentBinding.PHASE_SEGMENTS->GoalAutopilotPauseReason.SEGMENT_BUDGET
-        toolCount-segment.phaseStartCalls>=GoalSegmentBinding.PHASE_TOOL_CALLS->GoalAutopilotPauseReason.TOOL_BUDGET
-        nowMs<segment.startedAtMs||nowMs-segment.startedAtMs>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
+        toolCount-maxOf(segment.phaseStartCalls,segment.budgetBaseToolCalls)>=GoalSegmentBinding.PHASE_TOOL_CALLS->GoalAutopilotPauseReason.TOOL_BUDGET
+        activeElapsedMs>=GoalSegmentBinding.MAX_DURATION_MS->GoalAutopilotPauseReason.TIME_BUDGET
         noProgress>=GoalSegmentBinding.MAX_NO_PROGRESS->GoalAutopilotPauseReason.NO_PROGRESS
         else->null
     }

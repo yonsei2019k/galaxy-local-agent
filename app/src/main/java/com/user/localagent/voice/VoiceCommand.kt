@@ -211,6 +211,8 @@ class AgentRunService:Service() {
             if(!RunKeepAlive.snapshot(runId).active){hold.close();return null}
             return hold
         }
+        /** Whether this run's cleanup hold and its foreground receipt are both still live; never acquires one. */
+        fun cleanupHeld(runId:String):Boolean=cleanupHolds.isHeld(runId)&&RunKeepAlive.snapshot(runId).active
         internal fun appOnScreen():Boolean {
             val info=ActivityManager.RunningAppProcessInfo();ActivityManager.getMyMemoryState(info)
             return info.importance<=ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND

@@ -3,7 +3,7 @@ use ziphap_core::*;
 
 fn binding() -> RunBinding {
     RunBinding { run_id: "run-t".into(), thread_id: "thread-t".into(), project_id: None,
-        branch_id: "branch-t".into(), scope_id: "scope-t".into(), authorization_revision: 1 }
+        branch_id: "branch-t".into(), scope_id: "scope-t".into(), authorization_revision: Some(1) }
 }
 fn profile() -> ExecutionProfile {
     ExecutionProfile { profile_id: "p".into(), provider: ExecutionProvider::CodexCli, model_id: "m".into(),
@@ -68,7 +68,7 @@ fn repeated_cancellation_preserves_only_the_original_late_effect_receipt() {
     assert_eq!(Some(EffectState::Unknown), run.effect_state("claimed-call"));
 
     let mut new_authority = original.clone();
-    new_authority.authorization_revision += 1;
+    new_authority.authorization_revision = original.authorization_revision.map(|revision| revision + 1);
     assert_eq!(Err(CoreError::AuthorityChanged),
         run.reconcile_effect(&new_authority, "claimed-call", verified(), 105));
     assert_eq!(Err(CoreError::InvalidTransition),
