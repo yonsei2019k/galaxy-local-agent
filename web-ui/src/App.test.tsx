@@ -347,9 +347,59 @@ describe('native conversation', () => {
     expect(guests.length).toBeLessThanOrEqual(4)
     for (const guest of guests) expect(guest.getAttribute('aria-hidden')).toBe('true')
     expect(host.querySelector('.welcome h1')?.textContent).toBe('무엇을 도와드릴까요?')
-    // Without calendar access the plain first screen offers no suggestion that would start a permission request.
     const chips = [...host.querySelectorAll('.room-suggestions button')].map(item => item.textContent)
-    expect(chips).toEqual(['웹에서 정보 찾기', '첨부한 자료 요약'])
+    expect(chips).toEqual(['내일 오전 일정 정리해 줘', '이번 주말 서울 날씨 찾아 줘', '오늘 할 일 같이 정리해 줘'])
+  })
+
+  it('sends an empty-state suggestion right away as plain text with no permission fields', () => {
+    mount()
+    snapshot(base)
+    const before = requests().length
+    click('내일 오전 일정 정리해 줘')
+    const sent = requests().slice(before)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ action: 'send', threadId: 'thread-a', branchId: 'branch-a', payload: { text: '내일 오전 일정 정리해 줘' } })
+    // Only the sentence and the composer's own resend token travel; no permission, tool or model field.
+    expect(Object.keys(sent[0].payload).sort()).toEqual(['submitToken', 'text'])
+    // A held draft is never replaced or bypassed by a suggestion.
+    snapshot({ ...base, draft: '쓰던 글' })
+    const held = requests().length
+    expect(host.querySelector('.room-suggestions button')?.hasAttribute('disabled')).toBe(true)
+    expect(requests().length).toBe(held)
+  })
+
+  it('shows model-written reply choices as chips: recommended ink pill, one send, and 직접 입력 only focuses', () => {
+    mount()
+    const question: Snapshot = { ...base, singleConversation: true,
+      messages: [{ id: 'question', role: 'assistant', text: '이 시간으로 예약할까요?' }],
+      tasks: [{ id: 'question-run', phase: 'waiting_input', label: '', detail: '오후 3시가 비어 있어요.', canCancel: false,
+        choices: [{ label: '이 시간으로 예약할게요', recommended: true }, { label: '다른 시간 볼래요', recommended: false }] }],
+    }
+    snapshot(question)
+    const chips = [...host.querySelectorAll<HTMLButtonElement>('.reply-chips .reply-chip')]
+    expect(chips.map(chip => chip.textContent)).toEqual(['이 시간으로 예약할게요추천', '다른 시간 볼래요', '직접 입력'])
+    expect(chips[0].classList.contains('reply-chip--recommended')).toBe(true)
+    expect(chips[0].getAttribute('aria-label')).toBe('이 시간으로 예약할게요, 추천')
+    expect(chips[1].classList.contains('reply-chip--recommended')).toBe(false)
+    // The labels are the model's own words; the screen adds no fixed yes/no buttons.
+    expect(host.textContent).not.toMatch(/그래|아니야/)
+    // The header 집순이 calls the owner while a choice is pending.
+    expect(host.querySelector('.character-button')?.getAttribute('data-mood')).toBe('confirm')
+
+    const before = requests().length
+    act(() => { chips[2].click() })
+    expect(document.activeElement).toBe(input())
+    expect(requests().length).toBe(before)
+
+    act(() => { chips[0].click() })
+    act(() => { chips[0].click(); chips[1].click() })
+    const sent = requests().slice(before)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ action: 'chooseReply', payload: { runId: 'question-run', index: 0 } })
+    expect(Object.keys(sent[0].payload).sort()).toEqual(['index', 'runId'])
+    expect(chips[0].getAttribute('aria-pressed')).toBe('true')
+    expect(chips[0].classList.contains('is-chosen')).toBe(true)
+    for (const chip of chips) expect(chip.disabled).toBe(true)
   })
 
   it('draws the booking payment card dark with a metal lock and unchanged wording', () => {

@@ -160,6 +160,14 @@ export default function App() {
           onOfficeCalendar={() => request({action:'requestOfficeCalendar'})}
           onChooseReply={(runId, index) => !pending && !draft.trim() &&
             request({ action: 'chooseReply', payload: { runId, index } })}
+          onWriteOwnReply={() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="메시지"]')?.focus()}
+          onSendExample={text => {
+            // The same send intent as the composer, with only the fixed sentence: no draft, attachment or setting.
+            if (!snapshot?.ready || !enabled || pending || draft.trim() || snapshot.inlineLogin || snapshot.voiceTalk ||
+              snapshot.attachments?.length) return
+            if (!request({ action: 'send', payload: { text, submitToken: crypto.randomUUID() } })) return
+            dispatch({ type: 'submit', scope: snapshot, text, kind: 'send' })
+          }}
           onBookingPayment={(action, id) => request({ action, payload: { id } })}
           hasDraft={!!draft.trim() || !enabled || !!pending || !!snapshot?.voiceTalk || snapshot?.inlineLogin === true} onDraftExample={(text, needsFile) => {
             if (!enabled || pending || draft.trim() || snapshot?.inlineLogin || snapshot?.voiceTalk) return

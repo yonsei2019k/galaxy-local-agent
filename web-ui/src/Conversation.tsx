@@ -26,6 +26,16 @@ const exampleRequests: { label: string; text: string; icon: IconName; needsCalen
 ]
 
 /**
+ * Empty-state suggestions (owner direction 2026-11-27): a tap sends the fixed sentence as an ordinary request. The chip
+ * carries only text; the model interprets it like any typed message and any permission follows the normal flow.
+ */
+const roomSuggestions: { text: string; icon: IconName }[] = [
+  { text: '내일 오전 일정 정리해 줘', icon: 'calendar' },
+  { text: '이번 주말 서울 날씨 찾아 줘', icon: 'globe' },
+  { text: '오늘 할 일 같이 정리해 줘', icon: 'check' },
+]
+
+/**
  * The other 집순이 in the room scene: different hoods and colors from the owner's choice, so the chosen one stays
  * the only one in its look. Positions, blur (depth) and float timing live in styles.css (.room-guest--N).
  */
@@ -41,9 +51,10 @@ function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[]
   }))
 }
 
-function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onNavigate, onDismiss, onCalendar }: {
+function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onDraftExample, onSendExample, onNavigate, onDismiss, onCalendar }: {
   staff?: string
   situation?: CharacterSituation
+  onSendExample?(text: string): void
   guide: boolean
   compact?: boolean
   calendarGranted: boolean
@@ -55,9 +66,8 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
 }) {
   const [character] = useCharacter()
   const [step, setStep] = useState(0)
-  // Suggestions on the plain first screen only draft text; the calendar one appears once reading is already allowed,
-  // so this screen never starts a permission request (the first-run guide keeps that flow).
-  const suggestions = staff || guide ? [] : exampleRequests.filter(example => !example.needsCalendar || calendarGranted)
+  // The plain first screen only (staff rooms and the first-run guide keep their own flows).
+  const suggestions = staff || guide || !onSendExample ? [] : roomSuggestions
   return (
     <div className={compact ? "welcome welcome--compact" : "welcome"}>
       {!compact && <MotionField className="room-scene">
@@ -71,8 +81,8 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
       <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 도와드릴까요?'}</h1>
       {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
       {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
-        {suggestions.map(example => <button type="button" key={example.label} className="suggestion-chip" disabled={hasDraft}
-          onClick={() => onDraftExample(example.text, example.needsFile)}><Icon name={example.icon} />{example.label}</button>)}
+        {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
+          onClick={() => onSendExample?.(example.text)}><Icon name={example.icon} />{example.text}</button>)}
       </div>}
       {guide && <section className="office-guide" aria-label="집순이 처음 안내">
         <div className="office-guide-steps" aria-hidden="true">{[0, 1, 2].map(index =>
@@ -206,7 +216,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onBookingPayment, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onWriteOwnReply, onSendExample, onBookingPayment, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -222,12 +232,18 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onStayPhoto?: (messageId: string, index: number, kind?: 'map') => boolean
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
+  /** "직접 입력" next to reply choices: only moves focus to the composer; nothing is sent. */
+  onWriteOwnReply?(): void
+  /** Empty-state suggestion: sends that fixed sentence as an ordinary request (the model interprets it as usual). */
+  onSendExample?(text: string): void
   onBookingPayment?(action: BookingPaymentAction, id: string): boolean
   historyOpen?: boolean
   onHistoryChange?(open: boolean): void
 }) {
   const view = useRef<HTMLElement>(null)
+  // The question a choice was sent for, and which choice: every chip locks so one tap sends one answer.
   const [sentChoice, setSentChoice] = useState<string | null>(null)
+  const [chosenIndex, setChosenIndex] = useState<number | null>(null)
   const pinnedToEnd = useRef(true)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [openWorkId, setOpenWorkId] = useState<string | null>(null)
@@ -354,7 +370,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           </div>
           <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
         </div> : empty ?
-          <Welcome staff={staff} guide={guide} situation={situationForMood(mood)}
+          <Welcome staff={staff} guide={guide} situation={situationForMood(mood)} onSendExample={onSendExample}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft} onDraftExample={onDraftExample}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
@@ -391,14 +407,25 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             </section>}
             {waitingInput && !liveTasks.length && <div className="reply-needed">
               <div role="status"><StickerText text={waitingInput.detail || waitingInput.label} /></div>
-              {waitingInput.choices && onChooseReply && <div className="reply-options" role="group" aria-label="답변 선택지">
-                {waitingInput.choices.map((choice, index) => <button key={choice.label} type="button"
-                  disabled={!enabled || hasDraft || !!snapshot?.attachments?.length || sentChoice === waitingInput.id}
-                  onClick={() => {
-                    if (onChooseReply(waitingInput.id, index)) setSentChoice(waitingInput.id)
-                  }}>
-                  {withStickers(choice.label)}{choice.recommended && <span className="reply-recommended"><Icon name="sparkle" />추천</span>}
-                </button>)}
+              {waitingInput.choices && onChooseReply && <div className="reply-options reply-chips" role="group" aria-label="답변 선택지">
+                {/* Labels come from the model for this exact question; the recommended one is the ink pill. */}
+                {waitingInput.choices.map((choice, index) => {
+                  const chosen = sentChoice === waitingInput.id && chosenIndex === index
+                  return <button key={choice.label} type="button"
+                    className={`reply-chip${choice.recommended ? ' reply-chip--recommended' : ''}${chosen ? ' is-chosen' : ''}`}
+                    aria-label={choice.recommended ? `${choice.label}, 추천` : undefined} aria-pressed={chosen}
+                    disabled={!enabled || hasDraft || !!snapshot?.attachments?.length || sentChoice === waitingInput.id}
+                    onClick={() => {
+                      if (sentChoice === waitingInput.id) return
+                      if (onChooseReply(waitingInput.id, index)) { setSentChoice(waitingInput.id); setChosenIndex(index) }
+                    }}>
+                    {withStickers(choice.label)}{choice.recommended && <span className="reply-recommended" aria-hidden="true">추천</span>}
+                  </button>
+                })}
+                {onWriteOwnReply && <button type="button" className="reply-chip reply-chip--own"
+                  disabled={!enabled || sentChoice === waitingInput.id} onClick={onWriteOwnReply}>
+                  <Icon name="edit" />직접 입력
+                </button>}
               </div>}
             </div>}
             {guide && !liveTasks.length && !snapshot?.busy && <Welcome compact guide

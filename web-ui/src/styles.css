@@ -717,6 +717,16 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
 .reply-options button:focus-visible { outline: 2px solid var(--color-cobalt); outline-offset: 2px; }
 .reply-options button span { color: var(--color-text); font-size: var(--fs-small); font-weight: var(--fw-bold); }
 .reply-options button:disabled { opacity: .55; cursor: default; }
+/* Reply choices under a question (2026-11-27): model-written labels as pills; the recommended one is ink,
+   the rest grey, then "직접 입력". The tapped chip stays visibly pressed while every chip is locked. */
+.reply-needed .reply-chips .reply-chip { background: var(--color-surface); color: var(--color-text); font-weight: var(--fw-bold); }
+.reply-needed .reply-chips .reply-chip--recommended { background: var(--color-ink); color: var(--color-on-ink); box-shadow: none; }
+.reply-needed .reply-chips .reply-chip--recommended:not(:disabled):hover { background: var(--color-ink-hover); color: var(--color-on-ink); box-shadow: none; }
+.reply-chips .reply-chip--recommended .reply-recommended { padding: 1px 7px; background: rgba(255, 255, 255, .18); color: var(--color-on-ink); font-size: var(--fs-caption); }
+.reply-needed .reply-chips .reply-chip--own { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-soft-strong); color: var(--color-text-sub); font-weight: var(--fw-medium); }
+.reply-chip--own svg { width: 16px; height: 16px; }
+.reply-chips .reply-chip.is-chosen { opacity: 1; box-shadow: 0 0 0 3px var(--color-soft-strong); transform: scale(.97); }
+.reply-chips .reply-chip:disabled:not(.is-chosen) { opacity: .45; }
 
 /* Voice conversation: one white card with the character and a live caption. */
 .voice-talk {
