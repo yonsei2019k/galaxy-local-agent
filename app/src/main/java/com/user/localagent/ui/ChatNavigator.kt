@@ -22,12 +22,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,6 +49,8 @@ import com.user.localagent.core.ToolRegistry
 import com.user.localagent.core.IntentPlanning
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.layout.width
 
 /** UI snapshots contain no repositories, running jobs or Android folder permissions. */
 data class UiProject(
@@ -164,21 +163,20 @@ fun ChatNavigator(
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("ZipHap.Agent", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            IconButton(onClick = onDismiss, modifier = Modifier.semantics { contentDescription = "대화 목록 닫기" }) { Text("×", style = MaterialTheme.typography.headlineSmall) }
+            IconButton(onClick = onDismiss, modifier = Modifier.semantics { contentDescription = "대화 목록 닫기" }) { ZipIcon(com.user.localagent.runtime.R.drawable.zi_close, null, tint = ZipHapColors.TextPrimary) }
         }
         // The owner removed the drawer-wide "new conversation" button; each project row keeps its own "+".
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { projectEditorId = "" }, modifier = Modifier.testTag("new_project")) { Text("새 프로젝트") }
         }
-        OutlinedTextField(
+        ZipOutlinedTextField(
             value = query, onValueChange = { query = it }, singleLine = true,
             placeholder = { Text(if(actions.onSearchThreads==null)"제목 검색"else"제목·본문 검색") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).testTag("thread_search"),
-            shape = RoundedCornerShape(16.dp),
         )
         if(searching)Text("이 기기의 모든 대화 버전에서 검색 중…",Modifier.padding(horizontal=14.dp,vertical=4.dp),style=MaterialTheme.typography.bodySmall)
         if(searchError.isNotBlank())Text(searchError,Modifier.padding(horizontal=14.dp,vertical=4.dp),style=MaterialTheme.typography.bodySmall,color=ZipHapColors.Error)
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            RoomFilter.entries.filter{it!=RoomFilter.TRASH||navigation.supportsTrash}.forEach { item -> FilterChip(selected = filter == item, onClick = { filter = item }, label = { Text(item.label) }) }
+            RoomFilter.entries.filter{it!=RoomFilter.TRASH||navigation.supportsTrash}.forEach { item -> ZipFilterChip(selected = filter == item, onClick = { filter = item }, label = { Text(item.label) }) }
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             if (conversationActions != null && query.isBlank() && filter == RoomFilter.ACTIVE) item(key = "conversation-actions") {
@@ -195,7 +193,7 @@ fun ChatNavigator(
                                 Text(project.folderLabel, color = ZipHapColors.TextSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             IconButton(onClick = { actions.onNewThread(project.id); onDismiss() }, modifier = Modifier.size(36.dp).semantics { contentDescription = "${project.name}에 새 대화" }) { Text("＋") }
-                            IconButton(onClick = { projectEditorId = project.id }, modifier = Modifier.size(36.dp).semantics { contentDescription = "${project.name} 프로젝트 설정" }) { Text("⋯") }
+                            IconButton(onClick = { projectEditorId = project.id }, modifier = Modifier.size(36.dp).semantics { contentDescription = "${project.name} 프로젝트 설정" }) { ZipIcon(com.user.localagent.runtime.R.drawable.zi_menu, null, tint = ZipHapColors.TextSecondary, size = 20.dp) }
                         }
                     }
                     items(rooms, key = { "thread:${it.id}" }) { room ->
@@ -219,7 +217,7 @@ fun ChatNavigator(
             if (visible.isEmpty()) item { Text(if (query.isBlank()) "아직 대화가 없습니다." else if(searching)"본문 검색 결과를 기다리고 있습니다."else if(searchError.isNotBlank())"제목에서 일치하는 대화가 없습니다."else"일치하는 대화가 없습니다.", Modifier.padding(22.dp), color = ZipHapColors.TextSecondary) }
             item { Spacer(Modifier.height(16.dp)) }
         }
-        HorizontalDivider()
+        ZipInsetDivider(inset = 0.dp)
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { onDismiss(); onOpenImages() }) { Text("이미지 작업실") }
             TextButton(onClick = { onDismiss(); onOpenSettings() }) { Text("설정·참고") }
@@ -268,11 +266,14 @@ private fun NavigatorThread(room: UiThread, selected: Boolean, onSelect: () -> U
     Surface(Modifier.fillMaxWidth().padding(horizontal = 10.dp), color = if (selected) ZipHapColors.Elevated else ZipHapColors.Background, shape = RoundedCornerShape(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).clickable(onClick = onSelect).padding(start = 12.dp, top = 11.dp, bottom = 11.dp).testTag("thread_${room.id}")) {
-                Text((if (room.pinned) "⌑  " else "") + room.title.ifBlank { "새 대화" }, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (room.pinned) ZipIcon(com.user.localagent.runtime.R.drawable.zi_heart, "고정", tint = ZipHapTokens.CobaltText, size = 16.dp)
+                    Text(room.title.ifBlank { "새 대화" }, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
                 if (room.runStatus.isNotBlank()) Text(room.runStatus, color = ZipHapColors.Mint, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Column {
-                IconButton(onClick = { menu = true }, modifier = Modifier.size(40.dp).semantics { contentDescription = "대화 작업 · ${room.title}" }) { Text("⋯") }
+                IconButton(onClick = { menu = true }, modifier = Modifier.size(40.dp).semantics { contentDescription = "대화 작업 · ${room.title}" }) { ZipIcon(com.user.localagent.runtime.R.drawable.zi_menu, null, tint = ZipHapColors.TextSecondary, size = 20.dp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     fun close(action: () -> Unit) { menu = false; action() }
                     if (room.trashed) {
@@ -285,7 +286,7 @@ private fun NavigatorThread(room: UiThread, selected: Boolean, onSelect: () -> U
                         DropdownMenuItem(text = { Text("대화 복제") }, onClick = { close { actions.onDuplicateThread(room.id) } })
                         DropdownMenuItem(text = { Text("프로젝트로 이동") }, onClick = { close { onDialog(RoomDialog.MOVE) } })
                         DropdownMenuItem(text = { Text("내보내기") }, onClick = { close { onDialog(RoomDialog.EXPORT) } })
-                        HorizontalDivider()
+                        ZipInsetDivider(inset = 0.dp)
                         DropdownMenuItem(text = { Text("내용 비우기") }, onClick = { close { onDialog(RoomDialog.CLEAR) } })
                         if(supportsTrash)DropdownMenuItem(text = { Text("휴지통으로 이동") }, onClick = { close { actions.onTrashThread(room.id) } })
                         else DropdownMenuItem(text = { Text("영구 삭제",color=ZipHapColors.Error) }, onClick = { close { onDialog(RoomDialog.DELETE) } })
@@ -300,7 +301,7 @@ private fun NavigatorThread(room: UiThread, selected: Boolean, onSelect: () -> U
 private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by remember(initial) { mutableStateOf(initial) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
-        OutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true, label = { Text("이름") })
+        ZipOutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true, label = { Text("이름") })
     }, confirmButton = { TextButton(onClick = { onSave(name.trim()) }, enabled = name.isNotBlank()) { Text("저장") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } })
 }
 
@@ -318,8 +319,8 @@ private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelCh
     var toolsExpanded by rememberSaveable(project.id){mutableStateOf(false)}
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (project.id.isBlank()) "새 프로젝트" else "프로젝트 설정") }, text = {
         Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true, label = { Text("프로젝트 이름") })
-            OutlinedTextField(instructions, { if (it.length <= 4000) instructions = it }, label = { Text("이 프로젝트의 응답 지침") }, minLines = 2, maxLines = 5)
+            ZipOutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true, label = { Text("프로젝트 이름") })
+            ZipOutlinedTextField(instructions, { if (it.length <= 4000) instructions = it }, label = { Text("이 프로젝트의 응답 지침") }, minLines = 2, maxLines = 5)
             Column {
                 val choices=listOf(UiModelChoice("auto","자동"))+modelChoices.filter{it.id!="auto"}
                 TextButton(onClick={modelsOpen=true}){Text("기본 모델 · ${choices.firstOrNull{it.id==model}?.label?:"현재 모델(설치 확인 필요)"}")}
@@ -329,8 +330,8 @@ private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelCh
             Row(verticalAlignment=Alignment.CenterVertically){Checkbox(ownerMemory,{ownerMemory=it});Text("승인된 개인 기억 참고",style=MaterialTheme.typography.bodyMedium)}
             Row(verticalAlignment=Alignment.CenterVertically){Checkbox(ownerLearning,{ownerLearning=it});Text("이 프로젝트에서 개인 기억 후보 만들기",style=MaterialTheme.typography.bodyMedium)}
             Text("프로젝트 자료는 별도 범위에 저장됩니다. 기억 후보가 자동 승인되지는 않습니다.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
-            HorizontalDivider()
-            TextButton(onClick={toolsExpanded=!toolsExpanded}){Text("사용 도구 · ${ToolRegistry.definitions.keys.count{it !in disabledTools}}/${ToolRegistry.definitions.size} ${if(toolsExpanded)"⌃"else"⌄"}")}
+            ZipInsetDivider(inset = 0.dp)
+            TextButton(onClick={toolsExpanded=!toolsExpanded}){Text("사용 도구 · ${ToolRegistry.definitions.keys.count{it !in disabledTools}}/${ToolRegistry.definitions.size}");Spacer(Modifier.width(6.dp));ZipIcon(com.user.localagent.runtime.R.drawable.zi_down,null,Modifier.rotate(if(toolsExpanded)180f else 0f),size=18.dp)}
             if(toolsExpanded){
                 Text("선택한 도구를 이 프로젝트에서 사용합니다. 휴대전화 권한과 실행 확인은 별도로 적용됩니다.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
                 ToolRegistry.definitions.keys.groupBy{IntentPlanning.domainForTool(it)}.toSortedMap().forEach{(domain,names)->
@@ -345,7 +346,7 @@ private fun ProjectSettingsDialog(project: UiProject,modelChoices:List<UiModelCh
             if (project.id.isNotBlank()) TextButton(onClick = onChooseFolder) { Text("휴대전화 폴더 선택") }
             else Text("프로젝트를 만든 뒤 폴더를 연결할 수 있습니다.", style = MaterialTheme.typography.bodySmall, color = ZipHapColors.TextSecondary)
             if (onDelete != null) {
-                HorizontalDivider()
+                ZipInsetDivider(inset = 0.dp)
                 TextButton(onClick = onDelete, modifier = Modifier.testTag("delete_project")) { Text("프로젝트 삭제", color = ZipHapColors.Error) }
             }
         }

@@ -39,21 +39,21 @@ fun ExtensionInspectionPanel(onStatus:(String)->Unit={}) {
     }
     // The settings screen already scrolls; a nested unbounded LazyColumn would crash here.
     Column(Modifier.fillMaxWidth().padding(bottom=24.dp).testTag("extension_inspection"),verticalArrangement=Arrangement.spacedBy(10.dp)){
-        Column{
-            Text("확장 파일 보안 검사",style=MaterialTheme.typography.titleLarge)
+        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+            ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_shield,"확장 파일 보안 검사",tone=ZipTone.Mint)
             Text("이 기기에서 선언형 ZIP·manifest를 검사합니다. 설치하거나 실행하지 않으며 외부 서버에 접속하지 않습니다.",style=MaterialTheme.typography.bodySmall)
             Text("검사 통과는 악성 내용이 없다는 보증이 아닙니다. 실행형 MCP·코드·자동 설치는 제공하지 않습니다.",style=MaterialTheme.typography.bodySmall)
         }
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            OutlinedButton(enabled=!busy,onClick={bundlePicker.launch(arrayOf("application/zip","application/octet-stream"))}){Text(if(bundleUri==null)"ZIP 선택"else"ZIP 다시 선택")}
-            OutlinedButton(enabled=!busy,onClick={manifestPicker.launch(arrayOf("application/json","text/plain"))}){Text(if(manifestUri==null)"manifest 선택"else"manifest 다시 선택")}
+            ZipOutlinedButton(enabled=!busy,onClick={bundlePicker.launch(arrayOf("application/zip","application/octet-stream"))}){Text(if(bundleUri==null)"ZIP 선택"else"ZIP 다시 선택")}
+            ZipOutlinedButton(enabled=!busy,onClick={manifestPicker.launch(arrayOf("application/json","text/plain"))}){Text(if(manifestUri==null)"manifest 선택"else"manifest 다시 선택")}
         }
         Text("ZIP 최대 5MiB · 별도 UTF-8 manifest 최대 16KiB · 풀린 내용 최대 10MiB/100개",style=MaterialTheme.typography.bodySmall)
         Text("아래 두 값은 별도로 신뢰하는 고정 카탈로그·출처에서 확인해주세요. 선택한 manifest의 자기 주장만 복사하면 출처를 검증할 수 없습니다.",style=MaterialTheme.typography.bodySmall)
-        OutlinedTextField(expectedHash,{if(it.length<=64){expectedHash=it;result=null}},enabled=!busy,label={Text("별도로 확인한 ZIP SHA-256 · 64자리")},modifier=Modifier.fillMaxWidth().testTag("extension_expected_sha"),singleLine=true)
-        OutlinedTextField(expectedCommit,{if(it.length<=40){expectedCommit=it;result=null}},enabled=!busy,label={Text("별도로 확인한 고정 commit · 40자리")},modifier=Modifier.fillMaxWidth().testTag("extension_expected_commit"),singleLine=true)
+        ZipOutlinedTextField(expectedHash,{if(it.length<=64){expectedHash=it;result=null}},enabled=!busy,label={Text("별도로 확인한 ZIP SHA-256 · 64자리")},modifier=Modifier.fillMaxWidth().testTag("extension_expected_sha"),singleLine=true)
+        ZipOutlinedTextField(expectedCommit,{if(it.length<=40){expectedCommit=it;result=null}},enabled=!busy,label={Text("별도로 확인한 고정 commit · 40자리")},modifier=Modifier.fillMaxWidth().testTag("extension_expected_commit"),singleLine=true)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            Button(enabled=!busy&&bundleUri!=null&&manifestUri!=null&&Regex("[a-fA-F0-9]{64}").matches(expectedHash)&&Regex("[a-fA-F0-9]{40}").matches(expectedCommit),modifier=Modifier.testTag("extension_inspect"),onClick={
+            ZipFilledButton(enabled=!busy&&bundleUri!=null&&manifestUri!=null&&Regex("[a-fA-F0-9]{64}").matches(expectedHash)&&Regex("[a-fA-F0-9]{40}").matches(expectedCommit),modifier=Modifier.testTag("extension_inspect"),onClick={
                 val bundle=requireNotNull(bundleUri);val manifest=requireNotNull(manifestUri);val hash=expectedHash;val commit=expectedCommit
                 result=null;status="파일과 출처·권한을 검사하는 중입니다."
                 job=scope.launch {
@@ -71,7 +71,7 @@ fun ExtensionInspectionPanel(onStatus:(String)->Unit={}) {
         }
         Text(status,style=MaterialTheme.typography.bodySmall,modifier=Modifier.testTag("extension_inspection_status"))
         result?.let{inspection->
-            Column{HorizontalDivider();Text("검사한 번들",style=MaterialTheme.typography.titleMedium)
+            Column{ZipInsetDivider(inset = 0.dp);Text("검사한 번들",style=MaterialTheme.typography.titleMedium)
                 Text("${inspection.manifest.id} · ${inspection.manifest.version}\n${inspection.manifest.name}")
                 Text("출처: ${inspection.manifest.sourceRepository}\ncommit: ${inspection.manifest.pinnedCommit}\nSHA-256: ${inspection.bundleSha256}",style=MaterialTheme.typography.bodySmall)
                 Text("파일 ${inspection.declarativeFiles.size}개 · 풀린 크기 ${inspection.unpackedBytes}바이트\n요청 능력: ${inspection.manifest.capabilities.joinToString().ifBlank{"없음"}}",style=MaterialTheme.typography.bodySmall)

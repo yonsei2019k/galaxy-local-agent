@@ -19,6 +19,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import com.user.localagent.ui.ZipFilledButton
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
+import com.user.localagent.ui.ZipHapTheme
+import com.user.localagent.ui.ZipHapColors
+import com.user.localagent.ui.ZipScreenTitle
 
 class OutlookConnectActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,8 +35,9 @@ class OutlookConnectActivity : ComponentActivity() {
         val service=ConnectedService.entries.firstOrNull { it.outlook && it.id==intent.getStringExtra("service") }
         if(service==null){finish();return}
         setContent {
-            MaterialTheme { Column(Modifier.padding(16.dp)) {
-                Text(service.label)
+            ZipHapTheme { Column(Modifier.fillMaxSize().background(ZipHapColors.Background).safeDrawingPadding()
+                .padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ZipScreenTitle(service.label)
                 OutlookConnectCard(ConnectionHub.get(this@OutlookConnectActivity),service){setResult(RESULT_OK);finish()}
                 TextButton(onClick={finish()}){Text("닫기")}
             } }
@@ -49,7 +58,7 @@ class OutlookConnectActivity : ComponentActivity() {
         return
     }
     if(job==null){
-        Button(onClick={
+        ZipFilledButton(onClick={
             val current=hub.outlook.begin(service)
             ticket=current;error=false
             job=scope.launch {
@@ -69,7 +78,7 @@ class OutlookConnectActivity : ComponentActivity() {
         code?.let { seen ->
             Text("Microsoft 로그인 화면에 다음 코드를 입력해 주세요.")
             Text(seen,style=MaterialTheme.typography.headlineMedium)
-            Button(onClick={
+            ZipFilledButton(onClick={
                 try {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://microsoft.com/devicelogin")))}
                 catch(_:android.content.ActivityNotFoundException){error=true}
             }){Text("휴대폰에서 Microsoft 로그인")}

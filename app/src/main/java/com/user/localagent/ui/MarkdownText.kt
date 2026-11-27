@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +21,13 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Alignment
 
 private fun annotated(spans:List<MarkdownLite.Span>):AnnotatedString = buildAnnotatedString {
     spans.forEach {span->
@@ -48,7 +54,10 @@ internal fun MarkdownText(text:String,modifier:Modifier=Modifier) {
                     fontWeight=FontWeight.SemiBold,color=ZipHapColors.TextPrimary,modifier=Modifier.padding(top=4.dp))
                 is MarkdownLite.Block.Paragraph->Text(annotated(block.spans),style=body,color=ZipHapColors.TextPrimary)
                 is MarkdownLite.Block.ListItem->Row(Modifier.padding(start=(block.depth*16).dp)) {
-                    Text(block.marker,style=body,color=ZipHapColors.TextSecondary,modifier=Modifier.width(if(block.marker=="•")16.dp else 26.dp))
+                    if(block.marker=="•")Box(Modifier.width(16.dp).height(24.dp),contentAlignment=Alignment.CenterStart){
+                        Box(Modifier.size(5.dp).clip(CircleShape).background(ZipHapColors.TextSecondary))
+                    }
+                    else Text(block.marker,style=body,color=ZipHapColors.TextSecondary,modifier=Modifier.width(26.dp))
                     Text(annotated(block.spans),style=body,color=ZipHapColors.TextPrimary)
                 }
                 is MarkdownLite.Block.Quote->Text(annotated(block.spans),style=body,color=ZipHapColors.TextSecondary,
@@ -61,10 +70,10 @@ internal fun MarkdownText(text:String,modifier:Modifier=Modifier) {
                             row.forEach {cell->Text(annotated(cell),style=MaterialTheme.typography.bodyMedium,
                                 fontWeight=if(index==0)FontWeight.SemiBold else null,color=ZipHapColors.TextPrimary,modifier=Modifier.weight(1f))}
                         }
-                        if(index==0)HorizontalDivider(color=ZipHapColors.TextSecondary.copy(alpha=0.3f))
+                        if(index==0)Spacer(Modifier.height(2.dp))
                     }
                 }
-                MarkdownLite.Block.Rule->HorizontalDivider(color=ZipHapColors.TextSecondary.copy(alpha=0.3f))
+                MarkdownLite.Block.Rule->ZipInsetDivider(Modifier.padding(vertical=4.dp),inset=0.dp)
             }
         }
     }

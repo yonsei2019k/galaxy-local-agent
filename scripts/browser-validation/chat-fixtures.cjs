@@ -87,6 +87,21 @@ function camping() {
   ], tasks: [{...task('camp-run', 'paused', '글램핑 예약 준비', '휴대폰 인증 대기'), messageId: 'camp1'}]};
 }
 
+
+// 되묻기 선택지와 답변 속 이모티콘(스티커로 바뀌어 그려진다). 이모티콘은 이스케이프로 적는다.
+function choices() {
+  const cap = '\u{1F393}', cal = '\u{1F4C5}', spark = '\u2728', pin = '\u{1F4CD}', party = '\u{1F389}', heart = '\u2764\uFE0F';
+  return { ...base, threads: [{ id: 'thread-a', title: `${cap} 졸업식 준비`, selected: true }], messages: [
+    user('c1', `졸업식 일정 찾아서 가족한테 보낼 문자도 써 줘 ${heart}`),
+    assistant('c2', `${cap} 졸업식 일정을 찾았어요 ${spark}\n\n- ${cal} **12월 20일(토) 오전 11시** 본식\n- ${pin} 대강당, 주차는 정문 쪽이 편해요\n\n문자 초안도 준비했어요 ${party} 마음에 들면 보내기 전에 한 번 확인해 주세요 ${heart}`),
+  ], tasks: [{ ...task('c-ask', 'waiting_input', '졸업식 문자', '어느 날짜 기준으로 문자를 쓸까요?'), messageId: 'c1',
+    choices: [{ label: `12월 20일 본식 ${cap}`, recommended: true }, { label: '12월 19일 예행연습', recommended: false }, { label: '둘 다 넣어 줘', recommended: false }] }] };
+}
+
+// 휴대폰이 그리는 승인 카드 자리(웹은 빈 자리만 그린다).
+const approval = { ...base, messages: [user('ap1', '내일 오전 회의를 일정에 넣어 줘')],
+  approvalCard: { id: '00000000-0000-4000-8000-000000000001', messageId: 'ap1' } };
+
 module.exports = {
   empty: { ...base },
   chatShort: { ...base, messages: [user('m1', '안녕하세요'), assistant('m2', '안녕하세요. 무엇을 도와드릴까요?')] },
@@ -105,4 +120,7 @@ module.exports = {
   }),
   files: { ...base, messages: [user('f0', '보고서를 만들어 주세요'), assistant('f1', '보고서를 PDF로 만들었습니다.', { fileFormats: ['pdf'] })] },
   camping: camping(),
+  choices: choices(),
+  approval,
+  guide: { ...base, showOfficeGuide: true, officeSelected: true },
 };

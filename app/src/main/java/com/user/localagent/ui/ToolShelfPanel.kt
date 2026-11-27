@@ -35,10 +35,10 @@ import kotlinx.serialization.json.JsonPrimitive
     var selected by rememberSaveable {mutableIntStateOf(0)}
     val connectionContext=LocalContext.current
     Column(Modifier.fillMaxSize()) {
-        OutlinedButton(onClick={connectionContext.startActivity(Intent(connectionContext,com.user.localagent.connections.ConnectionsActivity::class.java))}){Text("계정·앱 연결 · 사진 글자 읽기")}
+        ZipOutlinedButton(onClick={connectionContext.startActivity(Intent(connectionContext,com.user.localagent.connections.ConnectionsActivity::class.java))}){Text("계정·앱 연결 · 사진 글자 읽기")}
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){
             listOf("기본 문서","Word·Excel","이메일","음성","도구 상태","영상","사진 분석").forEachIndexed {index,label->
-                FilterChip(selected=selected==index,onClick={selected=index},label={Text(label)})
+                ZipFilterChip(selected=selected==index,onClick={selected=index},label={Text(label)})
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f).imePadding()){
@@ -116,18 +116,18 @@ import kotlinx.serialization.json.JsonPrimitive
         onStatus("XLSX의 실제 저장된 셀 값을 읽었습니다. 수식을 계산하지 않았습니다.")
     }}
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {Text("Word·Excel 도구",style=MaterialTheme.typography.titleLarge);Text(detail,style=MaterialTheme.typography.bodySmall)}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_file,"Word·Excel 도구",detail)}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            OutlinedButton(enabled=!working,onClick={openDocx.launch(arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))}){Text("DOCX 열기")}
-            OutlinedButton(enabled=!working,onClick={openXlsx.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))}){Text("XLSX 열기")}
+            ZipOutlinedButton(enabled=!working,onClick={openDocx.launch(arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))}){Text("DOCX 열기")}
+            ZipOutlinedButton(enabled=!working,onClick={openXlsx.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))}){Text("XLSX 열기")}
         }}
-        item {OutlinedTextField(title,{if(it.length<=200)title=it},label={Text("새 문서 제목")},modifier=Modifier.fillMaxWidth(),enabled=!working)}
-        item {OutlinedTextField(sheetName,{if(it.length<=31)sheetName=it},label={Text("새 Excel 시트 이름")},modifier=Modifier.fillMaxWidth(),enabled=!working)}
-        item {OutlinedTextField(text,{if(it.length<=100_000)text=it},label={Text("문서 본문 / 표의 CSV 값")},modifier=Modifier.fillMaxWidth().heightIn(min=220.dp),enabled=!working)}
-        item {Button(enabled=!working&&text.isNotBlank(),onClick={onAsk(quotedAnalysis("선택한 Office 문서 일부",text))}){Text("이 부분 분석 요청")}}
+        item {ZipOutlinedTextField(title,{if(it.length<=200)title=it},label={Text("새 문서 제목")},modifier=Modifier.fillMaxWidth(),enabled=!working)}
+        item {ZipOutlinedTextField(sheetName,{if(it.length<=31)sheetName=it},label={Text("새 Excel 시트 이름")},modifier=Modifier.fillMaxWidth(),enabled=!working)}
+        item {ZipOutlinedTextField(text,{if(it.length<=100_000)text=it},label={Text("문서 본문 / 표의 CSV 값")},modifier=Modifier.fillMaxWidth().heightIn(min=220.dp),enabled=!working)}
+        item {ZipFilledButton(enabled=!working&&text.isNotBlank(),onClick={onAsk(quotedAnalysis("선택한 Office 문서 일부",text))}){Text("이 부분 분석 요청")}}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            Button(enabled=!working&&text.isNotBlank()&&exportToken==null,onClick={prepareExport("docx"){saveDocx.launch(it)}}){Text("새 DOCX 저장")}
-            OutlinedButton(enabled=!working&&text.isNotBlank()&&exportToken==null,onClick={prepareExport("xlsx"){saveXlsx.launch(it)}}){Text("새 XLSX 저장")}
+            ZipFilledButton(enabled=!working&&text.isNotBlank()&&exportToken==null,onClick={prepareExport("docx"){saveDocx.launch(it)}}){Text("새 DOCX 저장")}
+            ZipOutlinedButton(enabled=!working&&text.isNotBlank()&&exportToken==null,onClick={prepareExport("xlsx"){saveXlsx.launch(it)}}){Text("새 XLSX 저장")}
         }}
         item {Text("원본 서식·차트·매크로를 보존하는 편집기는 아닙니다. 새 XLSX는 셀 값을 문자열로 저장하며 수식은 실행하지 않습니다.",style=MaterialTheme.typography.bodySmall)}
         if(working)item {Row{CircularProgressIndicator(Modifier.size(20.dp));TextButton(onClick={job?.cancel()}){Text("중단")}}}
@@ -155,8 +155,8 @@ import kotlinx.serialization.json.JsonPrimitive
         catch(error:Exception){onStatus(error.message?.take(250)?:"메일 작성 앱을 열지 못했습니다.")}
     }){Text("작성 화면 열기")}},dismissButton={TextButton(onClick={confirm=false}){Text("취소")}})
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {Text("이메일 도구",style=MaterialTheme.typography.titleLarge);Text("선택한 EML을 로컬에서 읽습니다. 메일함 연결이나 첨부 실행은 하지 않습니다.",style=MaterialTheme.typography.bodySmall)}
-        item {OutlinedButton(enabled=!working,onClick={open.launch(arrayOf("message/rfc822","application/octet-stream"))}){Text("EML 파일 열기")}}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_mail,"이메일 도구","선택한 EML을 로컬에서 읽습니다. 메일함 연결이나 첨부 실행은 하지 않습니다.",ZipTone.Coral)}
+        item {ZipOutlinedButton(enabled=!working,onClick={open.launch(arrayOf("message/rfc822","application/octet-stream"))}){Text("EML 파일 열기")}}
         email?.let {document->
             item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
                 Text(document.subject.ifBlank {"제목 없음"},style=MaterialTheme.typography.titleMedium)
@@ -165,14 +165,14 @@ import kotlinx.serialization.json.JsonPrimitive
                 if(document.bodyTruncated||document.bodyText.length>6000)Text("본문 일부만 표시합니다.",style=MaterialTheme.typography.labelSmall)
                 document.attachments.forEach {attachment->Text("첨부: ${attachment.name?:"이름 없음"} · ${attachment.mediaType} · ${attachment.decodedSizeBytes}바이트",style=MaterialTheme.typography.bodySmall)}
                 document.warnings.forEach {Text(it,style=MaterialTheme.typography.bodySmall)}
-                Button(enabled=document.bodyText.isNotBlank(),onClick={onAsk(quotedAnalysis("선택한 이메일 일부",document.bodyText))}){Text("본문 일부 분석 요청")}
+                ZipFilledButton(enabled=document.bodyText.isNotBlank(),onClick={onAsk(quotedAnalysis("선택한 이메일 일부",document.bodyText))}){Text("본문 일부 분석 요청")}
             }}}
         }
         item {Text("메일 초안",style=MaterialTheme.typography.titleMedium)}
-        item {OutlinedTextField(to,{if(it.length<=1000)to=it},label={Text("받는 이메일 · 여러 주소는 쉼표로 구분")},modifier=Modifier.fillMaxWidth())}
-        item {OutlinedTextField(subject,{if(it.length<=300)subject=it},label={Text("제목")},modifier=Modifier.fillMaxWidth())}
-        item {OutlinedTextField(body,{if(it.length<=10_000)body=it},label={Text("본문")},modifier=Modifier.fillMaxWidth().heightIn(min=160.dp))}
-        item {Button(enabled=to.isNotBlank()&&body.isNotBlank(),onClick={confirm=true}){Text("메일 앱에서 초안 확인")}}
+        item {ZipOutlinedTextField(to,{if(it.length<=1000)to=it},label={Text("받는 이메일 · 여러 주소는 쉼표로 구분")},modifier=Modifier.fillMaxWidth())}
+        item {ZipOutlinedTextField(subject,{if(it.length<=300)subject=it},label={Text("제목")},modifier=Modifier.fillMaxWidth())}
+        item {ZipOutlinedTextField(body,{if(it.length<=10_000)body=it},label={Text("본문")},modifier=Modifier.fillMaxWidth().heightIn(min=160.dp))}
+        item {ZipFilledButton(enabled=to.isNotBlank()&&body.isNotBlank(),onClick={confirm=true}){Text("메일 앱에서 초안 확인")}}
         if(working)item {LinearProgressIndicator(Modifier.fillMaxWidth())}
     }
 }
@@ -194,17 +194,17 @@ import kotlinx.serialization.json.JsonPrimitive
     }
     DisposableEffect(Unit){onDispose {app.phoneMedia.cancelListening();app.phoneMedia.stop()}}
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {Text("기기 내 음성",style=MaterialTheme.typography.titleLarge);Text("버튼을 눌러 입력하고 결과를 직접 확인합니다. 음성을 서버로 보내는 대체 경로는 사용하지 않습니다.",style=MaterialTheme.typography.bodySmall)}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_microphone,"기기 내 음성","버튼을 눌러 입력하고 결과를 직접 확인합니다. 음성을 서버로 보내는 대체 경로는 사용하지 않습니다.",ZipTone.Lilac)}
         item {Text(capabilities?.let {"오프라인 한국어 음성 ${it.offlineKoreanVoices.size}개 · 기기 내 입력 ${if(it.onDeviceRecognitionAvailable)"지원"else"없음"}"}?:"설치된 음성 기능 확인 중",style=MaterialTheme.typography.bodySmall)
             capabilities?.offlineKoreanVoices?.firstOrNull()?.let {Text("기본 음성: ${it.name}",style=MaterialTheme.typography.labelSmall)}
             capabilities?.ttsError?.let {Text(it,style=MaterialTheme.typography.bodySmall)}}
-        item {OutlinedTextField(text,{if(it.length<=10_000)text=it},label={Text("말한 내용 / 읽을 텍스트")},modifier=Modifier.fillMaxWidth().heightIn(min=180.dp))}
+        item {ZipOutlinedTextField(text,{if(it.length<=10_000)text=it},label={Text("말한 내용 / 읽을 텍스트")},modifier=Modifier.fillMaxWidth().heightIn(min=180.dp))}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            Button(enabled=!reading,onClick={if(listening)app.phoneMedia.stopListening()else if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)start()else permission.launch(Manifest.permission.RECORD_AUDIO)}){Text(if(listening)"말하기 완료"else"눌러서 말하기")}
+            ZipFilledButton(enabled=!reading,onClick={if(listening)app.phoneMedia.stopListening()else if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)start()else permission.launch(Manifest.permission.RECORD_AUDIO)}){Text(if(listening)"말하기 완료"else"눌러서 말하기")}
             if(listening)TextButton(onClick={app.phoneMedia.cancelListening()}){Text("입력 취소")}
         }}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            OutlinedButton(enabled=!reading&&!listening&&text.isNotBlank(),onClick={reading=true;readJob=scope.launch {
+            ZipOutlinedButton(enabled=!reading&&!listening&&text.isNotBlank(),onClick={reading=true;readJob=scope.launch {
                 try{app.phoneMedia.speak(text);onStatus("로컬 음성 읽기를 마쳤습니다.")}
                 catch(_:TimeoutCancellationException){onStatus("음성 읽기 시간이 초과됐습니다.")}
                 catch(cancel:CancellationException){throw cancel}
@@ -213,7 +213,7 @@ import kotlinx.serialization.json.JsonPrimitive
             }}){Text("로컬 음성으로 읽기")}
             if(reading)TextButton(onClick={app.phoneMedia.stop();readJob?.cancel()}){Text("읽기 중단")}
         }}
-        item {Button(enabled=!listening&&!reading&&text.isNotBlank(),onClick={onAsk(text)}){Text("확인한 내용으로 비서에게 요청")}}
+        item {ZipFilledButton(enabled=!listening&&!reading&&text.isNotBlank(),onClick={onAsk(text)}){Text("확인한 내용으로 비서에게 요청")}}
         item {Text("기기 내 인식기나 한국어 음성이 설치되지 않았으면 상태를 알려드립니다. 녹음 파일 전사는 데이터 분석 화면에서 선택할 수 있습니다.",style=MaterialTheme.typography.bodySmall)}
     }
 }
@@ -230,7 +230,7 @@ import kotlinx.serialization.json.JsonPrimitive
     }}
     LaunchedEffect(Unit){refresh()}
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {Text("현재 도구 상태",style=MaterialTheme.typography.titleLarge);Text("설치·권한·모델의 현재 조건을 표시합니다. 작업 성공 여부는 실제 실행 후 따로 확인합니다.",style=MaterialTheme.typography.bodySmall);OutlinedButton(enabled=!loading,onClick={refresh()}){Text("상태 다시 확인")}}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_tools,"현재 도구 상태","설치·권한·모델의 현재 조건을 표시합니다. 작업 성공 여부는 실제 실행 후 따로 확인합니다.",ZipTone.Neutral);ZipOutlinedButton(enabled=!loading,onClick={refresh()}){Text("상태 다시 확인")}}
         if(loading)item {LinearProgressIndicator(Modifier.fillMaxWidth())}
         items(entries,key={it.id}) {entry->ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(5.dp)){
             Text(entry.title,style=MaterialTheme.typography.titleMedium)
@@ -252,13 +252,13 @@ import kotlinx.serialization.json.JsonPrimitive
     val choose=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->if(uri!=null){selected=uri;result=null}}
     DisposableEffect(Unit){onDispose {if(operation?.isActive==true){app.imageUnderstanding.cancel();operation?.cancel()}}}
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {Text("사진 분석",style=MaterialTheme.typography.titleLarge);Text("선택한 사진 한 장을 기기의 검증된 Gemma 모델로 읽습니다. 전체 갤러리를 조회하거나 이미지를 서버로 보내지 않습니다.",style=MaterialTheme.typography.bodySmall)}
-        item {OutlinedButton(enabled=!running,onClick={choose.launch(arrayOf("image/*"))}){Text(if(selected==null)"분석할 사진 선택"else"다른 사진 선택")}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_image,"사진 분석","선택한 사진 한 장을 기기의 검증된 Gemma 모델로 읽습니다. 전체 갤러리를 조회하거나 이미지를 서버로 보내지 않습니다.",ZipTone.Lilac)}
+        item {ZipOutlinedButton(enabled=!running,onClick={choose.launch(arrayOf("image/*"))}){Text(if(selected==null)"분석할 사진 선택"else"다른 사진 선택")}
             if(selected!=null)Text("사용자가 선택한 사진 1장",style=MaterialTheme.typography.labelSmall)}
-        item {OutlinedTextField(prompt,{if(it.length<=2000)prompt=it},label={Text("사진에 대한 질문")},modifier=Modifier.fillMaxWidth().heightIn(min=120.dp),enabled=!running)}
+        item {ZipOutlinedTextField(prompt,{if(it.length<=2000)prompt=it},label={Text("사진에 대한 질문")},modifier=Modifier.fillMaxWidth().heightIn(min=120.dp),enabled=!running)}
         item {Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            Button(enabled=!running&&selected!=null&&prompt.isNotBlank(),onClick={
-                val uri=selected?:return@Button
+            ZipFilledButton(enabled=!running&&selected!=null&&prompt.isNotBlank(),onClick={
+                val uri=selected?:return@ZipFilledButton
                 running=true;result=null
                 operation=scope.launch {
                     try{result=app.imageUnderstanding.describe(uri,prompt);onStatus("선택한 사진의 로컬 모델 분석을 마쳤습니다.")}
@@ -276,7 +276,7 @@ import kotlinx.serialization.json.JsonPrimitive
             Text(answer.text)
             Text("원본 ${answer.sourceWidth} × ${answer.sourceHeight} → 분석 ${answer.processedWidth} × ${answer.processedHeight} · ${answer.modelId}",style=MaterialTheme.typography.labelSmall)
             answer.limitations.forEach {Text(it,style=MaterialTheme.typography.bodySmall)}
-            OutlinedButton(onClick={onAsk(quotedAnalysis("선택한 문서",answer.text))}){Text("이 분석 결과를 인용해 정리 요청")}
+            ZipOutlinedButton(onClick={onAsk(quotedAnalysis("선택한 문서",answer.text))}){Text("이 분석 결과를 인용해 정리 요청")}
         }}}}
     }
 }
@@ -342,26 +342,26 @@ import kotlinx.serialization.json.JsonPrimitive
     }}
     DisposableEffect(Unit){onDispose {if(operation?.isActive==true){app.videoTools.cancel();operation?.cancel()};exportJob?.cancel()}}
     LazyColumn(Modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)){
-        item {Text("로컬 영상 도구",style=MaterialTheme.typography.titleLarge);Text("선택한 영상의 구간을 자르거나 사진을 MP4 슬라이드 영상으로 만듭니다. 720p 출력, 한 작업 최대 60초입니다.",style=MaterialTheme.typography.bodySmall)}
+        item {ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_image,"로컬 영상 도구","선택한 영상의 구간을 자르거나 사진을 MP4 슬라이드 영상으로 만듭니다. 720p 출력, 한 작업 최대 60초입니다.",ZipTone.Coral)}
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text("영상 자르기",style=MaterialTheme.typography.titleMedium)
-            OutlinedButton(enabled=!working,onClick={chooseVideo.launch(arrayOf("video/*"))}){Text(if(video==null)"영상 파일 선택"else"영상 파일 다시 선택")}
+            ZipOutlinedButton(enabled=!working,onClick={chooseVideo.launch(arrayOf("video/*"))}){Text(if(video==null)"영상 파일 선택"else"영상 파일 다시 선택")}
             if(video!=null)Text("사용자가 선택한 영상 1개",style=MaterialTheme.typography.labelSmall)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                OutlinedTextField(start,{if(it.length<=12)start=it},label={Text("시작 · 초")},modifier=Modifier.weight(1f),enabled=!working,singleLine=true)
-                OutlinedTextField(end,{if(it.length<=12)end=it},label={Text("종료 · 초")},modifier=Modifier.weight(1f),enabled=!working,singleLine=true)
+                ZipOutlinedTextField(start,{if(it.length<=12)start=it},label={Text("시작 · 초")},modifier=Modifier.weight(1f),enabled=!working,singleLine=true)
+                ZipOutlinedTextField(end,{if(it.length<=12)end=it},label={Text("종료 · 초")},modifier=Modifier.weight(1f),enabled=!working,singleLine=true)
             }
-            Button(enabled=!working&&video!=null,onClick={execute {
+            ZipFilledButton(enabled=!working&&video!=null,onClick={execute {
                 output=app.videoTools.trim(requireNotNull(video),videoSeconds(start),videoSeconds(end))
                 onStatus("자른 영상의 MP4·길이·해상도·첫 프레임을 확인했습니다.")
             }}){Text("선택 구간 MP4 만들기")}
         }}}
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text("사진으로 영상 만들기",style=MaterialTheme.typography.titleMedium)
-            OutlinedButton(enabled=!working,onClick={choosePhotos.launch(arrayOf("image/*"))}){Text("사진 여러 장 선택")}
+            ZipOutlinedButton(enabled=!working,onClick={choosePhotos.launch(arrayOf("image/*"))}){Text("사진 여러 장 선택")}
             Text("선택 ${photos.size}장 · 선택기가 반환한 순서대로 배치",style=MaterialTheme.typography.bodySmall)
-            OutlinedTextField(each,{if(it.length<=8)each=it},label={Text("사진 한 장 표시 시간 · 1–10초")},modifier=Modifier.fillMaxWidth(),enabled=!working,singleLine=true)
-            Button(enabled=!working&&photos.size in 1..20,onClick={execute {
+            ZipOutlinedTextField(each,{if(it.length<=8)each=it},label={Text("사진 한 장 표시 시간 · 1–10초")},modifier=Modifier.fillMaxWidth(),enabled=!working,singleLine=true)
+            ZipFilledButton(enabled=!working&&photos.size in 1..20,onClick={execute {
                 output=app.videoTools.slideshow(photos,videoSeconds(each))
                 onStatus("슬라이드 영상의 MP4·길이·해상도·첫 프레임을 확인했습니다.")
             }}){Text("사진 슬라이드 MP4 만들기")}
@@ -375,7 +375,7 @@ import kotlinx.serialization.json.JsonPrimitive
             Text("확인된 MP4 결과",style=MaterialTheme.typography.titleMedium)
             Text("${result.width} × ${result.height} · ${result.durationMs/1000.0}초 · ${result.sizeBytes/1024}KiB",style=MaterialTheme.typography.bodyMedium)
             Text("앱 전용 공간에 준비되었습니다. 저장 위치를 선택하면 복사 후 내용을 다시 검증합니다.",style=MaterialTheme.typography.bodySmall)
-            Button(enabled=!working&&!exporting&&exportToken==null,onClick={prepareVideoExport(result)}){Text("저장 위치 선택")}
+            ZipFilledButton(enabled=!working&&!exporting&&exportToken==null,onClick={prepareVideoExport(result)}){Text("저장 위치 선택")}
         }}}}
         if(exporting)item{Column{LinearProgressIndicator(Modifier.fillMaxWidth());Text("MP4 복사본 준비·저장 확인 중",style=MaterialTheme.typography.bodySmall);TextButton(onClick={exportJob?.cancel()}){Text("저장 중단")}}}
     }

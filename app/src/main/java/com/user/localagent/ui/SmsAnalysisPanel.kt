@@ -43,11 +43,10 @@ import java.time.format.DateTimeFormatter
     val chosen=state.candidates.map {edited[it.id]?:it}.filter {selected[it.id]==true}
     LazyColumn(Modifier.fillMaxSize().imePadding(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)){
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-            Text("문자 전체 분석과 일정",style=MaterialTheme.typography.titleLarge)
-            Text("Android SMS 제공자의 실제 본문을 읽어 통계와 일정 후보를 찾습니다. 처음 몇 개 발췌만 읽는 방식이 아닙니다. MMS·메신저는 별도 자료입니다.",style=MaterialTheme.typography.bodySmall)
+            ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_calendar,"문자 전체 분석과 일정","Android SMS 제공자의 실제 본문을 읽어 통계와 일정 후보를 찾습니다. 처음 몇 개 발췌만 읽는 방식이 아닙니다. MMS·메신저는 별도 자료입니다.",ZipTone.Sun)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                Button(enabled=!state.running&&!saving,onClick={selected.clear();edited.clear();if(!app.smsAnalysis.startScan())onStatus("이미 문자 분석 중입니다.")}){Text("전체 문자 분석")}
-                OutlinedButton(enabled=!state.running&&!saving,onClick={selected.clear();edited.clear();app.smsAnalysis.startScan(LocalDate.now(ScheduleExtraction.zone).year)}){Text("올해 받은 문자")}
+                ZipFilledButton(enabled=!state.running&&!saving,onClick={selected.clear();edited.clear();if(!app.smsAnalysis.startScan())onStatus("이미 문자 분석 중입니다.")}){Text("전체 문자 분석")}
+                ZipOutlinedButton(enabled=!state.running&&!saving,onClick={selected.clear();edited.clear();app.smsAnalysis.startScan(LocalDate.now(ScheduleExtraction.zone).year)}){Text("올해 받은 문자")}
             }
             if(state.running){LinearProgressIndicator(progress={if(state.totalCount>0)(state.scannedCount.toFloat()/state.totalCount).coerceIn(0f,1f)else 0f},modifier=Modifier.fillMaxWidth());TextButton(onClick={app.smsAnalysis.cancel()}){Text("분석 중단")}}
             Text(state.status,style=MaterialTheme.typography.bodyMedium)
@@ -57,7 +56,7 @@ import java.time.format.DateTimeFormatter
         }}}
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text("검토한 일정만 등록",style=MaterialTheme.typography.titleMedium)
-            Box {OutlinedButton(onClick={calendarMenu=true},enabled=!saving){Text(calendars.firstOrNull {it.id==calendarId}?.let {"${it.displayName} · ${it.accountName}"}?:"캘린더 선택")};DropdownMenu(expanded=calendarMenu,onDismissRequest={calendarMenu=false}){calendars.forEach {calendar->DropdownMenuItem(text={Text("${calendar.displayName} · ${calendar.accountName}")},onClick={calendarId=calendar.id;calendarMenu=false})}}}
+            Box {ZipOutlinedButton(onClick={calendarMenu=true},enabled=!saving){Text(calendars.firstOrNull {it.id==calendarId}?.let {"${it.displayName} · ${it.accountName}"}?:"캘린더 선택")};DropdownMenu(expanded=calendarMenu,onDismissRequest={calendarMenu=false}){calendars.forEach {calendar->DropdownMenuItem(text={Text("${calendar.displayName} · ${calendar.accountName}")},onClick={calendarId=calendar.id;calendarMenu=false})}}}
             calendarError?.let {Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)}
             TextButton(onClick={loadCalendars()}){Text("캘린더 다시 확인")}
             Text("종료 시각은 기본 1시간이며 수정할 수 있습니다. 날짜·시간이 애매한 후보는 먼저 확인해주세요. 선택만으로는 캘린더에 쓰지 않습니다.",style=MaterialTheme.typography.bodySmall)
@@ -65,7 +64,7 @@ import java.time.format.DateTimeFormatter
                 TextButton(enabled=!state.running&&!saving,onClick={state.candidates.map {edited[it.id]?:it}.filter {!it.needsReview&&it.startIso!=null&&runCatching {OffsetDateTime.parse(it.startIso).toInstant().isAfter(Instant.now())}.getOrDefault(false)}.forEach {selected[it.id]=true}}){Text("확실한 미래 일정 선택")}
                 TextButton(onClick={selected.clear()}){Text("선택 해제")}
             }
-            Button(enabled=!state.running&&!saving&&chosen.isNotEmpty()&&calendarId!=null,onClick={confirmSave=true}){Text(if(saving)"캘린더에 저장 중"else"선택 ${chosen.size}개 등록 검토")}
+            ZipFilledButton(enabled=!state.running&&!saving&&chosen.isNotEmpty()&&calendarId!=null,onClick={confirmSave=true}){Text(if(saving)"캘린더에 저장 중"else"선택 ${chosen.size}개 등록 검토")}
             if(saving&&saveJob!=null)TextButton(enabled=saveJob?.isActive==true,onClick={saveJob?.cancel();savedSummary="등록 중단을 요청했습니다. 이미 저장된 일정은 유지합니다."}){Text("등록 중단")}
             if(savedSummary.isNotBlank())Text(savedSummary,style=MaterialTheme.typography.bodyMedium)
             TextButton(enabled=!state.running&&!saving&&state.candidates.isNotEmpty(),onClick={clearAll=true}){Text("저장된 일정 후보 모두 삭제")}
@@ -79,10 +78,10 @@ import java.time.format.DateTimeFormatter
             ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
                 Row {Checkbox(checked=selected[original.id]==true,onCheckedChange={selected[original.id]=it},enabled=!saving&&!state.running&&!candidate.needsReview&&candidate.startIso!=null);Text(candidate.title,style=MaterialTheme.typography.titleMedium)}
                 Text(candidate.excerpt,style=MaterialTheme.typography.bodySmall,maxLines=7)
-                OutlinedTextField(value=titleText,onValueChange={titleText=it.take(300);selected[original.id]=false;edited[original.id]=candidate.copy(title=titleText,needsReview=true,reviewReason="수정한 내용을 확인 완료해주세요.")},label={Text("일정 제목")},modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!saving)
+                ZipOutlinedTextField(value=titleText,onValueChange={titleText=it.take(300);selected[original.id]=false;edited[original.id]=candidate.copy(title=titleText,needsReview=true,reviewReason="수정한 내용을 확인 완료해주세요.")},label={Text("일정 제목")},modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!saving)
                 if(candidate.needsReview)Text(candidate.reviewReason?:"날짜·시간 확인 필요",color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)
-                OutlinedTextField(value=startText,onValueChange={startText=it.take(30);selected[original.id]=false;edited[original.id]=candidate.copy(needsReview=true,reviewReason="수정한 날짜·시간을 확인 완료해주세요.")},label={Text("시작 · yyyy-MM-dd HH:mm")},modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!saving)
-                OutlinedTextField(value=endText,onValueChange={endText=it.take(30);selected[original.id]=false;edited[original.id]=candidate.copy(needsReview=true,reviewReason="수정한 날짜·시간을 확인 완료해주세요.")},label={Text("종료 · 기본 1시간, 수정 가능")},modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!saving)
+                ZipOutlinedTextField(value=startText,onValueChange={startText=it.take(30);selected[original.id]=false;edited[original.id]=candidate.copy(needsReview=true,reviewReason="수정한 날짜·시간을 확인 완료해주세요.")},label={Text("시작 · yyyy-MM-dd HH:mm")},modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!saving)
+                ZipOutlinedTextField(value=endText,onValueChange={endText=it.take(30);selected[original.id]=false;edited[original.id]=candidate.copy(needsReview=true,reviewReason="수정한 날짜·시간을 확인 완료해주세요.")},label={Text("종료 · 기본 1시간, 수정 가능")},modifier=Modifier.fillMaxWidth(),singleLine=true,enabled=!saving)
                 TextButton(enabled=!saving,onClick={
                     try {require(titleText.isNotBlank());val start=LocalDateTime.parse(startText.trim(),formatter).atZone(ScheduleExtraction.zone).toOffsetDateTime();val end=if(endText.isBlank())start.plusHours(1)else LocalDateTime.parse(endText.trim(),formatter).atZone(ScheduleExtraction.zone).toOffsetDateTime();require(end.isAfter(start));edited[original.id]=candidate.copy(title=titleText,startIso=start.toString(),endIso=end.toString(),needsReview=false,reviewReason=null);startText=display(start.toString());endText=display(end.toString());editError=null}
                     catch(_:Exception){editError="시작·종료 날짜를 예시 형식으로 확인해주세요. 종료는 시작보다 뒤여야 합니다."}

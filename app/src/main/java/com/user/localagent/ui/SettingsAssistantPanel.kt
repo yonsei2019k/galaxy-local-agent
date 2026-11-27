@@ -9,6 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalContext
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Rect
@@ -44,18 +46,22 @@ internal fun SettingsAssistantPanel(
             itemsIndexed(messages) { index, (owner, reply) ->
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = if (owner) Alignment.End else Alignment.Start) {
                     if (owner) {
-                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer) {
-                            Text(reply.text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = ZipHapColors.Elevated,
+                            contentColor = ZipHapColors.TextPrimary) {
+                            Text(reply.text, Modifier.padding(horizontal = 16.dp, vertical = 11.dp), style = MaterialTheme.typography.bodyMedium)
                         }
                     } else {
                         ZipHapCard {
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (index == 0) SettingsPortrait(character)
                                 Text(reply.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
-                    reply.link?.let { link -> TextButton(onClick = { open(link) }) { Text(link.label) } }
+                    reply.link?.let { link -> TextButton(onClick = { open(link) }) {
+                        Text(link.label, color = ZipHapTokens.CobaltText)
+                        ZipIcon(R.drawable.zi_chevron_right, null, tint = ZipHapTokens.CobaltText, size = 18.dp)
+                    } }
                     reply.chatDraft?.let { request ->
                         TextButton(enabled=!working,onClick={
                             if(!moveToChat(request)){
@@ -74,7 +80,7 @@ internal fun SettingsAssistantPanel(
                     style = MaterialTheme.typography.bodySmall)
             }
         }
-        OutlinedButton(enabled=!working,onClick={
+        ZipOutlinedButton(enabled=!working,onClick={
             if(messages.size>=25) repeat(2){messages.removeAt(1)}
             messages.add(true to SettingsReply("업데이트 확인"))
             working=true
@@ -87,11 +93,11 @@ internal fun SettingsAssistantPanel(
             }
         }){Text("업데이트 확인")}
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
+            ZipOutlinedTextField(
                 question, { if (it.length <= 600) question = it }, Modifier.weight(1f),
                 label = { Text("설정에 대해 물어보기") }, maxLines = 3,
             )
-            Button(enabled = !working && question.isNotBlank(), onClick = {
+            ZipFilledButton(enabled = !working && question.isNotBlank(), onClick = {
                 val request = question.trim()
                 question = ""
                 if (messages.size >= 25) repeat(2) { messages.removeAt(1) }
@@ -139,7 +145,10 @@ private fun SettingsPortrait(character: CharacterPreference) {
             }
         }
     }
-    Box(Modifier.size(34.dp)) {
-        bitmap?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+    Box(
+        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.CobaltSoft),
+        contentAlignment = Alignment.Center,
+    ) {
+        bitmap?.let { Image(it, contentDescription = null, modifier = Modifier.size(36.dp)) }
     }
 }

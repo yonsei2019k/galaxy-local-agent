@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { parseStayComparison, StayComparison } from './StayComparison'
 import type { StayPhotoRequest } from './StayComparison'
 import { parseServiceResult, ServiceResultCard } from './ServiceResultCard'
+import { withStickers } from './icons/Sticker'
 import './answer.css'
 
 const inlineToken = /(!?)\[([^\]\n]*)\]\(([^\s()]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*/g
@@ -25,7 +26,7 @@ function inline(text: string): ReactNode[] {
   let end = 0
   for (const match of text.matchAll(inlineToken)) {
     const index = match.index
-    nodes.push(text.slice(end, index))
+    nodes.push(...withStickers(text.slice(end, index), end))
     if (match[1] === '!') {
       nodes.push(<AnswerImage key={index + match[3]} source={match[3]} alternate={match[2]} />)
     } else if (match[3]) {
@@ -35,15 +36,15 @@ function inline(text: string): ReactNode[] {
         if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password &&
           url.origin !== new URL(imageRoot).origin) href = url.href
       } catch { /* Keep malformed URLs as text. */ }
-      nodes.push(href ? <a key={index} href={href} rel="noreferrer noopener" referrerPolicy="no-referrer">{match[2] || href}</a> : (match[2] || match[0]))
+      nodes.push(href ? <a key={index} href={href} rel="noreferrer noopener" referrerPolicy="no-referrer">{withStickers(match[2] || href, index)}</a> : withStickers(match[2] || match[0], index))
     } else if (match[4]) {
       nodes.push(<code key={index}>{match[4]}</code>)
     } else {
-      nodes.push(<strong key={index}>{match[5]}</strong>)
+      nodes.push(<strong key={index}>{withStickers(match[5], index)}</strong>)
     }
     end = index + match[0].length
   }
-  nodes.push(text.slice(end))
+  nodes.push(...withStickers(text.slice(end), end))
   return nodes
 }
 
@@ -63,9 +64,9 @@ function chart(code: string): ReactNode | null {
     row.length !== 2 || !row[0] || row[0].length > 100 || !/^-?\d+(?:\.\d+)?$/.test(row[1]) ||
     !Number.isFinite(Number(row[1])) || Number(row[1]) < 0)) return null
   const max = Math.max(1, ...rows.map(row => Number(row[1])))
-  return <figure className="answer-chart"><figcaption>{header.join(' · ')}</figcaption>
+  return <figure className="answer-chart"><figcaption>{withStickers(header.join(' · '))}</figcaption>
     <ul>{rows.map(([name, value], i) => <li key={i}>
-      <span>{name}</span><span>{value}</span>
+      <span>{withStickers(name)}</span><span>{value}</span>
       <meter min={0} max={max} value={Number(value)} aria-label={name} />
     </li>)}</ul></figure>
 }

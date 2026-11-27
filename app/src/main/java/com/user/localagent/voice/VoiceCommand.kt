@@ -32,6 +32,9 @@ import com.user.localagent.runtime.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.util.UUID
+import com.user.localagent.ui.ZipOutlinedButton
+import com.user.localagent.ui.ZipOutlinedTextField
+import com.user.localagent.ui.ZipFilledButton
 
 /** Entry points share a lightweight voice/text request sheet, without opening the main workspace. */
 object VoiceCommand {
@@ -76,17 +79,17 @@ class VoiceCommandActivity:ComponentActivity() {
                     Text("ZipHap 빠른 요청",style=MaterialTheme.typography.titleMedium)
                     Text(phase.value,style=MaterialTheme.typography.bodyMedium)
                     val shown=finalText.value?:heard.value
-                    if(textMode.value)OutlinedTextField(value=typedText.value,onValueChange={if(it.length<=2000)typedText.value=it},
+                    if(textMode.value)ZipOutlinedTextField(value=typedText.value,onValueChange={if(it.length<=2000)typedText.value=it},
                         modifier=Modifier.fillMaxWidth(),label={Text("어떤 작업을 할까요?")},minLines=2,maxLines=5,enabled=!sent)
                     else if(shown.isNotBlank())Text(shown,style=MaterialTheme.typography.titleLarge)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         if(textMode.value){
-                            Button(onClick={send()},enabled=typedText.value.isNotBlank()&&!sent){Text("보내기")}
-                            OutlinedButton(onClick={startVoice()}){Text("말로 요청")}
+                            ZipFilledButton(onClick={send()},enabled=typedText.value.isNotBlank()&&!sent){Text("보내기")}
+                            ZipOutlinedButton(onClick={startVoice()}){Text("말로 요청")}
                         }else if(finalText.value!=null){
-                            Button(onClick={send()}){Text(countdown.value?.let{"보내기 ($it)"}?:"보내기")}
-                            OutlinedButton(onClick={autoSend?.cancel();countdown.value=null;listen()}){Text("다시 말하기")}
-                        }else if(recognizer!=null) OutlinedButton(onClick={recognizer?.stopListening()}){Text("말 끝")}
+                            ZipFilledButton(onClick={send()}){Text(countdown.value?.let{"보내기 ($it)"}?:"보내기")}
+                            ZipOutlinedButton(onClick={autoSend?.cancel();countdown.value=null;listen()}){Text("다시 말하기")}
+                        }else if(recognizer!=null) ZipOutlinedButton(onClick={recognizer?.stopListening()}){Text("말 끝")}
                         TextButton(onClick={autoSend?.cancel();finish()}){Text("취소")}
                     }
                     if(!textMode.value)TextButton(onClick={switchToText()}){Text("글로 입력")}

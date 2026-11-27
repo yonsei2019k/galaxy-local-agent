@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import './stays.css'
+import { Icon } from './Icon'
+import { StickerText, withStickers } from './icons/Sticker'
 
 type Stay = {
   index: number
@@ -210,19 +212,20 @@ export function StayComparison({ data, onPrepare, photo }: {
       <details>
         <summary className="stay-top">
           {image && <img className="stay-thumbnail" src={image.src} alt="" />}
-          <span className="stay-name"><strong>{stay.name}</strong><span>{stay.area} · {stay.room}</span>
-            <span>{[drive, ...amenities].filter(Boolean).join(' · ') || stay.host}</span></span>
+          <span className="stay-name"><strong>{withStickers(stay.name)}</strong><span>{withStickers(`${stay.area} · ${stay.room}`)}</span>
+            <span><StickerText text={[drive, ...amenities].filter(Boolean).join(' · ') || stay.host} /></span></span>
           <span className="stay-price"><strong>{stay.total === null ? '총액 미확인' : won(stay.total)}</strong>
             <span>{stay.available === true ? '조회 당시 예약 가능' : stay.available === false ? '조회 당시 예약 불가' : '예약 가능 여부 미확인'}</span></span>
+          <Icon name="down" className="stay-chevron" />
         </summary>
         <div className="stay-facts">
           <span>온라인 {stay.online === null ? '미확인' : won(stay.online)}</span>
           <span>현장 {stay.onsite === null ? '미확인' : won(stay.onsite)}</span>
         </div>
-        {stay.rateTerms && <p className="stay-cancellation">객실 조건 · {stay.rateTerms}</p>}
-        {stay.optionalFees && <p className="stay-cancellation">선택 비용 · {stay.optionalFees}</p>}
-        <p className="stay-cancellation">취소 · {stay.cancellation ?? "미확인"}</p>
-        <p className="stay-source">{stay.host} · {localTime.format(new Date(stay.checkedAt))} 조회</p>
+        {stay.rateTerms && <p className="stay-cancellation">객실 조건 · <StickerText text={stay.rateTerms} /></p>}
+        {stay.optionalFees && <p className="stay-cancellation">선택 비용 · <StickerText text={stay.optionalFees} /></p>}
+        <p className="stay-cancellation">취소 · <StickerText text={stay.cancellation ?? "미확인"} /></p>
+        <p className="stay-source"><StickerText text={stay.host} /> · {localTime.format(new Date(stay.checkedAt))} 조회</p>
         {image && <figure className="stay-photo">
           <img src={image.src} alt={stay.name + (image.representative ? ' 대표 사진' : ' 출처 사진')} />
           <figcaption>{image.representative ? '숙소 대표 사진' : '숙소 출처 사진'}</figcaption>
@@ -243,16 +246,16 @@ export function StayComparison({ data, onPrepare, photo }: {
 
   return <section className="stay-comparison" aria-label="숙소 비교">
     <header className="stay-header"><h3>숙소 비교</h3>
-      <p>{data.checkIn} ~ {data.checkOut} · {nights}박 · {data.guests}명{data.party ? ` (${data.party})` : null}</p>
+      <p>{data.checkIn} ~ {data.checkOut} · {nights}박 · {data.guests}명{data.party ? <StickerText text={` (${data.party})`} /> : null}</p>
     </header>
     <ul className="stay-list">{(showAll ? groups : groups.slice(0, 3)).map(group => {
       if (group.length === 1) return offer(group[0])
       const comparison = priceComparison(group)
       return <li key={group[0].index} className="stay-offer-group">
-        <h4>{group[0].name} · {group[0].room}</h4>
+        <h4>{withStickers(`${group[0].name} · ${group[0].room}`)}</h4>
         {comparison && <p className="stay-savings">
           <strong>예상 {won(comparison.savings)} 절약</strong>
-          <span>{comparison.winner.host} {won(comparison.winner.total)} · 비교 기준 {comparison.baseline.host} {won(comparison.baseline.total)}</span>
+          <span><StickerText text={comparison.winner.host} /> {won(comparison.winner.total)} · 비교 기준 <StickerText text={comparison.baseline.host} /> {won(comparison.baseline.total)}</span>
         </p>}
         <ul className="stay-list" aria-label="같은 객실의 판매처">{group.map(offer)}</ul>
       </li>

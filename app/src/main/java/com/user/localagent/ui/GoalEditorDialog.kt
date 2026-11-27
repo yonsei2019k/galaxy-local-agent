@@ -12,9 +12,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +28,8 @@ import com.user.localagent.core.GoalCriterion
 import com.user.localagent.core.GoalCriterionStatus
 import com.user.localagent.core.GoalDefinition
 import com.user.localagent.core.GoalStatus
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 
 /** The host closes only after a verified save/start; failed storage leaves all edits here intact. */
 @Composable
@@ -66,14 +66,14 @@ fun GoalEditorDialog(
                 Text("진행 중인 작업이 목표 상태를 변경했습니다. 작성 중인 내용은 그대로 유지했습니다.",color=ZipHapColors.Error,style=MaterialTheme.typography.bodySmall)
                 TextButton(onClick={goal?.let{edited=it;conditions=it.constraints.joinToString("\n");error=""}}){Text("최신 목표로 다시 불러오기")}
             }
-            OutlinedTextField(edited.outcome,{text->edited=invalidate(edited.copy(outcome=text,criteria=clearEvidence(edited.criteria)))},
+            ZipOutlinedTextField(edited.outcome,{text->edited=invalidate(edited.copy(outcome=text,criteria=clearEvidence(edited.criteria)))},
                 modifier=Modifier.fillMaxWidth().testTag("goal_outcome"),label={Text("원하는 결과")},minLines=2,maxLines=5)
             Text("완료 기준",style=MaterialTheme.typography.titleSmall)
             Text("직접 확인한 기준과 실행 기록으로 검증된 기준을 구분합니다. 항목을 모두 확인해도 목표 상태를 자동으로 완료 처리하지 않습니다.",style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
             edited.criteria.forEachIndexed{index,criterion->
                 Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(5.dp)){
                     Row(verticalAlignment=Alignment.Top){
-                        OutlinedTextField(criterion.text,{text->edited=invalidate(edited.copy(criteria=edited.criteria.map{if(it.id==criterion.id)it.copy(text=text,status=GoalCriterionStatus.PENDING,evidence=emptyList())else it}))},
+                        ZipOutlinedTextField(criterion.text,{text->edited=invalidate(edited.copy(criteria=edited.criteria.map{if(it.id==criterion.id)it.copy(text=text,status=GoalCriterionStatus.PENDING,evidence=emptyList())else it}))},
                             modifier=Modifier.weight(1f).testTag("goal_criterion_${criterion.id}"),label={Text("기준 ${index+1}")},minLines=1,maxLines=4)
                         TextButton(onClick={edited=invalidate(edited.copy(criteria=edited.criteria.filterNot{it.id==criterion.id}))}){Text("제거")}
                     }
@@ -90,12 +90,12 @@ fun GoalEditorDialog(
                     }
                 }
             }
-            TextButton(onClick={edited=invalidate(edited.copy(criteria=edited.criteria+GoalCriterion(text="")))},modifier=Modifier.testTag("goal_add_criterion")){Text("＋ 완료 기준 추가")}
-            OutlinedTextField(conditions,{text->conditions=text;edited=invalidate(edited.copy(criteria=clearEvidence(edited.criteria)))},
+            TextButton(onClick={edited=invalidate(edited.copy(criteria=edited.criteria+GoalCriterion(text="")))},modifier=Modifier.testTag("goal_add_criterion")){ZipIcon(com.user.localagent.runtime.R.drawable.zi_plus,null,size=20.dp);Spacer(Modifier.width(6.dp));Text("완료 기준 추가")}
+            ZipOutlinedTextField(conditions,{text->conditions=text;edited=invalidate(edited.copy(criteria=clearEvidence(edited.criteria)))},
                 modifier=Modifier.fillMaxWidth().testTag("goal_constraints"),label={Text("조건 · 한 줄에 하나")},minLines=2,maxLines=5)
-            HorizontalDivider()
+            ZipInsetDivider(inset = 0.dp)
             Column{
-                TextButton(onClick={statusMenu=true},modifier=Modifier.testTag("goal_status")){Text("상태 · ${goalStatusLabel(edited.status)}")}
+                ZipOutlinedButton(onClick={statusMenu=true},modifier=Modifier.testTag("goal_status")){Text("상태 · ${goalStatusLabel(edited.status)}");Spacer(Modifier.width(6.dp));ZipIcon(com.user.localagent.runtime.R.drawable.zi_down,null,size=18.dp)}
                 DropdownMenu(expanded=statusMenu,onDismissRequest={statusMenu=false}){GoalStatus.entries.filterNot { it==GoalStatus.WAITING }.forEach{status->
                     DropdownMenuItem(text={Text(goalStatusLabel(status))},enabled=status!=GoalStatus.COMPLETE||edited.completionReady,
                         onClick={edited=edited.copy(status=status);statusMenu=false})
@@ -108,7 +108,7 @@ fun GoalEditorDialog(
         }
     },confirmButton={Row(horizontalArrangement=Arrangement.spacedBy(4.dp)){
         TextButton(onClick={submit(false)},enabled=!stale,modifier=Modifier.testTag("goal_save")){Text("저장")}
-        TextButton(onClick={submit(true)},enabled=!stale,modifier=Modifier.testTag("goal_start")){Text("목표 추진")}
+        ZipFilledButton(onClick={submit(true)},enabled=!stale,modifier=Modifier.testTag("goal_start")){Text("목표 추진")}
     }},dismissButton={TextButton(onClick=onDismiss){Text("닫기")}})
     if(deleting)AlertDialog(onDismissRequest={deleting=false},title={Text("목표 삭제")},text={Text("이 대화의 목표와 완료 기준을 삭제합니다. 이미 생성한 파일·일정 등 실행 결과는 유지됩니다.")},
         confirmButton={TextButton(onClick={deleting=false;if(stale)error="목표 상태가 바뀌었습니다. 최신 상태를 불러온 뒤 삭제해주세요." else if(onDeleteVersioned!=null)onDeleteVersioned(edited)else onDelete()}){Text("목표 삭제",color=ZipHapColors.Error)}},dismissButton={TextButton(onClick={deleting=false}){Text("취소")}})

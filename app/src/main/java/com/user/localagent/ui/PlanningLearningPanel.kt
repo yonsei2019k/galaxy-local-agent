@@ -63,7 +63,7 @@ import kotlinx.coroutines.withContext
             Text("승인 전 개선 제안 ${lessons}건 · 자동 적용·권한 부여 없음",style=MaterialTheme.typography.bodySmall)
             if(rows.isEmpty())Text("아직 기록된 실행 피드백이 없습니다.",style=MaterialTheme.typography.bodySmall)
             rows.sortedByDescending {it.updatedAt}.take(8).forEach {row->
-                HorizontalDivider()
+                ZipInsetDivider(inset = 0.dp)
                 Text("${feedbackDomainLabel(row.domain)} · ${feedbackToolLabel(row.tool)}",style=MaterialTheme.typography.labelLarge)
                 Text("검증 ${row.verifiedSuccess} · 준비 ${row.prepared} · 미검증 ${row.unverified} · 실패 ${row.failed}",style=MaterialTheme.typography.bodySmall)
                 row.proposedLessons.forEach {(kind,count)->
@@ -83,7 +83,7 @@ import kotlinx.coroutines.withContext
         }
         if(loading)LinearProgressIndicator(Modifier.fillMaxWidth())
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            OutlinedButton(enabled=!loading,onClick={refresh()}){Text("상태 새로고침")}
+            ZipOutlinedButton(enabled=!loading,onClick={refresh()}){Text("상태 새로고침")}
             TextButton(enabled=!loading&&snapshot!=null,onClick={resetDialog=true}){Text("전체 피드백 초기화")}
         }
     }}

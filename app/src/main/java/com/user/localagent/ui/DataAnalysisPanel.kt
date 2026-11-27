@@ -15,10 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -269,7 +267,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("대화 파일 가져오기", style = MaterialTheme.typography.titleMedium)
                     Text("카카오톡 등에서 내보낸 텍스트·CSV 파일을 선택합니다. 가져온 파일 범위만 보관하고, 전체 메신저 대화에 접근하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { launchPicker(PrivateDataPickerPurpose.CONVERSATION_IMPORT) {
+                    ZipFilledButton(onClick = { launchPicker(PrivateDataPickerPurpose.CONVERSATION_IMPORT) {
                         textPicker.launch(arrayOf("text/plain", "text/csv", "application/octet-stream"))
                     } }, enabled = !busy && !pickerPending && panelReady) {
                         Text("대화 파일 선택")
@@ -350,7 +348,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                                 finally { busy = false }
                             }
                         }, actionEnabled = audioGranted && !busy)
-                    OutlinedButton(onClick = { launchPicker(PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION) {
+                    ZipOutlinedButton(onClick = { launchPicker(PrivateDataPickerPurpose.AUDIO_TRANSCRIPTION) {
                         audioPicker.launch(arrayOf("audio/*"))
                     } }, enabled = !busy && !pickerPending && panelReady && !modelBusy) {
                         Text("오디오 파일 직접 선택 · 추가 권한 불필요")
@@ -360,7 +358,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
             }
         }
         item {
-            Text("가져온 대화 자료", style = MaterialTheme.typography.titleLarge)
+            ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_chat, "가져온 대화 자료", tone = ZipTone.Sun)
         }
         if (visibleCatalog.isEmpty()) item {
             val message = when {
@@ -379,7 +377,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                     val dates = listOfNotNull(entry.firstTimestamp, entry.lastTimestamp).distinct()
                     if (dates.isNotEmpty()) Text("인식한 기간: ${dates.joinToString(" ~ ")}", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        ZipFilledButton(onClick = {
                             val origin = catalogScope
                             if (origin == null || !displaysScope(origin)) status = "현재 대화의 자료 목록을 다시 확인해주세요."
                             else scope.launch {
@@ -391,7 +389,7 @@ fun DataAnalysisPanel(app: AppContainer, onAsk: (String, String) -> Unit, onTran
                                 catch (_: Exception) { status = "현재 대화의 자료 목록을 다시 확인해주세요." }
                             }
                         }, enabled = !busy && !pickerPending) { Text("이 자료 분석") }
-                        OutlinedButton(onClick = {
+                        ZipOutlinedButton(onClick = {
                             catalogScope?.takeIf(::displaysScope)?.let { deleteTarget = entry to it }
                         }, enabled = !busy && !pickerPending) { Text("삭제") }
                     }
@@ -445,8 +443,8 @@ private fun PermissionLine(
             }
             if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!granted) OutlinedButton(onClick = onGrant) { Text("접근 허용") }
-                Button(onClick = onAction, enabled = actionEnabled) { Text(actionLabel) }
+                if (!granted) ZipOutlinedButton(onClick = onGrant) { Text("접근 허용") }
+                ZipFilledButton(onClick = onAction, enabled = actionEnabled) { Text(actionLabel) }
             }
         }
     }

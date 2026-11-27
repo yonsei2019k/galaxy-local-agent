@@ -24,7 +24,7 @@ fun ImageSeriesPicker(items:List<ImageConsistencyRecipe>,enabled:Boolean,onDismi
                         TextButton(enabled=enabled,onClick={onLoad(recipe)},modifier=Modifier.testTag("series_load_$index")){Text("불러오기")}
                         TextButton(enabled=enabled,onClick={deleting=recipe},modifier=Modifier.testTag("series_remove_$index")){Text("조건 삭제")}
                     }
-                    HorizontalDivider()
+                    ZipInsetDivider(inset = 0.dp)
                 }
             }
         }

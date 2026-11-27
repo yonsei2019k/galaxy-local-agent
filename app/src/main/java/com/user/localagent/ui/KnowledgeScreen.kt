@@ -73,14 +73,14 @@ import kotlinx.coroutines.*
 
     edit?.let {claim->AlertDialog(onDismissRequest={if(!working)edit=null},title={Text("기억 수정·확정")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
         Text("${claim.subject} · ${claim.predicate}")
-        OutlinedTextField(editValue,{if(it.length<=4000)editValue=it},label={Text("사용자가 확인한 내용")},modifier=Modifier.fillMaxWidth())
+        ZipOutlinedTextField(editValue,{if(it.length<=4000)editValue=it},label={Text("사용자가 확인한 내용")},modifier=Modifier.fillMaxWidth())
         Row{Checkbox(editCore,{editCore=it});Text("관련 없어도 기본 프로필로 참고")}
     }},confirmButton={TextButton(enabled=!working&&editValue.isNotBlank(),onClick={execute {
         val saved=app.repository.saveKnowledgeClaim(claim.copy(value=editValue.trim(),status="confirmed",confidence=1.0,sourceKind="owner_approved",sourceId="",sourceExcerpt=null,tags=if(editCore)(claim.tags+"core").distinct()else claim.tags-"core",updatedAt=System.currentTimeMillis()))
         check(app.repository.getKnowledge(saved.id)==saved){"수정한 기억을 다시 확인하지 못했습니다."}
         edit=null;onHistoryChanged();onStatus("사용자 교정을 확정 기억으로 저장했습니다.")
     }}){Text("수정 내용 확정")}},dismissButton={TextButton(enabled=!working,onClick={edit=null}){Text("취소")}})}
-    editLegacy?.let {memory->AlertDialog(onDismissRequest={if(!working)editLegacy=null},title={Text("기존 기억 수정")},text={OutlinedTextField(legacyText,{if(it.length<=4000)legacyText=it},modifier=Modifier.fillMaxWidth())},confirmButton={TextButton(enabled=!working&&legacyText.isNotBlank(),onClick={execute {
+    editLegacy?.let {memory->AlertDialog(onDismissRequest={if(!working)editLegacy=null},title={Text("기존 기억 수정")},text={ZipOutlinedTextField(legacyText,{if(it.length<=4000)legacyText=it},modifier=Modifier.fillMaxWidth())},confirmButton={TextButton(enabled=!working&&legacyText.isNotBlank(),onClick={execute {
         val saved=app.repository.editMemory(memory.id,legacyText.trim())
         check(app.repository.getMemory(saved.id)==saved)
         editLegacy=null;onHistoryChanged();onStatus("기존 기억의 교정 내용을 확인했습니다.")
@@ -102,9 +102,9 @@ import kotlinx.coroutines.*
         item {PlanningLearningPanel(app,onStatus,onHistoryChanged)}
         item {Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Column(Modifier.weight(1f)){Text("자동 기억 정리",style=MaterialTheme.typography.titleMedium);Text("문자와 카톡·메일 알림에서 근거가 있는 내용을 기억합니다. 통화 기록과 사용 정보 접근을 허용한 앱의 사용 시각도 폰에 저장합니다.",style=MaterialTheme.typography.bodySmall)}
-            Switch(checked=learning.enabled,enabled=!working,onCheckedChange={enabled->execute {learning=app.knowledgeIngestion.setEnabled(enabled);onStatus(if(enabled)"자동 기억 정리를 켰습니다."else"자동 기억 정리를 중단했습니다.")}})
+            Switch(colors=zipSwitchColors(),checked=learning.enabled,enabled=!working,onCheckedChange={enabled->execute {learning=app.knowledgeIngestion.setEnabled(enabled);onStatus(if(enabled)"자동 기억 정리를 켰습니다."else"자동 기억 정리를 중단했습니다.")}})
         }
-        OutlinedButton(enabled=learning.enabled&&!working,onClick={execute {
+        ZipOutlinedButton(enabled=learning.enabled&&!working,onClick={execute {
             val report=app.knowledgeIngestion.scanConnectedNow {
                 onStatus("자료 ${it.processedSources}건 확인 · ${it.analyzedSegments}구간 분석 · 근거 기록 ${it.evidenceRecords}건 저장")
             }
@@ -122,20 +122,20 @@ import kotlinx.coroutines.*
         }}){Text("연결한 자료 지금 정리")}}
         item {Text("기억과 사용자 프로필",style=MaterialTheme.typography.titleLarge)
             Text("확인된 기본 프로필과 현재 요청에 관련된 기억만 대화에 사용합니다. 관찰은 추론으로 구분하며, 제안은 확정 전까지 사실로 사용하지 않습니다.",style=MaterialTheme.typography.bodySmall)}
-        item {OutlinedTextField(value,{if(it.length<=4000)value=it},label={Text("직접 확인한 사실·선호·교정")},modifier=Modifier.fillMaxWidth())
+        item {ZipOutlinedTextField(value,{if(it.length<=4000)value=it},label={Text("직접 확인한 사실·선호·교정")},modifier=Modifier.fillMaxWidth())
             Row{Checkbox(core,{core=it},enabled=!working);Text("기본 프로필로 참고",modifier=Modifier.padding(top=12.dp))}
             Text("이메일·연락처 같은 정보는 관련 요청에서만 사용합니다.",style=MaterialTheme.typography.labelSmall)
-            Button(enabled=!working&&value.isNotBlank(),onClick={execute {
+            ZipFilledButton(enabled=!working&&value.isNotBlank(),onClick={execute {
                 val id=UUID.randomUUID().toString()
                 val saved=app.repository.saveKnowledgeClaim(KnowledgeClaim(id=id,subject="owner",predicate="personal_fact.$id",value=value.trim(),status="confirmed",confidence=1.0,sourceKind="owner_approved",tags=if(core)listOf("core")else emptyList()))
                 check(app.repository.getKnowledge(saved.id)==saved)
                 value="";onHistoryChanged();onStatus("확정 기억 저장과 재조회를 확인했습니다.")
             }}){Text("확인한 내용 기억하기")}}
         item {Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-            listOf("confirmed","observed","proposed").forEach {state->FilterChip(selected=filter==state,onClick={filter=state},label={Text("${knowledgeStatus(state)} ${claims.count {it.status==state}}")})}
+            listOf("confirmed","observed","proposed").forEach {state->ZipFilterChip(selected=filter==state,onClick={filter=state},label={Text("${knowledgeStatus(state)} ${claims.count {it.status==state}}")})}
         }}
         if(working)item {LinearProgressIndicator(Modifier.fillMaxWidth())}
-        if(visible.isEmpty())item {Text("이 분류에 저장된 지식이 없습니다.",style=MaterialTheme.typography.bodySmall)}
+        if(visible.isEmpty())item {ZipEmptyState(com.user.localagent.runtime.R.drawable.zi_ill_archive,"이 분류에 저장된 지식이 없습니다.","")}
         items(visible,key={"knowledge:${it.id}"}) {claim->ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text("${claim.subject} · ${if(claim.predicate.startsWith("personal_fact."))"직접 확인한 사실·선호"else claim.predicate}",style=MaterialTheme.typography.labelLarge)
             Text(claim.value)
@@ -148,24 +148,24 @@ import kotlinx.coroutines.*
                 }}){Text("내용 확인·확정")}
                 TextButton(enabled=!working,onClick={edit=claim;editValue=claim.value;editCore="core" in claim.tags}){Text("수정")}
                 TextButton(onClick={sourceDetail=claim}){Text("출처")}
-                TextButton(enabled=!working,onClick={deleteClaim=claim}){Text("잊어줘")}
+                TextButton(enabled=!working,onClick={deleteClaim=claim}){Text("잊어줘",color=ZipTone.Coral.content)}
             }
         }}}
-        item {Text("기존 장기 기억 ${memories.size}",style=MaterialTheme.typography.titleMedium)}
+        item {ZipSectionTitle("기존 장기 기억 ${memories.size}",Modifier.padding(start=4.dp,top=8.dp))}
         items(memories,key={"legacy:${it.id}"}) {memory->ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text(memory.text);Text(if(memory.kind=="proposed")"AI 제안 · 확정 전 대화에 사용하지 않음"else"기존 승인 기억 · ${memory.kind}",style=MaterialTheme.typography.bodySmall)
             Row {
                 if(memory.kind=="proposed")TextButton(enabled=!working,onClick={execute {val saved=app.repository.editMemory(memory.id,memory.text,"preference");check(app.repository.getMemory(saved.id)==saved);onStatus("기존 제안을 승인했습니다.")}}){Text("기억으로 승인")}
                 TextButton(enabled=!working,onClick={editLegacy=memory;legacyText=memory.text}){Text("수정")}
-                TextButton(enabled=!working,onClick={deleteLegacy=memory}){Text("잊어줘")}
+                TextButton(enabled=!working,onClick={deleteLegacy=memory}){Text("잊어줘",color=ZipTone.Coral.content)}
             }
         }}}
-        item {OutlinedButton(enabled=!working,onClick={export.launch("ziphap-private-knowledge.md")}){Text("기억 Markdown 내보내기")};Text("내보내기는 직접 선택한 위치에 평문 Markdown으로 저장됩니다. 기본 저장은 기기 내 암호화 DB입니다.",style=MaterialTheme.typography.bodySmall)}
-        item {Text("메모 ${userNotes.size}",style=MaterialTheme.typography.titleMedium)}
+        item {ZipOutlinedButton(enabled=!working,onClick={export.launch("ziphap-private-knowledge.md")}){Text("기억 Markdown 내보내기")};Text("내보내기는 직접 선택한 위치에 평문 Markdown으로 저장됩니다. 기본 저장은 기기 내 암호화 DB입니다.",style=MaterialTheme.typography.bodySmall)}
+        item {ZipSectionTitle("메모 ${userNotes.size}",Modifier.padding(start=4.dp,top=8.dp))}
         items(userNotes,key={"note:${it.id}"}) {note->ZipHapCard {Column{Text(note.title,style=MaterialTheme.typography.titleMedium);Text(note.body)}}}
-        item {Text("리마인더 ${reminders.size}",style=MaterialTheme.typography.titleMedium)}
+        item {ZipSectionTitle("리마인더 ${reminders.size}",Modifier.padding(start=4.dp,top=8.dp))}
         items(reminders,key={"reminder:${it.id}"}) {reminder->ZipHapCard {Column{Text(reminder.title);Text(formatter.format(Instant.ofEpochMilli(reminder.atEpochMillis)))}}}
-        item {OutlinedButton(onClick=onPermissions){Text("일정·연락처·알림 권한 설정")}}
+        item {ZipOutlinedButton(onClick=onPermissions){Text("일정·연락처·알림 권한 설정")}}
     }
 }
 

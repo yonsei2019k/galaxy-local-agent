@@ -38,15 +38,14 @@ import java.time.format.DateTimeFormatter
     }
     LazyColumn(Modifier.fillMaxSize().imePadding(),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
-            Text("웹 조사와 쇼핑",style=MaterialTheme.typography.titleLarge)
-            Text("입력한 검색어로 공개 자료를 확인합니다. 저장된 문자·기억이나 계정 정보는 검색에 자동으로 보내지 않습니다.",style=MaterialTheme.typography.bodySmall)
-            OutlinedTextField(value=query,onValueChange={if(it.length<=500)query=it},label={Text("무엇을 찾을까요?")},placeholder={Text("예: 샤오미 공기청정기")},modifier=Modifier.fillMaxWidth(),minLines=1,maxLines=4,enabled=!state.running)
-            Row {Switch(checked=shopping,onCheckedChange={shopping=it;if(!it)store=null},enabled=!state.running);Text(if(shopping)"상품·가격 자료"else"일반 웹 자료",modifier=Modifier.padding(start=8.dp,top=12.dp))}
+            ZipFeatureHeader(com.user.localagent.runtime.R.drawable.zi_globe,"웹 조사와 쇼핑","입력한 검색어로 공개 자료를 확인합니다. 저장된 문자·기억이나 계정 정보는 검색에 자동으로 보내지 않습니다.")
+            ZipOutlinedTextField(value=query,onValueChange={if(it.length<=500)query=it},label={Text("무엇을 찾을까요?")},placeholder={Text("예: 샤오미 공기청정기")},modifier=Modifier.fillMaxWidth(),minLines=1,maxLines=4,enabled=!state.running)
+            Row {Switch(colors=zipSwitchColors(),checked=shopping,onCheckedChange={shopping=it;if(!it)store=null},enabled=!state.running);Text(if(shopping)"상품·가격 자료"else"일반 웹 자료",modifier=Modifier.padding(start=8.dp,top=12.dp))}
             if(shopping)Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                listOf(null to "전체", "coupang" to "쿠팡", "naver" to "네이버").forEach {(value,label)->FilterChip(selected=store==value,onClick={store=value},enabled=!state.running,label={Text(label)})}
+                listOf(null to "전체", "coupang" to "쿠팡", "naver" to "네이버").forEach {(value,label)->ZipFilterChip(selected=store==value,onClick={store=value},enabled=!state.running,label={Text(label)})}
             }
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                Button(enabled=!state.running&&query.isNotBlank(),onClick={if(!app.webResearch.startSearch(query.trim(),shopping,store))onStatus("검색을 시작하지 못했습니다. 진행 중인 검색을 확인해주세요.")}){Text("실제 공개 자료 검색")}
+                ZipFilledButton(enabled=!state.running&&query.isNotBlank(),onClick={if(!app.webResearch.startSearch(query.trim(),shopping,store))onStatus("검색을 시작하지 못했습니다. 진행 중인 검색을 확인해주세요.")}){Text("실제 공개 자료 검색")}
                 if(state.running)TextButton(onClick={app.webResearch.cancel()}){Text("중단")}
             }
             if(state.running){LinearProgressIndicator(progress={if(state.totalSteps>0)(state.progress.toFloat()/state.totalSteps).coerceIn(0f,1f)else 0f},modifier=Modifier.fillMaxWidth())}
@@ -68,12 +67,12 @@ import java.time.format.DateTimeFormatter
             item.priceSource?.let {Text("가격 근거: $it",style=MaterialTheme.typography.labelSmall)}
             Text("${item.source} · 확인 ${time(item.priceFetchedAt?:item.fetchedAt)}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text("링크: ${runCatching {java.net.URI(item.url).host}.getOrDefault("")}",style=MaterialTheme.typography.labelSmall)
-            OutlinedButton(onClick={open(item.url)}){Text(if(shopping)"상품·판매처 링크 열기"else"출처 페이지 열기")}
+            ZipOutlinedButton(onClick={open(item.url)}){Text(if(shopping)"상품·판매처 링크 열기"else"출처 페이지 열기")}
         }}}
         item {ZipHapCard {Column(verticalArrangement=Arrangement.spacedBy(7.dp)){
             Text("판매처에서 최종 조건 확인",style=MaterialTheme.typography.titleMedium)
             Text("표시 가격은 읽은 페이지·옵션의 자료입니다. 쿠폰, 회원가, 배송비와 재고에 따라 달라질 수 있으며 전체 시장 최저가로 단정하지 않습니다. 로그인·장바구니·구매·결제는 자동 수행하지 않습니다.",style=MaterialTheme.typography.bodySmall)
-            OutlinedButton(enabled=query.isNotBlank(),onClick={open(searchUrl())}){Text(if(shopping)"판매처 검색 화면 직접 열기"else"브라우저에서 검색 열기")}
+            ZipOutlinedButton(enabled=query.isNotBlank(),onClick={open(searchUrl())}){Text(if(shopping)"판매처 검색 화면 직접 열기"else"브라우저에서 검색 열기")}
             if(state.partial)Text("일부 페이지는 자동으로 읽지 못했습니다. 확인된 자료와 링크만 표시합니다.",style=MaterialTheme.typography.bodySmall)
         }}}
     }

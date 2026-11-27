@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './work.css'
 import { Icon } from '../Icon'
+import { withStickers } from '../icons/Sticker'
 import type { Task } from '../bridge'
 import { detailLine, workPresentation } from './workPresentation'
 import { useWorkDuration } from './workHistory'
@@ -20,14 +21,14 @@ export function WorkCard({ task, onOpen }: { task: Task; onOpen(taskId: string):
       onClick={() => onOpen(task.id)}>
       <span className={`work-icon${justFinished ? ' work-icon--just-finished' : ''}`}><Icon name={presentation.icon} /></span>
       <span className="work-text">
-        <span className="work-title" dir="auto">{task.label || '작업'}</span>
+        <span className="work-title" dir="auto">{withStickers(task.label || '작업')}</span>
         <span className="work-meta">
           <span className="work-state">{presentation.title}</span>
           {elapsed && <span className="work-duration"> · {elapsed}</span>}
-          {line && <span className="work-detail" dir="auto"> · {line}</span>}
+          {line && <span className="work-detail" dir="auto"> · {withStickers(line)}</span>}
         </span>
       </span>
-      <span className="work-chevron" aria-hidden="true">›</span>
+      <Icon name="chevronRight" className="work-chevron" />
       {task.phase === 'running' && <span className="work-progress" role="progressbar" aria-label="작업 진행 중"><span /></span>}
     </button>
   )
