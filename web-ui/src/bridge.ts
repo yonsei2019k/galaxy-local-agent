@@ -106,6 +106,7 @@ export interface Snapshot {
   canSteer?: boolean
   attachments?: Attachment[]
   canCancelPreparation?: boolean
+  preparingAttachments?: boolean
   otherApprovalPending?: boolean
   composerEpoch?: number
   singleConversation?: boolean
@@ -332,6 +333,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.activeRunId !== undefined && value.activeRunId !== null && typeof value.activeRunId !== 'string') return null
   if (value.actionEpoch !== undefined && !epoch(value.actionEpoch)) return null
   if (value.canSteer !== undefined && typeof value.canSteer !== 'boolean') return null
+  if (value.preparingAttachments !== undefined && typeof value.preparingAttachments !== 'boolean') return null
   if (value.canCancelPreparation !== undefined && typeof value.canCancelPreparation !== 'boolean') return null
   if (value.otherApprovalPending !== undefined && typeof value.otherApprovalPending !== 'boolean') return null
   if (value.attachments !== undefined && !list(value.attachments, attachment)) return null
@@ -388,6 +390,10 @@ export function sameConversation(a: Snapshot | null, b: Snapshot | null) {
   return a !== null && b !== null && a.threadId === b.threadId && a.branchId === b.branchId
 }
 
+export function attachmentsBlockReply(snapshot: Snapshot | null) {
+  return snapshot?.preparingAttachments === true || !!snapshot?.attachments?.length
+}
+
 export function hasNativeBridge() {
   return typeof window.ziphapNative?.postMessage === 'function'
 }
@@ -402,6 +408,7 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
       (intent.action === 'checkBookingHistory' && !card.hasBookingHistory) ||
       (intent.action === 'openBookingPayment' ? card.state !== 'ready' : card.state === 'checking')) return false
   }
+  if ((intent.action === 'chooseReply' || intent.action === 'answerGoalQuestion') && attachmentsBlockReply(scope)) return false
   if (intent.action === 'chooseReply' && !scope?.tasks.some(task => task.id === intent.payload.runId &&
     task.phase === 'waiting_input' && task.choices?.[intent.payload.index])) return false
   if (intent.action === 'answerGoalQuestion' && (!intent.payload.text.trim() || intent.payload.text.length > 4000 ||

@@ -666,6 +666,35 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'closeVoiceTalk' })
   })
 
+  it('retains the goal answer while attachments block replies and sends it once when cleared', () => {
+    mount()
+    const room: Snapshot = { ...base, messages: [{ id: 'ask', role: 'assistant', text: '어느 과정인가요?' }],
+      tasks: [{ id: 'ask-run', phase: 'waiting_input', label: '', detail: '', canCancel: false,
+        goalOwnerReply: true, choices: [{ label: '기본 과정', recommended: true }, { label: '다른 과정', recommended: false }] }] }
+    snapshot(room)
+    const reply = host.querySelector<HTMLInputElement>('input[aria-label="이어갈 작업에 답변"]')!
+    const text = '심화 과정'
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(reply, text)
+      reply.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const send = { action: 'answerGoalQuestion', payload: { runId: 'ask-run', text } } as const
+    for (const state of [{ preparingAttachments: true }, { attachments: [{ id: 'f', name: 'test.pdf' }] }]) {
+      const blocked = { ...room, ...state }
+      snapshot(blocked)
+      expect(button('답변하고 계속').disabled).toBe(true)
+      expect(button('다른 과정').disabled).toBe(true)
+      expect(postIntent(blocked, send)).toBe(false)
+      expect(postIntent(blocked, { action: 'chooseReply', payload: { runId: 'ask-run', index: 0 } })).toBe(false)
+      expect(reply.value).toBe(text)
+    }
+    snapshot(room)
+    click('답변하고 계속')
+    click('답변하고 계속')
+    expect(requests().filter(item => item.action === send.action)).toEqual([expect.objectContaining(send)])
+    expect(postIntent({ ...room, tasks: [] }, send)).toBe(false)
+  })
+
   it('sends one answer to the current question and preserves a composed reply', () => {
     mount()
     const question: Snapshot = { ...base,

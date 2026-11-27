@@ -8,6 +8,7 @@ import { RichAnswer } from './RichAnswer'
 import type { BookingPaymentAction, ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { BookingPaymentCard } from './BookingPaymentCard'
 import { isLiveTaskPhase } from './composer'
+import { attachmentsBlockReply } from './bridge'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { WorkCard } from './work/WorkCard'
@@ -215,6 +216,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const tasks = snapshot?.ready ? snapshot.tasks.filter(task => task.id !== website?.runId) : []
   const liveTasks = tasks.filter(task => isLiveTaskPhase(task.phase) || task.phase === 'queued')
   const waitingInput = tasks.find(task => task.phase === 'waiting_input')
+  const replyBlocked = attachmentsBlockReply(snapshot)
   useEffect(() => {
     if (!sentChoice) return
     const timer = window.setTimeout(() => setSentChoice(null), 8_000)
@@ -375,20 +377,21 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
             </section>}
             {waitingInput && !liveTasks.length && <div className="reply-needed">
               <div role="status"><StickerText text={waitingInput.detail || waitingInput.label} /></div>
+              {replyBlocked && <div>답변을 보내려면 작성창의 첨부를 먼저 취소하거나 제거해 주세요.</div>}
               {waitingInput.goalOwnerReply && onGoalAnswer && <form className="reply-options" onSubmit={event => {
                 event.preventDefault()
-                if (goalReply?.runId === waitingInput.id && onGoalAnswer(waitingInput.id, goalReply.text.trim())) setSentChoice(waitingInput.id)
+                if (!replyBlocked && goalReply?.runId === waitingInput.id && onGoalAnswer(waitingInput.id, goalReply.text.trim())) setSentChoice(waitingInput.id)
               }}>
                 <input aria-label="이어갈 작업에 답변" placeholder="이 작업에 답변" maxLength={4000}
                   value={goalReply?.runId === waitingInput.id ? goalReply.text : ''}
                   disabled={!enabled || sentChoice === waitingInput.id}
                   onChange={event => setGoalReply({ runId: waitingInput.id, text: event.target.value })} />
-                <button type="submit" disabled={!enabled || sentChoice === waitingInput.id ||
+                <button type="submit" disabled={!enabled || replyBlocked || sentChoice === waitingInput.id ||
                   goalReply?.runId !== waitingInput.id || !goalReply.text.trim()}>답변하고 계속</button>
               </form>}
               {waitingInput.choices && onChooseReply && <div className="reply-options" role="group" aria-label="답변 선택지">
                 {waitingInput.choices.map((choice, index) => <button key={choice.label} type="button"
-                  disabled={!enabled || hasDraft || !!snapshot?.attachments?.length || sentChoice === waitingInput.id}
+                  disabled={!enabled || hasDraft || replyBlocked || sentChoice === waitingInput.id}
                   onClick={() => {
                     if (onChooseReply(waitingInput.id, index)) setSentChoice(waitingInput.id)
                   }}>

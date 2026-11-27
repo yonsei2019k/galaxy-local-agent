@@ -650,6 +650,7 @@ class MainActivity : ComponentActivity() {
                         })
                     }
                     voicePrompt?.takeIf{it.talk==null&&it.threadId==composerThreadId&&it.branchId==currentBranchId}?.let{put("voicePrompt",it.stage)}
+                    put("preparingAttachments",preparingAttachments)
                     put("canCancelPreparation",preparingAttachments&&attachmentJobThreadId==composerThreadId||roomAuxiliary!=null)
                     put("otherApprovalPending",approvalThread!=null)
                     put("status",if(runForRoom!=null||activeExecutions.isEmpty())state else "다른 대화에서 작업 중")
