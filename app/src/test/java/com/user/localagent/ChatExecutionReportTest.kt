@@ -18,6 +18,19 @@ class ChatExecutionReportTest {
         put("playbackEvidence",buildJsonObject {put("playbackStatus",status);put("positionMs",position);put("durationMs",120000);put("playerSignature","private-player-token")})
     })
     private fun persisted(history:ChatExecutionReport.History)=buildJsonObject {put(ChatExecutionReport.KEY,history.json())}
+    @Test fun reportKeepsTheLatestChecklistAndUsesTheRecordedResumeTime() {
+        val observed=result(GoalProgressToolCatalog.UPDATE,Json.parseToJsonElement("""{"ledger":{"items":[
+            {"course":"기초교육","unit":"첫 강의","status":"done","evidence":["audit"]},
+            {"course":"기초교육","unit":"둘째 강의","kind":"lecture","status":"active"},
+            {"course":"기초교육","unit":"이수증","status":"done","evidence":[]}]}}""").jsonObject)
+        val history=ChatExecutionReport.read(persisted(ChatExecutionReport.observe(fresh,observed)))
+        val context=buildJsonObject {put("hostGoalWaitKind","time");put("hostGoalWaitAt",1_800_000_000_000L)}
+        val report=ChatExecutionReport.display(history,"paused","waiting_goal_condition",context)
+        assertTrue(report.any {it.contains("확인 1개 · 남음 2개")})
+        assertTrue(report.any {it=="진행 중 · 기초교육 / 둘째 강의"})
+        assertTrue(report.any {it=="남은 항목 · 기초교육 / 이수증"})
+        assertTrue(report.last().matches(Regex("예약 대기 · .+ 이후 다시 확인해요\\.")))
+    }
     @Test fun repeatedPollsReplaceOneLineAndPlaybackEndingDoesNotCertifySiteCompletion() {
         var h=ChatExecutionReport.observe(fresh,media("playing",1000))
         h=ChatExecutionReport.read(Json.parseToJsonElement(persisted(h).toString()).jsonObject)
@@ -57,7 +70,10 @@ class ChatExecutionReportTest {
         val h=ChatExecutionReport.observe(fresh,ledger("기초 과정"))
         assertEquals("작업 장부의 진행 대상 · 기초 과정 / 1강",h.lines.single().text)
         assertEquals(h,ChatExecutionReport.observe(h,ledger("기초 과정")))
-        assertEquals(h,ChatExecutionReport.observe(h,ledger("OTP 123456")))
+        val redacted=ChatExecutionReport.observe(h,ledger("OTP 123456"))
+        assertEquals(h.lines,redacted.lines)
+        assertEquals(listOf("작업 장부 1개 항목 중 확인 0개 · 남음 1개"),redacted.checklist)
+        assertFalse(redacted.json().toString().contains("123456"))
         assertFalse(h.json().toString().contains("99%"))
     }
     @Test fun ownerAuthenticationAndInterruptedActionsReportOnlyHostFacts() {

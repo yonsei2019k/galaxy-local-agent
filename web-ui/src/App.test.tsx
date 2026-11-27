@@ -144,6 +144,15 @@ afterEach(() => {
 })
 
 describe('native conversation', () => {
+  it('keeps earlier steps available beneath a long report', () => {
+    mount()
+    const executionReport = Array.from({length: 9}, (_, index) => '확인한 단계 ' + (index + 1))
+    snapshot({...base, messages: [{id:'long-report', role:'assistant', text:'', executionReport}]})
+    const report = host.querySelector('.execution-report')!
+    expect(report.querySelector(':scope > ol li')?.textContent).toBe(executionReport[1])
+    expect(report.querySelector('details')?.open).toBe(false)
+    expect(report.querySelector('details li')?.textContent).toBe(executionReport[0])
+  })
   it('renders persisted execution changes in order on the same assistant reply, including before it has text', () => {
     mount()
     const report = ['영상 재생 중 (관찰 위치 1분 0초)', '사이트 진도 미확인']

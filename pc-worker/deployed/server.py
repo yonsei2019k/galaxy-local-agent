@@ -211,6 +211,12 @@ class Handler(BaseHTTPRequestHandler):
    request=self.body(8192)
    try:
     work=request.pop('work',None)
+    if 'sessionKey' in request:
+     key=request['sessionKey']
+     if (path not in ('/v1/browser/open','/v1/browser/owner-login-submit') or work is None or
+         self.client_address[0].startswith('127.') or self.headers.get_all('X-ZipHap-Agent-Capability',[]) or
+         self.headers.get_all('X-ZipHap-Phone-Capability',[]) or not isinstance(key,str) or not re.fullmatch(r'[a-f0-9]{64}',key)):
+      self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
     if path=='/v1/browser/release':
      if request or not isinstance(work,str) or not re.fullmatch(r'[a-f0-9]{64}',work):raise BrowserError('BROWSER_WORK_SHAPE')
      self.reply(BROWSER_WORK.release(owner,work))

@@ -6,6 +6,26 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.net.URI
 import com.user.localagent.core.WebAgentPolicy
+import com.user.localagent.connections.ConnectionStore
+import java.security.SecureRandom
+
+internal object PairedWebsiteSessionKeys {
+    private fun store(context:Context)=ConnectionStore(context,"ziphap-website-session-keys-v1","ziphap.website.session.keys.v1")
+    @Synchronized fun key(context:Context,origin:String,create:Boolean=false):String? {
+        require(PcLoginSite.origin(origin)==origin)
+        val store=store(context)
+        return store.read(origin) ?: if(create) {
+            val key=ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+            store.write(origin,key)
+            key
+        } else null
+    }
+    @Synchronized fun remove(context:Context,origin:String) { store(context).write(origin,null) }
+    suspend fun openFields(context:Context,url:String):Map<String,JsonElement> = withContext(Dispatchers.IO) {
+        val origin=PcLoginSite.origin(url) ?: return@withContext emptyMap()
+        runCatching { key(context,origin) }.getOrNull()?.let { mapOf("sessionKey" to JsonPrimitive(it)) }.orEmpty()
+    }
+}
 
 internal object PcLoginSite {
     const val KAIRB = "https://www.kairb.org"
@@ -58,7 +78,8 @@ internal data class PcLoginResult(val stage: PcLoginStage, val retryAfterSeconds
 
 /** A one-use, native-owner capability. Its contents never reach the model or conversation database. */
 internal class PairedWebsiteLogin private constructor(
-    private val connection: PcConnection, private val token: String, private val work: String, val origin:String
+    private val connection: PcConnection, private val token: String, private val work: String, val origin:String,
+    private val sessionVault:Boolean
 ) {
     val host:String get()=URI(origin).host
     companion object {
@@ -81,7 +102,8 @@ internal class PairedWebsiteLogin private constructor(
                 buildJsonObject { put("origin", origin); put("work",work) }, 20_000)
             val token = result["challenge"]?.jsonPrimitive?.contentOrNull
             if (status == 200 && result["origin"] == JsonPrimitive(origin) && token != null &&
-                Regex("[a-f0-9]{64}").matches(token)) PairedWebsiteLogin(connection, token, work, origin) else null
+                Regex("[a-f0-9]{64}").matches(token)) PairedWebsiteLogin(connection, token, work, origin,
+                    result["sessionVault"]==JsonPrimitive(true)) else null
         }
     }
     fun current(context: Context) = BrowserAgentSettings.pc(context).enabled() &&
@@ -89,8 +111,15 @@ internal class PairedWebsiteLogin private constructor(
 
     suspend fun freshForm(context: Context) = if (current(context)) reopen(context, connection, work, origin) else null
 
-    suspend fun submit(context: Context, account: String, password: String) = request(context, "submit",
-        buildJsonObject { put("account", account); put("password", password) })
+    suspend fun submit(context: Context, account: String, password: String,remember:Boolean=false):PcLoginResult {
+        val key=if(remember&&sessionVault)withContext(Dispatchers.IO) {
+            runCatching { PairedWebsiteSessionKeys.key(context,origin,create=true) }.getOrNull()
+        } else null
+        return request(context,"submit",buildJsonObject {
+            put("account",account);put("password",password)
+            key?.let { put("sessionKey",it) }
+        })
+    }
 
     suspend fun checkResult(context: Context) = request(context, "status", buildJsonObject {})
 

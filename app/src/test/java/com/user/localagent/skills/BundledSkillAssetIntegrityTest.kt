@@ -41,4 +41,16 @@ class BundledSkillAssetIntegrityTest {
         // writer. It is a known exception handed off for cataloging; any other uncataloged body fails here.
         assertEquals("카탈로그에 없는 SKILL.md 디렉터리",setOf("research"),onDisk-inCatalog)
     }
+
+    @Test fun assistantWorkflowsAreDiscoverableThroughTheirActualTools(){
+        val examples=mapOf("browser-task" to "read_pc_browser_page", "mail-triage" to "read_gmail_message",
+            "meeting-prep" to "list_google_calendar_events", "task-continuity" to "read_goal_progress")
+        val noWorkflowTools=setOf("list_skills","read_skill")
+        assertTrue(examples.keys.none {it in store.applicableSkillIds(noWorkflowTools)})
+        examples.forEach { (skill, tool)->
+            assertTrue(skill in store.applicableSkillIds(noWorkflowTools+tool))
+            assertTrue(store.listJson(skill,noWorkflowTools+tool).contains("\"partiallyAvailable\":true"))
+            assertFalse(store.read(skill).grantsCapabilities)
+        }
+    }
 }

@@ -99,15 +99,19 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 val transport=PcTransport(context)
                 val config=transport.available(waitForRestart=true)?:throw PcBrowserNotConnected()
                 val workKey=checkNotNull(session()){"PC 브라우저 작업을 확인할 수 없어요."}
-                var result=transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
+                suspend fun openPaired(url:String,timeout:Int):JsonObject {
+                    val fields=mapOf("work" to JsonPrimitive(workKey),"url" to JsonPrimitive(url))
+                    val saved=PairedWebsiteSessionKeys.openFields(context,url)
+                    val result=transport.jsonWithStatus(config,"/v1/browser/open",JsonObject(fields+saved),timeout).second
+                    return if(saved.isNotEmpty()&&result["error"]==JsonPrimitive("URL_NOT_ALLOWED"))
+                        transport.jsonWithStatus(config,"/v1/browser/open",JsonObject(fields),timeout).second else result
+                }
+                var result=if(operation=="open")openPaired(body.getValue("url").jsonPrimitive.content,85_000)
+                    else transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
                 val reopened=if(operation=="read"&&result["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE"))
                     recoverAuth()?.let(PcLoginSite::entry) else null
                 val restartRead=reopened!=null
-                if(restartRead)result=transport.jsonWithStatus(config,"/v1/browser/open",buildJsonObject {
-                    put("work",workKey);put("url",reopened)
-                },28_000).second
-                if(restartRead&&result["loginRequired"]!=JsonPrimitive(true))
-                    return@BrowserAgentTools buildJsonObject {put("error","OWNER_LOGIN_PAGE_CHANGED")}
+                if(reopened!=null)result=openPaired(reopened,28_000)
                 val url=if(restartRead)reopened else body["url"]?.jsonPrimitive?.contentOrNull
                 val binding=work()
                 val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
