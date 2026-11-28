@@ -5,6 +5,10 @@ import android.app.KeyguardManager
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.user.localagent.compute.PcLoginStage
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
@@ -217,6 +221,9 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     val keyboard=LocalSoftwareKeyboardController.current
     val loginStatus by agent.ownerLoginStatus.collectAsState()
     val checkPending by agent.pcLoginNeedsCheck.collectAsState()
+    val pcStage by agent.pcLoginStage.collectAsState()
+    val lifecycle=LocalLifecycleOwner.current.lifecycle
+    val waitingForApproval=login.pairedPc && pcStage==PcLoginStage.OWNER_VERIFICATION
     val retryAt by agent.pcLoginRetryAt.collectAsState()
     var waitingToRetry by remember(login.id,retryAt){mutableStateOf(login.pairedPc && retryAt>System.currentTimeMillis())}
     LaunchedEffect(login.id,retryAt){
@@ -227,10 +234,17 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
     }
     val resultCheck=login.pairedPc && checkPending
     var editingCredentials by remember(login.id,resultCheck){mutableStateOf(false)}
-    val action=OwnerLoginCardAction.forCard(login.pairedPc,checkPending,editingCredentials)
+    val action=OwnerLoginCardAction.forCard(login.pairedPc,checkPending,editingCredentials&&!waitingForApproval)
     val checkOnly=action==OwnerLoginCardAction.CHECK_RESULT
     var account by remember(login.id){mutableStateOf("")}
     var password by remember(login.id){mutableStateOf("")}
+    LaunchedEffect(login.id,waitingForApproval,lifecycle) {
+        if(waitingForApproval){
+            account=""
+            password=""
+            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED){agent.watchPcApproval(login.id)}
+        }
+    }
     var submitting by remember {mutableStateOf(false)}
     val keyguard=LocalContext.current.getSystemService(KeyguardManager::class.java)
     var saveOnPhone by remember(login.id) {mutableStateOf(keyguard?.isDeviceSecure==true)}
@@ -290,11 +304,15 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
                     ZipMetalLockTile(size=36.dp)
                     Column(Modifier.weight(1f)){
-                        Text(if(login.pairedPc)"전용 PC 브라우저 로그인" else "사이트 로그인",style=MaterialTheme.typography.titleMedium)
+                        Text(when {
+                            waitingForApproval->"휴대폰에서 본인인증"
+                            login.pairedPc->"전용 PC 브라우저 로그인"
+                            else->"사이트 로그인"
+                        },style=MaterialTheme.typography.titleMedium)
                         Text(login.host,style=MaterialTheme.typography.bodySmall,color=ZipHapColors.TextSecondary)
                     }
                 }
-                if(login.pairedPc)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
+                if(login.pairedPc&&!waitingForApproval)Text("연결한 PC를 거쳐 이 사이트에 제출해요.",style=MaterialTheme.typography.bodySmall)
                 if(!login.pairedPc)loginStatus?.let{Text(it,style=MaterialTheme.typography.bodySmall)}
                 if(!checkOnly){
                     if(hasSaved&&keyguard?.isDeviceSecure==true)ZipOutlinedButton(onClick={useSaved()},enabled=!submitting&&!authPending&&!waitingToRetry){
@@ -316,7 +334,7 @@ internal fun InlineBrowserLoginCard(agent:AppWebAgent,login:AppWebAgent.LoginCar
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                     if(!login.pairedPc)TextButton(onClick={keyboard?.hide();agent.switchToWebsiteLogin(login.id)},enabled=!submitting){Text("사이트에서 로그인")}
-                    if(resultCheck)TextButton(onClick={editingCredentials=!editingCredentials;checkedFields=false},enabled=!submitting){
+                    if(resultCheck&&!waitingForApproval)TextButton(onClick={editingCredentials=!editingCredentials;checkedFields=false},enabled=!submitting){
                         Text(if(editingCredentials)"결과 확인으로 돌아가기" else "아이디·비밀번호 수정")
                     }
                     TextButton(onClick={keyboard?.hide();agent.foldOwnerLogin(login.id)},enabled=!submitting){Text("나중에")}

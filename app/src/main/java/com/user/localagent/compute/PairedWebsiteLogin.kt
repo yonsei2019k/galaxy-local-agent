@@ -121,13 +121,14 @@ internal class PairedWebsiteLogin private constructor(
         })
     }
 
-    suspend fun checkResult(context: Context) = request(context, "status", buildJsonObject {})
+    suspend fun checkResult(context:Context,timeoutMillis:Int=75_000) =
+        request(context,"status",buildJsonObject {},timeoutMillis)
 
-    private suspend fun request(context: Context, operation: String, fields: JsonObject): PcLoginResult = withContext(Dispatchers.IO) {
+    private suspend fun request(context:Context,operation:String,fields:JsonObject,timeoutMillis:Int=75_000):PcLoginResult = withContext(Dispatchers.IO) {
         val disconnected = PcLoginResult(PcLoginStage.DISCONNECTED)
         if (!current(context)) return@withContext disconnected
         val body = buildJsonObject { put("work", work); put("challenge", token); fields.forEach { (k, v) -> put(k,v) } }
-        val (status, result) = PcTransport(context).jsonWithStatus(connection, "/v1/browser/owner-login-$operation", body, 75_000)
+        val (status, result) = PcTransport(context).jsonWithStatus(connection, "/v1/browser/owner-login-$operation", body, timeoutMillis)
         if (current(context)) PcLoginResult.decode(status, result) else disconnected
     }
 }

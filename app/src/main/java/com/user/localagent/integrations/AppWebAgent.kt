@@ -71,6 +71,8 @@ class AppWebAgent private constructor(private val context:Context) {
     private var pendingPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     private var pcLoginNeedsNewForm=false
     internal val pcLoginNeedsCheck=MutableStateFlow(false)
+    internal val pcLoginStage=MutableStateFlow<PcLoginStage?>(null)
+    private var pcApprovalWatchUntil=0L
     internal val pcLoginRetryAt=MutableStateFlow(0L)
     private var confirmedPcLogin:com.user.localagent.compute.PairedWebsiteLogin?=null
     internal fun offerPcLogin(binding:WorkBinding,login:com.user.localagent.compute.PairedWebsiteLogin):Boolean {
@@ -83,6 +85,8 @@ class AppWebAgent private constructor(private val context:Context) {
         pendingPcLogin=login
         pcLoginNeedsNewForm=false
         pcLoginNeedsCheck.value=false
+        pcLoginStage.value=null
+        pcApprovalWatchUntil=0L
         pcLoginRetryAt.value=0L
         expiredLoginBinding="$loginProcess:$id"
         loginFolded.value=false
@@ -671,13 +675,25 @@ class AppWebAgent private constructor(private val context:Context) {
 
     internal suspend fun checkPcLogin(id:Long)=submitPcLogin(id,"","",checkOnly=true)
 
+    internal suspend fun watchPcApproval(id:Long) {
+        while(loginCard.value?.id==id && !loginFolded.value && RuntimeGate.foreground.get() &&
+            pcLoginStage.value==PcLoginStage.OWNER_VERIFICATION &&
+            android.os.SystemClock.elapsedRealtime()<pcApprovalWatchUntil) {
+            if(!loginSubmitting)submitPcLogin(id,"","",checkOnly=true,automaticCheck=true)
+            delay(4_000)
+        }
+        if(loginCard.value?.id==id && pcLoginStage.value==PcLoginStage.OWNER_VERIFICATION &&
+            android.os.SystemClock.elapsedRealtime()>=pcApprovalWatchUntil)
+            loginStatus.value="자동 확인 시간이 끝났어요. 이미 승인했다면 ‘로그인 결과 다시 확인’을 눌러 주세요."
+    }
+
     private suspend fun submitPcLogin(id:Long,account:String,password:String,checkOnly:Boolean=false,saveOnPhone:Boolean=false,
-        rememberSession:Boolean=saveOnPhone):Boolean {
+        rememberSession:Boolean=saveOnPhone,automaticCheck:Boolean=false):Boolean {
         if(loginSubmitting||!RuntimeGate.foreground.get()||loginCard.value?.id!=id)return false
         val saved=pendingPcLogin
         val binding=browserWorkBinding.value
         if(saved==null||binding==null||!saved.current(context)){
-            loginStatus.value="PC 브라우저 연결을 확인하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
+            if(!automaticCheck)loginStatus.value="PC 브라우저 연결을 확인하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요."
             return false
         }
         if(!checkOnly && (account.isBlank()||account.length>320||password.length !in 1..1024)){
@@ -696,17 +712,19 @@ class AppWebAgent private constructor(private val context:Context) {
                     browserWorkBinding.value==binding&&loginCard.value?.id==id&&RuntimeGate.foreground.get()
             }
             if(!canSubmit()){
-                if(loginCard.value?.id==id)loginStatus.value="이 작업이 로그인 대기 상태인지 확인하지 못했어요. 원래 채팅에서 다시 열어 주세요."
+                if(!automaticCheck&&loginCard.value?.id==id)
+                    loginStatus.value="이 작업이 로그인 대기 상태인지 확인하지 못했어요. 원래 채팅에서 다시 열어 주세요."
                 return false
             }
-            loginStatus.value="전용 PC 브라우저의 사이트 로그인 상태를 확인하고 있어요."
+            if(!automaticCheck)loginStatus.value="전용 PC 브라우저의 사이트 로그인 상태를 확인하고 있어요."
             if(!checkOnly && System.currentTimeMillis()<pcLoginRetryAt.value){
                 loginStatus.value=pcLoginWaitMessage(pcLoginRetryAt.value)
                 return false
             }
             var pc=saved
             var submittedCredentials=false
-            var result=if(checkOnly||pcLoginNeedsCheck.value)saved.checkResult(context) else null
+            var result=if(automaticCheck)saved.checkResult(context,15_000)
+                else if(checkOnly||pcLoginNeedsCheck.value)saved.checkResult(context) else null
             if(!checkOnly && result?.stage !in setOf(PcLoginStage.SIGNED_IN,PcLoginStage.OWNER_VERIFICATION,PcLoginStage.OWNER_CODE_ON_SITE)){
                 val fresh=if(pcLoginNeedsNewForm)saved.freshForm(context) else saved
                 if(fresh==null){
@@ -725,13 +743,14 @@ class AppWebAgent private constructor(private val context:Context) {
             if(!canSubmit()){
                 if(loginCard.value?.id==id && browserWorkBinding.value==binding){
                     pcLoginNeedsCheck.value=true
-                    loginStatus.value="로그인 확인을 이어가려면 원래 채팅에서 결과를 다시 확인해 주세요."
+                    if(!automaticCheck)loginStatus.value="로그인 확인을 이어가려면 원래 채팅에서 결과를 다시 확인해 주세요."
                 }
                 return false
             }
             val outcome=result?:return false
             if(outcome.stage!=PcLoginStage.SIGNED_IN){
-                recordPcLoginResult(binding,outcome)
+                if(!automaticCheck||outcome.stage !in setOf(PcLoginStage.OWNER_VERIFICATION,PcLoginStage.UNCONFIRMED,PcLoginStage.DISCONNECTED))
+                    recordPcLoginResult(binding,outcome)
                 return false
             }
             val savedToPhone=if(saveOnPhone&&submittedCredentials)try {
@@ -754,9 +773,11 @@ class AppWebAgent private constructor(private val context:Context) {
             return true
         }catch(cancel:CancellationException){throw cancel}
         catch(error:Exception){
-            if(loginCard.value?.id==id && browserWorkBinding.value==binding)
-                recordPcLoginResult(binding,PcLoginResult(PcLoginStage.DISCONNECTED))
-            com.user.localagent.FailureLog.record(context,"browser_owner_login",error,"PC_LOGIN_RESULT_UNAVAILABLE")
+            if(!automaticCheck) {
+                if(loginCard.value?.id==id && browserWorkBinding.value==binding)
+                    recordPcLoginResult(binding,PcLoginResult(PcLoginStage.DISCONNECTED))
+                com.user.localagent.FailureLog.record(context,"browser_owner_login",error,"PC_LOGIN_RESULT_UNAVAILABLE")
+            }
             return false
         }
         finally{loginSubmitting=false}
@@ -768,10 +789,13 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private suspend fun recordPcLoginResult(binding:WorkBinding,outcome:PcLoginResult){
+        if(outcome.stage==PcLoginStage.OWNER_VERIFICATION && pcLoginStage.value!=PcLoginStage.OWNER_VERIFICATION)
+            pcApprovalWatchUntil=android.os.SystemClock.elapsedRealtime()+5*60_000L
+        pcLoginStage.value=outcome.stage
         pcLoginNeedsCheck.value=outcome.stage in setOf(PcLoginStage.OWNER_VERIFICATION,PcLoginStage.OWNER_CODE_ON_SITE,PcLoginStage.UNCONFIRMED,PcLoginStage.DISCONNECTED)
         val message=when(outcome.stage){
             PcLoginStage.CORRECT_INPUT->"사이트에서 입력 내용을 다시 확인해 달라고 해요. 아이디와 비밀번호를 확인해 주세요."
-            PcLoginStage.OWNER_VERIFICATION->"사이트가 추가 본인인증을 요청했어요. 휴대폰으로 승인 요청이 오면 승인한 뒤 결과를 확인해 주세요."
+            PcLoginStage.OWNER_VERIFICATION->"휴대폰으로 온 본인인증 요청을 승인해 주세요. 이 카드로 돌아오면 집순이가 결과를 확인해요."
             PcLoginStage.OWNER_CODE_ON_SITE->"사이트에서 열린 인증 화면에 번호를 직접 입력해야 해요. 이 작업은 해당 인증 단계에서 기다리고 있어요."
             PcLoginStage.RETRY_LATER->{
                 pcLoginRetryAt.value=System.currentTimeMillis()+(outcome.retryAfterSeconds?:300)*1_000L
