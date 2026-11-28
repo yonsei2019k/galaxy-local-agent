@@ -129,7 +129,9 @@ class BrowserAuthContinuationTest {
         assertEquals(target,BrowserAuthContinuation.pcTaskPage(context(listOf(open,read))))
         assertEquals(target,BrowserAuthContinuation.pcTaskPage(context(listOf(read),page)))
         assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(read),"https://courses.example.org.other/course/details")))
-        val action=step("act_on_pc_browser_page",VerificationState.VERIFIED)
+        val action=HarnessStep("act_on_pc_browser_page",buildJsonObject {
+            put("action","back");put("snapshotId","fixture-snapshot")
+        },StepEvidence("act_on_pc_browser_page",VerificationState.VERIFIED,""))
         assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(open,action,read))))
         assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(read))))
     }

@@ -24,7 +24,7 @@ class GoalRecoveryReadbackTest {
         assertNull(expected.confirmed(call,expected.path,"1".repeat(64),expected.size))
         assertNull(expected.confirmed(call,expected.path,expected.sha256,expected.size-1))
         assertEquals(VerificationState.VERIFIED,expected.confirmed(call,expected.path,expected.sha256,expected.size)?.verification)
-        assertNull(GoalFileReadback.from(call,unknown.copy(effectNotApplied=true)))
+        assertNull(GoalFileReadback.from(call,unknown.copy(verification=VerificationState.FAILED,effectNotApplied=true)))
         assertNull(GoalFileReadback.from(call,unknown.copy(id="different-call")))
     }
 
