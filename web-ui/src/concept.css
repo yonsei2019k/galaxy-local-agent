@@ -1,0 +1,252 @@
+/* Concept match (2026-11-28, .local/sdd/2026-11-28-concept-match/spec.md): the phone chat screen takes the approved
+   concept's structure. White page; cards, chips and the composer are the lightest grey (--color-soft); no lines,
+   no card shadows. Applies to the single-conversation phone screen (.workspace--single); the office/desktop layout
+   keeps styles.css. Loaded after styles.css and motion.css so these rules win at equal specificity. */
+
+.workspace--single {
+  --canvas: var(--color-surface);
+  background: var(--color-surface);
+}
+.workspace--single .main-column { background: var(--color-surface); }
+
+/* S1. Header: ☰ circle · small 집순이 over its name · round buttons. White, no edge. -------------------------- */
+.topbar--center {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: calc(76px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  background: var(--color-surface);
+  box-shadow: none;
+}
+.topbar--center .topbar-context { display: contents; }
+.topbar--center .menu-button { grid-column: 1; justify-self: start; }
+.topbar--center .topbar-who { grid-column: 2; display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 46vw; }
+.topbar--center .topbar-actions { grid-column: 3; justify-self: end; gap: 8px; }
+/* Round grey 40px buttons; each keeps a 44px hit area through its pseudo-element. */
+.topbar--center .menu-button, .topbar--center .topbar-round, .header-work--round {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-soft);
+  color: var(--color-ink);
+}
+.topbar--center .menu-button::after, .topbar--center .topbar-round::after, .header-work--round::after { content: ""; position: absolute; inset: -2px; }
+.topbar--center .menu-button svg, .topbar--center .topbar-round svg, .header-work--round svg { width: 20px; height: 20px; }
+.topbar--center .menu-button:not(:disabled):hover, .topbar--center .topbar-round:not(:disabled):hover,
+.header-work--round:hover { background: var(--color-soft-strong); color: var(--color-ink); }
+.header-work--round { cursor: pointer; }
+/* A live run puts a small ink dot on the clock; the state itself is in the button's text and title. */
+.header-work--round[data-live="true"]::before {
+  content: ""; position: absolute; top: 7px; right: 7px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--color-ink); box-shadow: 0 0 0 2px var(--color-soft);
+}
+.topbar--center .character-button { min-width: 44px; min-height: 40px; margin-bottom: -2px; }
+.topbar--center .character-button:hover { background: transparent; }
+/* A tiny pencil on the header 집순이 says it can be changed (owner request 2026-11-28). */
+.character-edit-badge {
+  position: absolute; right: 0; bottom: 0; display: grid; place-items: center; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--color-ink); color: var(--color-on-ink); box-shadow: 0 0 0 2px var(--color-surface);
+  pointer-events: none;
+}
+.character-edit-badge svg { width: 10px; height: 10px; }
+.welcome-character-change {
+  margin-top: 6px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: var(--color-soft); color: var(--color-text-sub); font-size: 13px; font-weight: var(--fw-bold);
+}
+.welcome-character-change:hover { background: var(--color-soft-strong); }
+.topbar--center .topbar-title {
+  max-width: 100%;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: var(--fw-heavy);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+}
+
+/* S2. Empty conversation: a big 집순이, the question and a grey subline; suggestions sit right above the composer. */
+.workspace--single .conversation { padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right)); }
+.welcome-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.welcome-character { display: grid; place-items: center; }
+.welcome-character .character { display: block; }
+.welcome--plain { justify-content: flex-start; padding: 0 0 12px; }
+.welcome--plain .welcome-hero { flex: 1 1 auto; justify-content: center; padding-block: 12px; }
+.welcome h1 { font-size: 22px; font-weight: var(--fw-heavy); letter-spacing: -0.03em; color: var(--color-ink); }
+.welcome .welcome-hero p { margin: 0; color: var(--color-text-sub); font-size: 14px; }
+.welcome .welcome-hero h1 + p { margin-top: -4px; }
+.room-suggestions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  gap: 8px;
+  width: 100%;
+  max-width: 30rem;
+  margin: 16px 0 0;
+}
+.suggestion-chip {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--color-soft);
+  box-shadow: none;
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+  text-align: start;
+}
+.suggestion-chip:not(:disabled):hover { background: var(--color-soft-strong); }
+
+/* S3. The owner's words: a right-aligned black bubble with white bold text. -------------------------------- */
+.workspace--single .message--user {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 18px 18px 6px 18px;
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+}
+.workspace--single .message--user .message-text { font-weight: 600; font-size: 15px; line-height: 1.45; }
+
+/* S4. 집순이's answer: plain body text, no bubble and no name label (the header already names her). */
+.workspace--single .message-label { display: none; }
+.workspace--single .messages { gap: 16px; }
+.workspace--single .message--continued { margin-top: 0; }
+.workspace--single .assistant-text { font-size: 15px; line-height: 1.6; }
+.workspace--single .assistant-text .rich-answer > * { margin-bottom: .85rem; }
+.workspace--single .assistant-text .rich-answer > :last-child { margin-bottom: 0; }
+.workspace--single .rich-answer h2, .workspace--single .rich-answer h3, .workspace--single .rich-answer h4 {
+  font-size: 16px; font-weight: var(--fw-heavy); letter-spacing: -0.02em;
+}
+.workspace--single .rich-answer li + li { margin-top: .25em; }
+.workspace--single .rich-answer pre, .workspace--single .answer-table, .workspace--single .answer-chart { box-shadow: none; background: var(--color-soft); }
+
+/* S5. Work status: grey rounded cards with a 집순이 face, a bold title, a grey line and an ink bar. ----------- */
+.workspace--single .work-card, .workspace--single .execution-report {
+  width: 100%;
+  border-radius: 20px;
+  background: var(--color-soft);
+  box-shadow: none;
+}
+.workspace--single .work-card {
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 14px 12px 12px;
+}
+.workspace--single .work-card:hover { background: var(--color-soft-strong); box-shadow: none; }
+.workspace--single .work-icon { width: 40px; height: 40px; border-radius: 0; background: transparent; }
+.workspace--single .work-icon .character { display: block; width: 40px; height: 40px; }
+.workspace--single .work-title { font-size: 15px; font-weight: var(--fw-heavy); color: var(--color-ink); }
+.workspace--single .work-meta { margin-top: 2px; font-size: 13px; }
+.workspace--single .work-card--active .work-state, .workspace--single .work-card--complete .work-state,
+.workspace--single .work-card--waiting .work-state { color: var(--color-text-sub); font-weight: var(--fw-bold); }
+/* Running: an ink bar on a pale track under the text (indeterminate: the run reports no amount done). */
+.workspace--single .work-progress {
+  position: relative;
+  inset: auto;
+  display: block;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 9px;
+  background: var(--color-soft-strong);
+  overflow: hidden;
+}
+.workspace--single .work-progress span { width: 55%; height: 100%; border-radius: 9px; background: var(--color-ink); }
+@media (prefers-reduced-motion: no-preference) {
+  .workspace--single .work-progress span { animation: concept-progress 3s ease-in-out infinite alternate; }
+}
+@keyframes concept-progress { from { width: 30%; } to { width: 74%; } }
+.workspace--single .work-cards { gap: 8px; }
+
+/* The progress report as the same grey card: face on the left, the report beside it. */
+.workspace--single .execution-report {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  column-gap: 12px;
+  margin-block: 12px 0;
+  padding: 12px 14px 12px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.execution-report-face { display: none; }
+.workspace--single .execution-report-face { display: block; grid-row: 1 / span 3; width: 40px; height: 40px; }
+.workspace--single .execution-report-face .character { display: block; width: 40px; height: 40px; }
+.workspace--single .execution-report > :not(.execution-report-face) { grid-column: 2; min-width: 0; }
+.workspace--single .execution-report > strong { font-size: 15px; font-weight: var(--fw-heavy); color: var(--color-ink); line-height: 1.4; }
+.workspace--single .execution-report ol { margin-top: 4px; padding-inline-start: 1.3em; color: var(--color-text-sub); }
+.workspace--single .execution-report summary { color: var(--color-text-sub); font-size: 13px; font-weight: var(--fw-bold); }
+
+/* Run status and action receipts: the same grey card. Label bold, facts as grey lines, one small ink pill. */
+.workspace--single .run-status-reason, .workspace--single .run-status-instruction,
+.workspace--single .receipt-status, .workspace--single .receipt-incomplete {
+  margin: 2px 0 0; color: var(--color-text-sub); font-size: 13px; line-height: 1.45;
+}
+.workspace--single .run-status-action {
+  justify-self: start; margin-top: 8px; min-height: 32px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: var(--color-ink); color: var(--color-on-ink); font-size: 13px; font-weight: var(--fw-bold);
+}
+.workspace--single .run-status-action:hover { background: var(--color-ink-hover); }
+.workspace--single .receipt-card .execution-report-face { grid-row: 1 / span 9; }
+.workspace--single .receipt-item + .receipt-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-soft-strong); }
+.workspace--single .receipt-item > strong { display: block; font-size: 15px; font-weight: var(--fw-heavy); color: var(--color-ink); line-height: 1.4; }
+.workspace--single .receipt-card dl { margin: 6px 0 0; display: grid; gap: 4px; }
+.workspace--single .receipt-field { display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr); gap: 8px; }
+.workspace--single .receipt-field dt { color: var(--color-text-sub); font-size: 13px; font-weight: var(--fw-bold); }
+.workspace--single .receipt-field dd { margin: 0; color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace--single .receipt-link { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: var(--fw-bold); color: var(--color-ink); }
+
+/* Approval slot and reply choices in the same tone. */
+.workspace--single .task-card { box-shadow: none; background: var(--color-soft); border-radius: 20px; }
+.workspace--single .reply-needed .reply-options button:not(.reply-chip--recommended) { background: var(--color-soft); }
+
+/* S6. Composer: one grey pill; grey + and mic on the left, the hint in the middle, the ink ▲ on the right. ---- */
+.workspace--single .composer-footer {
+  padding: 6px max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
+  background: var(--color-surface);
+  box-shadow: none;
+}
+.workspace--single .composer { border-radius: 28px; background: var(--color-soft); }
+.workspace--single .composer--compact { padding: 2px; }
+.workspace--single .composer--compact .editor { margin: 0 2px; }
+/* The hint stays on one line even when the run controls leave the field narrow. */
+.workspace--single .editor textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workspace--single .editor textarea::placeholder { color: var(--color-text-faint); }
+.workspace--single .attach-button { padding: 0; background: transparent; color: var(--color-text-sub); }
+.workspace--single .attach-button:not(:disabled):hover { background: var(--color-soft-strong); }
+.workspace--single .voice-button { color: var(--color-text-sub); }
+.workspace--single .send-button { background: var(--color-ink); color: var(--color-on-ink); }
+.workspace--single .send-button:not(:has(span)) { width: 44px; height: 44px; }
+.workspace--single .send-button:not(:has(span)) svg { width: 20px; height: 20px; }
+.workspace--single .send-button:disabled { background: var(--color-soft-strong); color: var(--color-text-faint); }
+.workspace--single .stop-button { background: var(--color-surface); }
+
+/* S7. Bottom tabs: lighter and lower. Each tab has its own clay icon; the current tab shows it in full color with
+   an ink bold label (no ink pill); the others are a little paler with a grey label; disabled icons turn grey. */
+.workspace--single .bottom-nav { padding: 0 var(--pad) calc(2px + env(safe-area-inset-bottom)); gap: 2px; box-shadow: none; }
+.workspace--single .bottom-nav button { min-height: 48px; gap: 1px; color: var(--color-text-sub); font-size: 11px; font-weight: var(--fw-medium); }
+.workspace--single .bottom-nav button[aria-current="page"] { color: var(--color-ink); font-weight: var(--fw-heavy); }
+
+/* S8. Clay icons (design/clay.json): colorful soft 3D icons in tabs, the composer and menu rows; the chrome stays
+   white, grey and ink. Inactive = paler, disabled = grey; meaning is always in the label or the button name. */
+.workspace .bottom-nav button svg.clay {
+  box-sizing: border-box; width: 28px; height: 28px; padding: 0; border-radius: 0; background: none;
+  filter: saturate(.5) brightness(1.05); opacity: .8;
+}
+.workspace .bottom-nav button[aria-current="page"] svg.clay { background: none; filter: none; opacity: 1; }
+.workspace .bottom-nav button:disabled svg.clay, .attach-button:disabled svg.clay, .voice-button:disabled svg.clay,
+.sidebar-row:disabled > svg.clay { filter: grayscale(1); opacity: .5; }
+.attach-button svg.clay, .voice-button svg.clay { width: 26px; height: 26px; }
+.workspace--single .voice-button[aria-pressed="true"] { background: var(--color-surface); }
+.sidebar-row > svg.clay:first-child { padding: 5px; border-radius: var(--radius-pill); background: var(--color-soft); }
+.sidebar-row[aria-current="page"] > svg.clay:first-child { background: var(--color-surface); }
+.sidebar-row:disabled > svg.clay:first-child { opacity: .5; }

@@ -89,4 +89,14 @@ class ZipComponentsTest {
         assertEquals(ZipHapColors.Background, ZipHapColors.DeepNavy)
         assertEquals(ZipHapColors.Cobalt, ZipHapColors.Periwinkle)
     }
+
+    @Test
+    fun siteLoginPillIsAnInkPillOnWhiteWithReadableText() {
+        // Concept match S7: the strip under the chat is a small ink pill on the white chat background.
+        assertEquals(ZipHapTokens.Ink, ZipInkPillStyle.Container)
+        assertEquals(ZipHapTokens.Surface, ZipInkPillStyle.Background)
+        assertContrast(4.5, ZipInkPillStyle.Content, ZipInkPillStyle.Container, "pill label")
+        assertContrast(4.5, ZipInkPillStyle.DisabledContent, ZipInkPillStyle.DisabledContainer, "disabled pill label")
+        assertContrast(3.0, ZipInkPillStyle.Container, ZipInkPillStyle.Background, "pill against the chat background")
+    }
 }

@@ -47,6 +47,6 @@ class NoteToolRegistryIntegrationTest {
     @Test fun wholeNoteReadIsNotInferredFromPartialCompletionReport(){
         val c=call();val result=ToolResult(c.id,true,buildJsonObject{put("status","ok");put("partial",true);put("completeBody",false);put("hasMore",true);put("text","fragment")}.toString(),VerificationState.VERIFIED,"host")
         val text=ActionCompletionReport.render(setOf("read_note"),listOf(ObservedToolOutcome(c,result)))
-        assertTrue(text.contains("일부 조회"));assertTrue(text.contains("전체 요청의 완료는 확인되지 않았습니다."))
+        assertTrue(text.contains("일부 조회"));assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"))
     }
 }

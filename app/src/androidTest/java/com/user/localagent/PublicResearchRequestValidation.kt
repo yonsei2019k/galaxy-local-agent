@@ -106,7 +106,7 @@ class PublicResearchRequestValidation {
                 assertEquals("The complete chat request must finish", "completed", completed.status)
                 val response = review.getValue("response").jsonPrimitive.content
                 assertTrue("The actual chat must explain its research result", response.isNotBlank())
-                assertFalse("Connection-method research must not end as inbox status", response.contains("연결 자료를 확인했습니다"))
+                assertFalse("Connection-method research must not end as inbox status", response.contains("지금 받은 알림"))
                 assertFalse("Method research must not display shopping fallback copy", response.contains("가격: 판매처에서 확인"))
                 assertEquals("PUBLIC_RESEARCH", runs.lastSemanticAction.value)
                 assertFalse("A real local model must interpret the context", runs.lastSemanticModelId.value.isNullOrBlank())

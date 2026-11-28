@@ -672,9 +672,10 @@ class ScreenControl(context:Context,private val nativeAppsOnly:Boolean=false) {
     }
 
     internal enum class SetupNeeded(val code:String,val instruction:String){
-        SYSTEM("screen_setup_system","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘집순이 화면 연결’을 켜 주세요. 집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’도 켜져 있는지 확인해 주세요."),
-        APP("screen_setup_app","집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’를 켜 주세요."),
-        RECONNECT("screen_setup_reconnect","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘집순이 화면 연결’을 껐다가 다시 켜고 집합으로 돌아와 주세요.");
+        // Exact settings paths shown as the status card's grey line (and given to the model); no host sentence.
+        SYSTEM("screen_setup_system","휴대폰 설정 → 접근성 → 설치된 앱 → ‘ZipHap.Agent 화면 연결’ 켜기 · 집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근 → ‘에이전트 화면 제어’ 켜기"),
+        APP("screen_setup_app","집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근 → ‘에이전트 화면 제어’ 켜기"),
+        RECONNECT("screen_setup_reconnect","휴대폰 설정 → 접근성 → 설치된 앱 → ‘ZipHap.Agent 화면 연결’ 껐다가 다시 켜기 → 집합으로 돌아오기");
 
         companion object {
             fun forPause(outcomes:List<ObservedToolOutcome>):SetupNeeded? {

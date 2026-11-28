@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Generate ZipHap icons, illustrations, stickers and metal art from design/icons.json, design/illustrations.json,
-design/stickers.json and design/metal.json.
+"""Generate ZipHap icons, illustrations, stickers, metal art and clay icons from design/icons.json,
+design/illustrations.json, design/stickers.json, design/metal.json and design/clay.json.
 
 Outputs:
   web-ui/src/icons/generated.ts                    path data for the React Icon, Illustration and Sticker parts
   app/src/main/res/drawable/zi_<snake>.xml          duotone icon vector drawables (tintable; icons marked "web": true are web only)
   app/src/main/res/drawable/zi_ill_<snake>.xml      full-color illustration vector drawables
   app/src/main/res/drawable/zi_ill_metal_<snake>.xml metallic security art (gradients) for approval, payment and vault
+  app/src/main/res/drawable/zi_clay_<snake>.xml     colorful soft 3D "clay" icons (gradients, 48x48) for tabs, composer and menus
 Stickers (24x24 full-color glyphs that replace emoji inside model text) are web only.
 
 Usage: python scripts/gen-icons.py [--check] [--sheet OUT.html]
@@ -27,12 +28,14 @@ ICONS_SRC = ROOT / "design" / "icons.json"
 ILLS_SRC = ROOT / "design" / "illustrations.json"
 STICKERS_SRC = ROOT / "design" / "stickers.json"
 METAL_SRC = ROOT / "design" / "metal.json"
+CLAY_SRC = ROOT / "design" / "clay.json"
 TS_OUT = ROOT / "web-ui" / "src" / "icons" / "generated.ts"
 DRAWABLE = ROOT / "app" / "src" / "main" / "res" / "drawable"
-HEADER = "Generated from design/icons.json, design/illustrations.json, design/stickers.json and design/metal.json by scripts/gen-icons.py. Do not edit."
+HEADER = "Generated from design/icons.json, design/illustrations.json, design/stickers.json, design/metal.json and design/clay.json by scripts/gen-icons.py. Do not edit."
 # Android drawables come only from icons and illustrations, so their header stays as before.
 DRAWABLE_HEADER = "Generated from design/icons.json and design/illustrations.json by scripts/gen-icons.py. Do not edit."
 METAL_HEADER = "Generated from design/metal.json by scripts/gen-icons.py. Do not edit."
+CLAY_HEADER = "Generated from design/clay.json by scripts/gen-icons.py. Do not edit."
 
 NAME = re.compile(r"^[a-z][a-zA-Z0-9]*$")
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -416,19 +419,20 @@ def _num(v, where):
     return v
 
 
-def load_metal(src):
-    """Metallic art with linear/radial gradients in viewBox coordinates (userSpaceOnUse on the web)."""
+def load_metal(src, group="metal", size=160):
+    """Gradient art (metal: 160x160, clay: 48x48) with linear/radial gradients in viewBox coordinates
+    (userSpaceOnUse on the web)."""
     meta = src.get("meta", {})
     w, h = meta.get("viewBox", [0, 0])
-    if (w, h) != (160, 160):
-        raise ValueError("metal viewBox must be 160x160")
+    if (w, h) != (size, size):
+        raise ValueError(f"{group} viewBox must be {size}x{size}")
     arts = {}
-    for name, spec in src.get("metal", {}).items():
+    for name, spec in src.get(group, {}).items():
         if not NAME.fullmatch(name) or not isinstance(spec, dict) or set(spec) - {"gradients", "shapes"}:
             raise ValueError(f"bad metal art {name!r}")
         grads = {}
         for gname, g in spec.get("gradients", {}).items():
-            where = f"metal {name}.{gname}"
+            where = f"{group} {name}.{gname}"
             if not NAME.fullmatch(gname) or not isinstance(g, dict):
                 raise ValueError(f"{where}: bad gradient")
             kind = g.get("type")
@@ -447,11 +451,11 @@ def load_metal(src):
                             "stops": [[off, color.upper()] for off, color in stops]}
         shapes = spec.get("shapes")
         if not isinstance(shapes, list) or not shapes:
-            raise ValueError(f"metal {name}: needs shapes")
+            raise ValueError(f"{group} {name}: needs shapes")
         used = set()
         out = []
         for i, el in enumerate(shapes):
-            where = f"metal {name}[{i}]"
+            where = f"{group} {name}[{i}]"
             if not isinstance(el, dict) or set(el) - (SHAPE_KEYS | {"fill", "stroke", "sw", "opacity"}):
                 raise ValueError(f"{where}: unknown keys")
             item = {"d": shape_to_d(el, where)}
@@ -486,14 +490,14 @@ def load_metal(src):
                     raise ValueError(f"{where}: point ({px:.1f}, {py:.1f}) outside viewBox")
             out.append(item)
         if set(grads) - used:
-            raise ValueError(f"metal {name}: unused gradients {sorted(set(grads) - used)}")
+            raise ValueError(f"{group} {name}: unused gradients {sorted(set(grads) - used)}")
         arts[name] = {"gradients": grads, "shapes": out}
     if not arts:
-        raise ValueError("no metal art")
+        raise ValueError(f"no {group} art")
     return arts
 
 
-def gen_metal_xml(art):
+def gen_metal_xml(art, header=METAL_HEADER, size=160):
     def gradient(g):
         if g["type"] == "linear":
             attrs = (f'android:type="linear" android:startX="{fmt(g["x1"])}" android:startY="{fmt(g["y1"])}" '
@@ -525,13 +529,13 @@ def gen_metal_xml(art):
             body.append("    <path " + " ".join(attrs) + " />")
     return "\n".join([
         '<?xml version="1.0" encoding="utf-8"?>',
-        f"<!-- {METAL_HEADER} -->",
+        f"<!-- {header} -->",
         '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
         '    xmlns:aapt="http://schemas.android.com/aapt"',
-        '    android:width="160dp"',
-        '    android:height="160dp"',
-        '    android:viewportWidth="160"',
-        '    android:viewportHeight="160">',
+        f'    android:width="{size}dp"',
+        f'    android:height="{size}dp"',
+        f'    android:viewportWidth="{size}"',
+        f'    android:viewportHeight="{size}">',
         *body,
         "</vector>",
         "",
@@ -552,7 +556,26 @@ def _shape_ts(s):
     return "    { " + ", ".join(fields) + " },"
 
 
-def gen_ts(meta, icons, ills, stickers, metal):
+def _art_ts(const, arts):
+    lines = [f"export const {const} = {{"]
+    for name, art in arts.items():
+        lines.append(f"  {name}: {{")
+        lines.append("    gradients: {")
+        for gname, g in art["gradients"].items():
+            keys = ("x1", "y1", "x2", "y2") if g["type"] == "linear" else ("cx", "cy", "r")
+            coords = ", ".join(f"{k}: {fmt(g[k])}" for k in keys)
+            stops = ", ".join(f"[{fmt(off)}, {json.dumps(color)}]" for off, color in g["stops"])
+            lines.append(f"      {gname}: {{ type: '{g['type']}', {coords}, stops: [{stops}] }},")
+        lines.append("    },")
+        lines.append("    shapes: [")
+        lines += ["    " + _shape_ts(s) for s in art["shapes"]]
+        lines.append("    ],")
+        lines.append("  },")
+    lines += ["} satisfies Record<string, MetalArt>", ""]
+    return lines
+
+
+def gen_ts(meta, icons, ills, stickers, metal, clay):
     lines = [f"// {HEADER}", "",
              "export interface IconLayers { soft: string; accents: readonly { d: string; color: string }[]; line: string; dots: string }",
              "export interface IllustrationShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }",
@@ -582,21 +605,9 @@ def gen_ts(meta, icons, ills, stickers, metal):
               "  | { type: 'radial'; cx: number; cy: number; r: number; stops: readonly (readonly [number, string])[] }",
               "export interface MetalShape { d: string; fill?: string; stroke?: string; sw?: number; opacity?: number }",
               "export interface MetalArt { gradients: Readonly<Record<string, MetalGradient>>; shapes: readonly MetalShape[] }", "",
-              "export const METAL = {"]
-    for name, art in metal.items():
-        lines.append(f"  {name}: {{")
-        lines.append("    gradients: {")
-        for gname, g in art["gradients"].items():
-            keys = ("x1", "y1", "x2", "y2") if g["type"] == "linear" else ("cx", "cy", "r")
-            coords = ", ".join(f"{k}: {fmt(g[k])}" for k in keys)
-            stops = ", ".join(f"[{fmt(off)}, {json.dumps(color)}]" for off, color in g["stops"])
-            lines.append(f"      {gname}: {{ type: '{g['type']}', {coords}, stops: [{stops}] }},")
-        lines.append("    },")
-        lines.append("    shapes: [")
-        lines += ["    " + _shape_ts(s) for s in art["shapes"]]
-        lines.append("    ],")
-        lines.append("  },")
-    lines += ["} satisfies Record<string, MetalArt>", ""]
+              ]
+    lines += _art_ts("METAL", metal)
+    lines += _art_ts("CLAY", clay)
     return "\n".join(lines)
 
 
@@ -653,7 +664,8 @@ def build():
     ills = load_illustrations(json.loads(ILLS_SRC.read_text(encoding="utf-8")))
     stickers = load_stickers(json.loads(STICKERS_SRC.read_text(encoding="utf-8")))
     metal = load_metal(json.loads(METAL_SRC.read_text(encoding="utf-8")))
-    outputs = {TS_OUT: gen_ts(meta, icons, ills, stickers, metal)}
+    clay = load_metal(json.loads(CLAY_SRC.read_text(encoding="utf-8")), "clay", 48)
+    outputs = {TS_OUT: gen_ts(meta, icons, ills, stickers, metal, clay)}
     for name, ic in icons.items():
         if not ic["web"]:
             outputs[DRAWABLE / f"zi_{snake(name)}.xml"] = gen_icon_xml(meta, ic)
@@ -661,7 +673,9 @@ def build():
         outputs[DRAWABLE / f"zi_ill_{snake(name)}.xml"] = gen_ill_xml(shapes)
     for name, art in metal.items():
         outputs[DRAWABLE / f"zi_ill_metal_{snake(name)}.xml"] = gen_metal_xml(art)
-    return meta, icons, ills, stickers, outputs
+    for name, art in clay.items():
+        outputs[DRAWABLE / f"zi_clay_{snake(name)}.xml"] = gen_metal_xml(art, CLAY_HEADER, 48)
+    return meta, icons, ills, stickers, outputs, clay
 
 
 # ---------------------------------------------------------------- proof sheet
@@ -692,7 +706,46 @@ def ill_svg(shapes, width, box=(160, 120)):
     return "".join(parts)
 
 
-def gen_sheet(meta, icons, ills, stickers):
+def art_svg(art, size, uid, box=48):
+    def paint(v):
+        return f"url(#{uid}-{v[5:]})" if v and v.startswith("grad:") else v
+    defs = []
+    for gname, g in art["gradients"].items():
+        stops = "".join(f'<stop offset="{fmt(off)}" stop-color="{c}"/>' for off, c in g["stops"])
+        if g["type"] == "linear":
+            defs.append(f'<linearGradient id="{uid}-{gname}" gradientUnits="userSpaceOnUse" x1="{fmt(g["x1"])}" y1="{fmt(g["y1"])}" '
+                        f'x2="{fmt(g["x2"])}" y2="{fmt(g["y2"])}">{stops}</linearGradient>')
+        else:
+            defs.append(f'<radialGradient id="{uid}-{gname}" gradientUnits="userSpaceOnUse" cx="{fmt(g["cx"])}" cy="{fmt(g["cy"])}" '
+                        f'r="{fmt(g["r"])}">{stops}</radialGradient>')
+    parts = [f'<svg viewBox="0 0 {box} {box}" width="{size}" height="{size}" aria-hidden="true"><defs>{"".join(defs)}</defs>']
+    for sh in art["shapes"]:
+        a = [f'd="{sh["d"]}"', f'fill="{paint(sh.get("fill")) or "none"}"']
+        if "stroke" in sh:
+            a += [f'stroke="{paint(sh["stroke"])}"', f'stroke-width="{fmt(sh["sw"])}"', 'stroke-linecap="round"', 'stroke-linejoin="round"']
+        if "opacity" in sh:
+            a.append(f'opacity="{fmt(sh["opacity"])}"')
+        parts.append("<path " + " ".join(a) + "/>")
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def gen_clay_sheet(clay):
+    # Same state filters as web-ui/src/concept.css: active = full color, inactive = paler, disabled = grey.
+    states = [("active", ""), ("inactive", "filter:saturate(.5) brightness(1.05);opacity:.8"), ("disabled", "filter:grayscale(1);opacity:.5")]
+    rows = []
+    for n, (name, art) in enumerate(clay.items()):
+        cells = []
+        for bg in ("#FFFFFF", "#EFEFF3"):
+            for state, style in states:
+                cells.append(f'<div class="cv" style="background:{bg}"><span style="{style}">{art_svg(art, 24, f"c{n}{state}{bg[1:]}a")}'
+                             f'{art_svg(art, 20, f"c{n}{state}{bg[1:]}b")}</span><small>{state}</small></div>')
+        rows.append(f'<div class="ic"><div class="big">{art_svg(art, 64, f"c{n}big")}</div>'
+                    f'<div class="cvs">{"".join(cells)}</div><div class="n">{html.escape(name)}</div></div>')
+    return "".join(rows)
+
+
+def gen_sheet(meta, icons, ills, stickers, clay=None):
     rows = []
     variants = [("#FFFFFF", "#3B2F3A"), ("#F3F4F8", "#3B2F3A"), ("#FFFFFF", "#3355F0"), ("#F3F4F8", "#3355F0")]
     for name, ic in icons.items():
@@ -730,6 +783,9 @@ h2{{margin:8px 0 12px;font-size:15px}}
 .vs{{display:grid;grid-template-columns:1fr 1fr;gap:4px}}
 .v{{display:flex;gap:6px;align-items:center;padding:6px;border-radius:8px}}
 .n{{font-weight:600}}
+.clay{{grid-template-columns:repeat(3,1fr);margin-bottom:20px}} .cvs{{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}}
+.cv{{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;border-radius:10px}} .cv span{{display:flex;gap:6px;align-items:center}}
+.cv small{{font-size:10px;color:#5B6178}}
 .zoom{{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;width:1100px;margin-top:16px}}
 .z{{background:#fff;border-radius:12px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center}}
 .z span{{border-radius:10px;display:grid;place-items:center;padding:2px}} .z b{{width:100%;text-align:center;font-size:11px}}
@@ -741,6 +797,8 @@ figcaption{{margin-top:6px;font-weight:600}}
 .stickers{{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}} .stickers p{{margin:4px 0 0;font-size:15px}}
 .stickers p svg{{vertical-align:-4px}}
 </style></head><body>
+<h2>Clay icons ({len(clay or {})}) — 64px · 24px and 20px, active / inactive / disabled, on white and #EFEFF3</h2>
+<div class="grid clay">{gen_clay_sheet(clay or {})}</div>
 <h2>Icons ({len(icons)}) — 48px ink · 24/20px on white &amp; #F3F4F8 in ink &amp; cobalt</h2>
 <div class="tiles">{tiles}</div>
 <div class="grid">{''.join(rows)}</div>
@@ -754,11 +812,11 @@ figcaption{{margin-top:6px;font-weight:600}}
 
 
 def main(argv):
-    meta, icons, ills, stickers, outputs = build()
+    meta, icons, ills, stickers, outputs, clay = build()
     if "--sheet" in argv:
         target = pathlib.Path(argv[argv.index("--sheet") + 1]).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(gen_sheet(meta, icons, ills, stickers), encoding="utf-8")
+        target.write_text(gen_sheet(meta, icons, ills, stickers, clay), encoding="utf-8")
         print(f"wrote {target}")
     expected = {p.name for p in outputs if p.parent == DRAWABLE}
     if "--check" in argv:

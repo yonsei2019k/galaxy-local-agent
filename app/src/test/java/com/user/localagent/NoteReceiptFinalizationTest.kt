@@ -76,7 +76,7 @@ class NoteReceiptFinalizationTest {
         val actualReads=f.outcomes.filter{it.call.name=="read_note"}.map{Json.parseToJsonElement(it.result.content).jsonObject.getValue("text").jsonPrimitive.content}
         actualReads.forEach{assertTrue(result.contains(it))}
         assertEquals(f.db.note.body,actualReads.takeLast(2).joinToString(""))
-        assertFalse(result.contains("전체 요청의 완료는 확인되지 않았습니다."))
+        assertFalse(result.contains("부탁한 일이 다 끝났는지는 아직 모름"))
         assertEquals(1,f.db.receipts.size)
     }
     @Test fun directAnswerAfterTheSameProofUsesTheSameCanonicalBytes()=runBlocking {

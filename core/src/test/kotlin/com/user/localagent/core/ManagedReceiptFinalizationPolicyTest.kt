@@ -135,13 +135,13 @@ class ManagedReceiptFinalizationPolicyTest {
         val report = ManagedReceiptFinalizationPolicy.reportAfterReview(input, AutonomousReviewPolicy.Decision.Complete("전제 조회 범위만 완료"), true,
             "합성 사용자 요청", selected, goal, steps(listOf(outcome)), listOf(outcome))!!
         assertTrue(report.contains("PC 연결 가능 여부: 미확인"))
-        assertTrue(report.contains("실제 작업 성공의 근거가 아닙니다"))
+        assertTrue(report.contains("일이 된다는 근거 아님"))
     }
 
     @Test fun validReminderListRetainsQueueNotDeliveryLimitation() {
         val outcome = observed("list_reminders", reminderBody().toString(), args("scope" to JsonPrimitive("default")))
         assertNotNull(prepare(outcome))
-        assertTrue(ActionCompletionReport.render(setOf(outcome.call.name), listOf(outcome)).contains("실제 알림 표시·수신"))
+        assertTrue(ActionCompletionReport.render(setOf(outcome.call.name), listOf(outcome)).contains("알림이 실제로 떴는지"))
     }
 
     @Test fun malformedUnknownScopeAndLimitedReminderResultsAreRejected() {

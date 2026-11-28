@@ -25,8 +25,37 @@ export interface ConversationMessage {
   fileFormats?: string[]
   executionReport?: string[]
   executionReportActive?: boolean
+  /** Host status facts for the run of this answer; shown as a card when the message has no text. */
+  runStatus?: RunStatus
+  /** Host action receipts (exact values and proof state); shown as a card, never as chat text. */
+  receipt?: Receipt
   authorLabel?: string
   sentAt?: number
+}
+
+export interface RunStatus {
+  phase: string
+  label: string
+  reason?: string
+  action?: string
+  actionLabel?: string
+  instruction?: string
+}
+
+export type ReceiptStatus = 'verified' | 'prepared' | 'unverified' | 'failed'
+
+export interface ReceiptItem {
+  title: string
+  status: ReceiptStatus
+  verified: boolean
+  fields: { label: string; value: string }[]
+  link?: string
+}
+
+export interface Receipt {
+  /** False whenever the whole request is not proven done. */
+  complete: boolean
+  items: ReceiptItem[]
 }
 
 interface Thread {
@@ -114,6 +143,8 @@ export interface Snapshot {
   singleConversation?: boolean
   inlineLogin?: boolean
   character?: CharacterChoice
+  /** Native asks the chat to open its character picker (나의 집순이 > 집순이 모습 바꾸기); the web acknowledges it once. */
+  openCharacterPicker?: number
   approvalCard?: { id: string; messageId?: string }
   bookingPayment?: BookingPayment
   websiteCard?: { id: string; messageId?: string; runId?: string; title: string; status: string; steps: string[]; working: boolean; inputHeight?: number; keyboardOpen?: boolean }
@@ -168,6 +199,7 @@ type Intent =
   | { action: 'answerGoalQuestion'; payload: { runId: string; text: string } }
   | { action: BookingPaymentAction; payload: { id: string } }
   | { action: 'setCharacter'; payload: CharacterChange }
+  | { action: 'characterPickerShown'; payload: { epoch: number } }
   | { action: 'draft'; payload: { text: string } }
   | { action: 'reopenOwnerLogin'; payload: { runId: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
@@ -237,7 +269,32 @@ function message(value: unknown): value is ConversationMessage {
         typeof format === 'string' && ['pdf', 'docx', 'xlsx', 'txt', 'csv'].includes(format)))) &&
     (value.authorLabel === undefined || (value.role === 'assistant' && typeof value.authorLabel === 'string' &&
       value.authorLabel.trim().length > 0 && value.authorLabel.length <= 80 &&
-      !/[\u0000-\u001f\u007f]/.test(value.authorLabel)))
+      !/[\u0000-\u001f\u007f]/.test(value.authorLabel))) &&
+    (value.runStatus === undefined || (value.role === 'assistant' && runStatus(value.runStatus))) &&
+    (value.receipt === undefined || (value.role === 'assistant' && receipt(value.receipt)))
+}
+
+function shortLine(value: unknown, max: number) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+function runStatus(value: unknown): value is RunStatus {
+  return record(value) && shortLine(value.phase, 40) && shortLine(value.label, 60) &&
+    (value.reason === undefined || shortLine(value.reason, 120)) &&
+    (value.action === undefined || (typeof value.action === 'string' && /^[a-z_]{1,40}$/.test(value.action))) &&
+    (value.actionLabel === undefined || shortLine(value.actionLabel, 30)) &&
+    (value.instruction === undefined || shortLine(value.instruction, 400))
+}
+
+const RECEIPT_STATUSES = ['verified', 'prepared', 'unverified', 'failed']
+
+function receipt(value: unknown): value is Receipt {
+  return record(value) && typeof value.complete === 'boolean' && Array.isArray(value.items) && value.items.length <= 24 &&
+    value.items.every(item => record(item) && shortLine(item.title, 60) && RECEIPT_STATUSES.includes(item.status as string) &&
+      item.verified === (item.status === 'verified') && Array.isArray(item.fields) && item.fields.length <= 12 &&
+      item.fields.every(field => record(field) && shortLine(field.label, 40) &&
+        typeof field.value === 'string' && field.value.length <= 4000 && !field.value.includes('\u0000')) &&
+      (item.link === undefined || (typeof item.link === 'string' && /^https:\/\/\S{1,2040}$/.test(item.link))))
 }
 
 function thread(value: unknown): value is Thread {
@@ -337,6 +394,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
   if (value.singleConversation !== undefined && typeof value.singleConversation !== 'boolean') return null
   if (value.inlineLogin !== undefined && typeof value.inlineLogin !== 'boolean') return null
   if (value.character !== undefined && !isCharacterChoice(value.character)) return null
+  if (value.openCharacterPicker !== undefined && !epoch(value.openCharacterPicker)) return null
   const approval = value.approvalCard
   if (approval !== undefined && (!record(approval) || typeof approval.id !== 'string' || approval.id.length !== 36 ||
     (approval.messageId !== undefined && typeof approval.messageId !== 'string'))) return null
@@ -415,6 +473,7 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
     !scope?.tasks.some(task => task.id === intent.payload.runId && task.phase === 'waiting_input' && task.goalOwnerReply))) return false
   if (intent.action === 'setCharacter' && (!scope?.character ||
     !isCharacterChoice({ ...scope.character, [intent.payload.field]: intent.payload.value }))) return false
+  if (intent.action === 'characterPickerShown' && scope?.openCharacterPicker !== intent.payload.epoch) return false
   if (intent.action === 'selectThread' && !scope?.threads.some(thread => thread.id === intent.payload.id)) return false
   if (intent.action === 'selectModel' && !scope?.models.some(model => model.id === intent.payload.id)) return false
   if ((intent.action === 'dismissOfficeGuide' || intent.action === 'requestOfficeCalendar') && !scope?.officeSelected) return false

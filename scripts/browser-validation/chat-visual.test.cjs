@@ -133,7 +133,13 @@ const expectations = {
   camping: { messages: 4, cards: 1 },
   choices: { messages: 2, cards: 0 }, approval: { messages: 1, cards: 1 },
   guide: { messages: 0, cards: 0 },
+  conceptRunning: { messages: 2, cards: 2 }, devicePaused: { messages: 2, cards: 1 },
+  receipts: { messages: 2, cards: 0 }, runningDraft: { messages: 2, cards: 2 },
 };
+
+// Host sentences end like "…했어요." or "…합니다."; the host may show only labels, so none may appear outside
+// model text (.rich-answer) and user messages.
+const HOST_SENTENCE = /(요|다|죠|까|니다)\s*[.!?…](\s|$)/;
 
 for (const [name, snapshot] of Object.entries(fixtures)) {
   for (const [width, height] of widths) {
@@ -174,6 +180,28 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
           assert.equal(await page.getByText('A-04 선택').count(), 1);
           assert.equal(await page.getByRole('button', { name: '빈자리 A-12' }).count(), 0);
           assert.equal(await page.getByRole('button', { name: 'A-12', exact: true }).count(), 1);
+        }
+        if (name === 'devicePaused' || name === 'receipts') {
+          const hostText = await page.evaluate(() => [...document.querySelectorAll('.message--assistant')]
+            .map(item => { const copy = item.cloneNode(true); copy.querySelectorAll('.rich-answer').forEach(el => el.remove()); return copy.textContent; }).join('\n'));
+          assert.equal(HOST_SENTENCE.test(hostText), false, `host sentence in chat: ${hostText}`);
+        }
+        if (name === 'devicePaused') {
+          assert.equal(await page.locator('.run-status-card strong').innerText(), '잠깐 멈춤');
+          assert.equal(await page.locator('.run-status-card .run-status-instruction').count(), 1);
+          assert.equal(await page.locator('.run-status-card button.run-status-action').innerText(), '설정 열기');
+          assert.equal(await page.locator('.rich-answer').count(), 0);
+        }
+        if (name === 'receipts') {
+          assert.deepEqual(await page.locator('.receipt-card .receipt-item > strong').allInnerTexts(), ['문자 준비', '메모 저장']);
+          assert.equal(await page.locator('.receipt-item--prepared dd').first().innerText(), '010-0000-0002');
+          assert.equal(await page.locator('.run-status-card').count(), 0);
+        }
+        if (name === 'runningDraft') {
+          const actions = page.locator('.composer-actions').last().locator('button');
+          assert.deepEqual(await actions.evaluateAll(items => items.map(item => item.getAttribute('aria-label'))), ['현재 작업 중단', '추가 지시', '다음에 보내기']);
+          assert.equal((await page.getByRole('button', { name: '추가 지시' }).innerText()).trim(), '');
+          assert.equal(await page.getByRole('button', { name: '다음에 보내기' }).locator('svg').getAttribute('data-icon'), 'arrow');
         }
         await page.evaluate(async () => {
           await document.fonts.ready;

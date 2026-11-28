@@ -64,6 +64,12 @@ data class UiRunActivity(
     val goalOwnerReply:Boolean=false,
     val executionReport:List<String> = emptyList(),
     val reportGroup:String?=null,
+    /** Structured run status for the chat card (phase, label, reason, action); never prose. */
+    val runStatus:kotlinx.serialization.json.JsonObject?=null,
+    /** True when the last [executionReport] line is the run's status label, which the status card already shows. */
+    val executionReportEndsWithStatus:Boolean=false,
+    /** Structured action receipts for the chat card (`hostReceiptV1`); never prose. */
+    val receipt:kotlinx.serialization.json.JsonObject?=null,
 )
 internal data class UiWorkEvidenceCounts(val tools:Int,val verified:Int,val prepared:Int,val failed:Int)
 

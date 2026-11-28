@@ -161,14 +161,14 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
         val pause = GoalAutopilotPauseReason.entries.find { it.code == run.errorCode }
         if (pause != null) {
             val lastTool = records.lastOrNull { it.event.code == WorkTraceCode.TOOL_STARTED }?.event?.toolName
-            val lastLabel = lastTool?.let(::toolLabel)?.takeUnless { it == lastTool }
+            val lastLabel = lastTool?.let(ToolReportLabels::label)
             events += UiRunActivityEvent(
                 "goal-pause:${run.id}", UiWorkEventKind.CONTEXT,
-                lastLabel?.let { "마지막으로 시도한 단계 · $it" } ?: "작업을 멈춘 이유",
-                pause.description, run.updatedAt, UiWorkEvidence.UNVERIFIED,
+                lastLabel?.let { "마지막 단계 · $it" } ?: "멈춘 이유",
+                pause.label, run.updatedAt, UiWorkEvidence.UNVERIFIED,
             )
         }
-        if(run.id in unavailable)events+=UiRunActivityEvent("unavailable:${run.id}",UiWorkEventKind.CONTEXT,"일부 진행 기록의 저장·조회를 확인하지 못했습니다.",evidence=UiWorkEvidence.UNVERIFIED)
+        if(run.id in unavailable)events+=UiRunActivityEvent("unavailable:${run.id}",UiWorkEventKind.CONTEXT,"일부 기록을 못 불러옴",evidence=UiWorkEvidence.UNVERIFIED)
         val total=maxOf(totals[run.id]?:0,records.size.toLong())
         val waitingForReply=run.status=="paused"&&run.errorCode in setOf(
             com.user.localagent.core.NextActionQuestion.PAUSE_CODE,com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE,GOAL_OWNER_INPUT)
@@ -182,6 +182,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
         val reportGroup=context["browserWorkRootRunId"]?.jsonPrimitive?.contentOrNull
             ?:segment?.get("rootRunId")?.jsonPrimitive?.contentOrNull
             ?:context["browserAuthParentRunId"]?.jsonPrimitive?.contentOrNull?:run.id
+        val report=ChatExecutionReport.display(history,run.status,run.errorCode,context)
         val mode=runCatching{val value=Json.parseToJsonElement(run.contextJson).jsonObject["mode"]?.jsonPrimitive?.content?:"act";AgentWorkMode.parse(value).wireName}.getOrDefault("act")
         val displayStatus=if(run.status=="completed"&&pause!=null)"paused" else run.status
         put(target.messageId,UiRunActivity(run.id,threadId,target.messageId,displayStatus,mode,run.startedAt?:0L,
@@ -190,7 +191,10 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
                 runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
             userMessageId=run.userMessageId,finishedAt=run.finishedAt,goalOwnerReply=waitingForReply&&run.errorCode==GOAL_OWNER_INPUT,
-            executionReport=ChatExecutionReport.display(history,run.status,run.errorCode,context),reportGroup=reportGroup,
+            executionReport=report,reportGroup=reportGroup,
+            executionReportEndsWithStatus=report.isNotEmpty()&&report.last()==ChatExecutionReport.state(run.status,run.errorCode,context),
+            receipt=ActionReceiptCard.read(context),
+            runStatus=RunStatusLabels.card(run.status,run.errorCode,context).json(),
             canOpenOwnerLogin=run.status=="paused" && (run.errorCode=="waiting_goal_condition"||run.errorCode in BrowserAuthContinuation.reopenablePauses) &&
                 runCatching { BrowserAuthContinuation.canReopenLogin(run.contextJson) || run.errorCode=="waiting_goal_condition" &&
                     Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalOwnerLogin"]==JsonPrimitive(true) }.getOrDefault(false)))
@@ -207,19 +211,19 @@ private fun activityEvent(record:WorkTraceRecord,run:ChatRunRecord,start:WorkTra
         WorkTraceKind.ANSWER,WorkTraceKind.INFERENCE->UiWorkEventKind.ANSWER
         else->UiWorkEventKind.CONTEXT // Approval is preserved without inflating tool counts.
     }
-    val tool=event.toolName?.let{ name->com.user.localagent.ui.toolLabel(name).takeUnless{it==name} }?:"도구 작업"
+    val tool=event.toolName?.let(ToolReportLabels::label)?:ToolReportLabels.UNKNOWN
     val label=when(event.code){
-        WorkTraceCode.RUN_STARTED->"요청 실행 시작";WorkTraceCode.SEMANTIC_STARTED->"요청과 자료 범위 확인"
-        WorkTraceCode.PLAN_READY->if(event.summarySource==WorkSummarySource.MODEL_PLAN)"요청을 이렇게 이해했어요"else"진행 안내"
-        WorkTraceCode.DECISION_EXPLAINED->"이 방법을 고른 이유"
-        WorkTraceCode.CONTEXT_READY->"관련 지침·문맥 준비"
-        WorkTraceCode.INFERENCE_STARTED->"모델 추론 시작";WorkTraceCode.INFERENCE_FINISHED->"모델 추론 구간 종료"
-        WorkTraceCode.APPROVAL_WAITING->"실행 전 사용자 확인 대기";WorkTraceCode.APPROVAL_ACCEPTED->"사용자 실행 확인 반영";WorkTraceCode.APPROVAL_DECLINED->"사용자가 실행을 취소함"
-        WorkTraceCode.TOOL_STARTED->if(run.status in setOf("running","waiting_approval","queued"))"$tool · 실행 중"else"$tool · 후속 결과 미확인"
-        WorkTraceCode.TOOL_RESULT->"$tool · 실행 결과 기록"
-        WorkTraceCode.VERIFICATION_RECORDED->"후속 조건 검증 기록";WorkTraceCode.FILE_CHANGE->"실제 프로젝트 파일 변경"
-        WorkTraceCode.ANSWER_STARTED->"답변 작성 시작";WorkTraceCode.ANSWER_FINISHED->"답변 구간 저장 확인";WorkTraceCode.ANSWER_PAUSED->"답변 이어쓰기 대기"
-        WorkTraceCode.RUN_FINISHED->"응답 실행 종료";WorkTraceCode.RUN_INTERRUPTED->"실행 중단 상태 기록"
+        WorkTraceCode.RUN_STARTED->"시작";WorkTraceCode.SEMANTIC_STARTED->"부탁한 일 살펴보기"
+        WorkTraceCode.PLAN_READY->if(event.summarySource==WorkSummarySource.MODEL_PLAN)"할 일"else"진행 안내"
+        WorkTraceCode.DECISION_EXPLAINED->"이렇게 하는 이유"
+        WorkTraceCode.CONTEXT_READY->"필요한 자료 챙기기"
+        WorkTraceCode.INFERENCE_STARTED->"생각하는 중";WorkTraceCode.INFERENCE_FINISHED->"생각 끝"
+        WorkTraceCode.APPROVAL_WAITING->"허락 기다리는 중";WorkTraceCode.APPROVAL_ACCEPTED->"허락 받음";WorkTraceCode.APPROVAL_DECLINED->"하지 말라고 함"
+        WorkTraceCode.TOOL_STARTED->if(run.status in setOf("running","waiting_approval","queued"))"$tool · 하는 중"else"$tool · 결과 아직 모름"
+        WorkTraceCode.TOOL_RESULT->"$tool · 결과 받음"
+        WorkTraceCode.VERIFICATION_RECORDED->"다시 확인함";WorkTraceCode.FILE_CHANGE->"프로젝트 파일 바뀜"
+        WorkTraceCode.ANSWER_STARTED->"답 쓰는 중";WorkTraceCode.ANSWER_FINISHED->"답 저장함";WorkTraceCode.ANSWER_PAUSED->"답 이어 쓰기 기다리는 중"
+        WorkTraceCode.RUN_FINISHED->"끝";WorkTraceCode.RUN_INTERRUPTED->"중간에 끊김"
     }
     val evidence=when {
         event.evidence!=null->UiWorkEvidence.valueOf(event.evidence.name)
@@ -229,12 +233,12 @@ private fun activityEvent(record:WorkTraceRecord,run:ChatRunRecord,start:WorkTra
     }
     val detail=buildList {
         event.publicSummary?.takeIf{it.isNotBlank()}?.let{summary->add(if(event.summarySource==WorkSummarySource.USER_GOAL)"사용자 목표: $summary"else summary)}
-        event.count?.let{add("관찰 항목 수: $it")};if(event.partial==true)add("일부 범위만 확인한 결과입니다.")
+        event.count?.let{add("관찰 항목 수: $it")};if(event.partial==true)add("일부만 봄")
         if(start!=null&&record.event.code==WorkTraceCode.TOOL_RESULT){
             add("도구 시작: "+runCatching{Instant.ofEpochMilli(start.atEpochMillis).toString()}.getOrDefault("시각 미기록"))
             add("결과 기록: "+runCatching{Instant.ofEpochMilli(record.atEpochMillis).toString()}.getOrDefault("시각 미기록"))
         }
-        event.fileChange?.let{add("저장 후 확인한 파일 크기: ${it.bytes}바이트 · 프로그램 실행·테스트 결과는 별도입니다.")}
+        event.fileChange?.let{add("저장한 파일 크기 ${it.bytes}바이트 · 프로그램이 도는지는 따로 봐야 함")}
     }.joinToString("\n")
     val files=event.fileChange?.let{file->listOf(UiRunFileChange(file.relativePath,if(file.operation==WorkFileOperation.CREATED)UiFileChangeOperation.CREATED else UiFileChangeOperation.UPDATED,
         file.beforeSha256,file.afterSha256,file.diffRef,record.binding.projectId,file.workspaceBinding))}.orEmpty()

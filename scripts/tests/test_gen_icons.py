@@ -94,14 +94,14 @@ class SourceTest(unittest.TestCase):
 class OutputTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.meta, cls.icons, cls.ills, cls.stickers, cls.outputs = gen.build()
+        cls.meta, cls.icons, cls.ills, cls.stickers, cls.outputs, cls.clay = gen.build()
 
     def test_check_mode_reports_committed_outputs_current(self):
         result = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_generation_is_deterministic(self):
-        *_, again = gen.build()
+        *_, again, _ = gen.build()
         self.assertEqual(self.outputs, again)
 
     def test_icon_drawables_are_tintable_duotone(self):
@@ -149,6 +149,21 @@ class OutputTest(unittest.TestCase):
         for name, sticker in self.stickers.items():
             self.assertIn(f'\n  {name}: {{ label: "{sticker["label"]}"', ts)
         self.assertIn("export const ICON_STROKE = 1.8", ts)
+
+    def test_clay_icons_are_full_color_gradient_art(self):
+        # Clay icons (design/clay.json): 48x48 color art with gradients for tabs, the composer and menu rows.
+        self.assertTrue({"chat", "explore", "archive", "me", "attach", "mic", "voice"} <= set(self.clay))
+        ts = self.outputs[gen.TS_OUT]
+        self.assertIn("export const CLAY = {", ts)
+        for name, art in self.clay.items():
+            self.assertIn(f"\n  {name}: {{\n    gradients: {{", ts)
+            root = ET.fromstring(self.outputs[gen.DRAWABLE / f"zi_clay_{gen.snake(name)}.xml"])
+            self.assertEqual(root.get(ANDROID + "viewportWidth"), "48")
+            self.assertEqual(root.get(ANDROID + "viewportHeight"), "48")
+            colors = [p.get(ANDROID + "fillColor") for p in root.findall("path") if p.get(ANDROID + "fillColor")]
+            self.assertNotIn("@android:color/black", colors, name)
+            self.assertTrue(art["gradients"], name)
+            self.assertTrue(any(s.get("fill", "").startswith("grad:") for s in art["shapes"]), name)
 
     def test_drawable_names_are_valid_resource_names(self):
         for path in self.outputs:

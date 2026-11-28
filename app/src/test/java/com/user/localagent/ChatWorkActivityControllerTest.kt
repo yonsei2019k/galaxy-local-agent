@@ -84,7 +84,7 @@ class ChatWorkActivityControllerTest {
                 publicSummary="겹치는 일정이 있는지 먼저 보고 가능한 시간을 고르겠습니다.",summarySource=WorkSummarySource.MODEL_PLAN)),
         ).mapIndexed{index,event->trace(actual,index+1L,event)}
         val activity=project(actual,events).getValue("assistant-a")
-        assertEquals(listOf("요청을 이렇게 이해했어요","이 방법을 고른 이유"),activity.events.map{it.label})
+        assertEquals(listOf("할 일","이렇게 하는 이유"),activity.events.map{it.label})
         assertEquals("겹치는 일정이 있는지 먼저 보고 가능한 시간을 고르겠습니다.",activity.events.last().detail)
         assertEquals(4L,activity.totalEvents)
     }

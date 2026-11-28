@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from design/clay.json by scripts/gen-icons.py. Do not edit. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:pathData="M11 44.5 A13 2.2 0 1 0 37 44.5 A13 2.2 0 1 0 11 44.5 Z" android:fillColor="#2A1D14" android:fillAlpha="0.12" />
+    <path android:pathData="M7 25.2 A17 17 0 1 0 41 25.2 A17 17 0 1 0 7 25.2 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="6" android:endX="0" android:endY="46">
+                <item android:offset="0" android:color="#FF95BB6D" />
+                <item android:offset="1" android:color="#FF6F9A45" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M7 23 A17 17 0 1 0 41 23 A17 17 0 1 0 7 23 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="10" android:startY="6" android:endX="30" android:endY="42">
+                <item android:offset="0" android:color="#FFE4F2D3" />
+                <item android:offset="0.45" android:color="#FFC4E39E" />
+                <item android:offset="1" android:color="#FF91B769" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M10 12 A6 2.4 0 1 0 22 12 A6 2.4 0 1 0 10 12 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.6" />
+    <path android:pathData="M12.5 23 A11.5 11.5 0 1 0 35.5 23 A11.5 11.5 0 1 0 12.5 23 Z" android:fillColor="#EEF7E2" android:fillAlpha="0.55" />
+    <path android:pathData="M24 12.5 L28.4 23 L19.6 23 Z" android:fillColor="#E8664F" />
+    <path android:pathData="M24 33.5 L19.6 23 L28.4 23 Z" android:fillColor="#6F9A45" />
+    <path android:pathData="M21.4 23 A2.6 2.6 0 1 0 26.6 23 A2.6 2.6 0 1 0 21.4 23 Z" android:fillColor="#FFFFFF" />
+</vector>

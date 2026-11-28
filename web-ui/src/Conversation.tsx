@@ -4,6 +4,24 @@ import { Icon } from './Icon'
 import type { IconName } from './Icon'
 import { StickerText, withStickers } from './icons/Sticker'
 import { RichAnswer } from './RichAnswer'
+import { ReceiptCard, RunStatusCard } from './RunCards'
+
+/** Existing UI actions for runStatus action ids; an id without one shows no button. */
+export type RunStatusActions = Partial<Record<string, () => void>>
+
+/** Live runs already have their work card (and approval card), so their empty answer shows no second status. */
+const LIVE_STATUS_PHASES = new Set(['queued', 'running', 'waiting_approval'])
+
+/**
+ * The runStatus to show as the answer's card: only for an answer without model text. A finished run whose
+ * receipt card already says what was done needs no extra "끝남" card unless a reason or report line remains.
+ */
+export function statusCardFor(message: ConversationMessage) {
+  const status = message.runStatus
+  if (message.role !== 'assistant' || message.text.trim() || !status || LIVE_STATUS_PHASES.has(status.phase)) return undefined
+  if (status.phase === 'completed' && message.receipt && !status.reason && !message.executionReport?.length) return undefined
+  return status
+}
 import type { BookingPaymentAction, ConversationMessage, Panel, ResultPreview, Snapshot, Task } from './bridge'
 import { BookingPaymentCard } from './BookingPaymentCard'
 import { isLiveTaskPhase } from './composer'
@@ -11,7 +29,7 @@ import { attachmentsBlockReply } from './bridge'
 import { Character } from './character/Character'
 import { useCharacter } from './character/useCharacter'
 import { situationForMood, useCharacterMood } from './character/useCharacterMood'
-import { COLORS, VARIANTS, type CharacterChoice, type CharacterSituation } from './character/characterData'
+import type { CharacterSituation } from './character/characterData'
 import { WorkCard } from './work/WorkCard'
 import { WorkSheet } from './work/WorkSheet'
 import { websiteWorkFor, workHistory } from './work/workHistory'
@@ -24,30 +42,12 @@ export { taskPhase }
  * Empty-state suggestions (owner direction 2026-11-27): a tap sends the fixed sentence as an ordinary request. The chip
  * carries only text; the model interprets it like any typed message and any permission follows the normal flow.
  */
-const roomSuggestions: { text: string; icon: IconName }[] = [
-  { text: '내일 오전 일정 정리해 줘', icon: 'calendar' },
-  { text: '이번 주말 서울 날씨 찾아 줘', icon: 'globe' },
-  { text: '오늘 할 일 같이 정리해 줘', icon: 'check' },
-]
+const roomSuggestions: string[] = ['내일 오전 일정 정리해 줘', '이번 주말 서울 날씨 찾아 줘', '오늘 할 일 같이 정리해 줘']
 
-/**
- * The other 집순이 in the room scene: different hoods and colors from the owner's choice, so the chosen one stays
- * the only one in its look. Positions, blur (depth) and float timing live in styles.css (.room-guest--N).
- */
-function roomCast(host: CharacterChoice): (CharacterChoice & { size: number })[] {
-  const colors = COLORS.map(item => item.id).filter(color => color !== host.color)
-  const variants = VARIANTS.map(item => item.id)
-  const start = variants.indexOf(host.variant) + 1
-  const looks: { expr: CharacterChoice['expr']; size: number }[] = [
-    { expr: 'smile', size: 64 }, { expr: 'wink', size: 56 }, { expr: 'sleepy', size: 48 }, { expr: 'surprise', size: 72 },
-  ]
-  return looks.map((look, index) => ({
-    variant: variants[(start + index) % variants.length], color: colors[(index * 2 + 1) % colors.length], ...look,
-  }))
-}
-
-function Welcome({ staff, guide, compact, single, situation, calendarGranted, hasDraft, onSendExample, onNavigate, onDismiss, onCalendar }: {
+function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, onSendExample, onNavigate, onDismiss, onCalendar, onChangeCharacter }: {
   staff?: string
+  /** Opens the one character picker (the header's); shown as a small text button on the plain first screen. */
+  onChangeCharacter?(): void
   situation?: CharacterSituation
   onSendExample?(text: string): void
   guide: boolean
@@ -62,24 +62,21 @@ function Welcome({ staff, guide, compact, single, situation, calendarGranted, ha
   const [character] = useCharacter()
   // The plain first screen only (staff rooms and the first-run guide keep their own flows).
   const suggestions = staff || guide || !onSendExample ? [] : roomSuggestions
-  const quietChat = single && !guide && !compact
+  const plain = !staff && !guide
   return (
-    <div className={`welcome${compact ? ' welcome--compact' : ''}${guide ? ' welcome--guide' : ''}`}>
-      {quietChat && <div className="welcome-character"><Character choice={character} situation={situation} size={130} /></div>}
-      {!compact && !quietChat && <MotionField className="room-scene">
-        <span className="room-window" aria-hidden="true" /><span className="room-beam" aria-hidden="true" /><span className="room-rug" aria-hidden="true" />
-        {roomCast(character).map((guest, index) =>
-          <span key={index} className={`room-guest room-guest--${index + 1}`} aria-hidden="true">
-            <Character choice={guest} size={guest.size} decorative />
-          </span>)}
-        <span className="room-host"><Character choice={character} situation={situation} size={160} /></span>
-      </MotionField>}
-      <h1>{staff ? `${staff}에게 말 걸기` : quietChat ? '무엇을 해 둘까요?' : !guide ? '무엇을 도와드릴까요?' : compact ? '집순이와 해볼 일' : '안녕하세요, 집순이예요!'}</h1>
-      {quietChat && <p>말만 하면 끝까지 챙길게요</p>}
-      {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+    <div className={compact ? "welcome welcome--compact" : plain ? "welcome welcome--plain" : "welcome"}>
+      {/* Concept match (2026-11-28): one big 집순이 on white, no room scene; the situation still drives its motion. */}
+      {!compact && <div className="welcome-hero">
+        <MotionField className="welcome-character"><Character choice={character} situation={situation} size={120} /></MotionField>
+        <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 해 둘까요?'}</h1>
+        {staff && <p>이 직원이 맡은 일을 확인하거나 간단한 일을 직접 부탁해 보세요.</p>}
+        {plain && <p>말만 하면 끝까지 챙길게요</p>}
+        {plain && onChangeCharacter && <button type="button" className="text-button welcome-character-change" onClick={onChangeCharacter}>집순이 모습 바꾸기</button>}
+      </div>}
+      {compact && <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 해 둘까요?'}</h1>}
       {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
-        {suggestions.map(example => <button type="button" key={example.text} className="suggestion-chip" disabled={hasDraft}
-          onClick={() => onSendExample?.(example.text)}><Icon name={example.icon} />{example.text}</button>)}
+        {suggestions.map(example => <button type="button" key={example} className="suggestion-chip" disabled={hasDraft}
+          onClick={() => onSendExample?.(example)}>{example}</button>)}
       </div>}
       {guide && <>
         <p>바쁜 일을 하나씩 같이 챙겨요. 내일 일정을 정리하거나, 중요한 메일을 찾거나, 여행 숙소 가격을 비교해 드릴 수 있어요.</p>
@@ -145,8 +142,9 @@ function dateLabel(message?: ConversationMessage) {
   return message?.sentAt === undefined ? null : conversationDate.format(message.sentAt)
 }
 
-function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu, onPrepareStay, onStayPhoto, onSpeak, speaking }: {
+function Message({ message, previous, previousHasCards, previews, enabled, onCopy, onFiles, onMessageMenu, onPrepareStay, onStayPhoto, onSpeak, speaking, statusActions }: {
   message: ConversationMessage
+  statusActions?: RunStatusActions
   previous?: ConversationMessage
   previousHasCards: boolean
   previews: ResultPreview[]
@@ -168,19 +166,26 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   const reportActive = message.executionReportActive ?? !message.text.trim()
   const recentReport = report.slice(-8)
   const earlierReport = report.slice(0, -8)
+  const hasText = !!message.text.trim()
+  const statusCard = statusCardFor(message)
+  const statusAction = statusCard?.action ? statusActions?.[statusCard.action] : undefined
   return (
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
-      {assistant ? <div className="assistant-text conversation-bubble">
-        {message.text.trim() && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
-        {!!report.length && <details className="execution-report" aria-label="확인한 내용" open={reportActive} key={reportActive ? 'in-progress' : 'settled'}>
-          <summary>확인한 내용</summary>
+      {assistant ? <div className="assistant-text">
+        {hasText && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
+        {statusCard && <RunStatusCard status={statusCard} report={report} onAction={enabled ? statusAction : undefined} />}
+        {/* The host's structured run report (not model text) as a grey card with a resting 집순이 face. */}
+        {!statusCard && !!report.length && <section className="execution-report" aria-label="작업 진행 보고">
+          <span className="execution-report-face" aria-hidden="true"><Character choice={character} size={40} decorative /></span>
+          <strong>작업 진행 보고</strong>
           <ol>{recentReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           {!!earlierReport.length && <details>
             <summary>앞서 확인한 단계 {earlierReport.length}개</summary>
             <ol>{earlierReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           </details>}
-        </details>}
+        </section>}
+        {assistant && message.receipt && <ReceiptCard receipt={message.receipt} />}
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />
           {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장
@@ -217,7 +222,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onReopenLogin, onWriteOwnReply, onSendExample, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onReopenLogin, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onWriteOwnReply, onSendExample, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak, statusActions, onChangeCharacter }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -236,6 +241,9 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onReopenLogin?(runId: string): void
   onGoalAnswer?(runId: string, text: string): boolean
   onPdfEmail?(messageId: string): void
+  /** Existing UI actions for the status card button, by runStatus action id. */
+  statusActions?: RunStatusActions
+  onChangeCharacter?(): void
   /** "직접 입력" next to reply choices: only moves focus to the composer; nothing is sent. */
   onWriteOwnReply?(): void
   /** Empty-state suggestion: sends that fixed sentence as an ordinary request (the model interprets it as usual). */
@@ -257,7 +265,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const panelOpen = historyOpen ?? localHistoryOpen
   const setHistoryOpen = onHistoryChange ?? setLocalHistoryOpen
   const mood = useCharacterMood(snapshot)
-  const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim() || item.executionReport?.length) : []
+  const messages = snapshot?.ready ? snapshot.messages.filter(item => item.text.trim() || item.executionReport?.length || (item.role === 'assistant' && item.receipt) || statusCardFor(item)) : []
   const website = snapshot?.websiteCard
   const approval = snapshot?.ready ? snapshot.approvalCard : undefined
   const payment = snapshot?.ready ? snapshot.bookingPayment : undefined
@@ -380,7 +388,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
           </div>
           <span className="loading-label"><Icon name="clock" /> 대화를 불러오는 중</span>
         </div> : empty ?
-          <Welcome staff={staff} guide={guide} single={snapshot?.singleConversation} situation={situationForMood(mood)} onSendExample={onSendExample}
+          <Welcome staff={staff} guide={guide} situation={situationForMood(mood)} onSendExample={onSendExample} onChangeCharacter={onChangeCharacter}
             calendarGranted={snapshot?.officeCalendarReadGranted === true} hasDraft={hasDraft}
             onNavigate={onNavigate} onDismiss={onDismissOfficeGuide} onCalendar={onOfficeCalendar} /> : (
           <div className="transcript">
@@ -401,7 +409,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                       !snapshot?.websiteCard?.inputHeight && !snapshot?.approvalCard && snapshot?.voiceDraftEpoch !== undefined &&
                       (!snapshot?.busy || snapshot?.spokenMessageId === item.id) ? onSpeak : undefined}
                     enabled={enabled} onCopy={onCopy} onFiles={onFiles} onMessageMenu={onMessageMenu}
-                    onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} onStayPhoto={enabled ? onStayPhoto : undefined} />
+                    onPrepareStay={enabled && !hasDraft ? onDraftExample : undefined} onStayPhoto={enabled ? onStayPhoto : undefined} statusActions={statusActions} />
                   {item.pdfEmail && <section className="booking-payment-card" aria-label="PDF 첨부 메일">
                     <strong>{item.pdfEmail.subject}</strong>
                     <p>받는 사람 {item.pdfEmail.to}</p>

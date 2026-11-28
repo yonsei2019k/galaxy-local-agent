@@ -31,7 +31,7 @@ internal fun ChatRunCoordinator.handleChatCommand(input:String):String? {
         "/compact"->{scope.launch {
             val id=selectedThreadId.value;val thread=app.repository.chat.thread(id)?:return@launch
             val summary=compactBranch(id,thread.activeBranchId,explicit=true)
-            status.value=if(summary==null)"요약할 대화가 아직 없습니다."else"기존 원문을 유지하고 요약 문맥을 저장했습니다."
+            status.value=if(summary==null)"요약할 대화 없음"else"원문은 두고 요약 저장함"
         };return null}
         "/fork"->{visibleLines.value.lastOrNull()?.let {forkMessage(it.id)};return null}
     }
@@ -230,7 +230,7 @@ fun ChatRunCoordinator.steer(text:String,expectedRunId:String?=activeRunId,expec
 internal suspend fun preserveUnappliedInstruction(repository:LocalRepository,threadId:String,text:String,expectedBranchId:String?=null):Boolean {
     val thread=repository.chat.thread(threadId)?:return false
     val branchId=expectedBranchId?:thread.activeBranchId
-    val body="[아직 적용하지 않은 추가 지시]\n이 내용은 실행에 적용되지 않은 제안이며, 작업 완료나 새 실행 권한을 뜻하지 않습니다.\n\n"+
+    val body="[아직 적용하지 않은 추가 지시 · 실행 안 함 · 끝난 일이나 새 허락 아님]\n\n"+
         buildJsonObject{put("quoted_owner_instruction",text);put("applied",false)}.toString()
     val stored=repository.chat.addMessage(thread.id,branchId,"assistant",body)
     check(stored.threadId==thread.id&&stored.branchId==branchId&&repository.chat.fullMessageText(stored.id)==body){"추가 지시 보존을 확인하지 못했습니다."}

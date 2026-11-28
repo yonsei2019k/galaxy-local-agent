@@ -1,5 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground PNGs come from scripts/render-launcher-icon.cjs (the web 집순이, butter bear hood, smiling). -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ziphap_launch_background" />
-    <foreground android:drawable="@drawable/ziphap_launcher_foreground" />
-    <monochrome android:drawable="@drawable/jipsooni_launcher_monochrome" />
-</adaptive-icon>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />

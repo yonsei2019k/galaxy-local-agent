@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { SNAPSHOT_EVENT, characterChange, hasNativeBridge, postIntent, readSnapshot, type Snapshot } from './bridge'
 import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
@@ -20,6 +20,10 @@ export default function App() {
   const [collaborationScope, setCollaborationScope] = useState<string | null>(null)
   const observedOpenRequest = useRef(0)
   const exampleQueued = useRef(false)
+  // One character picker for the header badge, the empty-chat button and the native 나의 집순이 row.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const openPicker = useCallback(() => setPickerOpen(true), [])
+  const closePicker = useCallback(() => setPickerOpen(false), [])
   const sendAttempt = useRef<{ conversation: string; attachments: string; text: string; draftRevision: number; token: string } | null>(null)
 
   useEffect(() => {
@@ -75,6 +79,9 @@ export default function App() {
     }
     return delivered
   }
+  const latestRequest = useRef(request)
+  latestRequest.current = request
+  const pickerShown = useCallback((epoch: number) => { latestRequest.current({ action: 'characterPickerShown', payload: { epoch } }) }, [])
 
   function editDraft(text: string) {
     if (!snapshot?.ready) return
@@ -126,6 +133,8 @@ export default function App() {
     }
   }
 
+  const focusComposer = () => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="메시지"]')?.focus()
+
   const connectionNote = !connected ? 'Android 앱에서 대화를 열어 주세요.' : connectionError
     ? '앱에 연결하지 못했습니다. 입력을 보존하고 있습니다.' : ''
   const exampleBlocked = !snapshot?.ready || !enabled || !!pending || !!draft.trim() ||
@@ -161,11 +170,12 @@ export default function App() {
 
   return (
     <NativeCharacterSetting.Provider value={appearance ? [appearance, setAppearance] : null}>
-    <div className="workspace">
+    <div className={snapshot?.singleConversation ? "workspace workspace--single" : "workspace"}>
       <aside className="desktop-sidebar"><Sidebar {...sidebarProps} /></aside>
       <MobileSidebar open={mobileOpen} onClose={closeMobile}><Sidebar {...sidebarProps} onClose={closeMobile} /></MobileSidebar>
       <div className={snapshot?.singleConversation ? 'main-column main-column--chat-design' : 'main-column'} hidden={collaborationOpen}>
-        <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu} onManage={() => request({ action: 'manageThreads' })}
+        <Header key={conversationKey} snapshot={snapshot} enabled={enabled} onMenu={openMenu}
+          pickerOpen={pickerOpen} onPickerOpen={openPicker} onPickerClose={closePicker} onCharacterPickerShown={pickerShown} onManage={() => request({ action: 'manageThreads' })}
           onRename={title => request({ action: 'renameThread', payload: { title } })}
           onOpenWork={() => setWorkHistoryScope(conversationKey)}
           onOpenTools={() => setComposerToolsScope(conversationKey)} />
@@ -186,7 +196,17 @@ export default function App() {
           onGoalAnswer={(runId, text) => !pending && request({ action: 'answerGoalQuestion', payload: { runId, text } })}
           onChooseReply={(runId, index) => !pending && !draft.trim() &&
             request({ action: 'chooseReply', payload: { runId, index } })}
-          onWriteOwnReply={() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="메시지"]')?.focus()}
+          onWriteOwnReply={focusComposer}
+          onChangeCharacter={openPicker}
+          statusActions={{
+            // Each id reuses a control the app already has; open_login stays with the native login pill.
+            reply: focusComposer,
+            new_request: focusComposer,
+            open_pc_connection: () => sidebarRequest({ action: 'navigate', payload: { panel: 'connections' } }),
+            open_calendar_permission: () => sidebarRequest({ action: 'navigate', payload: { panel: 'capabilities' } }),
+            open_screen_setup: () => sidebarRequest({ action: 'navigate', payload: { panel: 'privacy' } }),
+            choose_model: () => document.querySelector<HTMLButtonElement>('button[aria-label="더하기 메뉴"]:not(:disabled)')?.click(),
+          }}
           onSendExample={sendExample}
           onBookingPayment={(action, id) => request({ action, payload: { id } })}
           hasDraft={exampleBlocked} onDraftExample={(text, needsFile) => {

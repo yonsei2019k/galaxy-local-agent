@@ -71,6 +71,56 @@
 - 구매후기 초안, 출석 확인, 사이트 탈퇴 정리를 채팅에서 선택할 수 있다. 각 버튼은 일반 사용자 메시지만 제출한다. 실제 출석 조건 확인과 사이트 탈퇴 승인은 실행 경로가 처리한다.
 - 기억·직원 프로필·자동 수집 자료·스킬 목록·도구 검사와 내부 진단을 일반 사용자 메뉴에서 제거한다. React 상태와 명령 허용 목록에서 직원 프로필 전달을 제거한다. 모델의 공개 답변 지침에도 내부 지침·저장 원문·개발 설정을 포함하지 않도록 명시한다. 작업 기록, 파일, 서비스 권한 및 연결 해제는 기존 경로에서 확인할 수 있다.
 - 웹 UI 174건, 코어 JVM 1,188건, Android JVM 1,315건과 로컬 릴리스 APK 조립을 확인했다. 폭 360px 모의 화면에서 첫 안내 상단과 더보기 이동을 검증했다. APK에는 새 채팅 번들과 ARM64 라이브러리가 들어 있다. 이 후보의 서명·설치와 실계정 로그인·출석·탈퇴는 별도 검증 대상이다.
+## 2026-11-28 — 시안·말투 통합: 상태 카드, 영수증 카드, 고정 문장 점검, 입력창 순서, 집순이 모습 바꾸기 입구 (claude/concept-voice-integration, Codex 통합 대기)
+
+- **병합:** `claude/design-concept-match`(069684a) 위에 `claude/persona-copy`(762ffc2), `claude/voice-harness`(cba8aa6)를 차례로 병합했다. 충돌은 이 파일뿐이었고 모든 항목을 남겼다. `MainActivity`·`InlineRunActivity`·`ChatNavigator`·`AGENTS.md`는 자동 병합됐다.
+- **상태 카드(웹 `RunCards.tsx`, `Conversation.tsx`):** 모델 글이 없는 답변에 `messages[].runStatus`가 있으면 회색 카드로 그린다. 단계별 40px 집순이 얼굴, 굵은 `label`, 회색 `reason`, 설정 경로 `instruction` 한 줄, 기존 동작이 있는 `action`만 검은 알약 버튼. 실행 중(queued/running/waiting_approval)은 작업 카드가 있으므로 그리지 않는다. 카드가 보일 때 `executionReport`의 마지막 상태 줄은 네이티브가 빼서 보낸다(`UiRunActivity.executionReportEndsWithStatus`).
+  - 동작 연결: `reply`·`new_request` → 입력창 초점, `open_pc_connection` → 연결 화면, `open_calendar_permission` → 기능 목록(`capabilities`, 휴대폰 캘린더 허용이 있는 곳), `open_screen_setup` → 개인정보와 권한(`privacy`), `choose_model` → 더하기 메뉴(모델 고르기). `open_login`은 웹 동작이 없어 버튼 없음(네이티브 "사이트 로그인 다시 열기" 알약이 맡는다).
+  - `ScreenControl.SetupNeeded.instruction`을 문장 대신 설정 경로(`… → … 켜기`)로 바꿨다(카드 회색 줄과 모델용 도구 결과에 같이 쓰인다).
+- **영수증 카드:** `ActionCompletionReport.compose()`가 `ActionReceipt{tool,title,status(verified|prepared|unverified|failed),fields[{label,value}],link}`와 남은 관찰 글, `complete`를 만든다. 앱은 실행 문맥 `hostReceiptV1`에 저장하고(`ActionReceiptCard`), 웹은 `messages[].receipt`를 카드로 그린다. 영수증 글은 채팅에 안 나가고, 모델 글은 `ModelStatusText` 거짓 완료 검사(끝났고 전부 증명된 경우만 완료 표현 허용)를 통과할 때만 옆에 보인다.
+  - 전환: 문자·메일·일정·알람·지도·링크·앱 열기(앱에 넘김), 메모 저장·고침, 알림 저장·고침, 구글 캘린더 일정 넣기(다시 봐서 확인), 모든 도구의 실패·결과 못 봄. 시각은 `yyyy년 M월 d일 HH:mm`(초·다른 시간대는 그대로 표시).
+  - 글로 남은 것(관찰 내용 자체가 답): 메모 읽기·부분 고치기, 저장소·중복 관찰, 기능 목록, 리마인더 목록, 조회 예약, 카카오톡 공유, PDF 메일, 시각·연락처 조회. 문장은 모두 `라벨 · 값` 사실 줄로 바꿨다.
+  - 도구 동작·승인·검증 기준은 바꾸지 않았다. `render()`는 마무리 정책(메모 부분 고치기, 관찰형 자동 검토)이 쓰는 글로 남는다.
+- **고정 문장 점검:** `scripts/voice-guard`가 `ActionCompletionReport.kt` 전체와 `compose(`·`publishReceipts(`를 채팅 출력으로 본다. 허용 목록 81개 모두 정확한 이유(상태 카드 필드, 상태 줄·토스트, 모델 지시문, 모델용 도구 결과, 예외, 사실 줄)로 다시 썼고 "TODO" 항목은 0개, 사라진 항목 0개다. 채팅에 보이는 항목에 문장 끝맺음(…요./…다.)은 없다.
+- **입력창(소유자 결정):** 실행 중 순서는 중단 → 추가 지시(아이콘만, `aria-label`·title 유지) → 보내기(맨 오른쪽, 항상 위쪽 화살표, `aria-label`은 "다음에 보내기"/"보내기"). 동작은 그대로.
+- **집순이 모습 바꾸기 입구(소유자 요청):** 헤더 집순이에 작은 연필 배지와 title, 빈 대화에 "집순이 모습 바꾸기" 작은 버튼, 나의 집순이 화면의 초상 누르기와 클레이 'me' 아이콘 행. 고르기 창은 웹 `CharacterPicker` 하나뿐이다. 네이티브 행은 채팅 탭으로 옮기고 스냅숏에 `openCharacterPicker`(한정된 epoch)를 넣는다. 웹은 한 번 열고 `characterPickerShown{epoch}`로 답하며 네이티브가 flag를 지운다(`CharacterPickerFlag`, `ReactBridgePolicy`). 고른 값은 기존 `setCharacter` 경로로 저장되고 나의 집순이 초상은 같은 상태를 읽는다.
+- **검증(소스 기준, 기기 증거 아님):** `gen-design-tokens.py --check`·`gen-icons.py --check` 통과, `scripts/tests` 89개 통과(9개 건너뜀, 고정 문장 점검 4개 포함). 웹 vitest 192개 통과. 브라우저 하네스 `chat-visual` 63개·`character-situations` 12개를 일반·움직임 줄이기 두 모드에서 모두 통과(일시 정지·영수증 장면의 호스트 문장 없음, 실행 중 입력창 순서 단정 추가). 전체 Gradle(`:core:test :android-runtime:testDebugUnitTest :android-runtime:lintRelease :app:lintRelease :app:assembleRelease`) 51분 20초 성공: core 1190개, android-runtime 1330개 시험 실패 0. 서명 전 APK `app-release-unsigned.apk` SHA-256 `b25a5cf68e37693bf6a12d09027caaa9b0c5bfd9d1c1b8a29e500bff69931e65`(설치·배포 안 함).
+- **그림:** `.local/sdd/2026-11-28-integrate/shots/compare-*.png`(이전 = 시안 맞춤 dist), `compare-receipts.png`, `compare-composer.png`(진행 중 입력 띠 포함), `character-entry-{header-badge,empty-chat,picker-open}.png`.
+- **말투 평가(합친 `JIPSOONI_VOICE`, 기준 `20261128-085207` → `20261128-132914`):** 합계 16.41→16.48, 쉬운 말 3.97→4.14, 자연스러움 3.9→3.86, 결과 먼저 4.76→4.62, 성격 3.79→3.86, 규칙 감점 0.79→0.41, 문장 길이 20.7→18.9, 사실성 실패 1→4(search-done, not-verified, chat-casual, chat-evening: 근거 없는 날씨·자기 상태·조회 결과를 지어냄), 고정 문구 1→1.
+- **남은 틈:** 나의 집순이 행은 기기·에뮬레이터 화면으로 아직 못 봤다(JVM에서는 행 동작·flag·브리지만 시험). 관찰형 도구의 글은 아직 카드가 아니다. 말투 평가의 사실성 실패 증가는 한 번 실행한 결과라 반복 측정과 `JIPSOONI_VOICE`의 "확인된 사실 밖 내용 금지" 보강이 필요하다.
+
+## 2026-11-28 — 채팅 화면 구조 시안 맞춤, 클레이 아이콘, 런처 아이콘 (claude/design-concept-match, Codex 통합 대기)
+
+- **배경:** 소유자가 v0.2.17을 보고 시안과 다르다고 했다. 이번에는 색이 아니라 화면 구조를 `concept_phones.png`에 맞췄다(사양 `.local/sdd/2026-11-28-concept-match/spec.md` S1~S9).
+- **웹 채팅(`web-ui/src`, 단일 대화 화면 `.workspace--single`, `concept.css`):**
+  - 상단: 회색 원형 ☰, 가운데 36px 집순이와 이름, 오른쪽 원형 "이 대화" 버튼. 작업 줄("최근 작업"/진행 상태)은 같은 `aria-label`·글·`title`을 가진 원형 시계 버튼(`.header-work--round`)으로 옮겼다. 머리 집순이는 `blocked`일 때 얼굴만 `idle`로 둔다(`data-mood`와 움직임은 그대로). 시안의 "+ 새 대화"는 단일 대화에 그런 기능이 없어 만들지 않았다.
+  - 빈 대화: 방 장면 제거, 120px 집순이, "무엇을 해 둘까요?"·"말만 하면 끝까지 챙길게요", 입력창 위 가로 꽉 찬 제안 줄(문구·전송 동작 동일).
+  - 사용자 말 검은 말풍선, 답변은 이름표 없는 본문. 작업 카드와 작업 진행 보고는 연회색 카드에 단계별 집순이 얼굴(`situationForPhase`), 진행 중이면 검은 막대. 실행 기록에 진행량이 없어 막대는 비결정이다. 카드는 구조화된 `tasks`/`executionReport`만 쓰고 모델 글을 해석하지 않는다.
+  - 입력창: 한 줄 연회색 알약(실행 중에도 첨부·음성 없으면 한 줄), 안내 글 "메시지 보내기"(빈 대화)/"추가로 말하기".
+- **클레이 아이콘(S8 개정):** `design/clay.json` → `scripts/gen-icons.py` → `CLAY`(TS)·`zi_clay_*.xml`. 하단 탭, 첨부·마이크·음성 대화, 서랍 메뉴 앞 아이콘에 쓴다. 선택 탭은 원색+검은 굵은 글자, 나머지는 옅게, 비활성은 회색. 네이티브 설정 목록의 회색 타일 아이콘은 이번에 바꾸지 않았다.
+- **네이티브(S7):** "사이트 로그인 다시 열기"를 흰 바탕 가운데의 작은 검은 알약(`ZipInkPillButton`)으로 바꿨다. 조건·동작·문구는 같다.
+- **런처 아이콘(S9):** `scripts/render-launcher-icon.cjs`가 웹 집순이(버터 곰 후드, 웃는 얼굴)를 밀도별로 직접 그려 `mipmap-*/ic_launcher_foreground.png`(108~432px)를 만든다. 배경 `#F3F4F8`, Android 13+ 테마용 `drawable/ic_launcher_monochrome.xml`. 옛 `ziphap_mascot_v1.png`와 `ziphap_launcher_foreground.xml`은 참조가 없어 지웠다. 목표 대기 알림의 작은 아이콘이 런처 그림을 쓰던 것을 다른 알림과 같은 `ic_agent`로 바꿨다. 앱 ID·서명은 그대로다.
+- **검증:** `gen-design-tokens.py --check`, `gen-icons.py --check` 통과, 생성기 시험 26개 통과. 웹 vitest 174 통과. 화면 하네스 `chat-visual`+`character-situations` 일반 69·움직임 줄이기 69 통과(대비 실패 0), `phone-browser`+`browser-login` 4 통과. Gradle `:core:test`(1188) `:android-runtime:testDebugUnitTest`(1316, 실패 0) `lintRelease` 2종 `:app:assembleRelease` 성공(서명 안 된 APK SHA-256 `2b44a21a6f842e95cf4b919597221bb1418519dd65148e4d4231d35103be76ef`, 새 웹 번들 포함 확인). 휴대폰 설치·실기기 화면·런처 아이콘 표시는 확인하지 않았다(통합 후 별도 증거).
+- **비교 그림:** `.local/sdd/2026-11-28-concept-match/shots/compare-*.png`, `clay-icon-sheet.png`, `launcher-icon-preview.png`(`scripts/browser-validation/concept-compare.cjs`로 다시 만든다).
+
+## 2026-11-28 — 호스트 고정 문구 제거와 실행 상태 카드 필드 (claude/persona-copy, 통합 대기)
+
+- **문제:** 0.2.17에서 말투를 바꿨지만 작업 중 채팅의 대부분은 호스트가 정한 문장이었다("좋아요, 이렇게 진행할게요 … 잠시만 기다려 주세요", "마지막 동작이 반영됐는지 확인하지 못했어요 …", 진행 보고의 `read_screen 결과 확인`). 소유자 지시: 고정 문구 없음, 초등학생도 아는 쉬운 말.
+- **원칙(계약):** 호스트는 채팅 문장을 쓰지 않는다. 사실은 상태 카드 필드로 넘기고 문장은 모델만 쓴다. 모델 문장이 없으면(실패·취소·응답 없음) 채팅에 아무 문장도 붙이지 않고 카드만 보인다. 진실성·증거·승인·권한·제어 흐름·오류 코드·FailureLog 코드는 그대로다.
+- **계획 안내:** `publicWorkPlanNotice`를 지웠다. 계획은 작업 기록(`publicPlan`)과 카드에만 남는다.
+- **실행 종료:** `publishActionFinal`의 `reason`은 이제 짧은 라벨이며 run 문맥 `hostRunNoticeV1 {reason, action?, instruction?}`에 저장된다. 채팅에는 `modelText`(완료가 아닌데 끝났다고 말하는 문장을 결정적으로 거르는 `ModelStatusText` 검사 통과 시) 또는 `verbatim`(모델 질문, 찾은 출처 목록처럼 이미 있는 내용)만 올라간다. 클라우드 부분 결과는 제공자의 `report.answer`를 먼저 쓴다. `ActionCompletionReport.render`는 이유 문장을 덧붙이지 않는다.
+- **웹 UI 계약(새 필드):** `messages[].runStatus = {phase, label, reason?, action?, actionLabel?, instruction?}` (실행에 묶인 assistant 메시지). `phase`: queued, running, waiting_approval, waiting_reply, waiting_login, waiting_time, paused, failed, interrupted, cancelled, completed. `action`: open_screen_setup, open_login, reply, open_pc_connection, open_calendar_permission, new_request, choose_model. 기존 `executionReport` 줄에도 상태 라벨이 들어가 지금 UI에서도 보인다.
+- **진행 보고:** 도구 이름은 쉬운 한국어 이름표(`toolLabel`에 빠진 도구 이름표를 모두 추가해 등록 도구 전부가 한국어 이름을 가진다. 모르는 도구는 "작업 단계")로 보인다. 증거 구분은 "확인함 / 안 됨 · 바뀌었는지 확인 필요 / 멈춤 · 바뀐 것 없음 / 준비만 함 · 결과는 아직 모름 / 결과 못 봄"으로 유지한다. 목표 일시정지 사유는 `GoalAutopilotPauseReason.label`(사용자용)과 `description`(도구 결과·예외용, 변경 없음)으로 나눴다.
+- **말투 지시:** `JIPSOONI_VOICE`에 쉬운 말 규칙과 계획 goal 문구 규칙을 넣었고, 로컬 의미 계획기 지시(`SemanticPlannerInstructions`)에도 goal 문구 규칙을 넣었다(표시 문구만, 계획·범위·권한 변화 없음). PC 쪽 `plan_task` 스키마 설명은 건드리지 않았다.
+- **감사표:** `.local/sdd/2026-11-28-persona-copy/strings-audit.md`.
+- **검증:** 대상 JVM 시험 8개 클래스 58건 통과(RunStatusNoticeTest, ChatExecutionReportTest, PublicWorkPlanTest, CloudAgentFinalsTest, ChatWorkActivityControllerTest, GoalRestartRecoveryTest, GoalTransientRetryTest, InlineRunActivityTest), `:core:test` 1188건 통과. voice-guard 스크립트 결과 LABEL 0, 문장 후보 70(모두 라벨·모델 지시문·예외 오탐, 감사표에 이유 기록). 전체 assembleRelease·lint·기기 확인은 하지 않았다. 웹 UI 카드 표시는 다른 브랜치에서 만든다.
+- **남은 틈:** `ActionCompletionReport.render`(core)의 영수증형 문장은 아직 채팅에 나간다. 모델 문장 다듬기 단계는 넣지 않았다. 목표 재시도·대기 결과 행은 라벨 글로만 바꿨다.
+
+## 2026-11-28 — 집순이 말투 기준·고정 문장 점검·말투 평가 (claude/voice-harness, 통합 대기)
+
+- **기준:** `docs/voice/jipsooni-voice.ko.md`와 `.claude/skills/jipsooni-voice/SKILL.md`(같은 내용)를 추가했다. 쉬운 해요체, 고정 문구 금지, 바꿔 쓰는 말 40쌍, 좋은 말과 나쁜 말 22쌍, 사실 규칙을 담았다. `AGENTS.md`에 한 줄 안내를 넣었다.
+- **정적 점검:** `scripts/tests/test_no_fixed_chat_sentences.py`(`scripts/voice-guard/`)가 앱·런타임·코어 Kotlin에서 채팅 출력 함수를 부르는 함수 안의 한국어 문장 상수와, 도구 라벨의 영어 식별자를 찾는다. 45bdb4b의 현재 위반 152건(고유 150건)과 라벨 문제 33건을 `docs/voice/fixed-sentence-allowlist.txt`에 `TODO remove (persona-copy branch)`로 올렸다. 새 위반을 추가하면 실패하고, 지운 항목이 목록에 남아 있어도 실패한다(지운 쪽이 목록을 같이 줄여야 한다). CI(android.yml)에 한 줄 추가. 소스(ChatRunCoordinator.kt 등)는 건드리지 않았다.
+- **평가:** `scripts/voice-eval/run_eval.py`가 `JIPSOONI_VOICE`를 소스에서 읽어 합성 시나리오 29개를 `claude -p`(도구 없음, 설정 없음)로 돌리고 규칙 검사와 심사 모델 채점을 한다. `--answers`, `--compare` 지원. 이 휴대폰 앱 동작이 아니라 문구 품질만 본다. 소스·APK 변경 없음, 빌드·설치 없음.
 
 ## 2026-11-28 — 장기 업무 상세 보고
 

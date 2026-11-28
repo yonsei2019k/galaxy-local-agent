@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from design/clay.json by scripts/gen-icons.py. Do not edit. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:pathData="M11 44.5 A13 2.2 0 1 0 37 44.5 A13 2.2 0 1 0 11 44.5 Z" android:fillColor="#2A1D14" android:fillAlpha="0.12" />
+    <path android:pathData="M14 11.2 H34 A8 8 0 0 1 42 19.2 V33.2 A8 8 0 0 1 34 41.2 H14 A8 8 0 0 1 6 33.2 V19.2 A8 8 0 0 1 14 11.2 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="6" android:endX="0" android:endY="46">
+                <item android:offset="0" android:color="#FF7FB1E3" />
+                <item android:offset="1" android:color="#FF5B93CC" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M14 9 H34 A8 8 0 0 1 42 17 V31 A8 8 0 0 1 34 39 H14 A8 8 0 0 1 6 31 V17 A8 8 0 0 1 14 9 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="10" android:startY="6" android:endX="30" android:endY="42">
+                <item android:offset="0" android:color="#FFDAECFF" />
+                <item android:offset="0.45" android:color="#FFACD5FF" />
+                <item android:offset="1" android:color="#FF7BADE0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M9 13 A5 1.6 0 1 0 19 13 A5 1.6 0 1 0 9 13 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.6" />
+    <path android:pathData="M9 35 L18 24 L25 31 L30 26 L39 35 Q39 36 38 36 H10 Q9 36 9 35 Z" android:fillColor="#5B93CC" />
+    <path android:pathData="M27.4 17 A3.6 3.6 0 1 0 34.6 17 A3.6 3.6 0 1 0 27.4 17 Z" android:fillColor="#FFE08A" />
+</vector>

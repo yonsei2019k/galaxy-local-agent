@@ -4,12 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PublicWorkPlanTest {
-    @Test fun noticeUsesTheExistingPublicPlanWithoutExposingHiddenContent(){
-        val notice=checkNotNull(publicWorkPlanNotice("네 명의 주말 숙소 총액을 비교할게요. 연락처 user@example.com"))
-        assertTrue(notice.contains("네 명의 주말 숙소 총액"))
-        assertTrue(notice.contains("잠시만 기다려 주세요"))
-        assertFalse(notice.contains("example.com"))
-        assertNull(publicWorkPlanNotice("<think>private</think>"))
+    @Test fun planGoesToTheTraceOnlyWithoutAChatNotice(){
+        // The plan is a trace row, never a canned chat answer around the goal.
+        val parts=publicWorkPlanParts("네 명의 주말 숙소 총액 비교하기 · 연락처 user@example.com",emptyList())
+        assertTrue(parts.joinToString("").contains("네 명의 주말 숙소 총액"))
+        assertFalse(parts.joinToString("").contains("example.com"))
+        assertFalse(parts.any {it.contains("잠시만 기다려") || it.contains("이렇게 진행할게요")})
     }
 
     @Test fun actualTaskExplanationIsPreservedInsteadOfReplacingItWithStatusText(){
