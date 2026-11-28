@@ -35,7 +35,7 @@ class ImageGenerationService:Service() {
             }
             val content=open?.let {PendingIntent.getActivity(this,id,it,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)}
             val builder=NotificationCompat.Builder(this,"image-generation").setSmallIcon(R.drawable.ic_agent)
-                .setContentTitle("ZipHap.Agent · 이미지 생성 중").setContentText(status).setContentIntent(content)
+                .setContentTitle("집순이 · 이미지 생성 중").setContentText(status).setContentIntent(content)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setOngoing(true)
             if(session!=null){
                 val stop=PendingIntent.getService(this,id,Intent(this,ImageGenerationService::class.java).setAction("stop")

@@ -330,7 +330,7 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                         put("messages",buildJsonArray {page.messages.forEach {message->add(buildJsonObject {
                             put("id",message.id);put("role",message.role);put("createdAt",message.createdAt);put("text",clip(message.text,500))
                         })}})
-                    },"ZipHap.Agent 자체 대화 기록의 일부입니다. 전체 원문은 대화 기록 화면에서 조회·내보낼 수 있습니다.")
+                    },"집순이 자체 대화 기록의 일부입니다. 전체 원문은 대화 기록 화면에서 조회·내보낼 수 있습니다.")
                 }
                 "list_imported_conversations"->listImportedConversations()
                 "search_conversation_imports"->searchConversationImports(call)

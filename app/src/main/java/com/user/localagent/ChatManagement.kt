@@ -260,7 +260,7 @@ fun ChatRunCoordinator.regenerate(messageId: String) = manage {
 
 fun ChatRunCoordinator.copyMessage(messageId: String) = manage {
     val text = com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(app.repository.chat.fullMessageText(messageId))
-    val clip = ClipData.newPlainText("ZipHap.Agent 답변", text).apply {
+    val clip = ClipData.newPlainText("집순이 답변", text).apply {
         description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
     }
     (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
@@ -312,7 +312,7 @@ private suspend fun ChatRunCoordinator.verifiedExport(prefix: String, extension:
 private fun ChatRunCoordinator.shareExport(file: File, mimeType: String) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val intent = Intent(Intent.ACTION_SEND).setType(mimeType).putExtra(Intent.EXTRA_STREAM, uri)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).apply { clipData = ClipData.newUri(context.contentResolver, "ZipHap.Agent 내보내기", uri) }
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).apply { clipData = ClipData.newUri(context.contentResolver, "집순이 내보내기", uri) }
     context.startActivity(Intent.createChooser(intent, "대화 파일 저장·공유").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
     status.value = "전체 원문 파일을 확인했습니다. 공유 화면에서 저장할 앱을 선택하세요."
 }

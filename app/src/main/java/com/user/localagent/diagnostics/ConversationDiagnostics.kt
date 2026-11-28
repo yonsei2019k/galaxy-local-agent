@@ -24,7 +24,7 @@ class ConversationDiagnostics(private val repository:LocalRepository) {
         fun write(text:String){val encoded=text.toByteArray(Charsets.UTF_8);check(bytes+encoded.size<=MAX_BYTES);output.write(encoded);bytes+=encoded.size}
         fun fits(text:String)=bytes+text.toByteArray(Charsets.UTF_8).size<=MAX_BYTES-FOOTER_RESERVE
         if(format==ConversationExportFormat.JSON)write("{\"schemaVersion\":1,\"scope\":\"ziphap_stored_app_messages_only\",\"order\":\"createdAt_desc_id_desc\",\"exportStartedAt\":${JsonPrimitive(Instant.now().toString())},\"includesText\":$includeText,\"messages\":[")
-        else write("ZipHap.Agent 대화 기록 · 앱에 저장된 대화만 포함\n최신 기록부터 · 개인 자료가 포함될 수 있습니다.\n\n")
+        else write("집순이 대화 기록 · 앱에 저장된 대화만 포함\n최신 기록부터 · 개인 자료가 포함될 수 있습니다.\n\n")
         while(!done && count<limit){
             currentCoroutineContext().ensureActive()
             val page=repository.messagePage(cursor,minOf(200,limit-count),query)

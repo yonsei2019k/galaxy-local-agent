@@ -51,7 +51,7 @@ fun UpdatePanel(
       ZipSection(contentPadding=PaddingValues(16.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             ZipIconTile(R.drawable.zi_download)
-            Text("ZipHap.Agent 업데이트",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
+            Text("집순이 업데이트",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
         }
         Spacer(Modifier.height(10.dp))
         Text(state.message,style=MaterialTheme.typography.bodyMedium,color=ZipHapColors.TextSecondary)

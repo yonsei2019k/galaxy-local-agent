@@ -300,7 +300,7 @@ fun ChatWorkspace(
                     }
                 }
             }
-            Text(navigation?.threads?.find{it.id==navigation.selectedThreadId}?.title?.takeIf{it.isNotBlank()}?:"ZipHap.Agent", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
+            Text(navigation?.threads?.find{it.id==navigation.selectedThreadId}?.title?.takeIf{it.isNotBlank()}?:"집순이", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                 color = ZipHapColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             WorkspaceModelSelector(selectedModelId, onModelChange,composerReady)
         }

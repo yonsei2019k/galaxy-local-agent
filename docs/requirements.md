@@ -20,6 +20,6 @@
 - Recommend extensions by ranking a public catalog locally against private task statistics. Never send personal histories, app usage, document contents or memories to GitHub search.
 - Every external installation/update must verify source, format, integrity/signature, permissions, network access and compatibility. Unsupported executable/native packages fail closed. Static checks do not guarantee absence of malicious behavior.
 - Trusted signed channel updates within existing permissions may apply automatically. New permissions, new publishers or unverifiable packages require review.
-- Product brand: ZipHap.Agent; premium readable native UI, adaptive icon and restrained system-respecting motion. Preserve installed package/signing identity.
+- Android display name: 집순이; premium readable native UI, adaptive icon and restrained system-respecting motion. Preserve installed package/signing identity.
 
 Implementation status is tracked in PROJECT_STATE.md. This requirement list does not claim the features are complete.

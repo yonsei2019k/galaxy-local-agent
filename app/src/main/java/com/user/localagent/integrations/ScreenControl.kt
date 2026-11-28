@@ -661,9 +661,9 @@ class ScreenControl(context:Context,private val nativeAppsOnly:Boolean=false) {
     }
     /** ZipHap itself is in front: report that (no content) so the agent can go home or open the target app first. */
     private fun ownAppView():String=buildJsonObject {
-        put("untrustedScreenData",true);put("packageName",context.packageName);put("app","ZipHap.Agent");put("snapshotId","ziphap-foreground")
+        put("untrustedScreenData",true);put("packageName",context.packageName);put("app","집순이");put("snapshotId","ziphap-foreground")
         put("controllable",false)
-        put("note","지금 전경은 ZipHap.Agent 자신이라 화면 내용은 읽지 않습니다. 다른 앱을 쓰려면 screen_action action=open_app (packageName에 패키지 이름 또는 앱 이름, 예: 계산기) 또는 action=home 을 snapshotId=ziphap-foreground 로 실행한 뒤 read_screen 하세요.")
+        put("note","지금 전경은 집순이 자신이라 화면 내용은 읽지 않습니다. 다른 앱을 쓰려면 screen_action action=open_app (packageName에 패키지 이름 또는 앱 이름, 예: 계산기) 또는 action=home 을 snapshotId=ziphap-foreground 로 실행한 뒤 read_screen 하세요.")
     }.toString()
 
     private fun service():ScreenBridgeService {
@@ -672,9 +672,9 @@ class ScreenControl(context:Context,private val nativeAppsOnly:Boolean=false) {
     }
 
     internal enum class SetupNeeded(val code:String,val instruction:String){
-        SYSTEM("screen_setup_system","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘ZipHap.Agent 화면 연결’을 켜 주세요. 집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’도 켜져 있는지 확인해 주세요."),
+        SYSTEM("screen_setup_system","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘집순이 화면 연결’을 켜 주세요. 집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’도 켜져 있는지 확인해 주세요."),
         APP("screen_setup_app","집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근에서 ‘에이전트 화면 제어’를 켜 주세요."),
-        RECONNECT("screen_setup_reconnect","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘ZipHap.Agent 화면 연결’을 껐다가 다시 켜고 집합으로 돌아와 주세요.");
+        RECONNECT("screen_setup_reconnect","휴대폰 설정 → 접근성 → 설치된 앱에서 ‘집순이 화면 연결’을 껐다가 다시 켜고 집합으로 돌아와 주세요.");
 
         companion object {
             fun forPause(outcomes:List<ObservedToolOutcome>):SetupNeeded? {
@@ -934,7 +934,7 @@ class ScreenControl(context:Context,private val nativeAppsOnly:Boolean=false) {
     private suspend fun <T> onMain(block:()->T):T=withContext(Dispatchers.Main){block()}
 
     open class ScreenRefused(message:String):IllegalStateException(message)
-    class OwnAppForeground:ScreenRefused("ZipHap.Agent 자신의 화면은 조작하지 않습니다.")
+    class OwnAppForeground:ScreenRefused("집순이 자신의 화면은 조작하지 않습니다.")
     internal class ScreenObservationUnavailable(message:String):ScreenRefused(message)
     internal class SnapshotChanged(private val afterApproval:Boolean):ScreenRefused(
         if(afterApproval)ScreenControlToolCatalog.APPROVED_SNAPSHOT_CHANGED_NOTICE

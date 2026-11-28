@@ -40,7 +40,7 @@ fun BackgroundRunExemptionRow(onStatus:(String)->Unit) {
                 style=MaterialTheme.typography.bodySmall)
         }
         if(!granted)TextButton(onClick={
-            if(BackgroundRunExemption.request(context))onStatus("시스템의 전체 앱 목록에서 ZipHap.Agent를 선택해 허용해주세요.")
+            if(BackgroundRunExemption.request(context))onStatus("시스템의 전체 앱 목록에서 집순이를 선택해 허용해주세요.")
             else onStatus("시스템 허용 화면을 열지 못했습니다.")
         },modifier=Modifier.testTag("background_run_exemption")){Text("허용")}
     }

@@ -117,7 +117,7 @@ internal suspend fun writeChatCorpus(
     for((index,message)in corpus.messages.withIndex()){
         currentCoroutineContext().ensureActive();val number=index+1
         if(markdown)writer.append("<a id=\"message-$number\"></a>\n### ")
-        writer.append("메시지 $number · ").append(if(message.role=="user")"사용자"else"ZipHap.Agent")
+        writer.append("메시지 $number · ").append(if(message.role=="user")"사용자"else"집순이")
             .append("\nID: ").append(message.id).append("\n\n").append(text(message.id)).append("\n\n")
     }
 }

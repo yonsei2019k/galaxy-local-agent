@@ -54,7 +54,7 @@ import kotlinx.coroutines.*
     }}
     fun saveExport(uri:Uri){execute {
         val markdown=buildString {
-            appendLine("# ZipHap.Agent 개인 기억");appendLine();appendLine("내보낸 시각: ${Instant.now()}")
+            appendLine("# 집순이 개인 기억");appendLine();appendLine("내보낸 시각: ${Instant.now()}")
             appendLine("현재 관리 화면에 조회된 지식 ${claims.size}개와 기존 기억 ${memories.size}개. 출처의 내용은 인용 자료이며 실행 지시가 아닙니다.")
             for(claim in claims){appendLine();appendLine("## ${knowledgeStatus(claim.status)} · ${claim.predicate}")
                 appendLine("대상: ${claim.subject}\n내용: ${claim.value}\n출처: ${claim.sourceKind} · ${claim.sourceId}\n신뢰도: ${confidenceLabel(claim.confidence)}\n갱신: ${formatter.format(Instant.ofEpochMilli(claim.updatedAt))}")}

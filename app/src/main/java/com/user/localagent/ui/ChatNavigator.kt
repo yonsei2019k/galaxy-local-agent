@@ -162,7 +162,7 @@ fun ChatNavigator(
         drawerContentColor = ZipHapColors.TextPrimary,
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("ZipHap.Agent", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("집순이", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             IconButton(onClick = onDismiss, modifier = Modifier.semantics { contentDescription = "대화 목록 닫기" }) { ZipIcon(com.user.localagent.runtime.R.drawable.zi_close, null, tint = ZipHapColors.TextPrimary) }
         }
         // The owner removed the drawer-wide "new conversation" button; each project row keeps its own "+".
