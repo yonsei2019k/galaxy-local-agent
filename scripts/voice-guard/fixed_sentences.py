@@ -20,7 +20,11 @@ SINKS = [
     "publishIncompleteCloudResult(", "publishMissingProviderReport(", "publishManagedReceiptReview(",
     "publishNoteReceiptFinal(", "publishPrivateCallFollowUpReport(", "publishOfficeReply(",
     "addMessage(", "appendAssistant", "finalAnswer", "ActionCompletionReport.render(",
+    "ActionCompletionReport.compose(", "publishReceipts(",
 ]
+# Files whose sentence literals all become chat text without a sink call in the same function
+# (the host's managed-action report: its text part is posted as the answer).
+CHAT_TEXT_FILES = {"core/src/main/kotlin/com/user/localagent/core/ActionCompletionReport.kt"}
 HANGUL = re.compile(r"[가-힣]")
 SENTENCE_END = re.compile(r"(요|다|죠|까|니다)\s*[.!?…]\s*$")
 FUN = re.compile(r"\bfun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(\w+)\s*\(")
@@ -105,6 +109,8 @@ def scan():
     out = []
     for p in iter_files():
         src = p.read_text(encoding="utf-8", errors="replace")
+        rel = str(p.relative_to(ROOT)).replace("\\", "/")
+        whole_file = rel in CHAT_TEXT_FILES
         lines = src.split("\n")
         funcs = [(i + 1, m.group(1)) for i, l in enumerate(lines) if (m := FUN.search(l))]
         if not funcs:
@@ -114,7 +120,7 @@ def scan():
         sink_in = []
         for s, e in zip(starts, ends):
             body = "\n".join(lines[s - 1:e - 1])
-            sink_in.append([x for x in SINKS if x in body])
+            sink_in.append([x for x in SINKS if x in body] or (["<chat-text file>"] if whole_file else []))
         for ln, text in literals(src):
             if not is_sentence(text):
                 continue
@@ -124,7 +130,6 @@ def scan():
             k = max((i for i, s in enumerate(starts) if s <= ln), default=0)
             if not sink_in[k]:
                 continue
-            rel = str(p.relative_to(ROOT)).replace("\\", "/")
             out.append((rel, ln, text.replace("\x00", "${...}").strip(), funcs[k][1]))
     return out
 
