@@ -112,8 +112,14 @@ export function MobileSidebar({ open, onClose, children }: { open: boolean; onCl
   </dialog>
 }
 
-export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOfficeProfile, onOpenWork }: {
+export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOfficeProfile, onOpenWork, pickerOpen, onPickerOpen, onPickerClose, onCharacterPickerShown }: {
   snapshot: Snapshot | null
+  /** The one character picker is opened from the header, the empty chat, or 나의 집순이 (native flag). */
+  pickerOpen: boolean
+  onPickerOpen(): void
+  onPickerClose(): void
+  /** Acknowledges the native openCharacterPicker flag so the host clears it. */
+  onCharacterPickerShown(epoch: number): void
   enabled: boolean
   onMenu(): void
   onManage(): void
@@ -124,10 +130,18 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
   const currentThread = snapshot?.threads.find(thread => thread.selected)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [character, setCharacter] = useCharacter()
-  const [pickerOpen, setPickerOpen] = useState(false)
   const mood = useCharacterMood(snapshot)
-
   const single = snapshot?.singleConversation === true
+  // Native 나의 집순이 > 집순이 모습 바꾸기 sets a bounded epoch; open once per epoch and tell the host to clear it.
+  const pickerEpoch = snapshot?.ready && single ? snapshot.openCharacterPicker : undefined
+  const handledEpoch = useRef<number | null>(null)
+  useEffect(() => {
+    if (pickerEpoch === undefined || handledEpoch.current === pickerEpoch) return
+    handledEpoch.current = pickerEpoch
+    onPickerOpen()
+    onCharacterPickerShown(pickerEpoch)
+  }, [pickerEpoch, onPickerOpen, onCharacterPickerShown])
+
   // The header face stays calm (S8, 2026-11-28): a paused or failed run shows its own face on its work card,
   // so the small 집순이 here never turns worried. Its motion (data-mood on the button) still follows the run.
   const headerSituation = situationForMood(mood) === 'blocked' ? 'idle' : situationForMood(mood)
@@ -138,14 +152,15 @@ export function Header({ snapshot, enabled, onMenu, onManage, onRename, onOffice
         <button type="button" className="icon-button menu-button" aria-label="대화 및 앱 메뉴 열기" onClick={onMenu}><Icon name="menu" /></button>
         {single && <>
           <div className="topbar-who">
-            <button type="button" className="character-button" data-mood={mood} aria-label="집순이 모습 바꾸기" onClick={() => setPickerOpen(true)}>
+            <button type="button" className="character-button" data-mood={mood} aria-label="집순이 모습 바꾸기" title="집순이 모습 바꾸기" onClick={onPickerOpen}>
               <Character choice={character} situation={headerSituation} size={36} decorative />
               {mood === 'thinking' && <span className="character-thinking" aria-hidden="true"><i /><i /><i /></span>}
               {mood === 'done' && <span className="character-burst" aria-hidden="true"><i /><i /><i /><i /><i /></span>}
+              <span className="character-edit-badge" aria-hidden="true"><Icon name="edit" /></span>
             </button>
             <span className="topbar-title" title={currentThread?.title ? withoutEmoji(currentThread.title) : undefined}><StickerText text={currentThread?.title || '집순이'} /></span>
           </div>
-          <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={() => setPickerOpen(false)} />
+          <CharacterPicker open={pickerOpen} value={character} onChange={setCharacter} onClose={onPickerClose} />
         </>}
         {!single && <div className="topbar-heading">
           <span className="topbar-title" title={currentThread?.title ? withoutEmoji(currentThread.title) : undefined}><StickerText text={currentThread?.title || '집순이'} /></span>
@@ -284,10 +299,10 @@ export function Composer({ snapshot, enabled, draft, pending, connectionNote, on
               {canStop && <button type="button" className="icon-button stop-button" aria-label="현재 작업 중단" title="현재 작업 중단" onClick={onStop}><Icon name="stop" /></button>}
               {canSteer && <button type="button" className="steer-button" disabled={!sendReady || !hasText || tooLongForSteer}
                 aria-label="추가 지시" title={tooLongForSteer ? '추가 지시는 4,000자까지 입력할 수 있어요.' : '실행 중인 작업에 추가 지시'} onClick={() => onSubmit('steer')}>
-                <Icon name="steer" /><span>추가 지시</span>
+                <Icon name="steer" />
               </button>}
               <button type="submit" className="send-button" disabled={!sendReady} title={`${sendLabel} (Ctrl / Cmd + Enter)`} aria-label={sendLabel}>
-                {busy && <span>{sendLabel}</span>}<Icon name={busy ? 'plus' : 'arrow'} />
+                <Icon name="arrow" />
               </button>
             </div>
           </div>

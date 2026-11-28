@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","saveOfficeProfile","clearOfficeProfile","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","characterPickerShown","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
     private val officeSeats=setOf("CHAIR","DIRECTOR","ASSOCIATE_GYUMIN","ASSOCIATE_SEOYUL")
     private fun requireOfficeEntries(element:JsonElement){
         val entries=element.jsonObject
@@ -48,6 +48,7 @@ internal object ReactBridgePolicy {
             "navigate"->setOf("panel")
             "saveOfficeProfile"->setOf("entries")
             "setCharacter"->setOf("field","value")
+            "characterPickerShown"->setOf("epoch")
             else->emptySet()
         }
         require(payload.keys==allowed)
@@ -58,7 +59,7 @@ internal object ReactBridgePolicy {
         else for((key,value) in payload){
             val p=value.jsonPrimitive
             if(key=="index")require(!p.isString&&p.int in 0..(if(action=="chooseReply")3 else 5))
-            else if(key in setOf("actionEpoch","bindingEpoch"))require(!p.isString&&p.long in 0..9007199254740991L)
+            else if(key in setOf("actionEpoch","bindingEpoch","epoch"))require(!p.isString&&p.long in 0..9007199254740991L)
             else {require(p.isString);require(p.content.length<=if(key=="text")when(action){"steer","answerGoalQuestion"->4000;"collabSend"->8000;else->12000}else 128);require(!p.content.contains('\u0000'))}
         }
         if(action in setOf("steer","collabSend"))require(payload.getValue("text").jsonPrimitive.content.isNotBlank())

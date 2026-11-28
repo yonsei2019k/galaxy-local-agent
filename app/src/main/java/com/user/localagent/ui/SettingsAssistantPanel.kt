@@ -11,6 +11,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalContext
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Rect
@@ -27,6 +31,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun SettingsAssistantPanel(
     app:AppContainer, character:CharacterPreference, open:(SettingsLink)->Unit, moveToChat:(String)->Boolean, modifier:Modifier=Modifier,
+    shortcuts:AssistantShortcutActions?=null,
 ) {
     val context = LocalContext.current
     val runner = remember(app, context) { SettingsAssistantRunner(context, app) }
@@ -53,8 +58,21 @@ internal fun SettingsAssistantPanel(
                     } else {
                         ZipHapCard {
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (index == 0) SettingsPortrait(character)
+                                if (index == 0) SettingsPortrait(character,
+                                    onClick = shortcuts?.let { { it.run(AssistantShortcut.CHANGE_CHARACTER) } })
                                 Text(reply.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        // The way to the one character picker (in the chat), as a plain row under the first card.
+                        if (index == 0 && shortcuts != null) ZipHapCard(
+                            Modifier.padding(top = 8.dp).clickable(role = Role.Button, onClickLabel = AssistantShortcut.CHANGE_CHARACTER.label) {
+                                shortcuts.run(AssistantShortcut.CHANGE_CHARACTER)
+                            }.testTag("assistant-change-character"),
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                ZipIllustration(R.drawable.zi_clay_me, null, Modifier.size(28.dp))
+                                Text(AssistantShortcut.CHANGE_CHARACTER.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                                ZipIcon(R.drawable.zi_chevron_right, null, tint = ZipHapColors.TextSecondary, size = 18.dp)
                             }
                         }
                     }
@@ -123,7 +141,7 @@ internal fun SettingsAssistantPanel(
 }
 
 @Composable
-private fun SettingsPortrait(character: CharacterPreference) {
+private fun SettingsPortrait(character: CharacterPreference, onClick: (() -> Unit)? = null) {
     val resources = LocalContext.current.resources
     val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, resources, character) {
         value = null
@@ -146,7 +164,9 @@ private fun SettingsPortrait(character: CharacterPreference) {
         }
     }
     Box(
-        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.Soft),
+        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ZipHapColors.Soft)
+            .then(if (onClick == null) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = AssistantShortcut.CHANGE_CHARACTER.label, onClick = onClick)
+                .semantics { contentDescription = AssistantShortcut.CHANGE_CHARACTER.label }),
         contentAlignment = Alignment.Center,
     ) {
         bitmap?.let { Image(it, contentDescription = null, modifier = Modifier.size(36.dp)) }

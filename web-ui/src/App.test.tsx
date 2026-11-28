@@ -754,6 +754,23 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'steer', payload: { runId: 'run-b', actionEpoch: 3, text: '다음 작업 추가 지시' } })
   })
 
+  it('orders run controls stop, steer, send with icon-only steer and an up-arrow send while busy', () => {
+    mount()
+    snapshot(running({ draft: '현재 작업 추가 지시' }))
+    const actions = button('다음에 보내기').parentElement!
+    const labels = [...actions.querySelectorAll('button')].map(item => item.getAttribute('aria-label'))
+    expect(labels).toEqual(['현재 작업 중단', '추가 지시', '다음에 보내기'])
+    const steer = button('추가 지시')
+    expect(steer.textContent).toBe('')
+    expect(steer.title).toBe('실행 중인 작업에 추가 지시')
+    const send = button('다음에 보내기')
+    expect(send.textContent).toBe('')
+    expect(send.querySelector('span')).toBeNull()
+    expect(send.querySelector('svg')?.getAttribute('data-icon')).toBe('arrow')
+    expect(steer.querySelector('svg')?.getAttribute('data-icon')).toBe('steer')
+    expect(actions.lastElementChild).toBe(send)
+  })
+
   it('keeps long input available for queued submission and respects the steer limit', () => {
     mount()
     const draft = '나'.repeat(4_001)

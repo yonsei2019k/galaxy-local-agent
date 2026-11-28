@@ -560,7 +560,7 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
 .send-button:disabled { background: #d3d8e3; color: var(--color-surface); }
 .send-button:disabled:has(span) { background: var(--disabled); color: var(--disabled-ink); }
 .send-button svg { width: 22px; height: 22px; }
-.steer-button { padding: 0 14px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--color-text); }
+.steer-button { width: var(--tap); height: var(--tap); padding: 0; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--color-text); }
 .steer-button:not(:disabled):hover { background: #d9e1ff; }
 .steer-button:disabled { color: var(--disabled-ink); }
 .stop-button { border-radius: var(--radius-pill); background: var(--color-surface); color: var(--ink); }
