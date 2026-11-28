@@ -173,7 +173,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private val workerConnectionHubFactory:((QueuedChatRequest)->com.user.localagent.connections.ConnectionHub)?=null,
     private val requestConnectionHub:com.user.localagent.connections.ConnectionHub?=null,
     private val externalIntentLauncher:(suspend(Intent)->Unit)?=null,
-    private val goalJournalFactory:((String,String,String?)->GoalExecutionJournal)?=null) {
+    private val goalJournalFactory:((String,String,String?)->GoalExecutionJournal)?=null,
+    private val deferQueueRestore:Boolean=false) {
     internal val executionEngine:com.user.localagent.inference.ComputeExecutionEngine=workerBinding?.engine?:app.engine
     internal val executionOrchestration:com.user.localagent.models.LocalOrchestration=if(workerBinding==null)app.orchestration else
         com.user.localagent.models.LocalOrchestration(context,app.models,executionEngine)
@@ -288,6 +289,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     internal var requestResearch:com.user.localagent.web.WebResearchController?=null
     private val preferences=context.getSharedPreferences("chat-preferences",0)
     private val initialized=CompletableDeferred<Unit>()
+    private val restoringGeneralQueue=java.util.concurrent.atomic.AtomicBoolean()
+    private val interruptedFileChecks=mutableMapOf<String,Job>()
     val status=MutableStateFlow("기기 안에서 실행")
     val busy=MutableStateFlow(false)
     val approval=MutableStateFlow<PendingAction?>(null)
@@ -316,25 +319,35 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         runMode.value=workerBinding.request.mode
         selectionReady.value=true
         initialized.complete(Unit)
-    }else if(!restorePersistedQueue){initialized.complete(Unit)}else scope.launch {
-        app.repository.chat.importLegacyDraft(context)
-        app.repository.chat.recoverInterruptedRuns()
-        val office=try{app.repository.chat.openFixedOfficeRooms()}
-        catch(cancel:CancellationException){throw cancel}
-        catch(error:Exception){FailureLog.record(context,"office_room_setup",error);null}
-        if(selection == null){
-            val thread=office ?: app.repository.chat.threads.first().firstOrNull() ?: app.repository.chat.createThread()
-            if(selection == null)selectThread(thread.id)
+    }else if(!restorePersistedQueue){initialized.complete(Unit)}else if(!deferQueueRestore)restoreGeneralQueue()}
+
+    internal fun restoreGeneralQueue() {
+        if(!restorePersistedQueue||workerBinding!=null||!restoringGeneralQueue.compareAndSet(false,true))return
+        scope.launch {
+            app.repository.chat.importLegacyDraft(context)
+            queueMutation.withLock {app.repository.chat.recoverInterruptedRuns(activeWorkers.keys.toSet())}
+            val office=try{app.repository.chat.openFixedOfficeRooms()}
+            catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){FailureLog.record(context,"office_room_setup",error);null}
+            if(selection == null){
+                val thread=office ?: app.repository.chat.threads.first().firstOrNull() ?: app.repository.chat.createThread()
+                if(selection == null)selectThread(thread.id)
+            }
+            val restored=queueMutation.withLock {
+                val known=queued.value.map {it.runId}.toSet()+activeWorkers.keys
+                app.repository.chat.queuedRuns().filterNot {it.id in known}
+                    .mapNotNull {run->runCatching {QueuedChatRequest.fromJson(run.contextJson)}.getOrNull()}
+                    .also {queued.value=queued.value+it}
+            }
+            restored.filter {it.goal!=null||it.browserAuthParentRunId!=null}.forEach {request->
+                if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
+                    runCatching {com.user.localagent.voice.AgentRunService.track(context,request.runId,request.threadId,request.text,request.goalSegment!=null)}
+            }
+            recoverGoalContinuations()
+            initialized.complete(Unit)
+            drain()
         }
-        queued.value=app.repository.chat.queuedRuns().mapNotNull {run->runCatching {QueuedChatRequest.fromJson(run.contextJson)}.getOrNull()}
-        queued.value.filter {it.goal!=null||it.browserAuthParentRunId!=null}.forEach {request->
-            if(!com.user.localagent.voice.RunKeepAlive.snapshot(request.runId).active)
-                runCatching {com.user.localagent.voice.AgentRunService.track(context,request.runId,request.threadId,request.text)}
-        }
-        recoverGoalContinuations()
-        initialized.complete(Unit)
-        drain()
-    }}
+    }
 
     /** A stop button belongs to the selected/original run, never to another room's compute engine. */
     fun stop(){
@@ -942,87 +955,164 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     private suspend fun recoverGoalContinuations() {
-        val chat=app.repository.chat
-        for(thread in chat.threads.first().filterNot {it.archived}) {
+        for(thread in app.repository.chat.threads.first().filterNot {it.archived}) {
             try {
-                goalMutation.withLock {
-                    val access=chat.accessScope(thread.id)
-                    val goal=goals.loadGuarded(access)?:return@withLock
-                    val parent=goal.linkedRunIds.lastOrNull()?.let {chat.run(it)}?:return@withLock
-                    val wait=app.goalWaits.store.get(goal.id)?.takeIf {record->
-                        record.parentRunId==parent.id&&record.threadId==thread.id&&record.branchId==thread.activeBranchId&&
-                            parent.branchId==record.branchId&&record.resumedOnceFor!=record.id
-                    }
-                    val hasWake=Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
-                    if(wait?.stopReason!=null){
-                        finishRecordedGoalWaitStop(wait,access,goal,parent)
-                        return@withLock
-                    }
-                    if(wait!=null&&goal.status in setOf(GoalStatus.WAITING,GoalStatus.ACTIVE)&&
-                        !parkedGoalAuthorityMatches(wait,requireGoalRunBinding(goal,parent),access,parent)) {
-                        pauseBlockedGoalWait(wait,access,goal,parent,authorityChanged=true)
-                        return@withLock
-                    }
-                    if(wait!=null&&(goal.status==GoalStatus.WAITING||goal.status==GoalStatus.ACTIVE&&!hasWake)) {
-                        if(wait.transientParentDigest!=null) {
-                            if(wait.matchesTransientParent(parent))scheduleTransientGoalRetry(access,goal,parent,requireGoalRunBinding(goal,parent),wait)
-                            else {
-                                app.goalWaits.cancel(wait)
-                                pauseApprovedGoal(access,goal,parent,GoalAutopilotPauseReason.INVALID_CHECKPOINT)
-                            }
-                            return@withLock
-                        }
-                        val parked=requireGoalRunBinding(goal,parent)
-                        val saved=parked.previousSteps.lastOrNull()
-                        val recordedWait=saved?.let {
-                            it.tool==GoalWaitToolCatalog.WAIT&&it.evidence.state==VerificationState.VERIFIED||
-                                it.tool in goalAuthReadTools&&it.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED&&it.evidence.effectNotApplied
-                        }==true
-                        val parkedRow=parent.status=="paused"&&parent.errorCode=="waiting_goal_condition"
-                        val restorable=parent.status=="interrupted"&&parent.errorCode=="process_restarted"&&recordedWait
-                        if(parkedRow||restorable) {
-                            if(goal.status==GoalStatus.ACTIVE)goals.saveGuarded(access,goal.copy(status=GoalStatus.WAITING))
-                            if(parkedRow||chat.restoreInterruptedGoalWait(parent))app.goalWaits.arm(wait)
-                            return@withLock
-                        }
-                    }
-                    if(goal.status!=GoalStatus.ACTIVE)return@withLock
-                    val interruptedWake=parent.status=="paused"&&parent.errorCode=="waiting_goal_condition"&&
-                        Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
-                    val unfinishedReadback=parent.status=="paused"&&parent.errorCode=="execution_not_verified"&&
-                        Json.parseToJsonElement(parent.contextJson).jsonObject["readbackObligations"] is JsonObject
-                    if(thread.activeBranchId!=parent.branchId||parent.status !in com.user.localagent.data.ChatStore.TERMINAL+"paused"||
-                        parent.status=="paused" && !goalMayResumeFrom(parent)&&!interruptedWake&&!unfinishedReadback&&!goalTransientFailure(parent))return@withLock
-                    val request=requireGoalRunBinding(goal,parent)
-                    if(request.goalSegment==null)return@withLock
-                    requireGoalSegmentScope(request,access)
-                    requireCapturedGoalAuthority(request)
-                    val unknown=goalRunEffectsUnresolved(parent,access.scopeKey)
-                    if(!unknown)check(app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
-                    when(val decision=goalRestartDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),
-                        unknown,useNativeBudget=true)) {
-                        is GoalSegmentDecision.Continue -> {
-                            if(goalTransientFailure(parent))scheduleTransientGoalRetry(access,goal,parent,request)
-                            else queueNextGoalSegment(access,goal,parent,decision,checkNotNull(currentCoroutineContext()[Job]))
-                        }
-                        GoalSegmentDecision.Complete -> completeApprovedGoal(access,goal,parent)
-                        is GoalSegmentDecision.Pause -> {
-                            pauseApprovedGoal(access,goal,parent,decision.reason)
-                            if(decision.reason==GoalAutopilotPauseReason.UNKNOWN_EFFECT&&parent.status=="interrupted"&&
-                                parent.errorCode=="process_restarted"&&InterruptedGoalFileCheck.KEY in parent.contextJson) {
-                                chat.run(parent.id)?.let {paused->
-                                    scope.launch {
-                                        initialized.await()
-                                        observeInterruptedGoalFile(paused,request,access)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                recoverGoalForThread(thread.id)
             } catch(cancel:CancellationException){throw cancel}
               catch(error:Exception){FailureLog.record(context,"goal_startup_recovery",error)}
         }
+    }
+
+    /** Called only on redelivery by the existing foreground service. Does not restore the general queue. */
+    internal suspend fun recoverTrackedGoal(runId:String,threadId:String) {
+        if(!com.user.localagent.voice.RunKeepAlive.snapshot(runId).active)return
+        recoverGoalForThread(threadId,runId)
+        drain()
+        interruptedFileChecks[runId]?.join()
+    }
+
+    private suspend fun recoverGoalForThread(threadId:String,trackedRunId:String?=null):Unit = goalMutation.withLock {
+        val chat=app.repository.chat
+        val thread=chat.thread(threadId)?.takeUnless {it.archived}?:return@withLock
+        val access=chat.accessScope(thread.id)
+        val goal=goals.loadGuarded(access)?:return@withLock
+        var parent=goal.linkedRunIds.lastOrNull()?.let {chat.run(it)}?:return@withLock
+        if(trackedRunId!=null) {
+            if(!trackedGoalRunMatches(parent.id,thread.id,thread.activeBranchId,goal,parent))return@withLock
+            val request=requireGoalRunBinding(goal,parent)
+            val segment=request.goalSegment?:return@withLock
+            if(request.goal?.let {sameGoalWork(it,goal)}!=true)return@withLock
+            if(parent.threadRevision!=access.threadRevision||
+                parent.projectRevision!=(access.projectId?.let {chat.project(it)?.revision}?:0L))return@withLock
+            requireGoalSegmentScope(request,access)
+            requireCapturedGoalAuthority(request)
+            val previous=if(trackedRunId==parent.id)null else {
+                if(!trackedGoalHandoffMatches(trackedRunId,goal,parent,segment))return@withLock
+                val source=chat.run(trackedRunId)?:return@withLock
+                requireGoalRunBinding(goal,source)
+                if(source.branchId!=thread.activeBranchId||source.threadRevision!=parent.threadRevision||
+                    source.projectRevision!=parent.projectRevision||goalRunEffectsUnresolved(source,access.scopeKey))return@withLock
+                requireGoalLaunchBinding(request,goal,source,callerCancelled=false)
+                source
+            }
+            val existing=queueMutation.withLock queue@{
+                if(executionForRun(parent.id)!=null || queued.value.any {it.runId==parent.id})return@queue true
+                if(chat.run(parent.id)!=parent)return@queue true
+                if(parent.status=="queued"&&goal.status==GoalStatus.ACTIVE) {
+                    if((goalStopEpochs[parent.threadId]?:0L)!=0L)return@queue true
+                    check(parent.startedAt==null)
+                    check(app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
+                    if(previous!=null&&!com.user.localagent.voice.RunKeepAlive.snapshot(parent.id).active) {
+                        if(!com.user.localagent.voice.AgentRunService.track(context,parent.id,parent.threadId,request.text,
+                                recoverGoal=true,previousGoalRunId=previous.id)||
+                            !com.user.localagent.voice.RunKeepAlive.await(parent.id).active)throw GoalRecoveryForegroundUnavailable()
+                    }
+                    check(com.user.localagent.voice.RunKeepAlive.snapshot(parent.id).active)
+                    if((goalStopEpochs[parent.threadId]?:0L)!=0L||chat.accessScope(thread.id)!=access||goals.loadGuarded(access)!=goal)return@queue true
+                    requireCapturedGoalAuthority(request)
+                    queued.value=queued.value+request
+                    return@queue true
+                }
+                if(parent.status in setOf("running","waiting_approval")) {
+                    parent=chat.recoverTrackedGoalRun(parent)?:return@queue true
+                }
+                false
+            }
+            if(existing)return@withLock
+        }
+        if(thread.activeBranchId!=parent.branchId)return@withLock
+        if(goal.status==GoalStatus.PAUSED&&parent.status=="interrupted"&&
+            parent.errorCode in setOf("process_restarted",GoalAutopilotPauseReason.UNKNOWN_EFFECT.code)&&
+            InterruptedGoalFileCheck.KEY in parent.contextJson) {
+            val request=requireGoalRunBinding(goal,parent)
+            requireGoalSegmentScope(request,access)
+            requireCapturedGoalAuthority(request)
+            if(parent.errorCode=="process_restarted") {
+                if(!goalRunEffectsUnresolved(parent,access.scopeKey))return@withLock
+                chat.updateRun(parent.id,parent.status,errorCode=GoalAutopilotPauseReason.UNKNOWN_EFFECT.code)
+                parent=chat.run(parent.id)?:return@withLock
+            }
+            scheduleInterruptedGoalFileCheck(parent,request,access)
+            return@withLock
+        }
+        val wait=app.goalWaits.store.get(goal.id)?.takeIf {record->
+            record.parentRunId==parent.id&&record.threadId==thread.id&&record.branchId==thread.activeBranchId&&
+                parent.branchId==record.branchId&&record.resumedOnceFor!=record.id
+        }
+        val hasWake=Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
+        if(wait?.stopReason!=null){
+            finishRecordedGoalWaitStop(wait,access,goal,parent)
+            return@withLock
+        }
+        if(wait!=null&&goal.status in setOf(GoalStatus.WAITING,GoalStatus.ACTIVE)&&
+            !parkedGoalAuthorityMatches(wait,requireGoalRunBinding(goal,parent),access,parent)) {
+            pauseBlockedGoalWait(wait,access,goal,parent,authorityChanged=true)
+            return@withLock
+        }
+        if(wait!=null&&(goal.status==GoalStatus.WAITING||goal.status==GoalStatus.ACTIVE&&!hasWake)) {
+            if(wait.transientParentDigest!=null) {
+                if(wait.matchesTransientParent(parent))scheduleTransientGoalRetry(access,goal,parent,requireGoalRunBinding(goal,parent),wait)
+                else {
+                    app.goalWaits.cancel(wait)
+                    pauseApprovedGoal(access,goal,parent,GoalAutopilotPauseReason.INVALID_CHECKPOINT)
+                }
+                return@withLock
+            }
+            val parked=requireGoalRunBinding(goal,parent)
+            val saved=parked.previousSteps.lastOrNull()
+            val recordedWait=saved?.let {
+                it.tool==GoalWaitToolCatalog.WAIT&&it.evidence.state==VerificationState.VERIFIED||
+                    it.tool in goalAuthReadTools&&it.evidence.summary==com.user.localagent.compute.BrowserAgentTools.PHONE_AUTH_REQUIRED&&it.evidence.effectNotApplied
+            }==true
+            val parkedRow=parent.status=="paused"&&parent.errorCode=="waiting_goal_condition"
+            val restorable=parent.status=="interrupted"&&parent.errorCode=="process_restarted"&&recordedWait
+            if(parkedRow||restorable) {
+                if(goal.status==GoalStatus.ACTIVE)goals.saveGuarded(access,goal.copy(status=GoalStatus.WAITING))
+                if(parkedRow||chat.restoreInterruptedGoalWait(parent))app.goalWaits.arm(wait)
+                return@withLock
+            }
+        }
+        if(goal.status!=GoalStatus.ACTIVE)return@withLock
+        val interruptedWake=parent.status=="paused"&&parent.errorCode=="waiting_goal_condition"&&
+            Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
+        val unfinishedReadback=parent.status=="paused"&&parent.errorCode=="execution_not_verified"&&
+            Json.parseToJsonElement(parent.contextJson).jsonObject["readbackObligations"] is JsonObject
+        if(thread.activeBranchId!=parent.branchId||parent.status !in com.user.localagent.data.ChatStore.TERMINAL+"paused"||
+            parent.status=="paused" && !goalMayResumeFrom(parent)&&!interruptedWake&&!unfinishedReadback&&!goalTransientFailure(parent))return@withLock
+        val request=requireGoalRunBinding(goal,parent)
+        if(request.goalSegment==null)return@withLock
+        requireGoalSegmentScope(request,access)
+        requireCapturedGoalAuthority(request)
+        val unknown=goalRunEffectsUnresolved(parent,access.scopeKey)
+        if(!unknown)check(app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
+        when(val decision=goalRestartDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),
+            unknown,useNativeBudget=true)) {
+            is GoalSegmentDecision.Continue -> {
+                if(goalTransientFailure(parent))scheduleTransientGoalRetry(access,goal,parent,request)
+                else queueNextGoalSegment(access,goal,parent,decision,checkNotNull(scope.coroutineContext[Job]),
+                    pauseOnForegroundUnavailable=trackedRunId==null)
+            }
+            GoalSegmentDecision.Complete -> completeApprovedGoal(access,goal,parent)
+            is GoalSegmentDecision.Pause -> {
+                pauseApprovedGoal(access,goal,parent,decision.reason)
+                if(decision.reason==GoalAutopilotPauseReason.UNKNOWN_EFFECT&&parent.status=="interrupted"&&
+                    parent.errorCode=="process_restarted"&&InterruptedGoalFileCheck.KEY in parent.contextJson) {
+                    chat.run(parent.id)?.let {scheduleInterruptedGoalFileCheck(it,request,access)}
+                }
+            }
+        }
+    }
+
+    /** Bound retries only while a recovered run still carries the dispatch marker. */
+    private fun scheduleInterruptedGoalFileCheck(parent:com.user.localagent.data.ChatRunRecord,request:QueuedChatRequest,
+        access:com.user.localagent.data.ChatAccessScope) {
+        if(parent.id in interruptedFileChecks)return
+        val job=scope.launch(start=CoroutineStart.LAZY) {
+            try {observeInterruptedGoalFile(parent,request,access)}
+            finally {interruptedFileChecks.remove(parent.id)}
+        }
+        interruptedFileChecks[parent.id]=job
+        job.start()
     }
 
     /** The original failure, receipt and request remain unchanged while WorkManager owns the next check. */
@@ -2692,19 +2782,26 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 project.revision
             }?:0L) && workspace.bindingFingerprint()==request.workspaceBinding &&
             goals.loadGuarded(access)?.let {live->
-                live.id==request.goal?.id&&live.status==GoalStatus.PAUSED&&live.linkedRunIds.lastOrNull()==parent.id
+                request.goal?.let {sameGoalWork(it,live)}==true&&live.status==GoalStatus.PAUSED&&live.linkedRunIds.lastOrNull()==parent.id
             }==true
         try {
-            withTimeoutOrNull(4_000L) { workspace.acquireLease().use {
-                if(!stillAllowed())return@withTimeoutOrNull
-                requireCapturedGoalAuthority(request)
-                val digest=workspace.hashForAudit(file.path,file.size)
-                if(!file.matches(digest.path,digest.sha256,digest.bytes)||!stillAllowed())return@withTimeoutOrNull
-                requireCapturedGoalAuthority(request)
-                currentCoroutineContext().ensureActive()
-                app.repository.chat.recordInterruptedGoalFileMatch(parent)
-                Unit
-            }}
+            withTimeoutOrNull(4_000L) {
+                if(workspace.state.value.external)return@withTimeoutOrNull
+                val lease=workspace.acquirePrivateReadLease(request.workspaceBinding?:return@withTimeoutOrNull)
+                    ?:return@withTimeoutOrNull
+                lease.use {
+                    if(!stillAllowed())return@withTimeoutOrNull
+                    requireCapturedGoalAuthority(request)
+                    val digest=workspace.hashForAudit(file.path,file.size)
+                    if(!file.matches(digest.path,digest.sha256,digest.bytes))return@withTimeoutOrNull
+                    goalMutation.withLock {
+                        if(!stillAllowed())return@withLock
+                        requireCapturedGoalAuthority(request)
+                        currentCoroutineContext().ensureActive()
+                        app.repository.chat.recordInterruptedGoalFileMatch(parent)
+                    }
+                }
+            }
         }catch(cancel:CancellationException){throw cancel}
         catch(_:Exception){ /* An optional local observation leaves the uncertain result intact. */ }
     }

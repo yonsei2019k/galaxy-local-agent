@@ -165,7 +165,7 @@ internal object GoalPdfEmail {
 
     suspend fun lookup(app: AppContainer, thread: String, branch: String, messageId: String): Pair<QueuedChatRequest,ToolCall>? {
         val room = app.repository.chat.thread(thread) ?: return null
-        if (room.deletedAt != null || room.activeBranchId != branch || app.runs.selectedThreadId.value != thread) return null
+        if (room.deletedAt != null || room.activeBranchId != branch || app.scopedRuns.selectedThreadId.value != thread) return null
         val msg = app.repository.getMessage(messageId) ?: return null
         if (msg.threadId != thread || msg.branchId != branch || msg.role != "assistant") return null
         val run = msg.runId?.let { app.repository.chat.run(it) } ?: return null

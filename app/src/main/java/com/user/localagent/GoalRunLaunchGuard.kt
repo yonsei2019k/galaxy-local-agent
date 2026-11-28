@@ -192,6 +192,16 @@ internal fun goalMayResumeFrom(row:ChatRunRecord):Boolean =
     row.status=="completed" || row.status=="interrupted"&&row.errorCode=="process_restarted" ||
         row.status=="paused"&&row.errorCode in goalRecoverablePauseCodes
 
+/** Redelivery owns the exact original run and cannot substitute the newest run in another conversation. */
+internal fun trackedGoalRunMatches(runId:String,threadId:String,branchId:String,goal:GoalDefinition,row:ChatRunRecord):Boolean =
+    goal.linkedRunIds.lastOrNull()==runId&&goal.threadId==threadId&&row.id==runId&&row.threadId==threadId&&
+        row.branchId==branchId&&row.projectId==goal.projectId&&goal.status in setOf(GoalStatus.ACTIVE,GoalStatus.WAITING,GoalStatus.PAUSED)
+
+/** A previous service may still own the last undelivered start while its child is committed. */
+internal fun trackedGoalHandoffMatches(runId:String,goal:GoalDefinition,child:ChatRunRecord,segment:GoalSegmentBinding):Boolean =
+    goal.status==GoalStatus.ACTIVE&&child.status=="queued"&&child.startedAt==null&&
+        goal.linkedRunIds.takeLast(2)==listOf(runId,child.id)&&segment.parentRunId==runId
+
 /** Pure host decision. unknownEffects must come from the real runtime journal, never model prose. */
 internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
     useNativeBudget:Boolean=false):GoalSegmentDecision {

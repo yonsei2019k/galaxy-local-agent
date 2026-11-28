@@ -55,6 +55,29 @@ class GoalSegmentAutopilotTest {
     @Test fun unknownRuntimeEffectCannotBeReplayedEvenWhenAllVisibleStepsSayVerified() {
         pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(unknown=true))
     }
+
+    @Test fun serviceRedeliveryIsBoundToTheSameLatestRunAndConversation() {
+        val interrupted=row(status="interrupted",errorCode="process_restarted")
+        assertTrue(trackedGoalRunMatches("run-a","thread","branch",goal(),interrupted))
+        assertFalse(trackedGoalRunMatches("other","thread","branch",goal(),interrupted))
+        assertFalse(trackedGoalRunMatches("run-a","thread","new-branch",goal(),interrupted))
+        assertFalse(trackedGoalRunMatches("run-a","thread","branch",goal(),interrupted.copy(threadId="other")))
+        assertFalse(trackedGoalRunMatches("run-a","thread","branch",goal(listOf("run-a","run-b")),interrupted))
+        assertFalse(trackedGoalRunMatches("run-a","thread","branch",goal().copy(status=GoalStatus.COMPLETE),interrupted))
+    }
+
+    @Test fun previousServiceCanRecoverOnlyItsImmediateUnstartedChild() {
+        val original=request()
+        val latest=child(original,decide(original) as GoalSegmentDecision.Continue)
+        val candidate=row(latest,status="queued",errorCode=null)
+        val current=checkNotNull(latest.goal)
+        val binding=checkNotNull(latest.goalSegment)
+        assertTrue(trackedGoalHandoffMatches("run-a",current,candidate,binding))
+        assertFalse(trackedGoalHandoffMatches("other",current,candidate,binding))
+        assertFalse(trackedGoalHandoffMatches("run-a",current,candidate.copy(status="running"),binding))
+        assertFalse(trackedGoalHandoffMatches("run-a",current,candidate.copy(startedAt=started),binding))
+        assertFalse(trackedGoalHandoffMatches("run-a",current.copy(linkedRunIds=listOf("run-a","other","run-b")),candidate,binding))
+    }
     @Test fun unverifiedStepsAndKnownFailuresAreRetainedAndStopAutomaticContinuation() {
         pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(request(listOf(step(state=VerificationState.UNVERIFIED)))))
         for(noEffect in listOf(false,true)) {

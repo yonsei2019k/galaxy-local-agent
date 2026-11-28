@@ -79,10 +79,11 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
     val chatAttachments by lazy {com.user.localagent.workspace.ChatAttachments(appContext,this)}
     val knowledgeIngestion by lazy {com.user.localagent.automation.KnowledgeIngestionController(appContext,repository)}
     val planningFeedback by lazy {com.user.localagent.automation.PlanningFeedbackStore(repository)}
-    val runs by lazy {
+    internal val scopedRuns by lazy {
         check(assistantWorkEnabled){"이 앱에서는 일반 에이전트를 시작하지 않습니다."}
-        ChatRunCoordinator(appContext,this)
+        ChatRunCoordinator(appContext,this,deferQueueRestore=true)
     }
+    val runs get()=scopedRuns.also {it.restoreGeneralQueue()}
     val remoteTests by lazy {com.user.localagent.compute.PcRemoteTestInbox(appContext,this)}
     suspend fun validatePrivateDataOrigin(origin:com.user.localagent.audio.PrivateDataPickerOrigin) {
         val expected=origin.scope
@@ -104,7 +105,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
         requestEngine:com.user.localagent.inference.InferenceEngine=engine,
         isRunLive:()->Boolean={false},
         approveGmailSend:suspend(String,com.user.localagent.core.ToolCall,com.user.localagent.core.connections.GmailSendPreview)->Boolean={_,_,_->false},
-        goalStore:com.user.localagent.automation.ChatGoalStore=runs.goals,
+        goalStore:com.user.localagent.automation.ChatGoalStore=scopedRuns.goals,
         onGoalChanged:suspend(com.user.localagent.core.GoalDefinition?)->Unit={},
         pcDataBinding:String?=null,
         kakaoReadBinding:String?=null,
@@ -231,7 +232,7 @@ class AppContainer(context: Context,repositoryOverride:LocalRepository?=null,pri
         idleUnload=maintenanceScope.launch {
             delay(120_000)
             // Image-only cleanup must not initialize the assistant's lazy coordinator.
-            val mayUnload = !assistantWorkEnabled || (!runs.busy.value && runs.queued.value.isEmpty())
+            val mayUnload = !assistantWorkEnabled || (!scopedRuns.busy.value && scopedRuns.queued.value.isEmpty())
             if(mayUnload&&RuntimeGate.inference.compareAndSet(false,true))
                 try{engine.unloadPhoneResidency()}finally{RuntimeGate.inference.set(false)}
         }

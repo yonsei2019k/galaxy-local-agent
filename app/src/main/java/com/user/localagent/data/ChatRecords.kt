@@ -974,25 +974,34 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val active=dao.runsForThread(threadId).filter {it.status !in TERMINAL||ChatQueueStore.isResumeQueued(it)}
         active.forEach {r->dao.run(r.copy(status=if(r.status in TERMINAL)r.status else"cancelled",contextJson=ChatQueueStore.withoutResumeFlag(r.contextJson),errorCode=if(r.status in TERMINAL)r.errorCode else errorCode,updatedAt=now(),finishedAt=r.finishedAt?:now()));queueStore.discardEmptyCancelledAssistant(r.id)};active.size
     }
-    suspend fun recoverInterruptedRuns():Int=database.withTransaction {
-        val active=dao.interrupted();active.forEach {r->
-            dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
-            val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
-            val stoppedAuth=r.errorCode==com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
-            val browserAuth=!stoppedAuth&&r.status=="running"&&runCatching {
-                val request=com.user.localagent.QueuedChatRequest.fromJson(r.contextJson)
-                com.user.localagent.BrowserAuthContinuation.allowsOrdinaryHandoff(request)&&
-                    com.user.localagent.BrowserAuthContinuation.canReopenLogin(r.contextJson)
-            }.getOrDefault(false)
-            dao.run(r.copy(status=when {stoppedByOwner||stoppedAuth->"cancelled";browserAuth->"paused";else->"interrupted"},
-                errorCode=when {
-                    stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
-                    stoppedAuth->com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
-                    browserAuth->"waiting_browser_auth"
-                    r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
-                    else->"process_restarted"
-                },updatedAt=now(),finishedAt=now()))
-        };active.size
+    suspend fun recoverInterruptedRuns(except:Set<String> = emptySet()):Int=database.withTransaction {
+        val active=dao.interrupted().filterNot {it.id in except}
+        active.forEach {recoverInterruptedRun(it)}
+        active.size
+    }
+    internal suspend fun recoverTrackedGoalRun(expected:ChatRunRecord):ChatRunRecord?=database.withTransaction {
+        if(dao.run(expected.id)!=expected||expected.status !in setOf("running","waiting_approval"))return@withTransaction null
+        val request=com.user.localagent.QueuedChatRequest.fromJson(expected.contextJson)
+        if(request.goalSegment==null||request.runId!=expected.id)return@withTransaction null
+        recoverInterruptedRun(expected)
+    }
+    private suspend fun recoverInterruptedRun(r:ChatRunRecord):ChatRunRecord {
+        dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
+        val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
+        val stoppedAuth=r.errorCode==com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
+        val browserAuth=!stoppedAuth&&r.status=="running"&&runCatching {
+            val request=com.user.localagent.QueuedChatRequest.fromJson(r.contextJson)
+            com.user.localagent.BrowserAuthContinuation.allowsOrdinaryHandoff(request)&&
+                com.user.localagent.BrowserAuthContinuation.canReopenLogin(r.contextJson)
+        }.getOrDefault(false)
+        return r.copy(status=when {stoppedByOwner||stoppedAuth->"cancelled";browserAuth->"paused";else->"interrupted"},
+            errorCode=when {
+                stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
+                stoppedAuth->com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
+                browserAuth->"waiting_browser_auth"
+                r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
+                else->"process_restarted"
+            },updatedAt=now(),finishedAt=now()).also {dao.run(it)}
     }
     suspend fun messagePage(threadId:String,branchId:String?=null,beforePosition:Long?=null,limit:Int=100):ChatMessagePage {
         require(limit in 1..200);val t=activeThread(threadId);val branch=branchId?:t.activeBranchId;activeBranch(threadId,branch)

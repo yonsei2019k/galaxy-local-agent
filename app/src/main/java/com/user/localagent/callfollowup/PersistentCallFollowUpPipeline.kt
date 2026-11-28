@@ -180,7 +180,7 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
             requireAuthorized(initial)
             ensureRoute(initial)
             initial = checkNotNull(store.job(queueId)) // The first route creation captures its exact revisions durably.
-            if (!deviceSafe() || !app.runs.selectionReady.value || app.runs.busy.value || app.runs.queued.value.isNotEmpty() ||
+            if (!deviceSafe() || !app.scopedRuns.selectionReady.value || app.scopedRuns.busy.value || app.scopedRuns.queued.value.isNotEmpty() ||
                 RuntimeGate.benchmark.get() || !RuntimeGate.inference.compareAndSet(false, true)) {
                 store.update(queueId, epoch) { it.copy(status = "DEFERRED", errorCode = "DEVICE_OR_OWNER_BUSY") }
                 return@withContext CallPipelineBatchResult.DEFERRED
@@ -533,7 +533,7 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
         val watcher = launch(Dispatchers.IO) {
             while (isActive) {
                 delay(1000)
-                if (!deviceSafe() || app.runs.busy.value || app.runs.queued.value.isNotEmpty()) {
+                if (!deviceSafe() || app.scopedRuns.busy.value || app.scopedRuns.queued.value.isNotEmpty()) {
                     engine.cancel(); operation.cancel(CallPipelineDeferred()); return@launch
                 }
                 try { checkSource(job) }

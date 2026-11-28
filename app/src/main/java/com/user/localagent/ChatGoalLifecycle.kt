@@ -63,7 +63,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
     capturedAllowExternalAgent:Boolean=false,capturedExternalAgentRevision:Long?=null,
     capturedKakaoReadBinding:String?=null,capturedPcImageRecoveryAllowed:Boolean=false,
     nextSegment:GoalSegmentDecision.Continue?=null,capturedPcTextDefault:String?=null,
-    ownerReplyTo:String?=null,renewBudget:Boolean=false):GoalLifecycleReceipt {
+    ownerReplyTo:String?=null,renewBudget:Boolean=false,pauseOnForegroundUnavailable:Boolean=true):GoalLifecycleReceipt {
     check(!renewBudget||nextSegment==null&&ownerReplyTo==null)
     var reserved:String?=null
     var writtenGoal:GoalDefinition?=null
@@ -175,8 +175,12 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
                 requireGoalRunBinding(linked,saved).toJson()==context&&goals.loadGuarded(access)==linked){"목표와 실제 대기 작업의 저장 결과를 확인하지 못했습니다."}
             check(app.repository.chat.accessScope(access.threadId)==access)
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
-            if(!com.user.localagent.voice.AgentRunService.track(this.context,runId,access.threadId,ownerInstruction)||
-                !com.user.localagent.voice.RunKeepAlive.await(runId).active)throw GoalAutopilotPaused(GoalAutopilotPauseReason.STOPPED)
+            if(!com.user.localagent.voice.AgentRunService.track(this.context,runId,access.threadId,ownerInstruction,
+                    recoverGoal=true,previousGoalRunId=nextSegment?.binding?.parentRunId)||
+                !com.user.localagent.voice.RunKeepAlive.await(runId).active) {
+                if(!pauseOnForegroundUnavailable)throw GoalRecoveryForegroundUnavailable()
+                throw GoalAutopilotPaused(GoalAutopilotPauseReason.STOPPED)
+            }
             check(app.repository.chat.accessScope(access.threadId)==access&&goals.loadGuarded(access)==linked)
             currentCoroutineContext().ensureActive();check(callerJob.isActive)
             // drain checks this original job before startRun, including cancellation after return.
@@ -224,7 +228,7 @@ internal suspend fun ChatRunCoordinator.queueBoundedGoalRun(access:ChatAccessSco
 
 /** Root calls after parent cleanup, under goalMutation; queue CAS/readback remains the same path. */
 internal suspend fun ChatRunCoordinator.queueNextGoalSegment(access:ChatAccessScope,goal:GoalDefinition,
-    parent:ChatRunRecord,next:GoalSegmentDecision.Continue,callerJob:Job):GoalLifecycleReceipt {
+    parent:ChatRunRecord,next:GoalSegmentDecision.Continue,callerJob:Job,pauseOnForegroundUnavailable:Boolean=true):GoalLifecycleReceipt {
     check(app.repository.chat.run(parent.id)==parent){"목표의 부모 실행이 변경되었습니다."}
     val request=requireGoalRunBinding(goal,parent)
     check(next.binding.parentRunId==parent.id&&next.binding.parentCheckpointDigest==goalDigest(parent.contextJson))
@@ -233,8 +237,10 @@ internal suspend fun ChatRunCoordinator.queueNextGoalSegment(access:ChatAccessSc
         capturedPcRevision=request.capturedPcRevision,allowCloudText=request.allowCloudText,
         capturedAllowExternalAgent=request.allowExternalAgent,capturedExternalAgentRevision=request.externalAgentRevision,
         capturedKakaoReadBinding=request.kakaoReadBinding,capturedPcImageRecoveryAllowed=request.pcImageRecoveryAllowed,nextSegment=next,
-        capturedPcTextDefault=request.capturedPcTextDefault)
+        capturedPcTextDefault=request.capturedPcTextDefault,pauseOnForegroundUnavailable=pauseOnForegroundUnavailable)
 }
+
+internal class GoalRecoveryForegroundUnavailable:IllegalStateException("목표의 백그라운드 재개에 필요한 실행 서비스를 시작하지 못했습니다.")
 
 /** Locks protect selection/CAS, but neither lock is held while waiting for a running job. */
 internal suspend fun ChatRunCoordinator.quiesceGoalRuns(access:ChatAccessScope,goal:GoalDefinition,callerRunId:String?):GoalLifecycleReceipt {

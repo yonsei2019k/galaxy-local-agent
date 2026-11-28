@@ -196,11 +196,15 @@ class AgentRunService:Service() {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
         private val cleanupHolds=RunCleanupHoldRegistry {android.os.SystemClock.elapsedRealtime()}
         /** Submission success is distinct from RunKeepAlive.await's actual startForeground receipt. */
-        fun track(context:Context,runId:String,threadId:String,text:String):Boolean {
+        fun track(context:Context,runId:String,threadId:String,text:String,recoverGoal:Boolean=false,previousGoalRunId:String?=null):Boolean {
             val token=RunKeepAlive.begin(runId)?:return false
             return runCatching {
-                ContextCompat.startForegroundService(context,Intent(context,AgentRunService::class.java)
-                    .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",text.take(200)).putExtra("keepAliveToken",token))
+                val intent=Intent(context,AgentRunService::class.java)
+                    .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",if(recoverGoal)"장기 작업 진행 중" else text.take(200))
+                    .putExtra("keepAliveToken",token)
+                    .putExtra("recoverGoal",recoverGoal)
+                val continuing=recoverGoal&&previousGoalRunId?.let {RunKeepAlive.snapshot(it).active}==true
+                checkNotNull(if(continuing)context.startService(intent) else ContextCompat.startForegroundService(context,intent))
             }.onFailure{RunKeepAlive.acknowledge(runId,token,false,"FOREGROUND_START_REJECTED")}.isSuccess
         }
         /**
@@ -221,7 +225,11 @@ class AgentRunService:Service() {
             return info.importance<=ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         }
     }
-    private class Tracked(val threadId:String,val text:String,val token:String?,val since:Long=System.currentTimeMillis()){var approvalNotified=false}
+    private class Tracked(val threadId:String,val text:String,val token:String?,val since:Long=System.currentTimeMillis()){
+        var approvalNotified=false
+        var recovering=false
+        var recoveryNoticeShown=false
+    }
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
     private val runs=LinkedHashMap<String,Tracked>()
     private var job:Job?=null
@@ -232,8 +240,13 @@ class AgentRunService:Service() {
         manager.createNotificationChannel(NotificationChannel(CHANNEL,"에이전트 작업 진행",NotificationManager.IMPORTANCE_LOW))
         manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
         val runId=intent?.getStringExtra("runId");val threadId=intent?.getStringExtra("threadId")
-        val token=intent?.getStringExtra("keepAliveToken")
-        if(runId!=null&&threadId!=null)runs[runId]=Tracked(threadId,intent.getStringExtra("text").orEmpty(),token)
+        val recoverGoal=intent?.getBooleanExtra("recoverGoal",false)==true&&runId!=null&&threadId!=null
+        val recovering=recoverGoal&&(flags and (START_FLAG_REDELIVERY or START_FLAG_RETRY))!=0&&runId !in runs
+        val token=if(recovering)runId?.let(RunKeepAlive::begin)else intent?.getStringExtra("keepAliveToken")
+        val tracked=if(runId!=null&&threadId!=null)Tracked(threadId,intent.getStringExtra("text").orEmpty(),token).also {
+            it.recovering=recovering
+            runs[runId]=it
+        }else null
         val latest=runs.entries.lastOrNull()
         // startForeground must follow every startForegroundService, even one that brought nothing to track.
         try{ServiceCompat.startForeground(this,ID,ongoing(latest?.key,latest?.value),if(Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)}
@@ -244,7 +257,17 @@ class AgentRunService:Service() {
         if(runId!=null&&token!=null)RunKeepAlive.acknowledge(runId,token,true)
         if(runs.isEmpty()){stopSelf();return START_NOT_STICKY}
         if(job?.isActive!=true)job=scope.launch{watch(manager)}
-        return START_NOT_STICKY
+        if(recovering&&runId!=null&&threadId!=null&&tracked!=null&&token!=null)scope.launch {
+            try {
+                (application as LocalAgentApplication).container.scopedRuns.recoverTrackedGoal(runId,threadId)
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:com.user.localagent.GoalRecoveryForegroundUnavailable){
+                tracked.recoveryNoticeShown=true
+                alert(manager,runId,tracked,"이어서 진행할 작업이 있어요","앱을 열어 주시면 중단된 작업부터 확인하고 이어갈게요.")
+            }catch(error:Exception){com.user.localagent.FailureLog.record(this@AgentRunService,"goal_service_recovery",error)}
+            finally {tracked.recovering=false}
+        }
+        return if(recoverGoal)START_REDELIVER_INTENT else START_NOT_STICKY
     }
 
     private fun open(runId:String,threadId:String)=PendingIntent.getActivity(this,runId.hashCode(),
@@ -258,12 +281,14 @@ class AgentRunService:Service() {
         val app=(application as LocalAgentApplication).container
         while(runs.isNotEmpty()){
             delay(2000)
-            val pending=app.runs.approval.value
+            val pending=app.scopedRuns.pendingActions.value
             for((runId,run) in runs.entries.toList()){
-                if(pending!=null&&pending.runId==runId){
+                if(run.recovering)continue
+                val approval=pending.firstOrNull {it.runId==runId}
+                if(approval!=null){
                     if(!run.approvalNotified&&!appOnScreen()){
                         run.approvalNotified=true
-                        alert(manager,runId,run,"승인이 필요합니다","눌러서 ZipHap에서 확인해주세요: "+(pending.reviewText?.lineSequence()?.firstOrNull{it.isNotBlank()}?:pending.call.name))
+                        alert(manager,runId,run,"승인이 필요합니다","눌러서 ZipHap에서 확인해주세요: "+(approval.reviewText?.lineSequence()?.firstOrNull{it.isNotBlank()}?:approval.call.name))
                     }
                 }else run.approvalNotified=false
                 val row=withContext(Dispatchers.IO){app.repository.chat.run(runId)}
@@ -273,7 +298,7 @@ class AgentRunService:Service() {
                     runs.remove(runId)
                     cleanupHolds.clear(runId)
                     run.token?.let{RunKeepAlive.acknowledge(runId,it,false,"FOREGROUND_TRACKING_ENDED")}
-                    if(row!=null&&!appOnScreen()){
+                    if(row!=null&&!run.recoveryNoticeShown&&!appOnScreen()){
                         val answer=withContext(Dispatchers.IO){
                             app.repository.chat.messages(run.threadId).first().lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
                         }

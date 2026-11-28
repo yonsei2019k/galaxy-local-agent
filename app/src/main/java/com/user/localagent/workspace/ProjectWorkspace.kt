@@ -31,9 +31,13 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
     private data class ReadEvidence(val hash:String,val complete:Boolean,val binding:String,val token:String?=null)
     private val reads=mutableMapOf<Pair<String,String>,ReadEvidence>()
     private val ownerReader="owner-ui"
-    suspend fun acquireLease():java.io.Closeable=operation.withLock {
+    suspend fun acquireLease():java.io.Closeable=operation.withLock {newLease()}
+    internal suspend fun acquirePrivateReadLease(expectedBinding:String):java.io.Closeable?=operation.withLock {
+        if(tree()==null&&bindingUnlocked()==expectedBinding)newLease() else null
+    }
+    private fun newLease():java.io.Closeable {
         leases.incrementAndGet();val open=java.util.concurrent.atomic.AtomicBoolean(true)
-        java.io.Closeable {if(open.compareAndSet(true,false))leases.decrementAndGet()}
+        return java.io.Closeable {if(open.compareAndSet(true,false))leases.decrementAndGet()}
     }
     suspend fun bindingFingerprint():String=operation.withLock {sha256("$workspaceId|${tree()?.toString()?:privateRoot.path}")}
     private fun bindingUnlocked()=sha256("$workspaceId|${tree()?.toString()?:privateRoot.path}")
