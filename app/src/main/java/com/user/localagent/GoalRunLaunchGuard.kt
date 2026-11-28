@@ -116,6 +116,22 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
     PROCESS_RESTARTED("goal_autopilot_process_restarted"),
     TRANSIENT_FAILURE("goal_autopilot_transient_failure"),
     ;
+    /** A few plain words for the owner's status card and progress report. [description] stays the tool/exception text. */
+    val label:String get()=when(this) {
+        SEGMENT_BUDGET->"이어갈 횟수를 다 씀"
+        TOOL_BUDGET->"할 수 있는 단계를 다 씀"
+        TIME_BUDGET->"정한 시간을 다 씀"
+        NO_PROGRESS->"세 번 해도 다음 차례를 못 찾음"
+        UNKNOWN_EFFECT->"마지막 일이 됐는지 아직 모름"
+        FAILED_STEP->"바꾼 뒤 결과를 못 봄"
+        OWNER_HANDOFF->"직접 확인이 필요함"
+        REQUIRED_READBACK->"바꾼 결과를 다시 봤지만 못 찾음"
+        LEGACY_CONTEXT->"예전 부탁이라 자동으로 못 이어감"
+        INVALID_CHECKPOINT->"저장된 기록을 못 봄"
+        STOPPED->"목표가 멈췄거나 조건이 바뀜"
+        PROCESS_RESTARTED->"앱이 다시 켜져서 멈춤"
+        TRANSIENT_FAILURE->"연결이 자꾸 끊겨서 멈춤"
+    }
     val description:String get()=when(this) {
         SEGMENT_BUDGET->"이번 목표에서 이어서 실행할 구간 한도에 도달했어요. 확인한 결과는 남겨뒀어요."
         TOOL_BUDGET->"이번 목표에서 도구 실행 한도에 도달했어요. 확인한 결과는 남겨뒀어요."

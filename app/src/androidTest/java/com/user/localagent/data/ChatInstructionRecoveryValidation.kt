@@ -49,7 +49,7 @@ class ChatInstructionRecoveryValidation {
             assertEquals(otherDraft,repository.chat.readDraft(other.id))
             val recovery=repository.chat.messages(thread.id,selected.id).first().last()
             assertEquals("assistant",recovery.role)
-            assertTrue(recovery.text.startsWith("[아직 적용하지 않은 추가 지시]"))
+            assertTrue(recovery.text.startsWith("[아직 적용하지 않은 추가 지시 · "))
             val quoted=Json.parseToJsonElement(recovery.text.substringAfter("\n\n")).jsonObject
             assertEquals(instruction,quoted.getValue("quoted_owner_instruction").jsonPrimitive.content)
             assertFalse(quoted.getValue("applied").jsonPrimitive.boolean)

@@ -59,10 +59,10 @@ internal object BrowserAuthContinuation {
     fun readFailureNotice(result:ToolResult):String {
         val code=runCatching{(Json.parseToJsonElement(result.content).jsonObject["error"] as? JsonPrimitive)?.content}.getOrNull()
         return when(code){
-            "TLS_ERROR"->"로그인 뒤 사이트에 다시 연결하는 중 보안 연결이 끊겼어요."
-            "PAGE_TIMEOUT","PAGE_UNREACHABLE","HTTP_ERROR"->"로그인 뒤 원래 페이지를 다시 열었지만 사이트에서 응답을 받지 못했어요."
-            "OWNER_LOGIN_PAGE_CHANGED","BROWSER_WORK_SESSION_GONE"->"로그인했던 브라우저 탭이 닫혔거나 다른 사이트로 바뀌어 원래 페이지를 확인하지 못했어요."
-            else->"로그인 뒤 같은 브라우저의 페이지를 다시 읽었지만 원래 작업을 이어갈 화면을 확인하지 못했어요."
+            "TLS_ERROR"->"로그인 뒤 보안 연결이 끊김"
+            "PAGE_TIMEOUT","PAGE_UNREACHABLE","HTTP_ERROR"->"로그인 뒤 사이트가 답하지 않음"
+            "OWNER_LOGIN_PAGE_CHANGED","BROWSER_WORK_SESSION_GONE"->"로그인한 탭이 닫혔거나 다른 사이트로 바뀜"
+            else->"로그인 뒤 이어갈 화면을 못 찾음"
         }
     }
     val reopenablePauses=setOf("browser_auth_on_phone","waiting_browser_auth","browser_auth_resume_expired")

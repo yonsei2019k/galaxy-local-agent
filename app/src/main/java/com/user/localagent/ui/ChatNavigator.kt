@@ -370,7 +370,26 @@ internal fun toolLabel(name:String)=when(name){
     "get_call_log_summary"->"통화 내역 조회";"list_audio_recordings"->"녹음 파일 목록";"search_audio_transcripts"->"녹음 전사 검색";"list_calendar_events"->"일정 조회";"prepare_calendar_event"->"일정 작성"
     "create_reminder"->"리마인더 생성";"create_alarm"->"알람 생성";"save_note"->"메모 저장";"search_notes"->"메모 검색";"search_contacts"->"연락처 검색";com.user.localagent.core.KakaoShare.TOOL->"카카오톡 공유 준비";"prepare_sms"->"문자 초안 작성";"prepare_email"->"이메일 초안 작성"
     "open_map"->"지도 열기";"open_url"->"웹페이지 열기";"save_memory"->"개인 기억 저장";"search_memories"->"개인 기억 검색";"delete_memory"->"개인 기억 삭제";"update_note"->"메모 수정";"update_reminder"->"리마인더 수정"
-    "delete_note"->"메모 삭제";"delete_reminder"->"리마인더 삭제";"list_messenger_notifications"->"연결한 메신저 알림 조회";"reply_messenger_notification"->"연결한 메신저 답장";else->name
+    "delete_note"->"메모 삭제";"delete_reminder"->"리마인더 삭제";"list_messenger_notifications"->"연결한 메신저 알림 조회";"reply_messenger_notification"->"연결한 메신저 답장"
+    "read_screen"->"화면 읽기";"screen_action"->"화면 누르기";"read_kakao_screen"->"카카오톡 화면 읽기";"read_note"->"메모 읽기";"patch_note"->"메모 고치기";"list_reminders"->"리마인더 보기"
+    "read_skill"->"일하는 방법 읽기";"list_skills"->"일하는 방법 목록 보기";"get_goal"->"목표 보기";"create_goal"->"목표 만들기";"update_goal"->"목표 고치기";"start_goal"->"목표 시작"
+    "pause_goal"->"목표 멈추기";"resume_goal"->"목표 다시 시작";"clear_goal"->"목표 지우기";"verify_goal_criterion"->"목표 기준 확인";"read_goal_progress"->"할 일 장부 보기";"update_goal_progress"->"할 일 장부 고치기"
+    "run_subagent"->"도우미에게 맡기기";"schedule_agent_task"->"나중에 할 일 미리 해 두기";"cancel_scheduled_agent_task"->"미리 해 둔 일 취소";"get_agent_capabilities"->"할 수 있는 일 보기"
+    "get_government_service"->"공공 서비스 찾기";"open_government_service"->"공공 서비스 열기";"open_coupang_review_workspace"->"쿠팡 리뷰 화면 열기";"inspect_project_storage"->"프로젝트 저장 공간 보기"
+    "find_project_duplicates"->"같은 파일 찾기";"read_analysis_evidence"->"분석 자료 읽기";"search_publications"->"논문 찾기";"verify_reference"->"참고 자료 확인";"list_analysis_sources"->"분석 자료 목록 보기"
+    "analyze_audio_transcript"->"녹음 글 분석";"analyze_conversation_import"->"가져온 대화 분석";"transcribe_recording"->"녹음을 글로 바꾸기";"analyze_selected_data"->"고른 자료 분석";"query_selected_data"->"고른 자료에서 찾기"
+    "calculate"->"계산하기";"date_calculate"->"날짜 계산";"find_free_time"->"빈 시간 찾기";"list_notebooklm_notebooks"->"노트북LM 노트 보기";"query_notebooklm"->"노트북LM에 묻기"
+    "search_drive_files"->"구글 드라이브 파일 찾기";"read_drive_text_file"->"구글 드라이브 글 파일 읽기";"create_drive_text_file"->"구글 드라이브 글 파일 만들기"
+    "read_google_document"->"구글 문서 읽기";"create_google_document"->"구글 문서 만들기";"read_google_sheet"->"구글 시트 읽기";"create_google_sheet"->"구글 시트 만들기"
+    "read_google_presentation"->"구글 슬라이드 읽기";"create_google_presentation"->"구글 슬라이드 만들기";"create_gmail_draft"->"Gmail 초안 쓰기"
+    "list_google_tasks"->"구글 할 일 보기";"create_google_task"->"구글 할 일 넣기";"complete_google_task"->"구글 할 일 끝 표시";"search_google_contacts"->"구글 연락처 찾기"
+    "read_google_form"->"구글 설문 읽기";"list_google_form_responses"->"구글 설문 답 보기";"create_google_form"->"구글 설문 만들기";"search_youtube_videos"->"유튜브 영상 찾기"
+    "list_youtube_playlists"->"유튜브 재생목록 보기";"list_naver_mail_inbox"->"네이버 메일함 보기";"list_x_bookmarks"->"엑스 북마크 보기";"list_telegram_bot_updates"->"텔레그램 새 메시지 보기"
+    "list_outlook_inbox"->"아웃룩 메일함 보기";"list_outlook_calendar"->"아웃룩 일정 보기";"list_github_repository_issues"->"깃허브 할 일 목록 보기";"read_slack_channel_history"->"슬랙 대화 읽기"
+    "search_notion_pages"->"노션 페이지 찾기";"list_todoist_tasks"->"투두이스트 할 일 보기";"open_korail_booking"->"코레일 예매 열기";"open_korail_guest_receipt"->"코레일 영수증 열기"
+    "open_srt_guest_receipt"->"SRT 영수증 열기";"open_tmap"->"티맵 열기";"open_tmap_destination"->"티맵 길 안내 열기";"open_netflix"->"넷플릭스 열기";"search_netflix"->"넷플릭스에서 찾기"
+    "open_netflix_title"->"넷플릭스 작품 열기";"open_coupang"->"쿠팡 열기";"search_coupang"->"쿠팡에서 찾기";"open_coupang_product"->"쿠팡 상품 열기";"open_coupang_eats"->"쿠팡이츠 열기"
+    else->name
 }
 
 /** Project deletion needs its own explicit confirmation listing what goes and what stays. */

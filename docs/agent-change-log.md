@@ -12,6 +12,19 @@
 - **검증:** `gen-design-tokens.py --check`, `gen-icons.py --check` 통과, 생성기 시험 26개 통과. 웹 vitest 174 통과. 화면 하네스 `chat-visual`+`character-situations` 일반 69·움직임 줄이기 69 통과(대비 실패 0), `phone-browser`+`browser-login` 4 통과. Gradle `:core:test`(1188) `:android-runtime:testDebugUnitTest`(1316, 실패 0) `lintRelease` 2종 `:app:assembleRelease` 성공(서명 안 된 APK SHA-256 `2b44a21a6f842e95cf4b919597221bb1418519dd65148e4d4231d35103be76ef`, 새 웹 번들 포함 확인). 휴대폰 설치·실기기 화면·런처 아이콘 표시는 확인하지 않았다(통합 후 별도 증거).
 - **비교 그림:** `.local/sdd/2026-11-28-concept-match/shots/compare-*.png`, `clay-icon-sheet.png`, `launcher-icon-preview.png`(`scripts/browser-validation/concept-compare.cjs`로 다시 만든다).
 
+## 2026-11-28 — 호스트 고정 문구 제거와 실행 상태 카드 필드 (claude/persona-copy, 통합 대기)
+
+- **문제:** 0.2.17에서 말투를 바꿨지만 작업 중 채팅의 대부분은 호스트가 정한 문장이었다("좋아요, 이렇게 진행할게요 … 잠시만 기다려 주세요", "마지막 동작이 반영됐는지 확인하지 못했어요 …", 진행 보고의 `read_screen 결과 확인`). 소유자 지시: 고정 문구 없음, 초등학생도 아는 쉬운 말.
+- **원칙(계약):** 호스트는 채팅 문장을 쓰지 않는다. 사실은 상태 카드 필드로 넘기고 문장은 모델만 쓴다. 모델 문장이 없으면(실패·취소·응답 없음) 채팅에 아무 문장도 붙이지 않고 카드만 보인다. 진실성·증거·승인·권한·제어 흐름·오류 코드·FailureLog 코드는 그대로다.
+- **계획 안내:** `publicWorkPlanNotice`를 지웠다. 계획은 작업 기록(`publicPlan`)과 카드에만 남는다.
+- **실행 종료:** `publishActionFinal`의 `reason`은 이제 짧은 라벨이며 run 문맥 `hostRunNoticeV1 {reason, action?, instruction?}`에 저장된다. 채팅에는 `modelText`(완료가 아닌데 끝났다고 말하는 문장을 결정적으로 거르는 `ModelStatusText` 검사 통과 시) 또는 `verbatim`(모델 질문, 찾은 출처 목록처럼 이미 있는 내용)만 올라간다. 클라우드 부분 결과는 제공자의 `report.answer`를 먼저 쓴다. `ActionCompletionReport.render`는 이유 문장을 덧붙이지 않는다.
+- **웹 UI 계약(새 필드):** `messages[].runStatus = {phase, label, reason?, action?, actionLabel?, instruction?}` (실행에 묶인 assistant 메시지). `phase`: queued, running, waiting_approval, waiting_reply, waiting_login, waiting_time, paused, failed, interrupted, cancelled, completed. `action`: open_screen_setup, open_login, reply, open_pc_connection, open_calendar_permission, new_request, choose_model. 기존 `executionReport` 줄에도 상태 라벨이 들어가 지금 UI에서도 보인다.
+- **진행 보고:** 도구 이름은 쉬운 한국어 이름표(`toolLabel`에 빠진 도구 이름표를 모두 추가해 등록 도구 전부가 한국어 이름을 가진다. 모르는 도구는 "작업 단계")로 보인다. 증거 구분은 "확인함 / 안 됨 · 바뀌었는지 확인 필요 / 멈춤 · 바뀐 것 없음 / 준비만 함 · 결과는 아직 모름 / 결과 못 봄"으로 유지한다. 목표 일시정지 사유는 `GoalAutopilotPauseReason.label`(사용자용)과 `description`(도구 결과·예외용, 변경 없음)으로 나눴다.
+- **말투 지시:** `JIPSOONI_VOICE`에 쉬운 말 규칙과 계획 goal 문구 규칙을 넣었고, 로컬 의미 계획기 지시(`SemanticPlannerInstructions`)에도 goal 문구 규칙을 넣었다(표시 문구만, 계획·범위·권한 변화 없음). PC 쪽 `plan_task` 스키마 설명은 건드리지 않았다.
+- **감사표:** `.local/sdd/2026-11-28-persona-copy/strings-audit.md`.
+- **검증:** 대상 JVM 시험 8개 클래스 58건 통과(RunStatusNoticeTest, ChatExecutionReportTest, PublicWorkPlanTest, CloudAgentFinalsTest, ChatWorkActivityControllerTest, GoalRestartRecoveryTest, GoalTransientRetryTest, InlineRunActivityTest), `:core:test` 1188건 통과. voice-guard 스크립트 결과 LABEL 0, 문장 후보 70(모두 라벨·모델 지시문·예외 오탐, 감사표에 이유 기록). 전체 assembleRelease·lint·기기 확인은 하지 않았다. 웹 UI 카드 표시는 다른 브랜치에서 만든다.
+- **남은 틈:** `ActionCompletionReport.render`(core)의 영수증형 문장은 아직 채팅에 나간다. 모델 문장 다듬기 단계는 넣지 않았다. 목표 재시도·대기 결과 행은 라벨 글로만 바꿨다.
+
 ## 2026-11-28 — 장기 업무 상세 보고
 
 - 진행 카드는 최신 보고를 먼저 보여 주고 이전 관찰은 같은 카드에서 펼칠 수 있다. 작업 장부에서 확인한 수와 남은 수, 진행 중인 항목 및 대기·막힘을 요약한다. 예약된 재개 시각은 작업기 기록에서 읽는다.
