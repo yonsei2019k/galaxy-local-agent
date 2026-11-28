@@ -1,3 +1,17 @@
+## 2026-11-28 — 채팅 화면 구조 시안 맞춤, 클레이 아이콘, 런처 아이콘 (claude/design-concept-match, Codex 통합 대기)
+
+- **배경:** 소유자가 v0.2.17을 보고 시안과 다르다고 했다. 이번에는 색이 아니라 화면 구조를 `concept_phones.png`에 맞췄다(사양 `.local/sdd/2026-11-28-concept-match/spec.md` S1~S9).
+- **웹 채팅(`web-ui/src`, 단일 대화 화면 `.workspace--single`, `concept.css`):**
+  - 상단: 회색 원형 ☰, 가운데 36px 집순이와 이름, 오른쪽 원형 "이 대화" 버튼. 작업 줄("최근 작업"/진행 상태)은 같은 `aria-label`·글·`title`을 가진 원형 시계 버튼(`.header-work--round`)으로 옮겼다. 머리 집순이는 `blocked`일 때 얼굴만 `idle`로 둔다(`data-mood`와 움직임은 그대로). 시안의 "+ 새 대화"는 단일 대화에 그런 기능이 없어 만들지 않았다.
+  - 빈 대화: 방 장면 제거, 120px 집순이, "무엇을 해 둘까요?"·"말만 하면 끝까지 챙길게요", 입력창 위 가로 꽉 찬 제안 줄(문구·전송 동작 동일).
+  - 사용자 말 검은 말풍선, 답변은 이름표 없는 본문. 작업 카드와 작업 진행 보고는 연회색 카드에 단계별 집순이 얼굴(`situationForPhase`), 진행 중이면 검은 막대. 실행 기록에 진행량이 없어 막대는 비결정이다. 카드는 구조화된 `tasks`/`executionReport`만 쓰고 모델 글을 해석하지 않는다.
+  - 입력창: 한 줄 연회색 알약(실행 중에도 첨부·음성 없으면 한 줄), 안내 글 "메시지 보내기"(빈 대화)/"추가로 말하기".
+- **클레이 아이콘(S8 개정):** `design/clay.json` → `scripts/gen-icons.py` → `CLAY`(TS)·`zi_clay_*.xml`. 하단 탭, 첨부·마이크·음성 대화, 서랍 메뉴 앞 아이콘에 쓴다. 선택 탭은 원색+검은 굵은 글자, 나머지는 옅게, 비활성은 회색. 네이티브 설정 목록의 회색 타일 아이콘은 이번에 바꾸지 않았다.
+- **네이티브(S7):** "사이트 로그인 다시 열기"를 흰 바탕 가운데의 작은 검은 알약(`ZipInkPillButton`)으로 바꿨다. 조건·동작·문구는 같다.
+- **런처 아이콘(S9):** `scripts/render-launcher-icon.cjs`가 웹 집순이(버터 곰 후드, 웃는 얼굴)를 밀도별로 직접 그려 `mipmap-*/ic_launcher_foreground.png`(108~432px)를 만든다. 배경 `#F3F4F8`, Android 13+ 테마용 `drawable/ic_launcher_monochrome.xml`. 옛 `ziphap_mascot_v1.png`와 `ziphap_launcher_foreground.xml`은 참조가 없어 지웠다. 목표 대기 알림의 작은 아이콘이 런처 그림을 쓰던 것을 다른 알림과 같은 `ic_agent`로 바꿨다. 앱 ID·서명은 그대로다.
+- **검증:** `gen-design-tokens.py --check`, `gen-icons.py --check` 통과, 생성기 시험 26개 통과. 웹 vitest 174 통과. 화면 하네스 `chat-visual`+`character-situations` 일반 69·움직임 줄이기 69 통과(대비 실패 0), `phone-browser`+`browser-login` 4 통과. Gradle `:core:test`(1188) `:android-runtime:testDebugUnitTest`(1316, 실패 0) `lintRelease` 2종 `:app:assembleRelease` 성공(서명 안 된 APK SHA-256 `2b44a21a6f842e95cf4b919597221bb1418519dd65148e4d4231d35103be76ef`, 새 웹 번들 포함 확인). 휴대폰 설치·실기기 화면·런처 아이콘 표시는 확인하지 않았다(통합 후 별도 증거).
+- **비교 그림:** `.local/sdd/2026-11-28-concept-match/shots/compare-*.png`, `clay-icon-sheet.png`, `launcher-icon-preview.png`(`scripts/browser-validation/concept-compare.cjs`로 다시 만든다).
+
 ## 2026-11-28 — 장기 업무 상세 보고
 
 - 진행 카드는 최신 보고를 먼저 보여 주고 이전 관찰은 같은 카드에서 펼칠 수 있다. 작업 장부에서 확인한 수와 남은 수, 진행 중인 항목 및 대기·막힘을 요약한다. 예약된 재개 시각은 작업기 기록에서 읽는다.
