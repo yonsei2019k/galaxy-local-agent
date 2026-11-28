@@ -180,7 +180,9 @@ class PersistentCallFollowUpPipeline(context: Context, private val app: AppConta
             requireAuthorized(initial)
             ensureRoute(initial)
             initial = checkNotNull(store.job(queueId)) // The first route creation captures its exact revisions durably.
-            if (!deviceSafe() || !app.scopedRuns.selectionReady.value || app.scopedRuns.busy.value || app.scopedRuns.queued.value.isNotEmpty() ||
+            // The job's private route is already pinned. Checking the UI's selected room would
+            // either restore unrelated chat work or prevent this job from running on cold startup.
+            if (!deviceSafe() || app.scopedRuns.hasActiveRuns.value || app.scopedRuns.queued.value.isNotEmpty() ||
                 RuntimeGate.benchmark.get() || !RuntimeGate.inference.compareAndSet(false, true)) {
                 store.update(queueId, epoch) { it.copy(status = "DEFERRED", errorCode = "DEVICE_OR_OWNER_BUSY") }
                 return@withContext CallPipelineBatchResult.DEFERRED
