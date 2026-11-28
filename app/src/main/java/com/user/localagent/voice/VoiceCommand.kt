@@ -194,6 +194,7 @@ class VoiceCommandActivity:ComponentActivity() {
 class AgentRunService:Service() {
     companion object {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
+        internal const val RESUME_BROWSER_AUTH_RUN="resume_browser_auth_run"
         private val cleanupHolds=RunCleanupHoldRegistry {android.os.SystemClock.elapsedRealtime()}
         /** Submission success is distinct from RunKeepAlive.await's actual startForeground receipt. */
         fun track(context:Context,runId:String,threadId:String,text:String,recoverGoal:Boolean=false,previousGoalRunId:String?=null):Boolean {
@@ -212,6 +213,7 @@ class AgentRunService:Service() {
             manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
             val intent=PendingIntent.getActivity(context,runId.hashCode(),
                 Intent(context,MainActivity::class.java).putExtra("open_thread_id",threadId)
+                    .putExtra(RESUME_BROWSER_AUTH_RUN,runId)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             manager.notify(ID+1+(runId.hashCode() and 0xffff),NotificationCompat.Builder(context,ALERTS)

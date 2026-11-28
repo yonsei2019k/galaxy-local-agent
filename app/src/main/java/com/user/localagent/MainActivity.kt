@@ -392,6 +392,12 @@ class MainActivity : ComponentActivity() {
             val project=thread.projectId?.let {app.repository.chat.project(it)}
             if(project?.archived==true)return@launch
             requestedTab.value=if(threadId==app.runs.selectedThreadId.value)0 else 6
+            val authRun=intent.getStringExtra(com.user.localagent.voice.AgentRunService.RESUME_BROWSER_AUTH_RUN)
+                ?.takeIf {it.length in 1..128}?:return@launch
+            lifecycle.withResumed { Unit }
+            try {app.goalWaits.resumeConfirmedBrowserAuth(threadId,authRun)}
+            catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){FailureLog.record(this@MainActivity,"browser_auth_resume_visible",error)}
         }
     }
 

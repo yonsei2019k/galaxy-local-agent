@@ -109,6 +109,15 @@ internal class GoalWaitWork(private val context: Context) {
     suspend fun restore() {
         for (record in store.all()) arm(record)
     }
+
+    suspend fun resumeConfirmedBrowserAuth(threadId:String,parentRunId:String) {
+        val record=store.all().singleOrNull {
+            it.ordinaryBrowserAuth&&it.threadId==threadId&&it.parentRunId==parentRunId&&
+                it.observedEvent==WakeEvent.OWNER_AUTH_DONE&&it.stopReason==null&&it.resumedOnceFor!=it.id
+        }?:return
+        val app=(context.applicationContext as? LocalAgentApplication)?.container?:return
+        app.scopedRuns.wakeBrowserAuth(record)
+    }
 }
 
 class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
