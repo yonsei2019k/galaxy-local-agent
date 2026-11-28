@@ -157,6 +157,17 @@ for (const [name, snapshot] of Object.entries(fixtures)) {
           return !document.querySelector('.loading') && document.querySelectorAll('.message').length === wantMessages;
         }, [SNAPSHOT_EVENT, snapshot, want.messages], { polling: 50, timeout: 5000 });
         await page.waitForFunction(cards => document.querySelectorAll('.task-card, .work-card').length >= cards, want.cards, { timeout: 5000 });
+        if (['conceptRunning', 'devicePaused', 'receipts'].includes(name)) {
+          const tabs = page.getByRole('navigation', { name: '빠른 이동' });
+          assert.equal(await tabs.locator('button svg[data-clay]').count(), 4);
+          const layout = await tabs.evaluate(nav => {
+            const boxes = [...nav.querySelectorAll('button')].map(button => button.getBoundingClientRect());
+            return { widths: boxes.map(box => Math.round(box.width)), rows: new Set(boxes.map(box => box.y)).size };
+          });
+          assert.equal(layout.rows, 1);
+          assert.ok(Math.max(...layout.widths) - Math.min(...layout.widths) <= 1);
+          assert.ok(layout.widths[0] >= 60);
+        }
         if (name === 'camping') {
           await page.locator('.stay-top').click();
           assert.equal(await page.getByRole('link', { name: '전체 배치도' }).getAttribute('href'), 'https://example.org/map.png');

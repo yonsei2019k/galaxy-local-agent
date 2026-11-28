@@ -671,6 +671,34 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
 .collab-recipient select { min-height: 36px; min-width: 92px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--color-surface); color: var(--ink); font-weight: var(--fw-bold); }
 .collab-recipient select:disabled { opacity: .6; }
 
+/* Bottom navigation layout. Tab art and selected-state colors live in concept.css. */
+.bottom-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 2px var(--pad) calc(3px + env(safe-area-inset-bottom));
+  gap: 4px;
+  border: 0;
+  background: var(--color-surface);
+}
+.bottom-nav button {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: var(--tap);
+  gap: 1px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--color-text-sub);
+  font: inherit;
+  font-size: 11px;
+  font-weight: var(--fw-medium);
+}
+.bottom-nav button[aria-current="page"] { color: var(--color-text); font-weight: var(--fw-bold); }
+.bottom-nav svg { box-sizing: content-box; width: 20px; height: 20px; padding: 2px 14px; border-radius: var(--radius-pill); }
+.bottom-nav button[aria-current="page"] svg { background: var(--color-ink); color: var(--color-on-ink); }
+@media (min-width: 940px), (max-height: 480px) { .bottom-nav { display: none; } }
+
 /* Layout --------------------------------------------------------------------------------------------- */
 @media (min-width: 940px) {
   .workspace { grid-template-columns: 272px minmax(0, 1fr); }
