@@ -32,6 +32,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.user.localagent.benchmark.RuntimeGate
+import com.user.localagent.core.WorkFailureReport
 import com.user.localagent.core.AssistantPolicy
 import com.user.localagent.core.AutonomousReviewPolicy
 import com.user.localagent.core.FinalSynthesisPolicy
@@ -1420,8 +1421,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // The local meaning plan selects research; lexical routes never override its action.
                 } else if(localAuthRead==null&&request.goal==null&&requestReadbackObligations==null&&request.previousSteps.none {s->s.evidence.state==VerificationState.VERIFIED&&com.user.localagent.core.RequiredReadbackObligations.Pair.entries.any {it.mutation==s.tool}}&&semantic?.action==com.user.localagent.core.SemanticAction.TOOL_TASK&&direct!=null&&semantic?.requiredTools==setOf(direct.name)&&usableAttachments.isEmpty()&&!projectFileRequest) {
                     val result=runTool(direct)
-                    answer(if(com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(taskGoal.requiredTools,observedOutcomes)else if(result.success&&result.verification==VerificationState.VERIFIED)toolAnswer(direct,result.content) else result.content)
+                    val directAnswer=when {
+                        com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes) ->
+                            com.user.localagent.core.ActionCompletionReport.render(taskGoal.requiredTools,observedOutcomes)
+                        result.success&&result.verification==VerificationState.VERIFIED -> toolAnswer(direct,result.content)
+                        else -> WorkFailureReport.describe("direct_tool_unconfirmed",observedOutcomes,hasUnconfirmedChange())
+                    }
+                    answer(directAnswer)
                     if(!result.success||result.verification!=VerificationState.VERIFIED){
+                        FailureLog.taskStop(context,request.runId,"direct_tool","execution_not_verified",null,observedOutcomes)
                         persistStepEvidence()
                         app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")
                     }
@@ -1679,7 +1687,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                                 complete=true;return@roundStep
                             }
                             workTraceSession?.publicDecision(call.publicExplanation)
-                            val result=try {runGoalBoundTool(call.copy(publicExplanation=null),taskGoal)}catch(cancel:CancellationException){throw cancel}catch(error:Exception){ToolResult(call.id,false,error.message?:"도구 실패",VerificationState.FAILED,"실행 결과 검증 실패")}
+                            val result=try {
+                                runGoalBoundTool(call.copy(publicExplanation=null),taskGoal)
+                            }catch(cancel:CancellationException){throw cancel}catch(error:Exception){
+                                FailureLog.taskStop(context,request.runId,"tool_execution","tool_exception",error,observedOutcomes,call.name)
+                                ToolResult(call.id,false,"이 동작의 결과를 확인하지 못했어요.",VerificationState.FAILED,"실행 결과 검증 실패")
+                            }
                             if(com.user.localagent.core.WebsiteExecutionPolicy.waiting(call.name,result)){
                                 pauseForPcWebsite(request)
                                 complete=true
@@ -2466,9 +2479,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&pauseForScreenSetup(request))return
         val authentication=CloudAgentFinals.interruptedBrowserAuthentication(
             observedOutcomes.lastOrNull { it.call.id==stop.pendingCallId && it.call.name==stop.pendingTool })
-        val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
-            authentication ?: "마지막 동작이 반영됐는지 확인하지 못했어요. 다시 시도하려면 현재 화면부터 확인해야 해요."
-            else "작업이 도중에 멈췄어요. 확인한 내용은 남겨뒀어요."
+        val unknownEffect=stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT
+        val message=authentication ?: WorkFailureReport.describe(why,observedOutcomes,unknownEffect)
         val recoverable=request.goalSegment!=null&&stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&
             requestSteps.isNotEmpty()&&requestSteps.all {isReadTool(it.tool)||it.evidence.effectNotApplied}
         publishActionFinal(request,requestAuthorizedTools,if(recoverable)"확인한 결과를 저장했어요. 남은 단계부터 이어갈게요." else message,
@@ -2493,7 +2505,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
         }.onFailure{if(it is CancellationException)throw it}.getOrDefault(false)
         if(canAnswerInSameTest)closeVerifiedSession()
-        publishActionFinal(request,requestAuthorizedTools,question.ifBlank{"이어서 하려면 정보가 조금 더 필요해요."},true,
+        if(question.isBlank()){
+            FailureLog.taskStop(context,request.runId,"cloud_question","provider_question_missing",null,observedOutcomes)
+        }
+        publishActionFinal(request,requestAuthorizedTools,question.ifBlank {
+            "이어서 하려면 정보가 필요한데, 어떤 정보인지 질문을 받지 못했어요. 요청은 남겨뒀어요. 이어서 할 때는 마지막 상태부터 확인할게요."
+        },true,
             if(canAnswerInSameTest && goalRespondable)GOAL_OWNER_INPUT
             else if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.CLOUD_PAUSE_CODE else "execution_not_verified",
             if(canAnswerInSameTest)com.user.localagent.core.NextActionQuestion.readChoices(report["choices"]) else emptyList())
@@ -2531,13 +2548,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             CloudPublicSearchProjection.partialSources(actual)
         }else emptyList()
         val reachedToolLimit=resultState=="partial" && stopMetadata.sequence>=capture.maxToolCalls
-        FailureLog.cloudStop(context,when {
+        val failureCode=when {
             actual.isNotEmpty() && actual.all { it.withheldFromCloud } -> "FINAL_ALL_READS_WITHHELD"
             accepted == null -> "FINAL_MISSING_PLAN"
             reachedToolLimit -> "FINAL_TOOL_BUDGET"
             resultState != "reported_done" -> "FINAL_PROVIDER_INCOMPLETE"
             else -> "FINAL_EVIDENCE_INCOMPLETE"
-        },stopMetadata,resultState,elapsedMs)
+        }
+        FailureLog.cloudStop(context,failureCode,stopMetadata,resultState,elapsedMs)
+        FailureLog.taskStop(context,request.runId,"cloud_result",failureCode,null,observedOutcomes)
         val lastScreenAction=actual.lastOrNull { observation ->
             observation.proposal.tool==com.user.localagent.core.ScreenControlToolCatalog.ACTION
         }?.result
@@ -2555,7 +2574,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             false->"버튼을 누른 뒤에도 화면이 그대로였어요. 요청한 결과는 아직 확인하지 못했어요."
             null->if(actual.isNotEmpty()&&actual.all{it.withheldFromCloud && it.result.success})
                 "휴대폰에서 자료를 읽었지만 개인 정보가 섞여 있어 답변에 쓸 수 있는 본문을 확보하지 못했어요."
-            else if(links.isEmpty())CloudAgentFinals.unfinishedNotice(actual)
+            else if(links.isEmpty()){
+                if(actual.any { it.proposal.tool in com.user.localagent.core.PcBrowserToolCatalog.names ||
+                            it.proposal.tool in com.user.localagent.core.AppBrowserToolCatalog.names })
+                    CloudAgentFinals.unfinishedNotice(actual)
+                else WorkFailureReport.describe(failureCode,observedOutcomes,hasUnconfirmedChange())
+            }
                 else "아래 자료를 찾았어요. 이 자료에서 확인한 내용까지만 남겼어요."
         }
         if(browserProgress!=null && authorityPermitted())
@@ -2689,20 +2713,26 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         return AutonomousReviewPolicy.LIMITED_FINAL_NOTICE
     }
 
+    private fun hasUnconfirmedChange():Boolean = requestSteps.any {
+        !com.user.localagent.core.ToolInterruptionPolicy.hasNoMutation(it.tool) &&
+            !it.evidence.effectNotApplied && it.evidence.state in setOf(VerificationState.UNVERIFIED,VerificationState.FAILED)
+    }
+
     private suspend fun handleRequestFailure(request:QueuedChatRequest,error:Throwable) {
         withContext(NonCancellable){workTraceSession?.closeProgress()}
         app.chatAttachments.restoreToThread(request.threadId,request.attachments)
         val planning=error as? com.user.localagent.planning.SemanticPlanningException
         val planningTimeout=planning?.reasonCode?.let {it.startsWith("planning_")&&it.endsWith("_timeout")}==true
         val planningDeferred=planningTimeout||planning?.reasonCode in setOf("planning_pc_busy","planning_pc_required","planning_pc_unavailable")
-        FailureLog.record(context,"chat_run",error,planning?.reasonCode)
+        val errorCode=planning?.reasonCode
+            ?:(error as? com.user.localagent.externalagent.PcAgentBridgeTimeout)?.stageCode
+            ?:error.javaClass.simpleName
+        FailureLog.taskStop(context,request.runId,if(planning==null)"chat_run" else "planning",errorCode,error,observedOutcomes)
         if(app.repository.chat.run(request.runId)?.status !in com.user.localagent.data.ChatStore.TERMINAL){
-            if(app.repository.chat.assistantForRun(request.runId)?.text.isNullOrBlank())
-                answer(if(planningDeferred)requireNotNull(planning).message.orEmpty() else "작업을 끝내지 못했습니다: ${error.message ?: error.javaClass.simpleName}")
+            val previous=app.repository.chat.assistantForRun(request.runId)?.text.orEmpty()
+            val explanation=WorkFailureReport.describe(errorCode,observedOutcomes,hasUnconfirmedChange())
+            answer(listOf(previous,explanation).filter {it.isNotBlank()}.joinToString("\n\n"))
             withContext(NonCancellable){runCatching {persistStepEvidence()};runCatching {sealLocalGoalJournal(request)}}
-            val errorCode=planning?.reasonCode
-                ?:(error as? com.user.localagent.externalagent.PcAgentBridgeTimeout)?.stageCode
-                ?:error.javaClass.simpleName
             app.repository.chat.updateRun(request.runId,if(planningDeferred)"paused"else"failed",errorCode)
         }
         status.value=if(planningDeferred)"계산 대기 · 요청과 제한 보존됨"else"오류 · 실행 상태 확인 필요"
@@ -3719,10 +3749,18 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(blockedReason!=null&&pauseForScreenSetup(request))return
         val final=if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,blockedReason)else blockedReason?:raw.ifBlank{"모델이 빈 답변을 반환했습니다."}
         if(written.messageId==null)answer(final)else lines.value+=ChatLine(written.messageId,"assistant",written.text)
-        if(blockedReason!=null){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
+        if(blockedReason!=null){
+            FailureLog.taskStop(context,request.runId,"result_verification","execution_not_verified",null,observedOutcomes)
+            persistStepEvidence()
+            app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")
+        }
     }
     private suspend fun publishActionFinal(request:QueuedChatRequest,required:Set<String>,reason:String,paused:Boolean,
         pauseCode:String="execution_not_verified",choices:List<com.user.localagent.core.NextActionQuestion.Choice> = emptyList()){
+        if(paused && (pauseCode=="execution_not_verified" || pauseCode.startsWith("partial_") ||
+                observedOutcomes.any { !it.result.success })) {
+            FailureLog.taskStop(context,request.runId,"chat_paused",pauseCode,null,observedOutcomes)
+        }
         if(paused&&pauseCode=="execution_not_verified"&&pauseForBrowserAuthentication(request))return
         if(paused&&pauseCode=="execution_not_verified"&&pauseForScreenSetup(request))return
         answer(if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes,reason)else reason)
