@@ -76,12 +76,13 @@ enum class GoalStatus {
 }
 
 @Serializable
-enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE, BROWSER_PDF_SOURCE, PDF_EMAIL_DRAFT, GMAIL_SENT, CALENDAR_EVENT, KAIRB_CERTIFICATE }
+enum class GoalProofKind { PUBLIC_PDF_SOURCE, PROJECT_FILE, KAIRB_COMPLETED_COURSE, BROWSER_PDF_SOURCE, PDF_EMAIL_DRAFT, GMAIL_SENT, CALENDAR_EVENT, KAIRB_CERTIFICATE, BROWSER_PLAYBACK_ENDED }
 
 @Serializable
 data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
     fun browserPdfCriterion():String="브라우저에서 「$target」 PDF 원본 저장"
     fun courseListCriterion():String="KAIRB 수강완료 목록에서 「$target」 확인"
+    fun playbackCriterion():String="브라우저에서 「$target」 영상 재생 종료 확인"
     /** Exact readback facts produced only after the connector completed its approved operation. */
     fun connectorFields():List<String> {
         val values=kotlinx.serialization.json.Json.parseToJsonElement(target) as? JsonArray
@@ -167,7 +168,7 @@ data class GoalProofTarget(val kind:GoalProofKind,val target:String) {
                 com.user.localagent.core.connections.ConnectionRequests.key(fields[0])
                 require(java.time.OffsetDateTime.parse(fields[3]).isAfter(java.time.OffsetDateTime.parse(fields[2])))
             }
-            GoalProofKind.PUBLIC_PDF_SOURCE,GoalProofKind.BROWSER_PDF_SOURCE->require(WebAgentPolicy.urlAllowed(target)&&target.startsWith("https://")&&'#' !in target)
+            GoalProofKind.PUBLIC_PDF_SOURCE,GoalProofKind.BROWSER_PDF_SOURCE,GoalProofKind.BROWSER_PLAYBACK_ENDED->require(WebAgentPolicy.urlAllowed(target)&&target.startsWith("https://")&&'#' !in target)
             GoalProofKind.PROJECT_FILE->require(ProjectPaths.segments(target).joinToString("/")==target)
             GoalProofKind.KAIRB_COMPLETED_COURSE->require(target.length in 1..240&&target==target.trim()&&target.none(Char::isISOControl))
         }

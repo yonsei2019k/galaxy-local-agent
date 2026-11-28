@@ -155,7 +155,7 @@ internal object ChatReadbackEvidence {
                 "read_project_file"->{
                     val hostPath=path((source["path"] as? JsonPrimitive)?.takeIf{it.isString}?.content)
                     hostPath?.let{queried+=it}
-                    require(source.flag("truncated")==false&&source.flag("partial")!=true)
+                    require(source.flag("truncated")!=null&&source.flag("partial")!=true)
                     returned+=fileSnapshot(source,call)
                 }
             }
@@ -180,7 +180,13 @@ internal object ChatReadbackEvidence {
         val path=json.string("path");ProjectPaths.segments(path)
         require(path==call.arguments["path"]?.jsonPrimitive?.content)
         val sha=json.string("sha256");require(sha.matches(Regex("[a-f0-9]{64}")))
-        if(call.name=="read_project_file")require(digest(json.string("text"))==sha)
+        if(call.name=="read_project_file"){
+            if(json.flag("truncated")==true) {
+                // The workspace computes the complete digest before ToolExecutor limits delivered text.
+                val token=json.string("readToken")
+                require(runCatching {java.util.UUID.fromString(token).toString()==token}.getOrDefault(false))
+            } else require(digest(json.string("text"))==sha)
+        }
         if(call.name=="write_project_file")require(digest(call.arguments.getValue("content").jsonPrimitive.content)==sha)
         return RequiredReadbackPolicy.Snapshot(RequiredReadbackPolicy.Resource("project_file",path),sha,sha)
     }

@@ -36,11 +36,26 @@ internal object BrowserLoginRoutes {
 
     private val authQueryNames=setOf("accesstoken","refreshtoken","idtoken","token","session","sessionid",
         "code","authcode","authorizationcode","state","nonce","oauth","oauthtoken","oauthverifier",
-        "redirecturi","redirecturl","returnurl","callback","codechallenge","codeverifier","password","passwd","otp")
+        "redirecturi","redirecturl","returnurl","callback","codechallenge","codeverifier","password","passwd","otp",
+        "authorization","credential","apikey","signature","sig","samlrequest","samlresponse","relaystate")
 
     fun naverTaskPage(raw:String?):String? {
         val start=naverReturnPage(raw)?:return null
-        val query=https(raw)?.rawQuery ?: return start
+        return taskPageWithQuery(start,https(raw)?.rawQuery)
+    }
+
+    fun pairedTaskPage(raw:String?,origin:String):String? {
+        if(!com.user.localagent.core.WebAgentPolicy.urlAllowed(raw))return null
+        val url=https(raw)?:return null
+        if("https://"+url.host.lowercase()!=origin)return null
+        val path=url.rawPath.ifEmpty { "/" }
+        if(origin=="https://hallymedu.co.kr"&&url.rawQuery==null&&url.rawFragment==null&&
+            path.lowercase() in setOf("/new_home/my/","/new_home/my/my/"))return "$origin/new_home/my/my/"
+        return taskPageWithQuery(origin+path,url.rawQuery)
+    }
+
+    private fun taskPageWithQuery(start:String,query:String?):String? {
+        if(query==null)return start
         if(query.length>4096)return null
         val taskQuery=query.split('&').filter {parameter->
             val name=runCatching { java.net.URLDecoder.decode(parameter.substringBefore('='),"UTF-8") }.getOrNull()

@@ -33,4 +33,19 @@ class GoalWaitStoreTest {
         assertTrue(store.replace(consumed,first))
         assertEquals(consumed,GoalWaitStore({ data },{ fail() }).get(first.goalId))
     }
+
+    @Test fun capacityReclaimsOnlyTheExactObsoleteRecord() {
+        var data: String? = null
+        val store = GoalWaitStore({ data },{ data=it })
+        val records=(1..256).map {first.copy(id="wait-$it",goalId="goal-$it")}
+        records.forEach {assertTrue(store.replace(it,null))}
+        val stale=records.first()
+        val current=stale.copy(id="new-wait")
+        assertTrue(store.replace(current,stale))
+        assertFalse(store.replace(first,null,setOf(stale)))
+        assertTrue(store.replace(first,null,setOf(records.last())))
+        assertEquals(current,store.get(current.goalId))
+        assertEquals(first,store.get(first.goalId))
+        assertNull(store.get(records.last().goalId))
+    }
 }

@@ -588,8 +588,6 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             check(child.browserAuthParentRunId==parent.id && child.userMessageId==parent.userMessageId)
             check(child.threadId==parent.threadId&&child.branchId==parent.branchId&&child.projectId==parent.projectId)
             if(dao.run(child.runId)!=null)return@withTransaction null
-            val newest=dao.messagePage(parent.threadId,parent.branchId,null,1).singleOrNull()
-            if(newest?.runId!=parent.id || newest.role!="assistant")return@withTransaction null
             val created=createRun(parent.threadId,parent.branchId,parent.userMessageId,parent.modelId,parent.contextSize,
                 parent.thinking,child.toJson(),child.runId,reserveAssistant=false)
             insertMessage(MessageRecord(role="assistant",text="",threadId=parent.threadId,branchId=parent.branchId,runId=child.runId))
@@ -864,6 +862,33 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         dao.run(run.copy(errorCode=errorCode,updatedAt=now()))
     }
 
+    /** A host status update for a parked run remains valid even after its execution grant changes. */
+    internal suspend fun writeBlockedGoalWait(expected:ChatRunRecord,goalId:String,errorCode:String,text:String)=database.withTransaction {
+        val run=checkNotNull(dao.run(expected.id))
+        check(run==expected && run.status !in setOf("queued","running","waiting_approval"))
+        check(com.user.localagent.QueuedChatRequest.fromJson(run.contextJson).goalSegment?.goalId==goalId)
+        check(errorCode in setOf("goal_wait_scope_changed","goal_wait_checkpoint_unavailable","goal_wait_cancelled"))
+        if(run.errorCode==errorCode)return@withTransaction
+        val thread=checkNotNull(dao.thread(run.threadId))
+        if(thread.deletedAt==null&&thread.activeBranchId==run.branchId&&thread.projectId==run.projectId&&
+            dao.branch(run.branchId)?.threadId==run.threadId) {
+            val id=UUID.nameUUIDFromBytes("blocked-goal-wait:${run.id}:$errorCode".toByteArray(Charsets.UTF_8)).toString()
+            if(local.messageById(id)==null) {
+                val after=dao.assistantForRun(run.id)?.id?:run.userMessageId
+                insertMessage(MessageRecord(id=id,role="assistant",text=text,threadId=run.threadId,branchId=run.branchId),after)
+            }
+        }
+        if(run.status=="paused"&&run.errorCode=="waiting_goal_condition" ||
+            run.status=="interrupted"&&run.errorCode=="process_restarted")
+            dao.run(run.copy(status="paused",errorCode=errorCode,updatedAt=now(),finishedAt=run.finishedAt?:now()))
+    }
+
+    internal suspend fun cancelOrdinaryBrowserAuthWait(expected:ChatRunRecord)=database.withTransaction {
+        val run=checkNotNull(dao.run(expected.id))
+        check(run==expected&&run.status=="paused"&&run.errorCode=="waiting_browser_auth")
+        dao.run(run.copy(errorCode="browser_auth_cancelled",updatedAt=now()))
+    }
+
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)
         val run=validRun(runId);check(run.status in setOf("running","waiting_approval")){"시작된 작업의 답변만 저장합니다."}
@@ -929,9 +954,15 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val active=dao.interrupted();active.forEach {r->
             dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
             val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
-            dao.run(r.copy(status=if(stoppedByOwner)"cancelled" else "interrupted",
+            val browserAuth=r.status=="running"&&runCatching {
+                val request=com.user.localagent.QueuedChatRequest.fromJson(r.contextJson)
+                com.user.localagent.BrowserAuthContinuation.allowsOrdinaryHandoff(request)&&
+                    com.user.localagent.BrowserAuthContinuation.canReopenLogin(r.contextJson)
+            }.getOrDefault(false)
+            dao.run(r.copy(status=when {stoppedByOwner->"cancelled";browserAuth->"paused";else->"interrupted"},
                 errorCode=when {
                     stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
+                    browserAuth->"waiting_browser_auth"
                     r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
                     else->"process_restarted"
                 },updatedAt=now(),finishedAt=now()))

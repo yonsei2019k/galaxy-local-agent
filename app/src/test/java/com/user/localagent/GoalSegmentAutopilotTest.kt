@@ -270,6 +270,27 @@ class GoalSegmentAutopilotTest {
         assertNull(goalOutcomeProof(call,result("https://example.org/another.pdf")))
     }
 
+    @Test fun playbackProofRequiresTheObservedEndAndExactRequestedPage() {
+        val url="https://example.org/lesson?id=7"
+        val target=GoalProofTarget(GoalProofKind.BROWSER_PLAYBACK_ENDED,url)
+        val call=ToolCall("playback",PcBrowserToolCatalog.READ,buildJsonObject {put(BrowserMediaRule.EXPRESSION,"ended")})
+        fun result(source:String,status:String="ended",position:Int=60000)=ToolResult(call.id,true,buildJsonObject {
+            put("url",source);put("loginRequired",false)
+            put("playbackEvidence",buildJsonObject {
+                put("playbackStatus",status);put("positionMs",position);put("durationMs",60000)
+                put("playerSignature","${"a".repeat(32)}:1:0")
+            })
+        }.toString(),VerificationState.VERIFIED)
+        fun step(result:ToolResult)=HarnessStep(call,StepEvidence(call.name,result.verification,result.verificationSummary,
+            auditId="observed-playback",outcomeProof=goalOutcomeProof(call,result)))
+        val criterion=GoalCriterion(text=target.playbackCriterion(),proofTarget=target)
+        assertTrue(goalCriterionMatches(criterion,step(result(url))))
+        assertFalse(goalCriterionMatches(criterion,step(result("https://example.org/lesson?id=8"))))
+        assertFalse(goalCriterionMatches(criterion,step(result(url,"playing"))))
+        assertFalse(goalCriterionMatches(criterion,step(result(url,position=1))))
+        assertFalse(goalCriterionMatches(criterion.copy(text="강의 이수 완료"),step(result(url))))
+    }
+
     @Test fun completedCourseReadMatchesOnlyTheExactOfficialCourseListCriterion() {
         val title="Synthetic IRB Course"
         val proof=GoalProofTarget(GoalProofKind.KAIRB_COMPLETED_COURSE,title)

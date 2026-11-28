@@ -15,11 +15,13 @@ internal class GoalWaitStore(private val load: () -> String?, private val save: 
 
     fun get(goalId: String): GoalWaitRecord? = all().singleOrNull { it.goalId == goalId }
 
-    fun replace(record: GoalWaitRecord, expected: GoalWaitRecord?): Boolean = synchronized(lock) {
+    fun atCapacity(): Boolean = synchronized(lock) { read().size >= MAX_RECORDS }
+
+    fun replace(record: GoalWaitRecord, expected: GoalWaitRecord?, reclaim: Set<GoalWaitRecord> = emptySet()): Boolean = synchronized(lock) {
         val records = read()
         if (records.singleOrNull { it.goalId == record.goalId } != expected) return false
-        val next = records.filterNot { it.goalId == record.goalId } + record
-        require(next.size <= 256)
+        val next = records.filterNot { it.goalId == record.goalId || it in reclaim } + record
+        if(next.size>MAX_RECORDS)return false
         save(Json.encodeToString(codec, next))
         true
     }
@@ -31,5 +33,8 @@ internal class GoalWaitStore(private val load: () -> String?, private val save: 
         true
     }
 
-    private companion object { val lock = Any() }
+    private companion object {
+        const val MAX_RECORDS = 256
+        val lock = Any()
+    }
 }

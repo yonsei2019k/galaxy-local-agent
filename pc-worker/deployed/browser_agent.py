@@ -736,6 +736,23 @@ class BrowserAgent:
                 return self._with_saved_session(self._owner_signed_in(), prior[3])
             return self._owner_login_stage()
 
+    def owner_login_observe(self, request):
+        if set(request) != {'origin'} or not isinstance(request['origin'], str):
+            raise BrowserError('OWNER_LOGIN_FORMAT')
+        origin = request['origin']
+        with self.lock:
+            prior = self.owner_login_attempt
+            signed_in = False
+            if (prior and prior[2] is self.page and prior[3] == origin and time.monotonic() < prior[1]
+                    and self.page.evaluate('location.origin', timeout=4) == origin):
+                if origin == KAIRB_ORIGIN:
+                    signed_in = (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
+                                 self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True)
+                else:
+                    stage = self.page.evaluate(OWNER_POST_STAGE + '(' + json.dumps(origin) + ')', timeout=4)
+                    signed_in = stage == 'signed_in' and not getattr(self.page, 'hallym_login_required', False)
+            return {'signedIn': signed_in, 'origin': origin}
+
     def _with_saved_session(self, result, origin):
         attempt = self.owner_login_attempt
         if result.get('signedIn') is True and attempt and len(attempt) == 5 and attempt[4] and attempt[3] == origin:

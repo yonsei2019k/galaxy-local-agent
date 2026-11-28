@@ -83,7 +83,18 @@ internal class PairedWebsiteLogin private constructor(
 ) {
     val host:String get()=URI(origin).host
     companion object {
-        suspend fun reopen(context:Context,connection:PcConnection,work:String,origin:String):PairedWebsiteLogin? {
+        suspend fun observeSignedIn(context:Context,connection:PcConnection,work:String,origin:String):Boolean {
+            fun current()=BrowserAgentSettings.pc(context).enabled()&&
+                PcComputeSettings.get(context).snapshot()?.samePair(connection)==true
+            if(PcLoginSite.origin(origin)!=origin||!current())return false
+            val (status,page)=withContext(Dispatchers.IO) {
+                PcTransport(context).jsonWithStatus(connection,"/v1/browser/owner-login-observe",
+                    buildJsonObject {put("work",work);put("origin",origin)},20_000)
+            }
+            return current()&&status==200&&page["origin"]==JsonPrimitive(origin)&&page["signedIn"]==JsonPrimitive(true)
+        }
+
+        suspend fun reopen(context:Context,connection:PcConnection,work:String,origin:String,taskUrl:String?=null):PairedWebsiteLogin? {
             if(PcLoginSite.origin(origin)!=origin)return null
             fun stillPaired()=BrowserAgentSettings.pc(context).enabled()&&
                 PcComputeSettings.get(context).snapshot()?.samePair(connection)==true
@@ -91,7 +102,8 @@ internal class PairedWebsiteLogin private constructor(
             prepare(context,connection,work,origin)?.let {return it.takeIf {stillPaired()} }
             if(!stillPaired())return null
             val (status,page)=PcTransport(context).jsonWithStatus(connection,"/v1/browser/open",buildJsonObject {
-                put("url",PcLoginSite.entry(origin));put("work",work)
+                val task=com.user.localagent.integrations.BrowserLoginRoutes.pairedTaskPage(taskUrl,origin)
+                put("url",task?:PcLoginSite.entry(origin));put("work",work)
             },25_000)
             if(status!=200||page["loginRequired"]!=JsonPrimitive(true)||!stillPaired())return null
             return prepare(context,connection,work,origin)

@@ -50,7 +50,7 @@ class ServerAgentAdapterTests(unittest.TestCase):
         from browser_agent import BrowserAgent, BrowserError, BrowserWorkSessions
 
         work = "a" * 64
-        for suffix in ("form", "submit", "status"):
+        for suffix in ("form", "submit", "status", "observe"):
             path = "/v1/browser/owner-login-" + suffix
             for peer, header, authorized, key, status in (
                 ("192.0.2.1", None, False, work, 401),

@@ -10,7 +10,10 @@ import android.os.SystemClock
 import androidx.work.*
 import com.user.localagent.LocalAgentApplication
 import com.user.localagent.FailureLog
+import com.user.localagent.automation.ChatGoalStore
 import com.user.localagent.connections.ConnectionStore
+import com.user.localagent.compute.PairedMediaRead
+import com.user.localagent.core.GoalStatus
 import com.user.localagent.core.GoalWaitPolicy
 import com.user.localagent.core.GoalWaitRecord
 import com.user.localagent.core.WaitCondition
@@ -24,10 +27,34 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal class GoalWaitWork(private val context: Context) {
     private val encrypted = ConnectionStore(context)
     val store = GoalWaitStore({ encrypted.read("goal.wait.v1") }, { encrypted.write("goal.wait.v1", it) })
+    private val registration = Mutex()
+
+    internal suspend fun register(record: GoalWaitRecord, expected: GoalWaitRecord?): Boolean = registration.withLock {
+        if (expected != null || !store.atCapacity()) return@withLock store.replace(record, expected)
+        val repository = (context.applicationContext as LocalAgentApplication).container.repository
+        val goals = ChatGoalStore(repository)
+        val reclaim = mutableSetOf<GoalWaitRecord>()
+        for (candidate in store.all()) {
+            val obsolete = try {
+                if (repository.chat.thread(candidate.threadId) == null || repository.chat.run(candidate.parentRunId) == null) true
+                else if (candidate.ordinaryBrowserAuth) false
+                else goals.load(candidate.threadId).let { it?.id != candidate.goalId || it.status == GoalStatus.COMPLETE }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                false
+            }
+            if (obsolete) reclaim += candidate
+        }
+        if (reclaim.isEmpty() && store.atCapacity()) return@withLock false
+        store.replace(record, expected, reclaim)
+    }
 
     suspend fun arm(record: GoalWaitRecord) {
         val time = GoalWaitPolicy.dueAt(record) ?: return
@@ -35,6 +62,16 @@ internal class GoalWaitWork(private val context: Context) {
             .setInputData(workDataOf("goalId" to record.goalId, "waitId" to record.id))
             .setInitialDelay((time - System.currentTimeMillis()).coerceAtLeast(0), TimeUnit.MILLISECONDS)
         WorkManager.getInstance(context).enqueueUniqueWork("goal-wait-"+record.id, ExistingWorkPolicy.KEEP, request.build()).await()
+    }
+
+    suspend fun armAfterWake(record:GoalWaitRecord):Boolean = try {
+        arm(record)
+        true
+    } catch (cancel:CancellationException) {
+        throw cancel
+    } catch (error:Exception) {
+        FailureLog.record(context,"goal_wait_rearm",error)
+        false
     }
 
     suspend fun confirmAuth(binding:String):Boolean {
@@ -74,11 +111,26 @@ internal class GoalWaitWork(private val context: Context) {
 }
 
 class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = try {
+        runDueWait()
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (error: Exception) {
+        FailureLog.record(applicationContext,"goal_wait_dispatch",error)
+        Result.retry()
+    }
+
+    private suspend fun runDueWait(): Result {
         val app = (applicationContext as LocalAgentApplication).container
         val goalId = inputData.getString("goalId") ?: return Result.failure()
         var record = app.goalWaits.store.get(goalId) ?: return Result.success()
-        if (record.id != inputData.getString("waitId")) return Result.success()
+        val waitId = inputData.getString("waitId") ?: return Result.failure()
+        if (record.id != waitId) {
+            // The previous worker may have saved its successor before enqueue was acknowledged.
+            // Uniqueness and the worker's record check keep this dispatch from running obsolete work.
+            app.goalWaits.arm(record)
+            return Result.success()
+        }
         val dueAt=GoalWaitPolicy.dueAt(record) ?: return Result.success()
         if(System.currentTimeMillis()<dueAt){
             val delayed=record.copy(id=java.util.UUID.randomUUID().toString())
@@ -95,8 +147,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 }
                 app.runs.isGoalWaitReady(record)
             }==true else false
-        if(!ready)
-            return if(app.runs.isRunLive(record.parentRunId))Result.retry() else Result.success()
+        if (!ready) return if (app.runs.settleUnreadyGoalWait(record)) Result.success() else Result.retry()
         if (System.currentTimeMillis() >= record.deadlineAt) {
             return if (app.runs.wakeGoal(record, WakeEvent.RESTORED_PAST_DUE)) Result.success() else Result.retry()
         }
@@ -125,21 +176,25 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val now=System.currentTimeMillis()
         val parent=app.repository.chat.run(record.parentRunId)?:return Result.success()
         val request=com.user.localagent.QueuedChatRequest.fromJson(parent.contextJson)
-        var transportFailed=false
-        val observation=try {
+        val probe=try {
             withContext(kotlinx.coroutines.Dispatchers.IO) {
                 com.user.localagent.compute.BrowserAgentTools.samplePairedMedia(applicationContext,
                     com.user.localagent.pcBrowserWorkKey(request))
             }
         } catch(cancel:CancellationException){throw cancel}
-          catch(_:Exception){transportFailed=true;null}
-        if(!app.runs.isGoalWaitReady(record)||app.goalWaits.store.get(record.goalId)!=record)return Result.success()
+          catch(_:Exception){PairedMediaRead.Unavailable}
+        if (app.goalWaits.store.get(record.goalId) != record) return Result.success()
+        if (!app.runs.isGoalWaitReady(record)) {
+            return if (app.runs.settleUnreadyGoalWait(record)) Result.success() else Result.retry()
+        }
+        val observation=(probe as? PairedMediaRead.Observed)?.page
         val player=observation?.player
         val moved=player!=null&&record.playingPositionMs?.let { player.positionMs>=it+100 }==true
         val lastProgress=record.lastMediaProgressAt?:record.createdAt
         val event=when {
             now-record.createdAt !in 0 until GoalWaitPolicy.MEDIA_MAX_MS -> WakeEvent.MEDIA_LIMIT
-            transportFailed -> if(now-lastProgress>=GoalWaitPolicy.MEDIA_STALL_MS)WakeEvent.MEDIA_STALLED else null
+            probe==PairedMediaRead.Unavailable ->
+                if(now-lastProgress>=GoalWaitPolicy.MEDIA_STALL_MS)WakeEvent.MEDIA_STALLED else null
             observation?.loginRequired==true -> WakeEvent.LOGIN_EXPIRED
             observation==null||player==null||observation.pageUrl!=condition.pageUrl||
                 player.playerId+":"+player.epoch!=condition.playerSignature -> WakeEvent.PLAYER_GONE

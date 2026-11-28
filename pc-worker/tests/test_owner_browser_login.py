@@ -18,6 +18,22 @@ def wait_for_worker(future, page):
 
 
 class OwnerLoginDialog(unittest.TestCase):
+    def test_owner_login_observation_requires_bound_attempt_and_positive_marker(self):
+        from unittest.mock import Mock, patch
+        agent = browser.BrowserAgent(profile='unused')
+        agent.page = Mock()
+        origin = browser.KAIRB_ORIGIN
+        request = {'origin': origin}
+        with patch.object(browser.time, 'monotonic', return_value=1000):
+            self.assertEqual(agent.owner_login_observe(request), {'signedIn': False, 'origin': origin})
+            agent.page.evaluate.assert_not_called()
+            agent.owner_login_attempt = ('0' * 64, 1100, agent.page, origin, None)
+            agent.page.evaluate.side_effect = [origin, False, False]
+            self.assertFalse(agent.owner_login_observe(request)['signedIn'])
+            agent.page.evaluate.side_effect = [origin, False, True]
+            self.assertTrue(agent.owner_login_observe(request)['signedIn'])
+            self.assertFalse(agent.owner_login_observe({'origin': 'https://example.org'})['signedIn'])
+
     def test_cooldown_reports_remaining_time_without_using_the_form(self):
         from unittest.mock import patch
         agent = browser.BrowserAgent(profile='unused')

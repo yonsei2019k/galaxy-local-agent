@@ -82,7 +82,10 @@ data class QueuedChatRequest(
             require(goalLedger.all {it.sourceRunId in goal.linkedRunIds})
         }
         require(goalSegment!=null||goalLedger.isEmpty())
-        browserWorkRootRunId?.let { require(goalSegment!=null&&it in checkNotNull(goal).linkedRunIds) }
+        browserWorkRootRunId?.let {
+            require(if(browserAuthParentRunId!=null)it.isNotBlank()&&it.length<=128&&it!=runId&&it.none(Char::isISOControl)
+                else goalSegment!=null&&it in checkNotNull(goal).linkedRunIds)
+        }
         require(goalReadbackSeedCount in 0..minOf(6,previousSteps.size))
         require((goalOwnerReplyParentId==null)==(goalOwnerReplyParentDigest==null))
         goalOwnerReplyParentId?.let {

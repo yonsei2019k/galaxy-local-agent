@@ -920,7 +920,9 @@ class MainActivity : ComponentActivity() {
                                         if(!opened)status.value="이 작업을 이어갈 수 있는지 확인해 주세요."
                                     }else webAgent.unfoldOwnerLogin(inlineCredentials.id)
                                 }}){Text("로그인 열기")}
-                                TextButton(onClick={webAgent.cancelLoginCard(inlineCredentials.id)}){Text("대기 그만두기")}
+                                TextButton(onClick={lifecycleScope.launch {
+                                    chat.cancelOwnerLoginWait(inlineCredentials.id,composerThreadId,currentBranchId)
+                                }}){Text("대기 그만두기")}
                             }
                         }else if(inlineSite?.nolGuide==true)com.user.localagent.integrations.InlineNolConnection(webAgent,
                             inlineSite,window,Modifier.fillMaxSize(),onVerified={lifecycleScope.launch {

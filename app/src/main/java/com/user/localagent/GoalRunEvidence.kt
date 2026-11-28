@@ -144,6 +144,7 @@ internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
             GoalProofTarget(GoalProofKind.PROJECT_FILE,path)
         }
         PcBrowserToolCatalog.READ-> {
+            browserPlaybackProof(call,actual)?.let {return goalOutcomeDigest(it)}
             val title=call.arguments[PcBrowserToolCatalog.COURSE_TITLE]?.jsonPrimitive?.contentOrNull?:return null
             if(actual["verifiedCompletedCourseTitle"]!=JsonPrimitive(title)||
                 actual["url"]?.jsonPrimitive?.contentOrNull?.substringBefore('?')!=PcBrowserToolCatalog.KAIRB_COMPLETED_URL)return null
@@ -152,6 +153,20 @@ internal fun goalOutcomeProof(call:ToolCall,result:ToolResult):String? {
         else->return null
     }
     return runCatching {proof.validate();goalOutcomeDigest(proof)}.getOrNull()
+}
+
+private fun browserPlaybackProof(call:ToolCall,actual:JsonObject):GoalProofTarget? {
+    if(!BrowserMediaRule.isRuleRead(call.name,call.arguments) ||
+        actual["loginRequired"]==JsonPrimitive(true) || actual["blocked"]==JsonPrimitive(true))return null
+    val source=(actual["url"] as? JsonPrimitive)?.takeIf {it.isString}?.content?:return null
+    val media=actual["playbackEvidence"] as? JsonObject?:return null
+    if(media["playbackStatus"]!=JsonPrimitive("ended"))return null
+    val position=(media["positionMs"] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull?:return null
+    val duration=(media["durationMs"] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull?:return null
+    val player=(media["playerSignature"] as? JsonPrimitive)?.takeIf {it.isString}?.content?:return null
+    if(duration !in 1..86_400_000 || position !in maxOf(0L,duration-250)..duration+250 ||
+        !player.matches(Regex("[0-9a-f]{32}:[1-9][0-9]{0,7}:[0-9]{1,10}")))return null
+    return runCatching {GoalProofTarget(GoalProofKind.BROWSER_PLAYBACK_ENDED,source).validate()}.getOrNull()
 }
 
 private fun goalBrowserPdfDigest(sourceSha256:String):String=goalDigest("BROWSER_PDF_SOURCE\n"+sourceSha256)
@@ -167,6 +182,7 @@ internal fun goalCriterionMatches(criterion:GoalCriterion,step:HarnessStep,goal:
         (it.kind !in setOf(GoalProofKind.GMAIL_SENT,GoalProofKind.CALENDAR_EVENT,GoalProofKind.KAIRB_CERTIFICATE)||criterion.text==it.connectorCriterion())&&
         (it.kind!=GoalProofKind.KAIRB_COMPLETED_COURSE||criterion.text==it.courseListCriterion())&&
             (it.kind!=GoalProofKind.BROWSER_PDF_SOURCE||criterion.text==it.browserPdfCriterion())&&
+            (it.kind!=GoalProofKind.BROWSER_PLAYBACK_ENDED||criterion.text==it.playbackCriterion())&&
             (if(it.kind==GoalProofKind.PDF_EMAIL_DRAFT)goal?.let {work->GoalPdfEmail.draftDigest(work,it)} else goalOutcomeDigest(it))?.let {digest->digest==step.evidence.outcomeProof}==true
     }==true
 

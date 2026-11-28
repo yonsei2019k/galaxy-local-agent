@@ -423,7 +423,8 @@ class AppWebAgent private constructor(private val context:Context) {
 
     internal fun confirmedReadTool()=if(confirmedPcLogin!=null)"read_pc_browser_page" else "read_app_browser_page"
     internal fun confirmedPcOriginFor(binding:WorkBinding)=confirmedPcLogin?.origin?.takeIf {browserWorkBinding.value==binding}
-    internal fun pendingPcOriginFor(runId:String)=pendingPcLogin?.origin?.takeIf {browserWorkBinding.value?.runId==runId}
+    internal fun pendingPcOriginFor(runId:String)=
+        (pendingPcLogin?:confirmedPcLogin)?.origin?.takeIf {browserWorkBinding.value?.runId==runId}
 
     private suspend fun notifyGoalAuth(id:Long):Boolean {
         lastConfirmedCard=id
@@ -464,6 +465,10 @@ class AppWebAgent private constructor(private val context:Context) {
 
     internal fun bindResumedWork(originalRunId:String,binding:WorkBinding) {
         if(browserWorkBinding.value?.runId!=originalRunId)return
+        if(loginCard.value?.id?.let {it==lastConfirmedCard}==true){
+            loginCard.value=null
+            loginFolded.value=false
+        }
         browserWorkBinding.value=binding
         if(browserNavigationWork?.let {it.runId==originalRunId&&it.threadId==binding.threadId&&it.branchId==binding.branchId}==true) {
             browserNavigationWork=binding
@@ -478,7 +483,8 @@ class AppWebAgent private constructor(private val context:Context) {
         val prior=websiteWorks.value.lastOrNull{it.binding?.runId==runId} ?: return
         val last=lastObservation?:prior.steps.lastOrNull()
         val label=when {
-            errorCode in setOf("waiting_browser_auth","browser_auth_on_phone") -> "사이트 로그인 대기 · 휴대폰에서 인증하면 원래 작업을 이어가요."
+            errorCode=="waiting_browser_auth" -> "사이트 로그인 대기 · 휴대폰 인증을 확인한 뒤 이어가요."
+            errorCode=="browser_auth_on_phone" -> "사이트 로그인 대기 · 인증을 마친 뒤 채팅에서 다음 단계를 확인해 주세요."
             errorCode=="waiting_goal_condition" -> "다음 확인 시각이나 사이트 응답을 기다리고 있어요."
             errorCode=="pc_browser_waiting_connection" -> "작업 PC에 연결되지 않아 페이지를 열지 못했어요."
             errorCode in setOf("browser_auth_read_required","browser_auth_read_unavailable","browser_auth_read_unconfirmed") ->
@@ -492,9 +498,12 @@ class AppWebAgent private constructor(private val context:Context) {
     }
 
     private fun showWebsiteWork(host:String,waiting:Boolean){
+        val binding=browserWorkBinding.value
+        val prior=websiteWorkFor(binding)?.takeIf {it.binding==binding}
         putWebsiteWork(WebsiteWork(host,
             if(waiting)"로그인 확인 · 재개 상태 확인 중" else "이전 작업을 계속하고 있어요.",
-            listOf("사이트 로그인 확인"),working=!waiting,binding=browserWorkBinding.value))
+            (prior?.steps.orEmpty()+"사이트 로그인 확인").distinct().takeLast(4),working=!waiting,binding=binding,
+            anchorRunId=prior?.anchorRunId?:binding?.runId,anchorMessageId=prior?.anchorMessageId))
     }
 
     private val naverAccountMenuHint =
@@ -762,7 +771,11 @@ class AppWebAgent private constructor(private val context:Context) {
             if(!canSubmit())return false
             confirmedPcLogin=pc
             showWebsiteWork(pc.host,waiting=true)
-            notifyGoalAuth(id)
+            val resumeRegistered=notifyGoalAuth(id)
+            if(!resumeRegistered && browserWorkBinding.value==binding){
+                val work=websiteWorkFor(binding)?.takeIf {it.binding==binding}
+                if(work!=null)putWebsiteWork(work.copy(status="로그인 확인 · 원래 작업의 다음 단계를 채팅에서 확인해 주세요.",working=false))
+            }
             loginStatus.value=when(savedToPhone) {
                 true->"${pc.host} 로그인 정보를 이 휴대폰의 보안 금고에 저장했어요."
                 false->"${pc.host} 로그인은 확인했어요. 이 휴대폰에는 저장하지 못했어요."
