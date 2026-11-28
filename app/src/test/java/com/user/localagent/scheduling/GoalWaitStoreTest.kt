@@ -68,4 +68,19 @@ class GoalWaitStoreTest {
         assertTrue(reopened.replace(saved.copy(resumedOnceFor=saved.id),saved))
         assertNull(GoalWaitPolicy.dueAt(checkNotNull(reopened.get(first.goalId))))
     }
+
+    @Test fun aStopFollowsTheLatestPollButNeverCancelsADifferentExecution() {
+        var data:String?=null
+        val store=GoalWaitStore({data},{data=it})
+        assertTrue(store.replace(first,null))
+        val successor=first.copy(id="poll-replacement")
+        assertTrue(store.replace(successor,first))
+        assertNull(store.markOwnerStopped(first.copy(parentRunId="another-execution"),"wrong-stop"))
+        val (old,stopping)=checkNotNull(store.markOwnerStopped(first,"owner-stop"))
+        assertEquals(successor,old)
+        assertEquals(GoalWaitStopReason.OWNER_CANCELLED,stopping.stopReason)
+        assertEquals(0L,GoalWaitPolicy.dueAt(stopping))
+        assertFalse(store.replace(successor.copy(id="another-poll"),successor))
+        assertEquals(stopping to stopping,store.markOwnerStopped(first,"another-stop"))
+    }
 }

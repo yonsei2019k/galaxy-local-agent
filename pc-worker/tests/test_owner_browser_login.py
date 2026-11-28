@@ -57,6 +57,14 @@ class OwnerLoginDialog(unittest.TestCase):
             agent.owner_login_observe(request)
         self.assertEqual(closed.exception.code, 'BROWSER_WORK_PAGE_GONE')
         self.assertIsNone(agent.page)
+        agent.page = page
+        agent.restored_owner_session = (page, request['origin'])
+        agent.work_origin = request['origin']
+        page.evaluate.side_effect = [1, browser.BrowserError('DEVTOOLS_CLOSED', 502)]
+        with self.assertRaises(browser.BrowserError) as closed_during_read:
+            agent.owner_login_observe(request)
+        self.assertEqual(closed_during_read.exception.code, 'BROWSER_WORK_PAGE_GONE')
+        self.assertIsNone(agent.page)
 
     def test_cooldown_reports_remaining_time_without_using_the_form(self):
         from unittest.mock import patch

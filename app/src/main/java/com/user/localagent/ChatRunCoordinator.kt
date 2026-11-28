@@ -4172,12 +4172,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(branchId!=null && (record.branchId!=branchId || app.repository.chat.thread(threadId)?.activeBranchId!=branchId))
             return@withLock
         val parent=app.repository.chat.run(record.parentRunId)?:return@withLock
-        val stopping=record.stopReason?.let {record}?:record.copy(id=UUID.randomUUID().toString(),
-            stopReason=GoalWaitStopReason.OWNER_CANCELLED)
-        if(stopping!=record&&!app.goalWaits.store.replace(stopping,record))return@withLock
+        val (old,stopping)=app.goalWaits.store.markOwnerStopped(record,UUID.randomUUID().toString())?:return@withLock
         app.goalWaits.armAfterWake(stopping)
         if(finishRecordedGoalWaitStop(stopping,access,goal,parent)){
-            if(stopping!=record)app.goalWaits.cancel(record)
+            if(stopping!=old)app.goalWaits.cancel(old)
             app.goalWaits.cancel(stopping)
         }
     }

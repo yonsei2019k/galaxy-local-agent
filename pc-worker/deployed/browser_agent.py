@@ -748,24 +748,23 @@ class BrowserAgent:
                 raise BrowserError('BROWSER_WORK_PAGE_GONE', 409)
             try:
                 self.page.evaluate('1', timeout=4)
+                prior = self.owner_login_attempt
+                signed_in = False
+                attempted = prior and prior[2] is self.page and prior[3] == origin and time.monotonic() < prior[1]
+                restored = self.restored_owner_session == (self.page, origin) and self.work_origin == origin
+                if (attempted or restored) and self.page.evaluate('location.origin', timeout=4) == origin:
+                    if origin == KAIRB_ORIGIN:
+                        signed_in = (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
+                                     self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True)
+                    else:
+                        stage = self.page.evaluate(OWNER_POST_STAGE + '(' + json.dumps(origin) + ')', timeout=4)
+                        signed_in = stage == 'signed_in' and not getattr(self.page, 'hallym_login_required', False)
             except (BrowserError, ConnectionResetError, BrokenPipeError) as error:
                 if isinstance(error, BrowserError) and error.code != 'DEVTOOLS_CLOSED':
                     raise
                 self.page.close()
                 self.page = None
                 raise BrowserError('BROWSER_WORK_PAGE_GONE', 409) from None
-            prior = self.owner_login_attempt
-            signed_in = False
-            attempted = prior and prior[2] is self.page and prior[3] == origin and time.monotonic() < prior[1]
-            restored = self.restored_owner_session == (self.page, origin) and self.work_origin == origin
-            if ((attempted or restored) and self.page is not None
-                    and self.page.evaluate('location.origin', timeout=4) == origin):
-                if origin == KAIRB_ORIGIN:
-                    signed_in = (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
-                                 self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True)
-                else:
-                    stage = self.page.evaluate(OWNER_POST_STAGE + '(' + json.dumps(origin) + ')', timeout=4)
-                    signed_in = stage == 'signed_in' and not getattr(self.page, 'hallym_login_required', False)
             return {'signedIn': signed_in, 'origin': origin}
 
     def _with_saved_session(self, result, origin):
