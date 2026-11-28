@@ -267,6 +267,7 @@ describe('native conversation', () => {
     click('나의 집순이')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'settings' } })
     expect(host.querySelector('.topbar--center .topbar-who .character')).not.toBeNull()
+    expect(host.querySelectorAll('.bottom-nav button [data-clay]')).toHaveLength(4)
     click('더하기 메뉴')
     expect(host.querySelector('.composer-sheet .sheet-action')).not.toBeNull()
     click('닫기')
@@ -654,13 +655,13 @@ describe('native conversation', () => {
     expect(host.querySelectorAll('.message--assistant .message-label')).toHaveLength(2)
   })
 
-  it('lays out both speakers as distinct bubbles in the main chat', () => {
+  it('lays out the owner bubble and the plain assistant answer in the main chat', () => {
     mount()
     snapshot({ ...base, singleConversation: true, messages: [
       { id: 'u1', role: 'user', text: '질문' }, { id: 'a1', role: 'assistant', text: '답' },
     ] })
     expect(host.querySelector('.main-column--chat-design .message--user .message-text')?.textContent).toBe('질문')
-    expect(host.querySelector('.main-column--chat-design .message--assistant .conversation-bubble')?.textContent).toBe('답')
+    expect(host.querySelector('.main-column--chat-design .message--assistant .assistant-text')?.textContent).toBe('답')
   })
 
   it('keepsSingleMenuAndRemovesCopyIcon', () => {

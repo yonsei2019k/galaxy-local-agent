@@ -172,7 +172,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   return (
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
-      {assistant ? <div className={hasText ? "assistant-text conversation-bubble" : "assistant-text"}>
+      {assistant ? <div className="assistant-text">
         {hasText && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
         {statusCard && <RunStatusCard status={statusCard} report={report} onAction={enabled ? statusAction : undefined} />}
         {/* The host's structured run report (not model text) as a grey card with a resting 집순이 face. */}

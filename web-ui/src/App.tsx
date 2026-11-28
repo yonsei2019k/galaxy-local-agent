@@ -3,7 +3,7 @@ import { SNAPSHOT_EVENT, characterChange, hasNativeBridge, postIntent, readSnaps
 import { initialChat, runControls, updateChat } from './composer'
 import { Conversation } from './Conversation'
 import { Collaboration } from './Collaboration'
-import { Composer, Header, MobileSidebar, Sidebar } from './Workspace'
+import { BottomNavigation, Composer, Header, MobileSidebar, Sidebar } from './Workspace'
 
 import { VoiceTalk } from './VoiceTalk'
 import { NativeCharacterSetting } from './character/useCharacter'
@@ -245,6 +245,8 @@ export default function App() {
           onCancelVoice={() => request({ action: 'cancelVoicePrompt' })}
           onOpenTalk={snapshot?.voiceDraftEpoch !== undefined && !snapshot?.websiteCard?.inputHeight && !snapshot?.approvalCard
             ? () => request({ action: 'openVoiceTalk' }) : undefined} />}
+        {snapshot?.singleConversation && !snapshot.inlineLogin &&
+          <BottomNavigation enabled={enabled} onNavigate={panel => sidebarRequest({ action: 'navigate', payload: { panel } })} />}
       </div>
       {snapshot?.singleConversation !== true && <Collaboration key={`collab:${conversationKey}`} open={collaborationOpen} enabled={enabled} room={snapshot?.collab}
         onBack={() => { setCollaborationScope(null); request({action:'navigate',payload:{panel:'chat'}}) }} onMenu={openMenu}
