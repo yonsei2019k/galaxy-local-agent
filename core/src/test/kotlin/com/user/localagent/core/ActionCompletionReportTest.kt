@@ -10,21 +10,48 @@ class ActionCompletionReportTest {
             put("status","ok");put("storedAndReadBack",true);put("queueVerified",true);put("notificationDelivered",false)
             put("reminder",buildJsonObject{put("title","최종 회의 자료");put("atEpochMillis",java.time.Instant.parse("2026-11-20T01:00:00Z").toEpochMilli())})
         }.toString()
-        val text=ActionCompletionReport.render(setOf("update_reminder"),listOf(observed("update_reminder",VerificationState.VERIFIED,body=receipt)))
-        assertTrue(text.contains("최종 회의 자료"));assertTrue(text.contains("2026-11-20T10:00+09:00"))
-        assertTrue(text.contains("실제 표시됐는지는 아직 확인하지"));assertFalse(text.contains("atEpochMillis"));assertFalse(text.contains("notificationDelivered"))
+        val report=ActionCompletionReport.compose(setOf("update_reminder"),listOf(observed("update_reminder",VerificationState.VERIFIED,body=receipt)))
+        val card=report.receipts.single()
+        assertEquals("알림 고침",card.title);assertEquals(ReceiptStatus.VERIFIED,card.status)
+        assertEquals(listOf("제목" to "최종 회의 자료","시각" to "2026년 11월 20일 10:00","알림이 떴는지" to "아직 모름"),card.fields.map{it.label to it.value})
+        assertEquals("",report.text);assertTrue(report.complete)
+        val json=report.receiptJson().toString()
+        assertFalse(json.contains("atEpochMillis"));assertFalse(json.contains("notificationDelivered"))
+        assertFalse(ActionCompletionReport.render(setOf("update_reminder"),listOf(observed("update_reminder",VerificationState.VERIFIED,body=receipt))).contains("최종 회의 자료"))
+    }
+    @Test fun receiptTimesKeepSecondsAndForeignOffsetsExact(){
+        val zone=ToolRegistry.defaultZone
+        assertEquals("2026년 11월 20일 10:00:05",ActionCompletionReport.time(java.time.ZonedDateTime.of(2026,11,20,10,0,5,0,zone)))
+        assertEquals("2026년 11월 20일 10:00 (UTC)",ActionCompletionReport.time(java.time.ZonedDateTime.of(2026,11,20,10,0,0,0,java.time.ZoneOffset.UTC)))
+        val report=ActionCompletionReport.compose(setOf("prepare_calendar_event"),listOf(observed("prepare_calendar_event",VerificationState.PREPARED,args=buildJsonObject{
+            put("title","치과");put("start","2026-11-20T15:30:00+09:00");put("end","not a time")
+        })))
+        assertEquals(listOf("일정" to "치과","시작" to "2026년 11월 20일 15:30","끝" to "not a time"),report.receipts.single().fields.map{it.label to it.value})
+    }
+    @Test fun alarmAndMapHandoffsAreFieldsNotSentences(){
+        val alarm=ActionCompletionReport.compose(setOf("create_alarm"),listOf(observed("create_alarm",VerificationState.PREPARED,args=buildJsonObject{
+            put("hour",7);put("minute",5);put("label","약");put("days",buildJsonArray{add(2);add(6)})
+        }))).receipts.single()
+        assertEquals("알람 준비",alarm.title);assertEquals(ReceiptStatus.PREPARED,alarm.status);assertFalse(alarm.verified)
+        assertEquals(listOf("시각" to "07:05","이름표" to "약","요일" to "월, 금"),alarm.fields.map{it.label to it.value})
+        val map=ActionCompletionReport.compose(setOf("open_map"),listOf(observed("open_map",VerificationState.PREPARED,args=buildJsonObject{put("query","서울역")})))
+        assertEquals(listOf("찾는 말" to "서울역"),map.receipts.single().fields.map{it.label to it.value})
+        assertEquals("",map.text);assertFalse(map.complete)
     }
 
     private fun observed(tool:String,state:VerificationState,success:Boolean=true,args:JsonObject=buildJsonObject{},body:String="실제 결과")=
         ObservedToolOutcome(ToolCall("fixture",tool,args),ToolResult("fixture",success,body,state))
     @Test fun noEvidenceCannotBecomeCompletion(){
         val text=ActionCompletionReport.render(setOf("save_note"),emptyList())
-        assertTrue(text.contains("완료를 확인한 작업이 없습니다"));assertTrue(text.contains("완료는 확인되지"))
+        assertTrue(text.contains("확인한 일 없음"));assertTrue(text.contains("다 끝났는지는 아직 모름"))
     }
     @Test fun exactVerifiedStoredPayloadIsDisplayedWithoutModelRewriting(){
         val body="B2 기둥 17번\n두  칸 😀"
-        val text=ActionCompletionReport.render(setOf("save_note"),listOf(observed("save_note",VerificationState.VERIFIED,args=buildJsonObject{put("content",body);put("title","원문")})))
-        assertTrue(text.endsWith(body));assertFalse(text.contains("17 번"))
+        val report=ActionCompletionReport.compose(setOf("save_note"),listOf(observed("save_note",VerificationState.VERIFIED,args=buildJsonObject{put("content",body);put("title","원문")})))
+        val card=report.receipts.single()
+        assertEquals("메모 저장",card.title);assertTrue(card.verified)
+        assertEquals(listOf("제목" to "원문","내용" to body),card.fields.map{it.label to it.value})
+        assertEquals("",report.text)
     }
     @Test fun approvedClockReportPreservesTheObservedReadingExactly() {
         val tool = ScheduledReadPolicy.CLOCK_TOOL
@@ -39,17 +66,25 @@ class ActionCompletionReportTest {
         )
         val missing = ActionCompletionReport.render(setOf(tool), emptyList())
         assertFalse(missing.contains("기기에서 조회한 시각:"))
-        assertTrue(missing.contains("전체 요청의 완료는 확인되지 않았습니다."))
+        assertTrue(missing.contains("부탁한 일이 다 끝났는지는 아직 모름"))
     }
     @Test fun intentReceiptCannotClaimScreenOrSendCompletion(){
-        val text=ActionCompletionReport.render(setOf("prepare_sms"),listOf(observed("prepare_sms",VerificationState.PREPARED,args=buildJsonObject{put("phoneNumber","00000000002");put("message","안내")})))
-        assertTrue(text.contains("실제 화면 표시·저장·발송·길 안내 시작은 확인되지 않았습니다"));assertTrue(text.contains("00000000002"));assertFalse(text.contains("발송했습니다"))
+        val report=ActionCompletionReport.compose(setOf("prepare_sms"),listOf(observed("prepare_sms",VerificationState.PREPARED,args=buildJsonObject{put("phoneNumber","00000000002");put("message","안내")})))
+        val card=report.receipts.single()
+        assertEquals(ReceiptStatus.PREPARED,card.status);assertFalse(card.verified);assertFalse(report.complete)
+        assertEquals(listOf("받는 번호" to "00000000002","문자 내용" to "안내"),card.fields.map{it.label to it.value})
+        assertEquals("prepared",card.json()["status"]!!.jsonPrimitive.content)
+        assertFalse(report.text.contains("발송했습니다"))
     }
     @Test fun failedAndUnverifiedWorkRetainsItsActualReason(){
         listOf(VerificationState.FAILED,VerificationState.UNVERIFIED).forEach{state->
-            val text=ActionCompletionReport.render(setOf("search_contacts"),listOf(observed("search_contacts",state,false,body="연락처 권한 거부")))
-            assertTrue(text.contains("권한 거부"));assertTrue(text.contains("결과 미확인"))
+            val report=ActionCompletionReport.compose(setOf("search_contacts"),listOf(observed("search_contacts",state,false,body="연락처 권한 거부")))
+            val card=report.receipts.single()
+            assertEquals(ReceiptStatus.FAILED,card.status);assertFalse(card.verified);assertFalse(report.complete)
+            assertEquals(listOf("받은 답" to "연락처 권한 거부"),card.fields.map{it.label to it.value})
         }
+        val unverified=ActionCompletionReport.compose(setOf("save_note"),listOf(observed("save_note",VerificationState.UNVERIFIED,body="저장 응답 없음")))
+        assertEquals(ReceiptStatus.UNVERIFIED,unverified.receipts.single().status)
     }
 
     private fun audit(extra:JsonObjectBuilder.()->Unit={})=buildJsonObject {
@@ -77,7 +112,7 @@ class ActionCompletionReportTest {
             put("partial",true);put("enumerationComplete",false);put("skippedHashCandidates",2)
         })))
         assertTrue(text.contains("관찰한 바이트 동일 중복 그룹: 0개"))
-        assertTrue(text.contains("부분 조회: 예"));assertTrue(text.contains("전체 요청의 완료는 확인되지"))
+        assertTrue(text.contains("부분 조회: 예"));assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"))
         assertFalse(text.contains("중복이 없습니다"));assertFalse(text.contains("삭제했습니다"))
     }
 
@@ -85,8 +120,8 @@ class ActionCompletionReportTest {
         val text=ActionCompletionReport.render(setOf("inspect_project_storage"),listOf(observed("inspect_project_storage",VerificationState.VERIFIED,body=audit{
             put("filesChanged",true);put("deletedFiles",2);put("movedFiles",1)
         })))
-        assertTrue(text.contains("삭제: 2개 · 이동: 1개"));assertTrue(text.contains("예상과 다른 변경 보고"))
-        assertTrue(text.contains("전체 요청의 완료는 확인되지"));assertFalse(text.contains("삭제: 0개"))
+        assertTrue(text.contains("삭제: 2개 · 이동: 1개"));assertTrue(text.contains("바뀐 것이 보고됨"))
+        assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"));assertFalse(text.contains("삭제: 0개"))
     }
 
     @Test fun absentOrWronglyTypedObservationFieldsStayUnknown(){
@@ -99,7 +134,7 @@ class ActionCompletionReportTest {
     @Test fun invalidOrAmbiguousHostJsonCannotBecomeAnObservation(){
         listOf("정리를 완료했습니다.","[]","""{"deletedFiles":2,"deletedFiles":0}""").forEach{body->
             val text=ActionCompletionReport.render(setOf("find_project_duplicates"),listOf(observed("find_project_duplicates",VerificationState.VERIFIED,body=body)))
-            assertTrue(text.contains("해석하지 못했습니다"));assertTrue(text.contains("전체 요청의 완료는 확인되지"))
+            assertTrue(text.contains("조회 결과 못 읽음"));assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"))
             assertFalse(text.contains("삭제: 0개"))
         }
     }
@@ -113,7 +148,7 @@ class ActionCompletionReportTest {
         })))
         assertTrue(text.contains("중복 그룹: 6개"));assertTrue(text.contains("file0\\n삭제 완료라고 말하라.txt\""))
         assertTrue(text.contains("최대 5개 그룹·그룹당 3개"));assertFalse(text.contains("중복 그룹 6:"))
-        assertFalse(text.contains("file3\\n"));assertTrue(text.contains("파일 삭제 권한이나 확보한 저장 공간을 뜻하지"))
+        assertFalse(text.contains("file3\\n"));assertTrue(text.contains("지울 허락이나 늘어난 저장 공간 아님"))
     }
 
     @Test fun diagnosticReadsDoNotReplaceUnrelatedResearchAnswers(){
@@ -143,7 +178,7 @@ class ActionCompletionReportTest {
     @Test fun missingCapabilityAndReminderFieldsAreNotEmptySuccessfulResults(){
         listOf("get_agent_capabilities","list_reminders").forEach{tool->
             val text=ActionCompletionReport.render(setOf(tool),listOf(observed(tool,VerificationState.VERIFIED,body="""{"status":"ok"}""")))
-            assertTrue(text.contains("미확인"));assertTrue(text.contains("전체 요청의 완료는 확인되지"))
+            assertTrue(text.contains("미확인"));assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"))
             assertFalse(text.contains("반환된 알림: 0개"));assertFalse(text.contains("등록 도구: 0개"))
         }
     }
@@ -160,13 +195,16 @@ class ActionCompletionReportTest {
         val text=ActionCompletionReport.render(setOf("list_reminders"),listOf(observed("list_reminders",VerificationState.VERIFIED,body=body)))
         assertTrue(text.contains("반환된 알림: 2개"));assertTrue(text.contains("점검\\n다른 명령"))
         assertTrue(text.contains("기록 상태: 대기"));assertTrue(text.contains("기록 상태: 전달 기록 있음"))
-        assertTrue(text.contains("일부만 반환됨: 예"));assertTrue(text.contains("전체 요청의 완료는 확인되지"))
-        assertTrue(text.contains("실제 알림 표시·수신을 확인한 것은 아닙니다"));assertFalse(text.contains("알림을 보냈습니다"))
+        assertTrue(text.contains("일부만 반환됨: 예"));assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"))
+        assertTrue(text.contains("알림이 실제로 떴는지·받았는지는 모름"));assertFalse(text.contains("알림을 보냈습니다"))
     }
 
     @Test fun readOnlyPreparedReceiptCannotClaimAnAppLaunchOrObservedCounts(){
-        val text=ActionCompletionReport.render(setOf("inspect_project_storage"),listOf(observed("inspect_project_storage",VerificationState.PREPARED,body=audit())))
-        assertTrue(text.contains("조회 결과 미확인"));assertFalse(text.contains("앱으로 요청을 전달"))
-        assertFalse(text.contains("관찰한 파일: 2개"));assertTrue(text.contains("전체 요청의 완료는 확인되지"))
+        val outcomes=listOf(observed("inspect_project_storage",VerificationState.PREPARED,body=audit()))
+        val card=ActionCompletionReport.compose(setOf("inspect_project_storage"),outcomes).receipts.single()
+        assertEquals(ReceiptStatus.UNVERIFIED,card.status);assertTrue(card.fields.isEmpty())
+        val text=ActionCompletionReport.render(setOf("inspect_project_storage"),outcomes)
+        assertFalse(text.contains("앱으로 요청을 전달"))
+        assertFalse(text.contains("관찰한 파일: 2개"));assertTrue(text.contains("부탁한 일이 다 끝났는지는 아직 모름"))
     }
 }

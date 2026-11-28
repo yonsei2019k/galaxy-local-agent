@@ -5,6 +5,36 @@ import kotlinx.serialization.json.*
 /** These records are made by the host after execution; model prose is never execution evidence. */
 data class ObservedToolOutcome(val call:ToolCall,val result:ToolResult)
 
+/** One plain-word fact on a receipt card: [label] is a short noun, [value] the exact observed or requested value. */
+data class ReceiptField(val label:String,val value:String)
+
+/** prepared, sent/stored and verified stay distinguishable: the UI shows [status], never a host sentence. */
+enum class ReceiptStatus(val id:String){VERIFIED("verified"),PREPARED("prepared"),UNVERIFIED("unverified"),FAILED("failed")}
+
+/**
+ * Structured receipt for one managed action. [title] is null when the UI should use its own tool label.
+ * Only [ReceiptStatus.VERIFIED] means the host re-read the stored result.
+ */
+data class ActionReceipt(val tool:String,val title:String?,val status:ReceiptStatus,val fields:List<ReceiptField>,val link:String?=null){
+    val verified get()=status==ReceiptStatus.VERIFIED
+    fun json()=buildJsonObject {
+        put("tool",tool);title?.let{put("title",it)};put("status",status.id);put("verified",verified)
+        put("fields",buildJsonArray{fields.forEach{field->add(buildJsonObject{put("label",field.label);put("value",field.value)})}})
+        link?.let{put("link",it)}
+    }
+}
+
+/**
+ * [receipts] go to the receipt card; [text] keeps only observed content that is itself the answer
+ * (a memo body, a listing, a lookup). [complete] is false whenever the whole request is not proven.
+ */
+data class ComposedReport(val receipts:List<ActionReceipt>,val text:String,val complete:Boolean,val observed:Boolean){
+    fun receiptJson()=buildJsonObject {
+        put("complete",complete)
+        put("items",buildJsonArray{receipts.forEach{add(it.json())}})
+    }
+}
+
 object ActionCompletionReport {
     val managedTools=setOf("patch_note","read_note","create_google_calendar_event","save_note","update_note","delete_note","create_reminder","update_reminder","delete_reminder",
         KakaoShare.TOOL,"prepare_sms","prepare_email","prepare_calendar_event","create_alarm","get_current_datetime","search_contacts",
@@ -12,66 +42,95 @@ object ActionCompletionReport {
         com.user.localagent.core.connections.ConsumerAppCatalog.names+setOf("open_map","open_url")+setOf(ScheduledReadToolCatalog.CREATE, ScheduledReadToolCatalog.CANCEL)
     private val auxiliaryReads=setOf("read_note","get_current_datetime","search_contacts","list_reminders","get_agent_capabilities")
     private val observationTools=setOf("read_note","inspect_project_storage","find_project_duplicates","list_reminders","get_agent_capabilities")
+    /** Card titles for receipts the host builds; other tools use the UI's plain tool label. */
+    private val titles=mapOf("prepare_sms" to "문자 준비","prepare_email" to "메일 준비","prepare_calendar_event" to "일정 준비",
+        "create_alarm" to "알람 준비","open_map" to "지도 열기","open_url" to "링크 열기","save_note" to "메모 저장","update_note" to "메모 고침",
+        "create_reminder" to "알림 저장","update_reminder" to "알림 고침","create_google_calendar_event" to "구글 캘린더에 일정 넣기")
+    private val handoffLabels=linkedMapOf("query" to "찾는 말","name" to "이름","label" to "이름표","url" to "주소")
+    private val weekdays=mapOf(1L to "일",2L to "월",3L to "화",4L to "수",5L to "목",6L to "금",7L to "토")
     fun manages(required:Set<String>,outcomes:List<ObservedToolOutcome>)=required.any{it in managedTools}||outcomes.any{it.call.name in managedTools-auxiliaryReads}
-    fun render(required:Set<String>,outcomes:List<ObservedToolOutcome>,reason:String?=null):String=buildString {
+
+    /**
+     * One string for callers outside the chat card (finalization policies, records). Receipts are not in it:
+     * the chat shows them through [compose] as a card.
+     */
+    fun render(required:Set<String>,outcomes:List<ObservedToolOutcome>,reason:String?=null):String {
+        val report=compose(required,outcomes)
+        return buildString {
+            if(!report.observed)append("확인한 일 없음")
+            append(report.text)
+            if(!report.complete){if(isNotEmpty())append("\n\n");append("부탁한 일이 다 끝났는지는 아직 모름")}
+            reason?.takeIf{it.isNotBlank()}?.let{append("\n").append(it)}
+        }
+    }
+
+    fun compose(required:Set<String>,outcomes:List<ObservedToolOutcome>):ComposedReport {
         val managed=outcomes.filter{it.call.name in managedTools}
         var observationIncomplete=false
         val noteReadPages=NoteReadbackPages()
         val noteReadIncomplete=linkedMapOf<RequiredReadbackPolicy.Resource,Boolean>()
-        if(managed.isEmpty())append("이번 실행에서 완료를 확인한 작업이 없습니다.")
-        managed.forEachIndexed {index,observed->
-            if(isNotEmpty())append("\n\n")
+        val receipts=mutableListOf<ActionReceipt>()
+        val text=StringBuilder()
+        fun section():StringBuilder {if(text.isNotEmpty())text.append("\n\n");return text}
+        managed.forEach {observed->
             val call=observed.call;val result=observed.result
             fun value(key:String)=call.arguments[key]?.jsonPrimitive?.content.orEmpty()
+            fun receipt(status:ReceiptStatus,vararg fields:Pair<String,String?>,link:String?=null){
+                receipts.add(ActionReceipt(call.name,titles[call.name],status,
+                    fields.mapNotNull{(label,value)->value?.let{ReceiptField(label,it)}},link))
+            }
             if(!result.success||result.verification in setOf(VerificationState.FAILED,VerificationState.UNVERIFIED)){
-                append("실행 결과 미확인 · ").append(result.content.take(1200));return@forEachIndexed
+                receipt(if(!result.success||result.verification==VerificationState.FAILED)ReceiptStatus.FAILED else ReceiptStatus.UNVERIFIED,
+                    "받은 답" to result.content.take(1200).ifBlank{null});return@forEach
             }
             if(call.name == "prepare_email" && PdfMailAttachments.FIELD in call.arguments && result.verification in setOf(VerificationState.PREPARED,VerificationState.VERIFIED)) {
-                append(result.content)
-                return@forEachIndexed
+                section().append(result.content)
+                return@forEach
             }
             if(call.name == KakaoShare.TOOL) {
-                append(if (result.verification == VerificationState.PREPARED) KakaoShare.HANDOFF else "카카오톡 전송 결과를 확인할 수 없어요.")
-                return@forEachIndexed
+                section().append(if (result.verification == VerificationState.PREPARED) KakaoShare.HANDOFF else "카카오톡 · 보냈는지 못 봄")
+                return@forEach
             }
             if(call.name in observationTools){
                 if(result.verification!=VerificationState.VERIFIED){
-                    append("조회 결과 미확인 · 실제 관찰 결과가 검증되지 않았습니다.")
+                    receipt(ReceiptStatus.UNVERIFIED)
                     observationIncomplete=true
                 }else{
                     val report=observation(call.name,result.content)
-                    append(report.text)
+                    section().append(report.text)
                     if(call.name=="read_note"){
                         val raw=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
                         val proof=noteReadPages.observe(call,raw);noteReadIncomplete[proof.target]=proof.snapshot==null
                     }else observationIncomplete=observationIncomplete||report.incomplete
                 }
             }else if(result.verification==VerificationState.PREPARED){
-                append("관련 앱으로 요청을 전달했습니다. 실제 화면 표시·저장·발송·길 안내 시작은 확인되지 않았습니다.")
                 when(call.name){
-                    "prepare_sms"->append("\n수신 번호: ").append(value("phoneNumber")).append("\n문자 내용:\n").append(value("message"))
-                    "prepare_email"->append("\n수신 주소: ").append(value("to")).append("\n제목: ").append(value("subject")).append("\n본문:\n").append(value("body"))
-                    "prepare_calendar_event"->append("\n일정: ").append(value("title")).append("\n시작: ").append(value("start")).append("\n종료: ").append(value("end"))
-                    else->listOf("query","name","label","url").forEach{key->if(value(key).isNotBlank())append("\n요청 값: ").append(value(key))}
+                    "prepare_sms"->receipt(ReceiptStatus.PREPARED,"받는 번호" to value("phoneNumber"),"문자 내용" to value("message"))
+                    "prepare_email"->receipt(ReceiptStatus.PREPARED,"받는 주소" to value("to"),"제목" to value("subject"),"본문" to value("body"))
+                    "prepare_calendar_event"->receipt(ReceiptStatus.PREPARED,"일정" to value("title"),
+                        "시작" to value("start").takeIf{it.isNotBlank()}?.let(::time),"끝" to value("end").takeIf{it.isNotBlank()}?.let(::time))
+                    "create_alarm"->receipt(ReceiptStatus.PREPARED,"시각" to alarmTime(call.arguments),
+                        "이름표" to value("label").ifBlank{null},"요일" to days(call.arguments["days"]))
+                    else->receipt(ReceiptStatus.PREPARED,*handoffLabels.map{(key,label)->label to value(key).ifBlank{null}}.toTypedArray())
                 }
             }else when(call.name){
                 ScheduledReadToolCatalog.CREATE, ScheduledReadToolCatalog.CANCEL -> {
                     val report = renderScheduledRead(call, result)
                     if (report == null) {
-                        append("해당 예약의 확인된 상태를 읽지 못했습니다.")
+                        receipt(ReceiptStatus.UNVERIFIED)
                         observationIncomplete = true
-                    } else append(report)
+                    } else section().append(report)
                 }
                 "patch_note"->{
                     val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
                     if(receipt?.flag("storedAndReadBack")==true&&receipt.flag("readbackComplete")==true&&receipt.flag("unreadTextPreserved")==true&&
                         receipt.text("id")==value("id")&&receipt.text("scope")==value("scope")&&receipt.text("beforeUpdatedAt")==value("expectedUpdatedAt")){
-                        append(if(receipt.flag("changed")==true)"메모 부분 수정 후 전체 저장 재조회를 확인했습니다."else"같은 내용으로 본문·버전 변경 없이 재조회를 확인했습니다.")
-                        append("\n제목: ").append(receipt.text("title"));append("\n메모 버전: ").append(receipt.text("updatedAt"))
-                        append("\n그 밖의 문구는 보존했습니다.")
+                        section().append(if(receipt.flag("changed")==true)"메모 일부 고침 · 저장 뒤 전체 다시 봐서 확인함"else"메모 그대로 · 본문·버전 안 바뀜 · 다시 봐서 확인함")
+                        text.append("\n제목: ").append(receipt.text("title"));text.append("\n메모 버전: ").append(receipt.text("updatedAt"))
+                        text.append("\n나머지 글 · 그대로 둠")
                         noteReadPages.invalidate(value("id"))
                         if("read_note" in required)noteReadIncomplete[RequiredReadbackPolicy.Resource("note_body_v1",value("id"))]=true
-                    }else{append("메모 부분 수정의 저장 근거를 확인하지 못했습니다.");observationIncomplete=true}
+                    }else{section().append("메모 일부 고침 · 저장됐는지 못 봄");observationIncomplete=true}
                 }
                 "create_google_calendar_event"->{
                     val privateEvent=call.arguments["private"]==JsonPrimitive(true)
@@ -88,44 +147,64 @@ object ActionCompletionReport {
                             java.time.OffsetDateTime.parse(event.text("end")).toInstant()==java.time.OffsetDateTime.parse(value("end")).toInstant())
                     }.isSuccess
                     if(proven){
-                        append("일정 생성 후 실제 ID·활성 상태·제목·시각 재조회를 확인했습니다.")
-                        append("\n일정: ").append(event?.text("title"));append("\n시작: ").append(event?.text("start"));append("\n종료: ").append(event?.text("end"))
-                        if(privateEvent)append("\n비공개로 등록됐고 참석자 초대는 없어요.")
-                        else append("\n참석자 수신·수락은 확인하지 않았습니다.")
-                        com.user.localagent.core.connections.CalendarTargetIntegrity.eventLink(event?.text("htmlLink"))
-                            ?.let {append("\n[Google Calendar에서 열기](").append(it).append(")")}
-                    }else{append("일정 생성의 대상·활성 상태·저장 근거를 확인하지 못했습니다.");observationIncomplete=true}
+                        receipt(ReceiptStatus.VERIFIED,"일정" to event?.text("title"),"시작" to event?.text("start")?.let(::time),"끝" to event?.text("end")?.let(::time),
+                            "초대" to if(privateEvent)"비공개 · 초대 없음" else "받았는지·수락했는지 모름",
+                            link=com.user.localagent.core.connections.CalendarTargetIntegrity.eventLink(event?.text("htmlLink")))
+                    }else{receipt(ReceiptStatus.UNVERIFIED,"일정" to value("title").ifBlank{null});observationIncomplete=true}
                 }
-                "save_note","update_note"->{append("메모 ").append(if(call.name=="save_note")"저장"else"수정").append(" 후 재조회를 확인했습니다.");if(value("title").isNotEmpty())append("\n제목: ").append(value("title"));append("\n본문:\n").append(value("content"))}
+                "save_note","update_note"->receipt(ReceiptStatus.VERIFIED,"제목" to value("title").ifEmpty{null},"내용" to value("content"))
                 "create_reminder","update_reminder"->{
                     val receipt=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()
                     val reminder=receipt?.get("reminder") as? JsonObject
                     val title=(reminder?.get("title") as? JsonPrimitive)?.takeIf{it.isString}?.content
                     val at=(reminder?.get("atEpochMillis") as? JsonPrimitive)?.longOrNull
                     if((receipt?.get("storedAndReadBack") as? JsonPrimitive)?.booleanOrNull==true&&(receipt?.get("queueVerified") as? JsonPrimitive)?.booleanOrNull==true&&title!=null&&at!=null){
-                        append("알림 ").append(if(call.name=="create_reminder")"저장"else"수정").append("과 예약 큐를 확인했습니다.")
-                        append("\n제목: ").append(title).append("\n시각: ").append(java.time.Instant.ofEpochMilli(at).atZone(ToolRegistry.defaultZone))
-                        append("\n알림이 실제 표시됐는지는 아직 확인하지 않았습니다.")
-                    }else append(result.content)
+                        receipt(ReceiptStatus.VERIFIED,"제목" to title,"시각" to time(java.time.Instant.ofEpochMilli(at).atZone(ToolRegistry.defaultZone)),
+                            "알림이 떴는지" to "아직 모름")
+                    }else section().append(result.content)
                 }
-                "get_current_datetime"->append("기기에서 조회한 시각: ").append(result.content)
-                "search_contacts"->append("연락처 조회 결과:\n").append(result.content)
-                else->append(result.content)
+                "get_current_datetime"->section().append("기기에서 조회한 시각: ").append(result.content)
+                "search_contacts"->section().append("연락처 조회 결과:\n").append(result.content)
+                else->section().append(result.content)
             }
         }
         val verified=outcomes.filter{it.result.success&&it.result.verification==VerificationState.VERIFIED}.map{it.call.name}.toSet()
-        if((required-verified).isNotEmpty()||observationIncomplete||noteReadIncomplete.values.any{it})append("\n\n전체 요청의 완료는 확인되지 않았습니다.")
-        reason?.takeIf{it.isNotBlank()}?.let{append("\n").append(it)}
+        val complete=(required-verified).isEmpty()&&!observationIncomplete&&noteReadIncomplete.values.none{it}
+        return ComposedReport(receipts,text.toString(),complete,managed.isNotEmpty())
+    }
+
+    /** Exact wall time in plain Korean; seconds and a non-default offset stay visible when present. */
+    internal fun time(value:java.time.ZonedDateTime):String {
+        val base=value.format(java.time.format.DateTimeFormatter.ofPattern("yyyy년 M월 d일 HH:mm"))
+        val seconds=when {
+            value.nano!=0->":%02d.%s".format(value.second,"%09d".format(value.nano).trimEnd('0'))
+            value.second!=0->":%02d".format(value.second)
+            else->""
+        }
+        val zone=if(value.offset==ToolRegistry.defaultZone.rules.getOffset(value.toInstant()))"" else " (UTC${value.offset.id.takeUnless{it=="Z"}.orEmpty()})"
+        return base+seconds+zone
+    }
+    private fun time(value:String):String=runCatching{time(java.time.OffsetDateTime.parse(value).toZonedDateTime())}.getOrNull()
+        ?:runCatching{time(java.time.LocalDateTime.parse(value).atZone(ToolRegistry.defaultZone))}.getOrNull()?:value
+    private fun alarmTime(arguments:JsonObject):String? {
+        val hour=(arguments["hour"] as? JsonPrimitive)?.takeUnless{it.isString}?.longOrNull?:return null
+        val minute=(arguments["minute"] as? JsonPrimitive)?.takeUnless{it.isString}?.longOrNull?:return null
+        return "%02d:%02d".format(hour,minute)
+    }
+    private fun days(value:JsonElement?):String? {
+        val list=value as? JsonArray?:return null
+        return list.map{item->(item as? JsonPrimitive)?.takeUnless{it.isString}?.longOrNull?.let(weekdays::get)?:item.toString()}
+            .joinToString(", ").ifBlank{null}
     }
 
     private data class Observation(val text:String,val incomplete:Boolean)
     private fun observation(tool:String,body:String):Observation {
         val data=if(body.length<=65536)runCatching{rejectDuplicateKeys(body);Json.parseToJsonElement(body) as? JsonObject}.getOrNull()else null
-        if(data==null)return Observation("조회 결과를 해석하지 못했습니다. 관찰 내용과 변경 여부는 미확인입니다.",true)
+        if(data==null)return Observation("조회 결과 못 읽음 · 본 내용과 바뀐 것은 모름",true)
         return when(tool){
             "read_note"->{
                 val complete=data.flag("completeBody")==true&&data.flag("partial")==false&&data.flag("hasMore")==false
-                Observation((if(complete)"메모 전체 조회"else"메모 일부 조회 · 읽지 않은 부분이 있습니다.")+"\n"+data.text("text").orEmpty(),!complete)
+                Observation((if(complete)"메모 전체 조회"else"메모 일부 조회 · 안 읽은 부분 있음")+"\n"+data.text("text").orEmpty(),!complete)
             }
             "inspect_project_storage","find_project_duplicates"->storage(tool,data)
             "get_agent_capabilities"->capabilities(data)
@@ -147,7 +226,7 @@ object ActionCompletionReport {
             append("\n관찰한 파일: ").append(countLabel(data.count("observedFiles")))
             append("\n부분 조회: ").append(flagLabel(partial))
             append("\n파일 목록 순회 완료: ").append(flagLabel(enumerated))
-            if(partial==true||enumerated==false)append("\n누락·제외된 범위가 있어 전체 결과로 판단할 수 없습니다.")
+            if(partial==true||enumerated==false)append("\n빠진 범위 있음 · 전체 결과 아님")
             if(tool=="find_project_duplicates"){
                 val total=data.count("observedDuplicateGroups")
                 append("\n관찰한 바이트 동일 중복 그룹: ").append(countLabel(total))
@@ -165,11 +244,11 @@ object ActionCompletionReport {
                 }
                 if(groups==null){append("\n중복 경로: 미확인");incomplete=true}
                 if((groups?.size?:0)>5||groups?.any{((it as? JsonObject)?.get("paths") as? JsonArray)?.size?.let{size->size>3}==true}==true)
-                    append("\n경로 표시는 최대 5개 그룹·그룹당 3개이며 나머지는 생략했습니다.")
+                    append("\n경로 표시 · 최대 5개 그룹·그룹당 3개 · 나머지 생략")
                 listOf("duplicateGroupsOmitted" to "결과에서 생략한 중복 그룹", "duplicatePathsOmitted" to "결과에서 생략한 중복 경로").forEach{(key,label)->
                     data.count(key)?.takeIf{it>0}?.let{append("\n").append(label).append(": ").append(countLabel(it))}
                 }
-                append("\n중복 관찰은 파일 삭제 권한이나 확보한 저장 공간을 뜻하지 않습니다.")
+                append("\n중복을 찾은 것뿐 · 지울 허락이나 늘어난 저장 공간 아님")
             }else{
                 append("\n확인된 크기 합계: ").append(data.count("observedKnownBytes")?.let{"${it}바이트"}?:"미확인")
                 if(data.flag("sizeTotalCapped")==true)append(" (합계 상한에 도달한 값)")
@@ -182,7 +261,7 @@ object ActionCompletionReport {
             append("\n파일 변경 보고: ").append(flagLabel(changed))
             append("\n삭제: ").append(countLabel(deleted)).append(" · 이동: ").append(countLabel(moved))
             if(data.flag("readOnly")==false||changed==true||(deleted?:0)>0||(moved?:0)>0)
-                append("\n읽기 전용 도구의 예상과 다른 변경 보고가 있어 결과를 확인해야 합니다.")
+                append("\n읽기만 하는 도구인데 바뀐 것이 보고됨 · 결과 확인 필요")
         }
         return Observation(text,incomplete)
     }
@@ -193,7 +272,7 @@ object ActionCompletionReport {
         val models=data["models"] as? JsonObject
         val workspace=data["workspace"] as? JsonObject
         val text=buildString {
-            append("도구와 실행 전제조건 조회 결과입니다.")
+            append("도구와 실행 조건 조회")
             append("\n조회 상태: ").append(if(data.text("status")=="ok")"결과 반환"else"미확인")
             append("\n등록 도구: ").append(countLabel(data.count("registeredToolCount")))
             append("\n현재 요청에서 허용된 도구: ").append(countLabel(data.count("allowedToolCount")))
@@ -208,7 +287,7 @@ object ActionCompletionReport {
             append("\nPC 연결 가능 여부: ").append(if(paired.flag("reachabilityVerified")==true)"조회에서 확인됨"else"미확인")
             append("\n모델 실행 준비: ").append(if(models.flag("runtimeReadyVerified")==true)"조회에서 확인됨"else"미확인")
             append("\n프로젝트 접근 재확인: ").append(if(workspace.flag("accessRevalidated")==true)"확인됨"else"미확인")
-            append("\n등록·설정·허용 여부는 실제 작업 성공의 근거가 아닙니다. 권한과 범위는 실행 직전에 다시 확인합니다.")
+            append("\n등록·설정·허용은 일이 된다는 근거 아님 · 권한과 범위는 실행 직전에 다시 확인")
         }
         return Observation(text,data.text("status")!="ok"||data.count("registeredToolCount")==null||data.count("allowedToolCount")==null||tools==null||data.flag("partial")!=false)
     }
@@ -218,7 +297,7 @@ object ActionCompletionReport {
         val truncated=data.flag("truncated")
         var incomplete=data.text("status")!="ok"||data.text("source")!="current_request_reminders"||rows==null||truncated!=false
         val text=buildString {
-            append("리마인더 기록 조회 결과입니다.")
+            append("리마인더 기록 조회")
             append("\n조회 범위: ").append(if(data.text("source")=="current_request_reminders")"현재 요청의 대화·프로젝트"else"미확인")
             append("\n조회 상태: ").append(if(data.text("status")=="ok")"결과 반환"else"미확인")
             append("\n반환된 알림: ").append(countLabel(rows?.size?.toLong()))
@@ -233,9 +312,9 @@ object ActionCompletionReport {
                 append("\n  기록 상태: ").append(when(state){"pending"->"대기";"delivering"->"전달 처리 중";"delivered"->"전달 기록 있음";else->"미확인"})
                 if(title==null||datetime==null||state !in setOf("pending","delivering","delivered"))incomplete=true
             }
-            if((rows?.size?:0)>20)append("\n표시 한도로 나머지 ").append(rows!!.size-20).append("개는 생략했습니다.")
-            if(truncated==true)append("\n조회 한도 밖의 알림은 이 결과에 포함되지 않았습니다.")
-            append("\n목록 기록만으로 실제 알림 표시·수신을 확인한 것은 아닙니다.")
+            if((rows?.size?:0)>20)append("\n표시 한도 · 나머지 ").append(rows!!.size-20).append("개 생략")
+            if(truncated==true)append("\n조회 한도 밖 알림 · 이 결과에 없음")
+            append("\n목록 기록만 봄 · 알림이 실제로 떴는지·받았는지는 모름")
         }
         return Observation(text,incomplete)
     }
@@ -248,22 +327,22 @@ object ActionCompletionReport {
         if (call.name == ScheduledReadToolCatalog.CREATE) {
             return when (status) {
                 ScheduledReadPolicy.SCHEDULED ->
-                    "조회 예약을 등록했습니다. 실행 결과는 원래 대화에서 확인할 수 있습니다.\n예약 번호 $id"
+                    "조회 예약 넣음 · 결과는 원래 대화에\n예약 번호 $id"
                 "queued", "running", "waiting_approval", "completed", "cancelled", "failed", "interrupted", "paused" ->
-                    "같은 예약이 이미 있습니다. 현재 상태와 결과를 원래 대화에서 확인할 수 있습니다.\n예약 번호 $id"
+                    "같은 예약 이미 있음 · 상태와 결과는 원래 대화에\n예약 번호 $id"
                 else -> null
             }
         }
         if (id != (call.arguments["scheduleId"] as? JsonPrimitive)?.takeIf { it.isString }?.content) return null
         val message = when (status) {
-            "stop_requested" -> "진행 중인 실행에 중지를 요청했습니다. 최종 상태는 원래 대화에서 확인할 수 있습니다."
-            "cancelled" -> "해당 예약이 취소된 상태를 확인했습니다."
-            "completed", "failed", "interrupted", "paused" -> "이미 끝난 예약입니다. 기존 결과와 상태를 유지했습니다."
+            "stop_requested" -> "하던 일에 멈춤 요청 보냄 · 마지막 상태는 원래 대화에"
+            "cancelled" -> "예약 취소된 것 확인함"
+            "completed", "failed", "interrupted", "paused" -> "이미 끝난 예약 · 결과와 상태 그대로"
             else -> return null
         }
         val cleanup = receipt.text("systemCleanup")
         return if (status in setOf("stop_requested", "cancelled") && cleanup != "confirmed") {
-            "$message Android 예약 작업 정리는 아직 확인하지 못했습니다."
+            "$message · Android 예약 정리는 아직 못 봄"
         } else message
     }
 

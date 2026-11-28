@@ -1416,7 +1416,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // The local meaning plan selects research; lexical routes never override its action.
                 } else if(localAuthRead==null&&request.goal==null&&requestReadbackObligations==null&&request.previousSteps.none {s->s.evidence.state==VerificationState.VERIFIED&&com.user.localagent.core.RequiredReadbackObligations.Pair.entries.any {it.mutation==s.tool}}&&semantic?.action==com.user.localagent.core.SemanticAction.TOOL_TASK&&direct!=null&&semantic?.requiredTools==setOf(direct.name)&&usableAttachments.isEmpty()&&!projectFileRequest) {
                     val result=runTool(direct)
-                    answer(if(com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(taskGoal.requiredTools,observedOutcomes)else if(result.success&&result.verification==VerificationState.VERIFIED)toolAnswer(direct,result.content) else result.content)
+                    if(com.user.localagent.core.ActionCompletionReport.manages(setOf(direct.name),observedOutcomes))publishReceipts(taskGoal.requiredTools)
+                    else answer(if(result.success&&result.verification==VerificationState.VERIFIED)toolAnswer(direct,result.content) else result.content)
                     if(!result.success||result.verification!=VerificationState.VERIFIED){
                         persistStepEvidence()
                         app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")
@@ -2517,14 +2518,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val answerText=CloudAgentFinals.visibleAnswer(report.getValue("answer").jsonPrimitive.content)
         // Host-rendered reports replace model prose only when something was changed or handed off.
         // A read-only answer (date, calendar, contacts, search) keeps the model's synthesis of verified reads.
-        val final=if(CloudAgentFinals.needsHostReport(observedOutcomes.map{it.call.name}))
-            com.user.localagent.core.ActionCompletionReport.render(requestAuthorizedTools,observedOutcomes)
-            else answerText
-        if (final.isBlank()) {
+        // The host receipt is a card; the model's own text is shown beside it only after the no-false-success check.
+        if(CloudAgentFinals.needsHostReport(observedOutcomes.map{it.call.name})){
+            persistStepEvidence();publishReceipts(requestAuthorizedTools,answerText)
+        }else if(answerText.isBlank()){
             publishActionFinal(request, requestAuthorizedTools, "답을 못 받음 · 확인한 것은 남겨 둠", true)
             return
-        }
-        persistStepEvidence();answer(final)
+        }else{persistStepEvidence();answer(answerText)}
         persistSharedEngineState(request,nativeJournal.sealCheckpoint())
         recordCloudReceipt(request.runId,planDigest,toolCount,report.getValue("elapsedMs"),nativeJournal.snapshot())
         app.repository.chat.updateRun(request.runId,"completed")
@@ -3709,8 +3709,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     /** A repeated-action stop is not a finished task: keep it paused with a reason the owner and logs can see. */
     private suspend fun pauseForHarness(request:QueuedChatRequest,reason:String,code:String){
         val required=requestSemanticPlan?.requiredTools.orEmpty()
-        if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))
-            answer(com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes))
+        if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))publishReceipts(required)
         hostNotice(request,"같은 동작이 되풀이돼 멈춤 · 아직 안 끝남")
         persistStepEvidence()
         app.repository.chat.updateRun(request.runId,"paused",errorCode=code)
@@ -3728,11 +3727,12 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private suspend fun publishCheckedAnswer(request:QueuedChatRequest,required:Set<String>,raw:String,written:WrittenAnswer,blockedReason:String?){
         if(blockedReason!=null&&pauseForBrowserAuthentication(request))return
         if(blockedReason!=null&&pauseForScreenSetup(request))return
-        val final=if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes)
-            else if(blockedReason==null)raw else ""
+        val managed=com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes)
+        val final=if(managed)"" else if(blockedReason==null)raw else ""
         if(written.messageId!=null)lines.value+=ChatLine(written.messageId,"assistant",written.text)
+        else if(managed)publishReceipts(required,raw.takeIf {blockedReason==null})
         else if(final.isNotBlank())answer(final)
-        if(blockedReason!=null)hostNotice(request,blockedReason) else if(final.isBlank()&&written.messageId==null)hostNotice(request,"빈 답을 받음")
+        if(blockedReason!=null)hostNotice(request,blockedReason) else if(!managed&&final.isBlank()&&written.messageId==null)hostNotice(request,"빈 답을 받음")
         if(blockedReason!=null){persistStepEvidence();app.repository.chat.updateRun(request.runId,"paused",errorCode="execution_not_verified")}
     }
     /**
@@ -3745,8 +3745,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         modelText:String?=null,verbatim:String?=null,action:String?=null,instruction:String?=null){
         if(paused&&pauseCode=="execution_not_verified"&&pauseForBrowserAuthentication(request))return
         if(paused&&pauseCode=="execution_not_verified"&&pauseForScreenSetup(request))return
-        if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))
-            answer(com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes))
+        if(com.user.localagent.core.ActionCompletionReport.manages(required,observedOutcomes))publishReceipts(required,modelText,!paused)
         else ModelStatusText.choose(modelText,completed=!paused)?.let {answer(it)}
         verbatim?.takeIf {it.isNotBlank()}?.let {answer(it)}
         hostNotice(request,reason,action,instruction)
@@ -3755,6 +3754,26 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             storeOwnerChoices(request,pauseCode,choices)
             status.value=if(pauseCode=="cloud_clarification_read_only")"답 기다리는 중" else "잠깐 멈춤"
         }
+    }
+    /**
+     * Managed actions: the exact receipts go to the run's card (`hostReceiptV1`). Chat text is only observed
+     * content that is itself the answer (a memo body, a listing) and the model's [modelText], which must pass
+     * the no-false-success check against the proven state ([finished] and every required step verified).
+     */
+    private suspend fun publishReceipts(required:Set<String>,modelText:String?=null,finished:Boolean=true){
+        val report=com.user.localagent.core.ActionCompletionReport.compose(required,observedOutcomes)
+        val request=activeRequest
+        val stored=request?.let {
+            runCatching {app.repository.chat.beginAssistant(it.runId)}.onFailure {failure->if(failure is CancellationException)throw failure}
+            app.repository.chat.run(it.runId)?.contextJson?.let {json->runCatching {Json.parseToJsonElement(json).jsonObject}.getOrNull()}
+        }
+        if(request==null||stored==null){
+            answer(com.user.localagent.core.ActionCompletionReport.render(required,observedOutcomes))
+            return
+        }
+        app.repository.chat.updateRunContext(request.runId,ActionReceiptCard.write(stored,report).toString())
+        report.text.takeIf {it.isNotBlank()}?.let {answer(it)}
+        ModelStatusText.choose(modelText,completed=finished&&report.complete)?.let {answer(it)}
     }
     /** Stores the run's status facts for the card; never writes a chat sentence. */
     private suspend fun hostNotice(request:QueuedChatRequest,reason:String,action:String?=null,instruction:String?=null){

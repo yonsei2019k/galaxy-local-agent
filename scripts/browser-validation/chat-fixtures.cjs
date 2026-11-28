@@ -105,12 +105,31 @@ const conceptRunning = { ...base, busy: true, activeRunId: 'cr1', actionEpoch: 2
   tasks: [task('cr1', 'running', '교육 영상 재생', '3강 중 2강 · 진행률 확인 중'),
     task('cr2', 'completed', '로그인 확인 완료', '직접 입력하신 뒤 이어서 진행했어요')] };
 
-// 지금 폰 화면(device-now.png)과 같은 장면: 일시 정지 안내와 호스트의 작업 진행 보고.
+// 지금 폰 화면(device-now.png)과 같은 장면: 일시 정지. 호스트는 문장을 쓰지 않는다(2026-11-28 통합).
+// 모델 글이 없는 답변은 runStatus 상태 카드(이름표·사유·설정 경로·기존 버튼)로만 보이고, 보고의 상태 줄은 카드가 대신한다.
 const devicePaused = { ...base,
   messages: [user('du1', '채팅 비우기 메뉴가 있는지 확인해 줘'),
-    assistant('da1', '휴대폰 화면 연결이 준비되지 않아 요청을 일시정지했어요. 휴대폰 설정 > 접근성 > 설치된 앱에서 ‘ZipHap.Agent 화면 연결’을 켜 주세요. 설정한 뒤 이 대화에서 다시 요청하면 이어서 확인할 수 있어요.',
-      { executionReport: ['read_screen 단계에서 멈췄고 변경은 적용되지 않았어요.', '일시 정지 · 작업 기록을 확인한 뒤 이어갈 수 있어요.'] })],
-  tasks: [{ ...task('dp1', 'paused', '휴대폰 화면 확인', '화면 연결을 기다려요'), messageId: 'du1' }] };
+    assistant('da1', '', {
+      runStatus: { phase: 'paused', label: '잠깐 멈춤', reason: '화면 연결 설정 필요 · 그래야 화면을 볼 수 있음',
+        action: 'open_screen_setup', actionLabel: '설정 열기',
+        instruction: '휴대폰 설정 → 접근성 → 설치된 앱 → ‘ZipHap.Agent 화면 연결’ 켜기 · 집합 설정 → 개인정보와 권한 → 다른 앱 화면 접근 → ‘에이전트 화면 제어’ 켜기' },
+      executionReport: ['화면 읽기 · 멈춤 · 바뀐 것 없음'] })],
+  tasks: [{ ...task('dp1', 'paused', '휴대폰 화면 확인', '화면 연결 기다리는 중'), messageId: 'du1' }] };
+
+// 영수증 카드 장면: 문자 준비(앱에 넘김)와 메모 저장(다시 봐서 확인). 값은 그대로, 문장은 모델 글만.
+const receipts = { ...base,
+  messages: [user('ru1', '엄마한테 7시에 도착한다고 문자 준비하고, 주차 위치 메모해 줘'),
+    assistant('ra1', '문자는 보내기 전에 한 번 봐 주세요.', {
+      runStatus: { phase: 'completed', label: '끝남' },
+      receipt: { complete: false, items: [
+        { title: '문자 준비', status: 'prepared', verified: false,
+          fields: [{ label: '받는 번호', value: '010-0000-0002' }, { label: '문자 내용', value: '엄마, 7시쯤 도착해요.' }] },
+        { title: '메모 저장', status: 'verified', verified: true,
+          fields: [{ label: '제목', value: '주차' }, { label: '내용', value: 'B2 기둥 17번' }] },
+      ] } })] };
+
+// 실행 중에 추가로 말하려고 입력한 상태: 중단 · 추가 지시(아이콘만) · 보내기(위쪽 화살표, 맨 오른쪽).
+const runningDraft = { ...conceptRunning, draft: '끝나면 알려 줘' };
 
 // 휴대폰이 그리는 승인 카드 자리(웹은 빈 자리만 그린다).
 const approval = { ...base, messages: [user('ap1', '내일 오전 회의를 일정에 넣어 줘')],
@@ -138,5 +157,7 @@ module.exports = {
   approval,
   conceptRunning,
   devicePaused,
+  receipts,
+  runningDraft,
   guide: { ...base, showOfficeGuide: true, officeSelected: true },
 };

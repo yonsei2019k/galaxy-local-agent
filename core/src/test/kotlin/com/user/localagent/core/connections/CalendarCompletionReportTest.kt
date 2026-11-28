@@ -14,9 +14,12 @@ class CalendarCompletionReportTest {
     }
     @Test fun actualActiveReceiptRendersCreationAndKeepsAttendeeConfirmationUnknown()=runBlocking {
         val o=observed("tentative");assertTrue(ActionCompletionReport.manages(setOf(o.call.name),listOf(o)))
-        val text=ActionCompletionReport.render(setOf(o.call.name),listOf(o))
-        assertTrue(text.contains("일정 생성 후 실제 ID·활성 상태"));assertTrue(text.contains("참석자 수신·수락은 확인하지 않았습니다."))
-        assertFalse(text.contains("전체 요청의 완료는 확인되지 않았습니다."))
+        val report=ActionCompletionReport.compose(setOf(o.call.name),listOf(o))
+        val card=report.receipts.single()
+        assertEquals(ReceiptStatus.VERIFIED,card.status);assertTrue(card.verified);assertTrue(report.complete)
+        assertEquals("받았는지·수락했는지 모름",card.fields.single{it.label=="초대"}.value)
+        assertEquals(listOf("일정","시작","끝","초대"),card.fields.map{it.label})
+        assertFalse(ActionCompletionReport.render(setOf(o.call.name),listOf(o)).contains("부탁한 일이 다 끝났는지는 아직 모름"))
         val receipt=Json.parseToJsonElement(o.result.content).jsonObject
         assertEquals(false,receipt["attendeeAcceptanceConfirmed"]!!.jsonPrimitive.boolean)
         assertFalse(o.result.content.contains("Owner"))
@@ -26,14 +29,16 @@ class CalendarCompletionReportTest {
         for(bad in listOf(buildJsonObject{put("verified",true)},JsonObject(original+("calendarSelector" to JsonPrimitive("other-calendar"))),
             JsonObject(original+("event" to JsonObject(original["event"]!!.jsonObject+("id" to JsonPrimitive("other-event"))))))){
             val outcome=good.copy(result=good.result.copy(content=bad.toString()))
-            val text=ActionCompletionReport.render(setOf(good.call.name),listOf(outcome))
-            assertFalse(text.contains("생성 후 실제 ID"));assertTrue(text.contains("저장 근거를 확인하지 못했습니다."))
+            val report=ActionCompletionReport.compose(setOf(good.call.name),listOf(outcome))
+            assertEquals(ReceiptStatus.UNVERIFIED,report.receipts.single().status);assertFalse(report.receipts.single().verified)
+            assertFalse(report.complete);assertNull(report.receipts.single().link)
         }
     }
     @Test fun unverifiedCalendarEffectCannotBeReportedAsCreated()=runBlocking {
         val o=observed("cancelled");assertFalse(o.result.success)
-        val text=ActionCompletionReport.render(setOf(o.call.name),listOf(o))
-        assertFalse(text.contains("생성 후 실제 ID"));assertTrue(text.contains("실행 결과 미확인"))
+        val report=ActionCompletionReport.compose(setOf(o.call.name),listOf(o))
+        assertEquals(ReceiptStatus.FAILED,report.receipts.single().status);assertFalse(report.complete)
+        assertFalse(report.receipts.single().fields.any{it.label=="일정"})
     }
 
     @Test fun privateEventRequiresVerifiedVisibilityAndHasAnOfficialEventLinkOnly()=runBlocking {
@@ -54,10 +59,10 @@ class CalendarCompletionReportTest {
             CalendarTargetIntegrity.ownerConfirmed(approved,approved.approvalText()),original,verifiedHost.identity!!))
         val observed=result(verifiedHost)
         assertTrue(observed.success)
-        fun report(value:ConnectionOutcome)=ActionCompletionReport.render(setOf(call.name),listOf(ObservedToolOutcome(
-            call,ToolResult(call.id,value.success,value.data,value.state,value.code))))
-        assertTrue(report(observed).contains("비공개로 등록"))
-        assertTrue(report(observed).contains(official))
+        fun report(value:ConnectionOutcome)=ActionCompletionReport.compose(setOf(call.name),listOf(ObservedToolOutcome(
+            call,ToolResult(call.id,value.success,value.data,value.state,value.code)))).receipts.single()
+        assertEquals("비공개 · 초대 없음",report(observed).fields.single{it.label=="초대"}.value)
+        assertEquals(official,report(observed).link)
         assertFalse(result(CalendarTargetRegressionTest.Host(call)).success)
         assertFalse(result(CalendarTargetRegressionTest.Host(call).also{
             it.visibility="private";it.attendees=buildJsonArray {add(buildJsonObject {put("email","fixture@example.org")})}
@@ -66,6 +71,7 @@ class CalendarCompletionReportTest {
             it.visibility="private";it.htmlLink="https://www.google.com/url?url=https://example.org"
         })
         assertTrue(untrusted.success)
-        assertFalse(report(untrusted).contains("https://"))
+        assertNull(report(untrusted).link)
+        assertFalse(report(untrusted).fields.any{it.value.contains("https://")})
     }
 }

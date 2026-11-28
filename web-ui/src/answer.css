@@ -6,6 +6,11 @@
 .execution-report li + li { margin-top: .2em; }
 .execution-report details { margin-top: .5rem; }
 .execution-report summary { cursor: pointer; }
+.execution-report > strong, .receipt-item > strong { display: block; }
+.receipt-card dl { margin: .3rem 0 0; }
+.receipt-field { display: flex; gap: .6em; }
+.receipt-field dt { flex: none; font-weight: var(--fw-bold); }
+.receipt-field dd { margin: 0; white-space: pre-wrap; }
 .rich-answer > * { margin: 0 0 .6rem; }
 .rich-answer > :last-child { margin-bottom: 0; }
 .rich-answer h2, .rich-answer h3, .rich-answer h4, .rich-answer h5, .rich-answer h6 { line-height: var(--lh-tight, 1.3); margin-top: .85em; letter-spacing: var(--ls-tight); }

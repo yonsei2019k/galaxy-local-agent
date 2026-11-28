@@ -34,10 +34,10 @@ class NotePatchReadbackIntegrationTest {
     }
     @Test fun completionReportDistinguishesCompletePageSetFromOnePartialPage(){
         val partial=ActionCompletionReport.render(required,listOf(mutation(),read()))
-        assertTrue(partial.contains("전체 요청의 완료는 확인되지 않았습니다."))
+        assertTrue(partial.contains("부탁한 일이 다 끝났는지는 아직 모름"))
         val full=ActionCompletionReport.render(required,listOf(read(version=7),mutation(),read(),read(900)))
-        assertFalse(full.contains("전체 요청의 완료는 확인되지 않았습니다."))
-        assertTrue(full.contains("전체 저장 재조회를 확인"))
+        assertFalse(full.contains("부탁한 일이 다 끝났는지는 아직 모름"))
+        assertTrue(full.contains("저장 뒤 전체 다시 봐서 확인함"))
     }
     @Test fun beforeMutationPageCannotCompleteAnAfterPartialRead(){assertFalse(assess(read(),mutation(),read(900)).readbackSatisfied)}
     @Test fun privateDurableObligationSurvivesNarrowedReadOnlyResumeWithoutAddingWrite(){

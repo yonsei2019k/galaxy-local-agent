@@ -292,19 +292,25 @@ class CalendarV1DeviceValidation {
             for(message in store.messages(slot.room.id).first().filter{it.role=="assistant"})text.append(store.fullMessageText(message.id)).append('\n')
             return text.toString()
         }
+        /** The host receipt card stored on the run (`hostReceiptV1`); receipts are not chat text. */
+        suspend fun receipt(slot:Slot):JsonObject?=ActionReceiptCard.read(Json.parseToJsonElement(checkNotNull(store.run(slot.runId)).contextJson).jsonObject)
+        suspend fun verifiedReceipt(slot:Slot)=receipt(slot)?.get("items")?.jsonArray.orEmpty().any{it.jsonObject["verified"]==JsonPrimitive(true)}
         suspend fun assertGood(slot:Slot) {
             val saved=finish(slot);assertEquals("completed",saved.status)
             val verified=steps(slot).filter{it.evidence.state==VerificationState.VERIFIED}
             assertEquals(1,verified.size);assertEquals(CREATE,verified.single().tool)
             assertEquals(1,slot.posts.get());assertEquals(1,slot.gets.get());assertEquals(1,slot.approvals.size)
             val journal=checkNotNull(slot.journal());assertEquals("verified",journal.phase);assertEquals(slot.expectedId,journal.remoteId)
-            val text=body(slot);assertTrue(text.contains("일정 생성 후 실제 ID·활성 상태"));assertTrue(text.contains("참석자 수신·수락은 확인하지 않았습니다."))
+            val card=checkNotNull(receipt(slot))["items"]!!.jsonArray.single().jsonObject
+            assertEquals(JsonPrimitive("verified"),card["status"])
+            assertTrue(card["fields"]!!.jsonArray.any{it.jsonObject["label"]==JsonPrimitive("초대")&&it.jsonObject["value"]==JsonPrimitive("받았는지·수락했는지 모름")})
+            val text=body(slot)
             assertFalse(text.contains("QA_SYNTHETIC_UNTRUSTED_COMPLETION"))
         }
         suspend fun assertNotCreated(slot:Slot) {
             val saved=finish(slot);assertNotEquals("completed",saved.status)
             assertFalse(steps(slot).any{it.tool==CREATE&&it.evidence.state==VerificationState.VERIFIED})
-            assertFalse(body(slot).contains("일정 생성 후 실제 ID·활성 상태"))
+            assertFalse(verifiedReceipt(slot))
             assertFalse(body(slot).contains("QA_SYNTHETIC_UNTRUSTED_COMPLETION"))
         }
         suspend fun assertPrivate(slot:Slot) {
@@ -391,7 +397,7 @@ class CalendarV1DeviceValidation {
             assertTrue(checkNotNull(runner).pendingActions.value.none{it.runId==s.runId});assertTrue(steps(s).isEmpty())
             assertEquals("paused",checkNotNull(store.run(s.runId)).status)
             assertFalse(body(s).contains("QA_SYNTHETIC_UNTRUSTED_COMPLETION"))
-            assertEquals(0,s.posts.get());assertEquals(0,s.gets.get());assertFalse(body(s).contains("일정 생성 후 실제 ID·활성 상태"))
+            assertEquals(0,s.posts.get());assertEquals(0,s.gets.get());assertFalse(verifiedReceipt(s))
         }
     }
     @Test fun changingSelectedChatDoesNotRetargetNamedCalendarOrOriginalRun()=runBlocking(Dispatchers.Default){withHarness {

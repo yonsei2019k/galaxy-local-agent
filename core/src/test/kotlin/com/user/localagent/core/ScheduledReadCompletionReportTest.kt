@@ -2,6 +2,7 @@ package com.user.localagent.core
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,29 +14,32 @@ class ScheduledReadCompletionReportTest {
         val outcome = outcome(ScheduledReadToolCatalog.CANCEL, "cancelled", "unconfirmed")
         assertTrue(ActionCompletionReport.manages(emptySet(), listOf(outcome)))
         val answer = ActionCompletionReport.render(setOf(outcome.call.name), listOf(outcome))
-        assertTrue(answer.contains("취소된 상태"))
-        assertTrue(answer.contains("정리는 아직 확인하지 못했습니다"))
+        assertTrue(answer.contains("예약 취소된 것 확인함"))
+        assertTrue(answer.contains("Android 예약 정리는 아직 못 봄"))
     }
 
     @Test fun requestedStopIsNotASuccessfulCancellationClaim() {
         val outcome = outcome(ScheduledReadToolCatalog.CANCEL, "stop_requested", "confirmed")
         val answer = ActionCompletionReport.render(emptySet(), listOf(outcome))
-        assertTrue(answer.contains("중지를 요청했습니다"))
-        assertFalse(answer.contains("취소된 상태"))
+        assertTrue(answer.contains("멈춤 요청 보냄"))
+        assertFalse(answer.contains("취소된 것 확인함"))
     }
 
     @Test fun originalScheduleIdMustMatchTheCancellationReceipt() {
         val outcome = outcome(ScheduledReadToolCatalog.CANCEL, "cancelled", "confirmed", ScheduledReadPolicy.ID_PREFIX + "b".repeat(64))
+        val report = ActionCompletionReport.compose(emptySet(), listOf(outcome))
+        assertEquals(ReceiptStatus.UNVERIFIED, report.receipts.single().status)
+        assertFalse(report.complete)
         val answer = ActionCompletionReport.render(emptySet(), listOf(outcome))
-        assertTrue(answer.contains("상태를 읽지 못했습니다"))
-        assertFalse(answer.contains("취소된 상태"))
+        assertTrue(answer.contains("부탁한 일이 다 끝났는지는 아직 모름"))
+        assertFalse(answer.contains("취소된 것 확인함"))
     }
 
     @Test fun registrationReportsFutureExecutionWithoutClaimingTheRead() {
         val outcome = outcome(ScheduledReadToolCatalog.CREATE, ScheduledReadPolicy.SCHEDULED)
         val answer = ActionCompletionReport.render(emptySet(), listOf(outcome))
-        assertTrue(answer.contains("조회 예약을 등록했습니다"))
-        assertTrue(answer.contains("실행 결과는 원래 대화에서 확인"))
+        assertTrue(answer.contains("조회 예약 넣음"))
+        assertTrue(answer.contains("결과는 원래 대화에"))
         assertTrue(answer.contains(id))
     }
 

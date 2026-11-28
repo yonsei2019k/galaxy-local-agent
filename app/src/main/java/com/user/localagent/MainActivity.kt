@@ -478,6 +478,9 @@ class MainActivity : ComponentActivity() {
         val calendarGranted by officeCalendarReadGranted.collectAsState()
         val characterSettings=remember {getSharedPreferences("jipsooni-character",MODE_PRIVATE)}
         var character by remember {mutableStateOf(com.user.localagent.ui.CharacterPreference.load(characterSettings))}
+        // 나의 집순이 > 집순이 모습 바꾸기: asks the chat WebView to open its one picker; the web acknowledges it.
+        var characterPickerEpoch by remember {mutableStateOf<Long?>(null)}
+        var characterPickerLast by rememberSaveable {mutableStateOf(0L)}
         val guideSettings=remember{getSharedPreferences("jipsooni-introduction",MODE_PRIVATE)}
         var officeGuideDismissed by remember{mutableStateOf(guideSettings.getBoolean("dismissed",false))}
         fun dismissOfficeGuide(){
@@ -614,6 +617,7 @@ class MainActivity : ComponentActivity() {
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
                     put("character",character.toJson())
+                    characterPickerEpoch?.let {put("openCharacterPicker",it)}
                     put("inlineLogin",connectionsOpen)
                     if(connectionsOpen)connectionStatus?.let{put("browserLoginStatus",it)}
                     if(inlineCredentials!=null||visibleWebsiteWork!=null)put("websiteCard",buildJsonObject{
@@ -669,14 +673,22 @@ class MainActivity : ComponentActivity() {
                         val text = if (message.role == "assistant" || author != null)
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
                         val cleanText = text.replace(GoalPdfEmail.MARKER,"").trimEnd()
-                        reports[message.id]?.takeIf {message.role=="assistant"}?.let {put("executionReport",JsonArray(it.map(::JsonPrimitive)))}
-                        roomActivities[message.id]?.takeIf {message.role=="assistant"&&it.threadId==composerThreadId}?.runStatus?.let {put("runStatus",it)}
-                        pdfDrafts[message.id]?.let { put("pdfEmail",it) }
                         val files = verifiedFiles[message.id].orEmpty()
-                        if (files.isEmpty()) put("text",cleanText.take(32000)) else {
-                            put("fileFormats",buildJsonArray { files.forEach { add(it.substringAfterLast('.')) } })
-                            put("text",files.fold(cleanText){body,name->body.replace("[[file:$name]]","")}.trimEnd().take(32000))
+                        val shownText = (if (files.isEmpty()) cleanText else files.fold(cleanText){body,name->body.replace("[[file:$name]]","")}.trimEnd()).take(32000)
+                        val activity = roomActivities[message.id]?.takeIf {message.role=="assistant"&&it.threadId==composerThreadId}
+                        // The web shows runStatus as a card only when the message has no text; that card already
+                        // carries the status label, so the report's last status line is not repeated under it.
+                        val statusCard = activity?.runStatus?.takeIf { shownText.isBlank() &&
+                            (it["phase"] as? JsonPrimitive)?.contentOrNull !in setOf("queued","running","waiting_approval") }
+                        reports[message.id]?.takeIf {message.role=="assistant"}?.let { report ->
+                            val lines = if (activity != null && statusCard != null && report === activity.executionReport && activity.executionReportEndsWithStatus) report.dropLast(1) else report
+                            if (lines.isNotEmpty()) put("executionReport",JsonArray(lines.map(::JsonPrimitive)))
                         }
+                        activity?.runStatus?.let {put("runStatus",it)}
+                        activity?.receipt?.let {put("receipt",it)}
+                        pdfDrafts[message.id]?.let { put("pdfEmail",it) }
+                        if (files.isNotEmpty()) put("fileFormats",buildJsonArray { files.forEach { add(it.substringAfterLast('.')) } })
+                        put("text",shownText)
                         author?.let { put("authorLabel", it.label) }
                     })}})
                     put("officeSelected",officeOpen)
@@ -764,6 +776,8 @@ class MainActivity : ComponentActivity() {
                                 chat.sendOwnerChoice(payload.getValue("runId").jsonPrimitive.content,
                                     payload.getValue("index").jsonPrimitive.int,composerThreadId,currentBranchId)
                             }
+                            "characterPickerShown"->characterPickerEpoch=com.user.localagent.ui.CharacterPickerFlag.cleared(
+                                characterPickerEpoch,payload.getValue("epoch").jsonPrimitive.long)
                             "setCharacter"->{
                                 character=character.update(payload.getValue("field").jsonPrimitive.content,
                                     payload.getValue("value").jsonPrimitive.content)
@@ -1028,7 +1042,11 @@ class MainActivity : ComponentActivity() {
                 if(panelStatus.isNotBlank() && (tab!=4 || manualSettings))Text(panelStatus,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=12.dp))
                 when(tab){1->VoiceSettingsScreen();2->MemoryScreen();3->Box(Modifier.weight(1f)){ToolShelfPanel(app,{status.value=it}){request->tab=0;send(request)}};4->if(manualSettings) key(settingsPage){
                     SettingsScreen(settingsPage,chatScreenUnavailable,{settingsPage=it}){openPanel(it,fromSettings=true)}
-                }else SettingsAssistantPanel(app,character,::showManual,moveToChat={request->
+                }else SettingsAssistantPanel(app,character,::showManual,shortcuts=remember{com.user.localagent.ui.AssistantShortcutActions {
+                    characterPickerLast=com.user.localagent.ui.CharacterPickerFlag.next(characterPickerLast)
+                    characterPickerEpoch=characterPickerLast
+                    openPanel(0)
+                }},moveToChat={request->
                     if(!chat.selectionReady.value||chat.selectedThreadId.value!=composerThreadId||
                         composerThreadId.isBlank()||chat.draft.value.isNotEmpty())false
                     else {

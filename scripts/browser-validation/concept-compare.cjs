@@ -1,6 +1,6 @@
 // 시안 맞춤 비교 그림(2026-11-28). 지금 web-ui/dist와 이전 빌드(--before DIST)를 393px 폭에서 찍고,
 // 시안(concept_phones.png)·지금 폰 화면(device-now.png)이나 이전 빌드와 나란히 붙인 compare-*.png를 만든다.
-// 사용: node concept-compare.cjs --refs <시안 그림 폴더> --out <shots 폴더> [--before <이전 dist>]
+// 사용: node concept-compare.cjs --refs <시안 그림 폴더> --out <shots 폴더> [--before <이전 dist>] [--before-label <이름>]
 // 합성 자료만 쓴다(chat-fixtures.cjs). 개인정보 없음.
 const fs = require('node:fs');
 const http = require('node:http');
@@ -12,6 +12,8 @@ const arg = name => { const i = process.argv.indexOf(name); return i > 0 ? path.
 const refs = arg('--refs');
 const out = arg('--out');
 const before = arg('--before');
+const beforeIndex = process.argv.indexOf('--before-label');
+const beforeLabel = beforeIndex > 0 ? process.argv[beforeIndex + 1] : '이전(v0.2.17)';
 const after = path.resolve(__dirname, '../../web-ui/dist');
 if (!refs || !out) { console.error('usage: node concept-compare.cjs --refs DIR --out DIR [--before DIST]'); process.exit(2); }
 fs.mkdirSync(out, { recursive: true });
@@ -35,6 +37,8 @@ const scenes = {
   paused: withVoice(fixtures.devicePaused),
   choices: withVoice(fixtures.choices),
   approval: withVoice(fixtures.approval),
+  receipts: withVoice(fixtures.receipts),
+  runningDraft: withVoice(fixtures.runningDraft),
 };
 
 async function shoot(browser, base, name, snapshot, { drawer = false } = {}) {
@@ -60,6 +64,35 @@ async function shoot(browser, base, name, snapshot, { drawer = false } = {}) {
   const parts = { bar: await clip('.bottom-nav'), composer: await clip('.composer-footer') };
   await page.close();
   return { full: buffer, ...parts, name };
+}
+
+// 집순이 모습 바꾸기 입구(2026-11-28): 헤더 연필 배지, 빈 대화의 버튼, 나의 집순이 신호(openCharacterPicker)로 열린 고르기 창.
+// 나의 집순이 행 자체는 네이티브 Compose 화면이라 여기서 찍지 않는다.
+async function characterEntry(browser, base) {
+  const page = await browser.newPage({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2, reducedMotion: 'reduce' });
+  await page.addInitScript(() => { window.ziphapNative = { postMessage() {} }; });
+  await page.goto(base);
+  await page.waitForSelector('#root > *');
+  const send = detail => page.waitForFunction(value => {
+    window.dispatchEvent(new CustomEvent('ziphap:snapshot', { detail: value }));
+    return !document.querySelector('.loading') && document.querySelector('.composer-footer');
+  }, detail, { polling: 50, timeout: 5000 });
+  const settle = () => page.evaluate(async () => {
+    await document.fonts.ready;
+    for (const animation of document.getAnimations()) animation.finish?.();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
+  await send(scenes.empty);
+  await settle();
+  const header = await page.locator('.topbar').boundingBox();
+  await page.screenshot({ path: path.join(out, 'character-entry-header-badge.png'),
+    clip: { x: 0, y: header.y, width: 393, height: header.height + 4 } });
+  await page.screenshot({ path: path.join(out, 'character-entry-empty-chat.png') });
+  await send({ ...scenes.empty, openCharacterPicker: 1 });
+  await page.waitForSelector('dialog[aria-label="집순이 모습 바꾸기"][open]');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'character-entry-picker-open.png') });
+  await page.close();
 }
 
 const data = buffer => `data:image/png;base64,${buffer.toString('base64')}`;
@@ -107,6 +140,7 @@ async function natural(browser, src) {
   now.drawer = await shoot(browser, url(afterServer), 'drawer', scenes.empty, { drawer: true });
   fs.writeFileSync(path.join(out, 'after-drawer-393.png'), now.drawer.full);
   if (beforeServer) old.drawer = await shoot(browser, url(beforeServer), 'drawer', scenes.empty, { drawer: true });
+  await characterEntry(browser, url(afterServer));
 
   const phones = file('concept_phones.png');
   const phonesSize = await natural(browser, phones);
@@ -115,7 +149,7 @@ async function natural(browser, src) {
   const half = Math.floor(phonesSize[0] / 2);
   const W = 300;
   const shot = (label, buffer) => ({ label, src: data(buffer), width: W });
-  const beforeShot = name => old[name] ? [shot('이전(v0.2.17)', old[name].full)] : [];
+  const beforeShot = name => old[name] ? [shot(beforeLabel, old[name].full)] : [];
   await compose(browser, 'empty', '(a) 빈 대화: 시안 · 이번 화면', [
     { label: '시안', src: phones, natural: phonesSize, crop: [0, 0, half, phonesSize[1]], width: W },
     ...beforeShot('empty'), shot('이번 화면', now.empty.full)]);
@@ -127,13 +161,16 @@ async function natural(browser, src) {
     ...beforeShot('paused'), shot('이번 화면', now.paused.full)]);
   await compose(browser, 'choices', '(d) 선택지 칩', [...beforeShot('choices'), shot('이번 화면', now.choices.full)]);
   await compose(browser, 'approval', '(e) 승인 카드 자리(카드 내용은 휴대폰이 그린다)', [...beforeShot('approval'), shot('이번 화면', now.approval.full)]);
-  await compose(browser, 'drawer', '메뉴(서랍) 아이콘: 이전 · 이번', [...(old.drawer ? [shot('이전(v0.2.17)', old.drawer.full)] : []), shot('이번 화면', now.drawer.full)]);
+  await compose(browser, 'receipts', '(f) 한 일 영수증 카드(값은 그대로, 문장은 모델 글만)', [...beforeShot('receipts'), shot('이번 화면', now.receipts.full)]);
+  await compose(browser, 'drawer', '메뉴(서랍) 아이콘: 이전 · 이번', [...(old.drawer ? [shot(beforeLabel, old.drawer.full)] : []), shot('이번 화면', now.drawer.full)]);
   const strip = (label, buffer) => ({ label, src: data(buffer), width: 393 });
   await compose(browser, 'bottom-bar', '하단 탭: 이전 · 이번', [
     ...(old.empty?.bar ? [strip('이전', old.empty.bar)] : []), strip('이번', now.empty.bar)]);
-  await compose(browser, 'composer', '입력창(빈 대화 · 진행 중): 이전 · 이번', [
-    ...(old.empty?.composer ? [strip('이전 빈 대화', old.empty.composer), strip('이전 진행 중', old.running.composer)] : []),
-    strip('이번 빈 대화', now.empty.composer), strip('이번 진행 중', now.running.composer)]);
+  await compose(browser, 'composer', '입력창(빈 대화 · 진행 중 · 진행 중 입력): 이전 · 이번', [
+    ...(old.empty?.composer ? [strip('이전 빈 대화', old.empty.composer), strip('이전 진행 중', old.running.composer),
+      strip('이전 진행 중 입력', old.runningDraft.composer)] : []),
+    strip('이번 빈 대화', now.empty.composer), strip('이번 진행 중', now.running.composer),
+    strip('이번 진행 중 입력(중단 · 추가 지시 · 보내기)', now.runningDraft.composer)]);
   await browser.close();
   afterServer.close(); beforeServer?.close();
   console.log(`wrote compare-*.png to ${out}`);

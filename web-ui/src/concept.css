@@ -49,6 +49,18 @@
 }
 .topbar--center .character-button { min-width: 44px; min-height: 40px; margin-bottom: -2px; }
 .topbar--center .character-button:hover { background: transparent; }
+/* A tiny pencil on the header 집순이 says it can be changed (owner request 2026-11-28). */
+.character-edit-badge {
+  position: absolute; right: 0; bottom: 0; display: grid; place-items: center; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--color-ink); color: var(--color-on-ink); box-shadow: 0 0 0 2px var(--color-surface);
+  pointer-events: none;
+}
+.character-edit-badge svg { width: 10px; height: 10px; }
+.welcome-character-change {
+  margin-top: 6px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: var(--color-soft); color: var(--color-text-sub); font-size: 13px; font-weight: var(--fw-bold);
+}
+.welcome-character-change:hover { background: var(--color-soft-strong); }
 .topbar--center .topbar-title {
   max-width: 100%;
   min-width: 0;
@@ -173,6 +185,25 @@
 .workspace--single .execution-report > strong { font-size: 15px; font-weight: var(--fw-heavy); color: var(--color-ink); line-height: 1.4; }
 .workspace--single .execution-report ol { margin-top: 4px; padding-inline-start: 1.3em; color: var(--color-text-sub); }
 .workspace--single .execution-report summary { color: var(--color-text-sub); font-size: 13px; font-weight: var(--fw-bold); }
+
+/* Run status and action receipts: the same grey card. Label bold, facts as grey lines, one small ink pill. */
+.workspace--single .run-status-reason, .workspace--single .run-status-instruction,
+.workspace--single .receipt-status, .workspace--single .receipt-incomplete {
+  margin: 2px 0 0; color: var(--color-text-sub); font-size: 13px; line-height: 1.45;
+}
+.workspace--single .run-status-action {
+  justify-self: start; margin-top: 8px; min-height: 32px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: var(--color-ink); color: var(--color-on-ink); font-size: 13px; font-weight: var(--fw-bold);
+}
+.workspace--single .run-status-action:hover { background: var(--color-ink-hover); }
+.workspace--single .receipt-card .execution-report-face { grid-row: 1 / span 9; }
+.workspace--single .receipt-item + .receipt-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-soft-strong); }
+.workspace--single .receipt-item > strong { display: block; font-size: 15px; font-weight: var(--fw-heavy); color: var(--color-ink); line-height: 1.4; }
+.workspace--single .receipt-card dl { margin: 6px 0 0; display: grid; gap: 4px; }
+.workspace--single .receipt-field { display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr); gap: 8px; }
+.workspace--single .receipt-field dt { color: var(--color-text-sub); font-size: 13px; font-weight: var(--fw-bold); }
+.workspace--single .receipt-field dd { margin: 0; color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace--single .receipt-link { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: var(--fw-bold); color: var(--color-ink); }
 
 /* Approval slot and reply choices in the same tone. */
 .workspace--single .task-card { box-shadow: none; background: var(--color-soft); border-radius: 20px; }
