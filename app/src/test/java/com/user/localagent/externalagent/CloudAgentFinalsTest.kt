@@ -1,11 +1,25 @@
 package com.user.localagent.externalagent
 
+import com.user.localagent.compute.BrowserAgentTools
 import com.user.localagent.core.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class CloudAgentFinalsTest {
+    @Test fun interruptedBrowserActionExplainsTheObservedLoginWall(){
+        val call=ToolCall("click",PcBrowserToolCatalog.ACTION,JsonObject(emptyMap()))
+        val result=ToolResult(call.id,false,
+            """{"pcBrowserOrigin":"https://e.hallymedu.co.kr","error":"PC_BROWSER_AUTH_REQUIRED"}""",
+            verificationSummary=BrowserAgentTools.PC_AUTH_REQUIRED)
+        val notice=CloudAgentFinals.interruptedBrowserAuthentication(ObservedToolOutcome(call,result)).orEmpty()
+        assertTrue(notice.contains("한림에듀"))
+        assertTrue(notice.contains("로그인이 필요"))
+        assertTrue(notice.contains("반영됐는지는 아직 확인하지 못했어요"))
+        assertNull(CloudAgentFinals.interruptedBrowserAuthentication(
+            ObservedToolOutcome(call,result.copy(verificationSummary="ACTION_OUTCOME_UNKNOWN"))))
+    }
+
     @Test fun explainsTheObservedClassroomClickWithoutClaimingPlayback(){
         val id="10000000-0000-4000-8000-000000000002"
         val proposal=ExternalAgentProposal(id,1,"app_browser_action",buildJsonObject{put("action","click")},

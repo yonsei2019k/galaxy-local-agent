@@ -766,8 +766,21 @@ describe('native conversation', () => {
     snapshot({ ...base, messages: [...messages, { id: 'reply-a', role: 'user', text: 'Busan' }],
       tasks: [{ ...task, phase: 'clarification_record' }] })
     expect(host.querySelector('.reply-needed')).toBeNull()
-    expect(host.querySelector('.work-card .work-state')?.textContent).toBe('질문 기록')
+    expect(host.querySelector('.work-cards')).toBeNull()
     expect(host.querySelector('details.task-evidence')).toBeNull()
+  })
+
+  it('reopens login from the original work item below newer chat', () => {
+    mount()
+    snapshot({ ...base, messages: [
+      { id: 'hallym', role: 'user', text: '한림에듀 이어듣기' },
+      { id: 'attendance', role: 'user', text: '출석 체크 해줘' },
+    ], tasks: [{ id: 'hallym-run', messageId: 'hallym', phase: 'paused',
+      label: '한림에듀 이어듣기', detail: '', canCancel: false, canReopenLogin: true }] })
+    const log = host.querySelector('[role="log"]')!
+    const button = log.querySelector<HTMLButtonElement>('[aria-label="사이트 로그인"] button')!
+    expect(log.textContent!.indexOf('사이트 로그인 다시 열기')).toBeLessThan(log.textContent!.indexOf('출석 체크 해줘'))
+    expect(button.textContent).toBe('사이트 로그인 다시 열기')
   })
 
   it('keeps voice controls scoped to the chat and requires user confirmation to send a transcript', () => {

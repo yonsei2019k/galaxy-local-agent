@@ -531,6 +531,12 @@ h1, h2, h3 { letter-spacing: var(--ls-tight); }
   box-shadow: var(--shadow-card);
 }
 /* Payment is a different step: a dark card with a metal lock. Wording and buttons are unchanged. */
+.site-login-retry button {
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--color-on-ink);
+  color: var(--color-ink);
+}
 .booking-payment-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
 .booking-payment-art { flex: none; width: 44px; height: 44px; margin: -4px 0 -4px -4px; }
 .booking-payment-heading strong { flex: 1 1 8rem; overflow-wrap: anywhere; letter-spacing: var(--ls-tight); }

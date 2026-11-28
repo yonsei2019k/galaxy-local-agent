@@ -144,7 +144,11 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 }
                 val loginOrigin=result["loginOrigin"]?.jsonPrimitive?.contentOrNull?.takeIf {PcLoginSite.origin(it)==it}
                     ?:observedOrigin
-                val offer=if(operation in setOf("open","read") && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
+                // An action can hit the site's login wall. Only bind a form for an explicit login
+                // origin reported by the paired browser. The action result stays unverified.
+                val mayOfferLogin=operation in setOf("open","read") ||
+                    (operation=="act" && result["loginOrigin"]==JsonPrimitive(PcLoginSite.HALLYM))
+                val offer=if(mayOfferLogin && result["loginRequired"]==JsonPrimitive(true) && binding!=null &&
                     loginOrigin!=null && (expected==null||expected==loginOrigin)) try {
                     PairedWebsiteLogin.prepare(context,config,workKey,loginOrigin)
                 } catch(cancel:CancellationException){throw cancel}
@@ -313,6 +317,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             return refused(call,"PUBLIC_SEARCH_LOGIN_WALL")
         if(result["loginRequired"]==JsonPrimitive(true)&&!(operation=="read"&&target!=null))
             return authenticationRequired(call,result["phoneBrowserVisible"]==JsonPrimitive(true),
+                authOrigin=result.string("loginOrigin").takeIf{origin(it)==it},
                 pcSession=catalog==PcBrowserToolCatalog && result["nativeOwnerCard"]!=JsonPrimitive(true))
         val phoneError=result["error"]?.jsonPrimitive?.contentOrNull
         if(operation=="read"&&target!=null){
@@ -563,7 +568,8 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         )
     }
 
-    private fun authenticationRequired(call:ToolCall,shown:Boolean=false,pcSession:Boolean=catalog==PcBrowserToolCatalog):ToolResult {
+    private fun authenticationRequired(call:ToolCall,shown:Boolean=false,pcSession:Boolean=catalog==PcBrowserToolCatalog,
+        authOrigin:String?=null):ToolResult {
         last=null
         lastPage=null
         recoveredTarget=null
@@ -572,11 +578,11 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         return ToolResult(call.id,false,buildJsonObject {
             put("error",code)
             if(pcSession){
-                initialOrigin?.let{put("pcBrowserOrigin",it)}
+                (authOrigin?:initialOrigin)?.let{put("pcBrowserOrigin",it)}
                 put("hint","PC 브라우저가 별도 로그인을 요구해요. 사이트가 지원하는 휴대폰 승인 방법을 확인하세요. 휴대폰의 기존 로그인 상태는 PC로 전달되지 않아요.")
             }else{
                 put("phoneBrowserVisible",shown)
-                initialOrigin?.let{put("phoneBrowserOrigin",it)}
+                (authOrigin?:initialOrigin)?.let{put("phoneBrowserOrigin",it)}
                 put("hint","인증은 휴대폰의 집합 앱 브라우저에서 직접 진행해 주세요. 로그인이나 인증값을 채팅에 입력할 필요가 없습니다.")
             }
         }.toString(),if(noChange)VerificationState.FAILED else VerificationState.UNVERIFIED,

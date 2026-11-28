@@ -6,7 +6,7 @@ internal data class ReactUiCommand(val action:String,val threadId:String,val bra
 
 /** A UI input boundary, never a tool or permission bridge. Unknown commands fail closed. */
 internal object ReactBridgePolicy {
-    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","stopGoalWait","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
+    private val actions=setOf("ready","send","draft","selectThread","renameThread","openOffice","dismissOfficeGuide","requestOfficeCalendar","selectModel","stop","steer","attach","removeAttachment","navigate","copy","messageFiles","openPdfEmail","messageMenu","stayPhoto","manageThreads","cancelPreparation","openWaitingApproval","collabRefresh","collabSend","stopGoalWait","reopenOwnerLogin","startVoicePrompt","finishVoicePrompt","cancelVoicePrompt","setCharacter","chooseReply","answerGoalQuestion","openVoiceTalk","closeVoiceTalk","listenVoiceTalk","sendVoiceTalk","toggleAnswerSpeech","openBookingPayment","checkBookingPayment","checkBookingHistory")
     fun parse(raw:String):ReactUiCommand?=runCatching {
         require(raw.toByteArray(Charsets.UTF_8).size<=64*1024)
         val o=Json.parseToJsonElement(raw).jsonObject
@@ -28,7 +28,7 @@ internal object ReactBridgePolicy {
             "collabSend"->setOf("clientMessageId","text","recipient","bindingEpoch")
             "collabRefresh"->setOf("bindingEpoch")
             "selectThread","selectModel","removeAttachment","openBookingPayment","checkBookingPayment","checkBookingHistory"->setOf("id")
-            "stopGoalWait"->setOf("runId")
+            "stopGoalWait","reopenOwnerLogin"->setOf("runId")
             "stop"->setOf("runId","actionEpoch")
             "steer"->setOf("runId","actionEpoch","text")
             "navigate"->setOf("panel")

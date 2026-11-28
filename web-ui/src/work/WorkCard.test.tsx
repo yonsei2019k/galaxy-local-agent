@@ -223,11 +223,17 @@ describe('Conversation work cards', () => {
     expect(host.querySelector('.conversation-wrap > [role="status"]')?.textContent).toContain('문서를 읽는 중입니다')
   })
 
-  it('showsOnlyTheMostRecentClarificationRecord', () => {
-    renderConversation({ ...base, messages: [{ id: 'u1', role: 'user', text: '질문' }],
-      tasks: [task({ id: 'q1', phase: 'clarification_record', label: '옛 질문', canCancel: false }),
-        task({ id: 'q2', phase: 'clarification_record', label: '새 질문', canCancel: false })] })
-    expect([...host.querySelectorAll('.work-card')].map(card => card.id)).toEqual(['work-q2'])
+  it('keeps a recorded clarification beside its request as later messages arrive', () => {
+    renderConversation({ ...base, messages: [
+      { id: 'u1', role: 'user', text: '출석 체크 해줘' },
+      { id: 'a1', role: 'assistant', text: '어느 서비스인가요?' },
+      { id: 'u2', role: 'user', text: '새 작업' },
+    ], tasks: [task({ id: 'q1', phase: 'clarification_record', canCancel: false }),
+      task({ id: 'q2', messageId: 'u1', phase: 'clarification_record', canCancel: false })] })
+    const messages = host.querySelector('.messages')?.textContent ?? ''
+    expect(messages).toContain('추가 질문이 있었어요')
+    expect(messages.indexOf('추가 질문이 있었어요')).toBeLessThan(messages.indexOf('새 작업'))
+    expect(host.querySelector('.work-cards')).toBeNull()
   })
 
   it('closesTheSheetAndDropsItsButtonsWhenTheTaskDisappears', () => {

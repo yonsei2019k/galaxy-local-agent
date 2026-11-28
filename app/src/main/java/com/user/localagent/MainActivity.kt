@@ -601,6 +601,7 @@ class MainActivity : ComponentActivity() {
                 }.associateBy{it.runId}
                 val reports=visibleMessages.mapNotNull { roomActivities[it.id] }.filter {it.threadId==composerThreadId && it.executionReport.isNotEmpty()}
                     .associateBy {it.reportGroup?:it.runId}.values.associate {it.assistantMessageId to it.executionReport}
+                var openingPausedLogin by remember(composerThreadId,currentBranchId){mutableStateOf(false)}
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
                     put("singleConversation",true)
@@ -713,6 +714,8 @@ class MainActivity : ComponentActivity() {
                                 if(latestQuestion&&activity.replyChoices.isNotEmpty())
                                     put("choices",JsonArray(activity.replyChoices.map{it.toJson()}))
                                 activity.userMessageId?.let{put("messageId",it)}
+                                if(activity.canOpenOwnerLogin&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null)
+                                    put("canReopenLogin",true)
                                 put("label",activity.userMessageId?.let(requestTitles::get)?.takeIf(String::isNotBlank)?:
                                     when(phase){"waiting_input"->"답변을 기다리고 있어요";"waiting_goal"->"조건이 되면 이어서 진행";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
                                 activity.startedAt.takeIf{it>0}?.let{put("startedAt",it)}
@@ -742,6 +745,21 @@ class MainActivity : ComponentActivity() {
                                 else webAgent.openOwnerHistory(this@MainActivity,id,composerThreadId,currentBranchId,booking=command.action=="checkBookingHistory")
                                 if(!opened)android.widget.Toast.makeText(this@MainActivity,
                                     "선택한 화면을 열 수 없어요. 예약처의 예약 내역과 카드 거래 내역에서 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            "reopenOwnerLogin"->{
+                                val runId=payload.getValue("runId").jsonPrimitive.content
+                                if(activitiesByRun[runId]?.canOpenOwnerLogin==true&&!openingPausedLogin&&!connectionsOpen&&
+                                    webAgent.ownerLoginCard.value==null&&runForRoom==null) {
+                                    openingPausedLogin=true
+                                    lifecycleScope.launch {
+                                        val opened=try { chat.reopenOwnerLogin(runId,composerThreadId,currentBranchId) }
+                                            catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+                                            catch(_:Exception){false}
+                                            finally {openingPausedLogin=false}
+                                        if(!opened)android.widget.Toast.makeText(this@MainActivity,
+                                            "이 작업의 로그인 화면을 열 수 없어요. PC 연결을 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
                             }
                             "answerGoalQuestion"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()){
                                 chat.sendGoalOwnerAnswer(payload.getValue("runId").jsonPrimitive.content,
@@ -919,25 +937,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                }
-                val pausedLogin=activitiesByRun.values.filter{it.canOpenOwnerLogin}.maxByOrNull{it.startedAt}
-                if(pausedLogin!=null&&inlineCredentials==null&&!connectionsOpen&&runForRoom==null){
-                    var loginNotice by remember(pausedLogin.runId){mutableStateOf<String?>(null)}
-                    var openingLogin by remember(pausedLogin.runId){mutableStateOf(false)}
-                    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal=12.dp)){
-                        ZipOutlinedButton(onClick={lifecycleScope.launch {
-                            openingLogin=true
-                            try {
-                                loginNotice=if(chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId))null
-                                    else "이 작업의 로그인 화면을 열 수 없어요. PC 연결을 확인해 주세요."
-                            }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
-                            catch(_:Exception){loginNotice="로그인 화면을 열지 못했어요. PC 연결을 확인한 뒤 다시 눌러 주세요."}
-                            finally{openingLogin=false}
-                        }},modifier=Modifier.fillMaxWidth(),enabled=!openingLogin){
-                            Text(if(openingLogin)"로그인 화면 확인 중" else "사이트 로그인 다시 열기")
-                        }
-                        loginNotice?.let {Text(it)}
-                    }
                 }
                 if(connectionsOpen) {
                     com.user.localagent.connections.ChatConnectionCard(this@MainActivity,window,

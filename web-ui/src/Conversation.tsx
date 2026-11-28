@@ -216,7 +216,7 @@ function ResultFigure({ preview }: { preview: ResultPreview }) {
 
 const endedPhases = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
-export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onWriteOwnReply, onSendExample, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak }: {
+export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, onMessageMenu, onStopGoalWait, onNavigate, onDismissOfficeGuide, onOfficeCalendar, hasDraft, onDraftExample, historyOpen, onHistoryChange, onStayPhoto, onChooseReply, onReopenLogin, onWriteOwnReply, onSendExample, onGoalAnswer, onBookingPayment, onPdfEmail, onSpeak }: {
   snapshot: Snapshot | null
   connected: boolean
   enabled: boolean
@@ -232,6 +232,7 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   onStayPhoto?: (messageId: string, index: number, kind?: 'map') => boolean
   onSpeak?(messageId: string): void
   onChooseReply?(runId: string, index: number): boolean
+  onReopenLogin?(runId: string): void
   onGoalAnswer?(runId: string, text: string): boolean
   onPdfEmail?(messageId: string): void
   /** "직접 입력" next to reply choices: only moves focus to the composer; nothing is sent. */
@@ -293,15 +294,14 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
   const cardsByMessage = new Map<string, Task[]>()
   for (const task of tasks) {
     if (!task.messageId || !visibleUserIds.has(task.messageId) ||
-      task.phase === 'waiting_input' || task.phase === 'clarification_record') continue
+      task.phase === 'waiting_input') continue
     const peers = cardsByMessage.get(task.messageId) ?? []
     peers.push(task)
     cardsByMessage.set(task.messageId, peers)
   }
   const placed = new Set([...cardsByMessage.values()].flatMap(cards => cards.map(card => card.id)))
-  const lastClarification = tasks.filter(task => task.phase === 'clarification_record').at(-1)
   const unplacedTasks = tasks.filter(task => !placed.has(task.id) && task.phase !== 'waiting_input' &&
-    (task.phase !== 'clarification_record' || task === lastClarification))
+    task.phase !== 'clarification_record')
   const history = panelOpen ? workHistory(snapshot) : undefined
   const sheetTask = history && openWorkId !== null
     ? [...history.active, ...history.recent].find(task => task.id === openWorkId) ?? null : null
@@ -412,7 +412,14 @@ export function Conversation({ snapshot, connected, enabled, onCopy, onFiles, on
                       PDF를 첨부해 Gmail에서 열기
                     </button>
                   </section>}
-                  {cardsByMessage.get(item.id)?.map(task => <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
+                  {cardsByMessage.get(item.id)?.map(task => task.phase === 'clarification_record'
+                    ? <div key={task.id} className="conversation-date">추가 질문이 있었어요</div>
+                    : <WorkCard key={task.id} task={task} onOpen={openWorkHistory} />)}
+                  {snapshot?.tasks.filter(task => task.messageId === item.id && task.canReopenLogin).map(task =>
+                    <section key={task.id} className="booking-payment-card site-login-retry" aria-label="사이트 로그인">
+                      <button type="button" disabled={!enabled || !onReopenLogin}
+                        onClick={() => onReopenLogin?.(task.id)}>사이트 로그인 다시 열기</button>
+                    </section>)}
                   {websiteAnchor === item.id && websiteCard}
                   {approvalAnchor === item.id && approvalCard}
                   {paymentAnchor === item.id && paymentCard}

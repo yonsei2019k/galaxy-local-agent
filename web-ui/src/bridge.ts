@@ -57,6 +57,7 @@ export interface Task {
   evidence?: Evidence[]
   choices?: ReplyChoice[]
   goalOwnerReply?: boolean
+  canReopenLogin?: boolean
   startedAt?: number
   finishedAt?: number
 }
@@ -167,6 +168,7 @@ type Intent =
   | { action: BookingPaymentAction; payload: { id: string } }
   | { action: 'setCharacter'; payload: CharacterChange }
   | { action: 'draft'; payload: { text: string } }
+  | { action: 'reopenOwnerLogin'; payload: { runId: string } }
   | { action: 'stopGoalWait'; payload: { runId: string } }
   | { action: 'copy' | 'messageFiles' | 'openPdfEmail' | 'messageMenu' | 'toggleAnswerSpeech'; payload: { messageId: string } }
   | { action: 'stayPhoto'; payload: { messageId: string; index: number; kind?: 'map' } }
@@ -257,6 +259,7 @@ function replyChoice(value: unknown): value is ReplyChoice {
 function task(value: unknown): value is Task {
   return record(value) && strings(value, 'id', 'phase', 'label', 'detail') &&
     typeof value.canCancel === 'boolean' && (value.messageId === undefined || typeof value.messageId === 'string') &&
+    (value.canReopenLogin === undefined || typeof value.canReopenLogin === 'boolean') &&
     (value.startedAt === undefined || taskTime(value.startedAt)) &&
     (value.finishedAt === undefined || taskTime(value.finishedAt)) &&
     (value.evidence === undefined || list(value.evidence, evidence)) &&
@@ -399,6 +402,9 @@ export function postIntent(scope: Snapshot | null, intent: Intent): boolean {
       (intent.action === 'checkBookingHistory' && !card.hasBookingHistory) ||
       (intent.action === 'openBookingPayment' ? card.state !== 'ready' : card.state === 'checking')) return false
   }
+  if (intent.action === 'reopenOwnerLogin' && (scope?.busy || scope?.websiteCard?.inputHeight ||
+    !scope?.tasks.some(task => task.id === intent.payload.runId && task.canReopenLogin &&
+      scope.messages.some(message => message.id === task.messageId && message.role === 'user')))) return false
   if ((intent.action === 'chooseReply' || intent.action === 'answerGoalQuestion') && attachmentsBlockReply(scope)) return false
   if (intent.action === 'chooseReply' && !scope?.tasks.some(task => task.id === intent.payload.runId &&
     task.phase === 'waiting_input' && task.choices?.[intent.payload.index])) return false

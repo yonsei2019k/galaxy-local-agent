@@ -2477,8 +2477,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val stop=controller.stopMetadata()
         FailureLog.cloudStop(context,why,stop,lastProviderState,android.os.SystemClock.elapsedRealtime()-bridgeStarted)
         if(stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&pauseForScreenSetup(request))return
+        val authentication=CloudAgentFinals.interruptedBrowserAuthentication(
+            observedOutcomes.lastOrNull { it.call.id==stop.pendingCallId && it.call.name==stop.pendingTool })
         val message=if(stop.pending==com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT)
-            "마지막 동작이 반영됐는지 확인하지 못했어요. 다시 시도하려면 현재 화면부터 확인해야 해요."
+            authentication ?: "마지막 동작이 반영됐는지 확인하지 못했어요. 다시 시도하려면 현재 화면부터 확인해야 해요."
             else "작업이 도중에 멈췄어요. 확인한 내용은 남겨뒀어요."
         val recoverable=request.goalSegment!=null&&stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&
             requestSteps.isNotEmpty()&&requestSteps.all {isReadTool(it.tool)||it.evidence.effectNotApplied}

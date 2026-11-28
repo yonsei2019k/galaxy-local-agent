@@ -1,6 +1,10 @@
 package com.user.localagent.externalagent
 
+import com.user.localagent.compute.BrowserAgentTools
+import com.user.localagent.core.AppBrowserToolCatalog
 import com.user.localagent.core.HarnessStep
+import com.user.localagent.core.ObservedToolOutcome
+import com.user.localagent.core.PcBrowserToolCatalog
 import com.user.localagent.core.VerificationState
 import kotlinx.serialization.json.*
 
@@ -29,6 +33,30 @@ object CloudAgentFinals {
 
     internal val browserPageReads=setOf("read_app_browser_page","read_pc_browser_page")
     internal val browserReadTools=browserPageReads+"read_screen"
+
+    internal fun interruptedBrowserAuthentication(outcome:ObservedToolOutcome?):String? {
+        if(outcome==null||outcome.result.success||outcome.result.effectNotApplied||
+            outcome.call.name !in setOf(PcBrowserToolCatalog.action,AppBrowserToolCatalog.action))return null
+        val phone=when(outcome.result.verificationSummary){
+            BrowserAgentTools.PHONE_AUTH_REQUIRED->true
+            BrowserAgentTools.PC_AUTH_REQUIRED->false
+            else->return null
+        }
+        val info=runCatching{Json.parseToJsonElement(outcome.result.content).jsonObject}.getOrNull()
+        val field=if(phone)"phoneBrowserOrigin" else "pcBrowserOrigin"
+        val host=(info?.get(field) as? JsonPrimitive)?.contentOrNull?.let { address->
+            runCatching{java.net.URI(address).host}.getOrNull()
+        }
+        val site=when(host?.lowercase()){
+            "hallymedu.co.kr","www.hallymedu.co.kr","e.hallymedu.co.kr"->"한림에듀"
+            "kairb.org","www.kairb.org"->"KAIRB"
+            else->"사이트"
+        }
+        val where=if(outcome.call.name==PcBrowserToolCatalog.action)"PC 작업 중 " else ""
+        val next=if(phone)"휴대폰에서 인증을 마치면 현재 페이지부터 다시 확인할 수 있어요."
+            else "이 작업에 ‘사이트 로그인 다시 열기’가 보이면 휴대폰에서 인증해 주세요."
+        return "${where}${site}에서 로그인이 필요해 멈췄어요. 직전 동작이 반영됐는지는 아직 확인하지 못했어요. $next"
+    }
 
     internal fun unfinishedNotice(actual:Collection<PhoneAgentExecution>):String {
         val lastBrowser=actual.lastOrNull { it.proposal.tool in com.user.localagent.core.PcBrowserToolCatalog.names ||
