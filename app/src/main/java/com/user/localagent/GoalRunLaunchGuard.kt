@@ -378,10 +378,14 @@ internal fun goalRunEffectsUnresolved(row:ChatRunRecord,scopeKey:String):Boolean
 /** Startup decision for an ACTIVE goal whose last linked run ended while the app was not running. */
 internal fun goalRestartDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
     useNativeBudget:Boolean=false):GoalSegmentDecision = try {
-    if(parent.errorCode==GOAL_STOP_REQUESTED)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.STOPPED) else
-    when(val decision=goalSegmentDecision(parent,goal,scopeKey,nowMs,unknownEffects,useNativeBudget)) {
-        GoalSegmentDecision.Complete, is GoalSegmentDecision.Continue->decision
-        is GoalSegmentDecision.Pause->if(decision.reason==GoalAutopilotPauseReason.STOPPED)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)else decision
+    if(parent.errorCode==GOAL_STOP_REQUESTED) {
+        GoalSegmentDecision.Pause(GoalAutopilotPauseReason.STOPPED)
+    } else {
+        when(val decision=goalSegmentDecision(parent,goal,scopeKey,nowMs,unknownEffects,useNativeBudget)) {
+            GoalSegmentDecision.Complete, is GoalSegmentDecision.Continue->decision
+            is GoalSegmentDecision.Pause->if(decision.reason==GoalAutopilotPauseReason.STOPPED)
+                GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED) else decision
+        }
     }
 }catch(_:Exception){GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)}
 
