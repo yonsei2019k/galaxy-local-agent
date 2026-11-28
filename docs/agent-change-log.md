@@ -25,6 +25,12 @@
 - **검증:** 대상 JVM 시험 8개 클래스 58건 통과(RunStatusNoticeTest, ChatExecutionReportTest, PublicWorkPlanTest, CloudAgentFinalsTest, ChatWorkActivityControllerTest, GoalRestartRecoveryTest, GoalTransientRetryTest, InlineRunActivityTest), `:core:test` 1188건 통과. voice-guard 스크립트 결과 LABEL 0, 문장 후보 70(모두 라벨·모델 지시문·예외 오탐, 감사표에 이유 기록). 전체 assembleRelease·lint·기기 확인은 하지 않았다. 웹 UI 카드 표시는 다른 브랜치에서 만든다.
 - **남은 틈:** `ActionCompletionReport.render`(core)의 영수증형 문장은 아직 채팅에 나간다. 모델 문장 다듬기 단계는 넣지 않았다. 목표 재시도·대기 결과 행은 라벨 글로만 바꿨다.
 
+## 2026-11-28 — 집순이 말투 기준·고정 문장 점검·말투 평가 (claude/voice-harness, 통합 대기)
+
+- **기준:** `docs/voice/jipsooni-voice.ko.md`와 `.claude/skills/jipsooni-voice/SKILL.md`(같은 내용)를 추가했다. 쉬운 해요체, 고정 문구 금지, 바꿔 쓰는 말 40쌍, 좋은 말과 나쁜 말 22쌍, 사실 규칙을 담았다. `AGENTS.md`에 한 줄 안내를 넣었다.
+- **정적 점검:** `scripts/tests/test_no_fixed_chat_sentences.py`(`scripts/voice-guard/`)가 앱·런타임·코어 Kotlin에서 채팅 출력 함수를 부르는 함수 안의 한국어 문장 상수와, 도구 라벨의 영어 식별자를 찾는다. 45bdb4b의 현재 위반 152건(고유 150건)과 라벨 문제 33건을 `docs/voice/fixed-sentence-allowlist.txt`에 `TODO remove (persona-copy branch)`로 올렸다. 새 위반을 추가하면 실패하고, 지운 항목이 목록에 남아 있어도 실패한다(지운 쪽이 목록을 같이 줄여야 한다). CI(android.yml)에 한 줄 추가. 소스(ChatRunCoordinator.kt 등)는 건드리지 않았다.
+- **평가:** `scripts/voice-eval/run_eval.py`가 `JIPSOONI_VOICE`를 소스에서 읽어 합성 시나리오 29개를 `claude -p`(도구 없음, 설정 없음)로 돌리고 규칙 검사와 심사 모델 채점을 한다. `--answers`, `--compare` 지원. 이 휴대폰 앱 동작이 아니라 문구 품질만 본다. 소스·APK 변경 없음, 빌드·설치 없음.
+
 ## 2026-11-28 — 장기 업무 상세 보고
 
 - 진행 카드는 최신 보고를 먼저 보여 주고 이전 관찰은 같은 카드에서 펼칠 수 있다. 작업 장부에서 확인한 수와 남은 수, 진행 중인 항목 및 대기·막힘을 요약한다. 예약된 재개 시각은 작업기 기록에서 읽는다.
