@@ -600,7 +600,7 @@ class MainActivity : ComponentActivity() {
                     it.threadId==composerThreadId&&it.assistantMessageId in visibleMessageIds
                 }.associateBy{it.runId}
                 val reports=visibleMessages.mapNotNull { roomActivities[it.id] }.filter {it.threadId==composerThreadId && it.executionReport.isNotEmpty()}
-                    .associateBy {it.reportGroup?:it.runId}.values.associate {it.assistantMessageId to it.executionReport}
+                    .associateBy {it.reportGroup?:it.runId}.values.associateBy {it.assistantMessageId}
                 var openingPausedLogin by remember(composerThreadId,currentBranchId){mutableStateOf(false)}
                 val snapshot=buildJsonObject{
                     put("threadId",composerThreadId);put("branchId",currentBranchId);put("ready",composerReady)
@@ -661,7 +661,10 @@ class MainActivity : ComponentActivity() {
                         val text = if (message.role == "assistant" || author != null)
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
                         val cleanText = text.replace(GoalPdfEmail.MARKER,"").trimEnd()
-                        reports[message.id]?.takeIf {message.role=="assistant"}?.let {put("executionReport",JsonArray(it.map(::JsonPrimitive)))}
+                        reports[message.id]?.takeIf {message.role=="assistant"}?.let {activity->
+                            put("executionReport",JsonArray(activity.executionReport.map(::JsonPrimitive)))
+                            put("executionReportActive",activity.status in setOf("queued","running","waiting_approval"))
+                        }
                         pdfDrafts[message.id]?.let { put("pdfEmail",it) }
                         val files = verifiedFiles[message.id].orEmpty()
                         if (files.isEmpty()) put("text",cleanText.take(32000)) else {

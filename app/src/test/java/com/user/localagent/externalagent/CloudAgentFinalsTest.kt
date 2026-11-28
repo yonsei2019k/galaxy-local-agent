@@ -15,9 +15,17 @@ class CloudAgentFinalsTest {
         val notice=CloudAgentFinals.interruptedBrowserAuthentication(ObservedToolOutcome(call,result)).orEmpty()
         assertTrue(notice.contains("한림에듀"))
         assertTrue(notice.contains("로그인이 필요"))
-        assertTrue(notice.contains("반영됐는지는 아직 확인하지 못했어요"))
+        assertTrue(notice.contains("마지막으로 시도한 작업은 결과를 아직 확인하지 못했어요"))
         assertNull(CloudAgentFinals.interruptedBrowserAuthentication(
             ObservedToolOutcome(call,result.copy(verificationSummary="ACTION_OUTCOME_UNKNOWN"))))
+    }
+
+    @Test fun interruptedPhoneAuthenticationDoesNotPromiseAutomaticContinuation(){
+        val call=ToolCall("click",AppBrowserToolCatalog.ACTION,JsonObject(emptyMap()))
+        val result=ToolResult(call.id,false,"{}",verificationSummary=BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        val notice=CloudAgentFinals.interruptedBrowserAuthentication(ObservedToolOutcome(call,result)).orEmpty()
+        assertTrue(notice.contains("현재 사이트 상태부터 다시 확인"))
+        assertFalse(notice.contains("돌아오면"))
     }
 
     @Test fun explainsTheObservedClassroomClickWithoutClaimingPlayback(){

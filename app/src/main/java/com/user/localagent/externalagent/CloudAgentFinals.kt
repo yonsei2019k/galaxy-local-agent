@@ -53,7 +53,7 @@ object CloudAgentFinals {
             else->"사이트"
         }
         val where=if(outcome.call.name==PcBrowserToolCatalog.action)"PC 작업 중 " else ""
-        val next=if(phone)"휴대폰에서 인증을 마쳐 주세요. 이 대화로 돌아오면 로그인됐는지 확인할게요."
+        val next=if(phone)"휴대폰에 인증 화면이 보이면 직접 인증해 주세요. 작업을 이어가려면 현재 사이트 상태부터 다시 확인해야 해요."
             else "‘사이트 로그인 다시 열기’ 버튼이 보이면 눌러서 인증해 주세요."
         return "${where}${site}에서 로그인이 필요해요. 마지막으로 시도한 작업은 결과를 아직 확인하지 못했어요. $next"
     }

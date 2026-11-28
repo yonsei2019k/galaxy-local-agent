@@ -82,7 +82,7 @@ class ChatExecutionReportTest {
         val h=ChatExecutionReport.observe(fresh,outcome)
         assertEquals(h,ChatExecutionReport.observe(h,outcome))
         val parked=buildJsonObject {put("hostGoalWaitKind","auth")}
-        assertTrue(ChatExecutionReport.display(h,"paused","waiting_goal_condition",parked).last().contains("공식 인증"))
+        assertTrue(ChatExecutionReport.display(h,"paused","waiting_goal_condition",parked).last().contains("사이트에서 인증을 마쳐 주세요"))
         assertFalse(h.json().toString().contains("123456"))
         assertTrue(ChatExecutionReport.display(h,"cancelled",null,empty).last().contains("중단"))
         val wake=buildJsonObject {put("hostGoalWake",buildJsonObject {put("event","OWNER_AUTH_DONE");put("token","secret")})}
