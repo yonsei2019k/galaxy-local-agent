@@ -258,11 +258,11 @@ class AgentRunService:Service() {
         if(runs.isEmpty()){stopSelf();return START_NOT_STICKY}
         if(job?.isActive!=true)job=scope.launch{watch(manager)}
         if(recovering&&runId!=null&&threadId!=null&&tracked!=null&&token!=null)scope.launch {
+            tracked.recoveryNoticeShown=true
             try {
                 (application as LocalAgentApplication).container.scopedRuns.recoverTrackedGoal(runId,threadId)
             }catch(cancel:CancellationException){throw cancel}
             catch(_:com.user.localagent.GoalRecoveryForegroundUnavailable){
-                tracked.recoveryNoticeShown=true
                 alert(manager,runId,tracked,"이어서 진행할 작업이 있어요","앱을 열어 주시면 중단된 작업부터 확인하고 이어갈게요.")
             }catch(error:Exception){com.user.localagent.FailureLog.record(this@AgentRunService,"goal_service_recovery",error)}
             finally {tracked.recovering=false}

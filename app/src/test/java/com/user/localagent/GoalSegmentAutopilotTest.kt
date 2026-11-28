@@ -78,6 +78,14 @@ class GoalSegmentAutopilotTest {
         assertFalse(trackedGoalHandoffMatches("run-a",current,candidate.copy(startedAt=started),binding))
         assertFalse(trackedGoalHandoffMatches("run-a",current.copy(linkedRunIds=listOf("run-a","other","run-b")),candidate,binding))
     }
+
+    @Test fun persistedStopBlocksRestartAndACompletedParentsChild() {
+        for(status in listOf("cancelled","interrupted","completed")) {
+            val stopped=row(status=status,errorCode=GOAL_STOP_REQUESTED)
+            pause(GoalAutopilotPauseReason.STOPPED,goalRestartDecision(stopped,goal(),"scope",started+100,unknownEffects=false))
+            pause(GoalAutopilotPauseReason.STOPPED,goalSegmentDecision(stopped,goal(),"scope",started+100,unknownEffects=false))
+        }
+    }
     @Test fun unverifiedStepsAndKnownFailuresAreRetainedAndStopAutomaticContinuation() {
         pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(request(listOf(step(state=VerificationState.UNVERIFIED)))))
         for(noEffect in listOf(false,true)) {

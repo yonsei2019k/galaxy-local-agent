@@ -734,15 +734,16 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val scheduledStop=r.errorCode.takeIf {
             ScheduledReadPolicy.isId(runId)&&it in setOf(ScheduledReadPolicy.STOP_REQUESTED,ScheduledReadPolicy.WORKER_STOPPED)
         }
+        val goalStop=r.errorCode==com.user.localagent.GOAL_STOP_REQUESTED
         val finalStatus=when(scheduledStop){
             ScheduledReadPolicy.STOP_REQUESTED->"cancelled"
             ScheduledReadPolicy.WORKER_STOPPED->"interrupted"
-            else->status
+            else->if(goalStop&&r.status !in TERMINAL&&status in TERMINAL)"cancelled" else status
         }
         if(r.status in TERMINAL)check(finalStatus==r.status){"종료된 작업을 다시 시작하지 않습니다."}
         if(contextJson!=null)checkBinding(r)
         if(finalStatus !in TERMINAL)validRun(runId)
-        val finalError=scheduledStop?:errorCode
+        val finalError=scheduledStop?:if(goalStop) r.errorCode else errorCode
         val preserved=contextJson?.let {com.user.localagent.ChatExecutionReport.retain(r.contextJson,it)}?:r.contextJson
         r.copy(status=finalStatus,errorCode=finalError,contextJson=preserved,updatedAt=now(),finishedAt=if(finalStatus in TERMINAL)now()else null).also {dao.run(it)}
     }
@@ -979,6 +980,15 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         active.forEach {recoverInterruptedRun(it)}
         active.size
     }
+    internal suspend fun recordGoalStopRequest(request:com.user.localagent.QueuedChatRequest) = database.withTransaction {
+        val row=dao.run(request.runId)?:return@withTransaction
+        if(row.status !in setOf("running","waiting_approval","paused","interrupted","completed"))return@withTransaction
+        check(row.threadId==request.threadId&&row.branchId==request.branchId&&row.projectId==request.projectId)
+        val captured=com.user.localagent.QueuedChatRequest.fromJson(row.contextJson)
+        check(request.goalSegment!=null&&captured.goalSegment==request.goalSegment&&captured.runId==request.runId)
+        if(row.errorCode!=com.user.localagent.GOAL_STOP_REQUESTED)
+            dao.run(row.copy(errorCode=com.user.localagent.GOAL_STOP_REQUESTED,updatedAt=now()))
+    }
     internal suspend fun recoverTrackedGoalRun(expected:ChatRunRecord):ChatRunRecord?=database.withTransaction {
         if(dao.run(expected.id)!=expected||expected.status !in setOf("running","waiting_approval"))return@withTransaction null
         val request=com.user.localagent.QueuedChatRequest.fromJson(expected.contextJson)
@@ -987,7 +997,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     }
     private suspend fun recoverInterruptedRun(r:ChatRunRecord):ChatRunRecord {
         dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
-        val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
+        val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED ||
+            r.errorCode==com.user.localagent.GOAL_STOP_REQUESTED
         val stoppedAuth=r.errorCode==com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
         val browserAuth=!stoppedAuth&&r.status=="running"&&runCatching {
             val request=com.user.localagent.QueuedChatRequest.fromJson(r.contextJson)
@@ -996,7 +1007,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         }.getOrDefault(false)
         return r.copy(status=when {stoppedByOwner||stoppedAuth->"cancelled";browserAuth->"paused";else->"interrupted"},
             errorCode=when {
-                stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
+                stoppedByOwner->r.errorCode
                 stoppedAuth->com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
                 browserAuth->"waiting_browser_auth"
                 r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"

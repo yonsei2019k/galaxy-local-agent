@@ -364,7 +364,19 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         }else cancelOwnedExecution()
     }
     private fun cancelOwnedExecution(invalidateGoalContinuations:Boolean=true){
-        if(invalidateGoalContinuations)activeRequest?.let {queueOwner.goalStopEpochs.merge(it.threadId,1L,Long::plus)}
+        val request=activeRequest
+        if(invalidateGoalContinuations&&request!=null) {
+            queueOwner.goalStopEpochs.merge(request.threadId,1L,Long::plus)
+            if(request.goalSegment!=null) {
+                scope.launch {
+                    try {app.repository.chat.recordGoalStopRequest(request)}
+                    catch(cancel:CancellationException){throw cancel}
+                    catch(error:Exception){FailureLog.record(context,"goal_owner_stop",error)}
+                    finally {cancelOwnedExecution(invalidateGoalContinuations=false)}
+                }
+                return
+            }
+        }
         executionEngine.cancel();requestResearch?.cancel();ownedRequestJob?.cancel()
         approval.value?.decision?.complete(false)
     }

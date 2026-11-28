@@ -188,6 +188,8 @@ internal val goalRecoverablePauseCodes=setOf("reasoning_budget_exhausted","final
     "partial_verified_sources","partial_verified_tool_budget","partial_recoverable_provider","goal_readback_retry",
     GoalAutopilotPauseReason.TOOL_BUDGET.code,GoalAutopilotPauseReason.TIME_BUDGET.code)
 
+internal const val GOAL_STOP_REQUESTED="goal_owner_stop_requested"
+
 internal fun goalMayResumeFrom(row:ChatRunRecord):Boolean =
     row.status=="completed" || row.status=="interrupted"&&row.errorCode=="process_restarted" ||
         row.status=="paused"&&row.errorCode in goalRecoverablePauseCodes
@@ -213,6 +215,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     check(request.goal!=null&&sameGoalWork(request.goal,goal)&&parent.id in goal.linkedRunIds&&request.goal.linkedRunIds.all {it in goal.linkedRunIds}&&
         segment.scopeKey==scopeKey&&segment.workDigest==goalWorkDigest(goal)) {"목표 구간의 원래 작업·자료 범위가 변경되었습니다."}
     fun pause(reason:GoalAutopilotPauseReason)=GoalSegmentDecision.Pause(reason)
+    if(parent.errorCode==GOAL_STOP_REQUESTED)return pause(GoalAutopilotPauseReason.STOPPED)
     if(goal.status!=GoalStatus.ACTIVE||!request.allowTools||request.mode !in setOf("act","debug"))return pause(GoalAutopilotPauseReason.STOPPED)
     if(request.continuation!=null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     if(unknownEffects)return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
@@ -360,6 +363,7 @@ internal fun goalRunEffectsUnresolved(row:ChatRunRecord,scopeKey:String):Boolean
 /** Startup decision for an ACTIVE goal whose last linked run ended while the app was not running. */
 internal fun goalRestartDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeKey:String,nowMs:Long,unknownEffects:Boolean,
     useNativeBudget:Boolean=false):GoalSegmentDecision = try {
+    if(parent.errorCode==GOAL_STOP_REQUESTED)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.STOPPED) else
     when(val decision=goalSegmentDecision(parent,goal,scopeKey,nowMs,unknownEffects,useNativeBudget)) {
         GoalSegmentDecision.Complete, is GoalSegmentDecision.Continue->decision
         is GoalSegmentDecision.Pause->if(decision.reason==GoalAutopilotPauseReason.STOPPED)GoalSegmentDecision.Pause(GoalAutopilotPauseReason.PROCESS_RESTARTED)else decision
