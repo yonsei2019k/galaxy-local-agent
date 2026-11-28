@@ -1,3 +1,21 @@
+## 2026-11-28 — 시안·말투 통합: 상태 카드, 영수증 카드, 고정 문장 점검, 입력창 순서, 집순이 모습 바꾸기 입구 (claude/concept-voice-integration, Codex 통합 대기)
+
+- **병합:** `claude/design-concept-match`(069684a) 위에 `claude/persona-copy`(762ffc2), `claude/voice-harness`(cba8aa6)를 차례로 병합했다. 충돌은 이 파일뿐이었고 모든 항목을 남겼다. `MainActivity`·`InlineRunActivity`·`ChatNavigator`·`AGENTS.md`는 자동 병합됐다.
+- **상태 카드(웹 `RunCards.tsx`, `Conversation.tsx`):** 모델 글이 없는 답변에 `messages[].runStatus`가 있으면 회색 카드로 그린다. 단계별 40px 집순이 얼굴, 굵은 `label`, 회색 `reason`, 설정 경로 `instruction` 한 줄, 기존 동작이 있는 `action`만 검은 알약 버튼. 실행 중(queued/running/waiting_approval)은 작업 카드가 있으므로 그리지 않는다. 카드가 보일 때 `executionReport`의 마지막 상태 줄은 네이티브가 빼서 보낸다(`UiRunActivity.executionReportEndsWithStatus`).
+  - 동작 연결: `reply`·`new_request` → 입력창 초점, `open_pc_connection` → 연결 화면, `open_calendar_permission` → 기능 목록(`capabilities`, 휴대폰 캘린더 허용이 있는 곳), `open_screen_setup` → 개인정보와 권한(`privacy`), `choose_model` → 더하기 메뉴(모델 고르기). `open_login`은 웹 동작이 없어 버튼 없음(네이티브 "사이트 로그인 다시 열기" 알약이 맡는다).
+  - `ScreenControl.SetupNeeded.instruction`을 문장 대신 설정 경로(`… → … 켜기`)로 바꿨다(카드 회색 줄과 모델용 도구 결과에 같이 쓰인다).
+- **영수증 카드:** `ActionCompletionReport.compose()`가 `ActionReceipt{tool,title,status(verified|prepared|unverified|failed),fields[{label,value}],link}`와 남은 관찰 글, `complete`를 만든다. 앱은 실행 문맥 `hostReceiptV1`에 저장하고(`ActionReceiptCard`), 웹은 `messages[].receipt`를 카드로 그린다. 영수증 글은 채팅에 안 나가고, 모델 글은 `ModelStatusText` 거짓 완료 검사(끝났고 전부 증명된 경우만 완료 표현 허용)를 통과할 때만 옆에 보인다.
+  - 전환: 문자·메일·일정·알람·지도·링크·앱 열기(앱에 넘김), 메모 저장·고침, 알림 저장·고침, 구글 캘린더 일정 넣기(다시 봐서 확인), 모든 도구의 실패·결과 못 봄. 시각은 `yyyy년 M월 d일 HH:mm`(초·다른 시간대는 그대로 표시).
+  - 글로 남은 것(관찰 내용 자체가 답): 메모 읽기·부분 고치기, 저장소·중복 관찰, 기능 목록, 리마인더 목록, 조회 예약, 카카오톡 공유, PDF 메일, 시각·연락처 조회. 문장은 모두 `라벨 · 값` 사실 줄로 바꿨다.
+  - 도구 동작·승인·검증 기준은 바꾸지 않았다. `render()`는 마무리 정책(메모 부분 고치기, 관찰형 자동 검토)이 쓰는 글로 남는다.
+- **고정 문장 점검:** `scripts/voice-guard`가 `ActionCompletionReport.kt` 전체와 `compose(`·`publishReceipts(`를 채팅 출력으로 본다. 허용 목록 81개 모두 정확한 이유(상태 카드 필드, 상태 줄·토스트, 모델 지시문, 모델용 도구 결과, 예외, 사실 줄)로 다시 썼고 "TODO" 항목은 0개, 사라진 항목 0개다. 채팅에 보이는 항목에 문장 끝맺음(…요./…다.)은 없다.
+- **입력창(소유자 결정):** 실행 중 순서는 중단 → 추가 지시(아이콘만, `aria-label`·title 유지) → 보내기(맨 오른쪽, 항상 위쪽 화살표, `aria-label`은 "다음에 보내기"/"보내기"). 동작은 그대로.
+- **집순이 모습 바꾸기 입구(소유자 요청):** 헤더 집순이에 작은 연필 배지와 title, 빈 대화에 "집순이 모습 바꾸기" 작은 버튼, 나의 집순이 화면의 초상 누르기와 클레이 'me' 아이콘 행. 고르기 창은 웹 `CharacterPicker` 하나뿐이다. 네이티브 행은 채팅 탭으로 옮기고 스냅숏에 `openCharacterPicker`(한정된 epoch)를 넣는다. 웹은 한 번 열고 `characterPickerShown{epoch}`로 답하며 네이티브가 flag를 지운다(`CharacterPickerFlag`, `ReactBridgePolicy`). 고른 값은 기존 `setCharacter` 경로로 저장되고 나의 집순이 초상은 같은 상태를 읽는다.
+- **검증(소스 기준, 기기 증거 아님):** `gen-design-tokens.py --check`·`gen-icons.py --check` 통과, `scripts/tests` 89개 통과(9개 건너뜀, 고정 문장 점검 4개 포함). 웹 vitest 192개 통과. 브라우저 하네스 `chat-visual` 63개·`character-situations` 12개를 일반·움직임 줄이기 두 모드에서 모두 통과(일시 정지·영수증 장면의 호스트 문장 없음, 실행 중 입력창 순서 단정 추가). 전체 Gradle(`:core:test :android-runtime:testDebugUnitTest :android-runtime:lintRelease :app:lintRelease :app:assembleRelease`) 51분 20초 성공: core 1190개, android-runtime 1330개 시험 실패 0. 서명 전 APK `app-release-unsigned.apk` SHA-256 `b25a5cf68e37693bf6a12d09027caaa9b0c5bfd9d1c1b8a29e500bff69931e65`(설치·배포 안 함).
+- **그림:** `.local/sdd/2026-11-28-integrate/shots/compare-*.png`(이전 = 시안 맞춤 dist), `compare-receipts.png`, `compare-composer.png`(진행 중 입력 띠 포함), `character-entry-{header-badge,empty-chat,picker-open}.png`.
+- **말투 평가(합친 `JIPSOONI_VOICE`, 기준 `20261128-085207` → `20261128-132914`):** 합계 16.41→16.48, 쉬운 말 3.97→4.14, 자연스러움 3.9→3.86, 결과 먼저 4.76→4.62, 성격 3.79→3.86, 규칙 감점 0.79→0.41, 문장 길이 20.7→18.9, 사실성 실패 1→4(search-done, not-verified, chat-casual, chat-evening: 근거 없는 날씨·자기 상태·조회 결과를 지어냄), 고정 문구 1→1.
+- **남은 틈:** 나의 집순이 행은 기기·에뮬레이터 화면으로 아직 못 봤다(JVM에서는 행 동작·flag·브리지만 시험). 관찰형 도구의 글은 아직 카드가 아니다. 말투 평가의 사실성 실패 증가는 한 번 실행한 결과라 반복 측정과 `JIPSOONI_VOICE`의 "확인된 사실 밖 내용 금지" 보강이 필요하다.
+
 ## 2026-11-28 — 채팅 화면 구조 시안 맞춤, 클레이 아이콘, 런처 아이콘 (claude/design-concept-match, Codex 통합 대기)
 
 - **배경:** 소유자가 v0.2.17을 보고 시안과 다르다고 했다. 이번에는 색이 아니라 화면 구조를 `concept_phones.png`에 맞췄다(사양 `.local/sdd/2026-11-28-concept-match/spec.md` S1~S9).
