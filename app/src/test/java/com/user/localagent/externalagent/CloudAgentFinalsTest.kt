@@ -25,10 +25,10 @@ class CloudAgentFinalsTest {
         val opened=outcome("""{"pageChanged":false,"performed":{"control":"강의실 입장"}}""",true)
         val obscured=outcome("""{"error":"ELEMENT_OBSCURED","attemptedControl":"동영상 재생"}""",false)
         val unavailable=outcome("""{"error":"ACTION_OUTCOME_UNKNOWN","attemptedControl":"강의실 입장","navigationError":"TLS_ERROR"}""",false)
-        assertTrue(CloudAgentFinals.unfinishedNotice(listOf(opened)).contains("재생 버튼을 확인하지 못했어요"))
-        assertEquals("다른 화면이 ‘동영상 재생’ 버튼을 가려 누르지 못했어요.",
+        assertTrue(CloudAgentFinals.unfinishedNotice(listOf(opened)).contains("재생 버튼 못 봄"))
+        assertEquals("다른 화면이 ‘동영상 재생’ 버튼 가림 · 못 누름",
             CloudAgentFinals.unfinishedNotice(listOf(opened,obscured)))
-        assertEquals("‘강의실 입장’ 버튼을 누른 뒤 다음 화면에 안전하게 연결할 수 없었어요.",
+        assertEquals("‘강의실 입장’ 버튼 누름 · 다음 화면에 안전하게 못 이어짐",
             CloudAgentFinals.unfinishedNotice(listOf(opened,unavailable)))
     }
     @Test fun onlyAPlanlessCallFreeDoneReportIsAPlainAnswer(){
@@ -91,9 +91,9 @@ class CloudAgentFinalsTest {
         }
         val saved=progress("2",true)!!
         assertTrue(progress("2",true,"read_pc_browser_page")!!.startsWith("PC 브라우저"))
-        assertTrue(saved.contains("2개"));assertTrue(saved.contains("저장은 실행하지 않았어요"))
+        assertTrue(saved.contains("2개"));assertTrue(saved.contains("파일 저장은 안 함"))
         assertFalse(saved.contains("private"))
-        assertTrue(progress("0",true)!!.contains("마지막으로 읽은 화면"))
+        assertTrue(progress("0",true)!!.contains("마지막 화면에 바로 저장할 PDF 링크 없음"))
         assertFalse(progress("1",false)!!.contains("PDF"))
         assertNull(progress("\"1\"",true));assertNull(progress("121",true))
     }
@@ -104,6 +104,6 @@ class CloudAgentFinalsTest {
         assertEquals(body,CloudAgentFinals.toolFreeAnswer("  $body "))
         assertEquals(body,CloudAgentFinals.visibleAnswer("$legacy\n\n$legacy\n\n$body"))
         assertEquals("  $body ",CloudAgentFinals.visibleAnswer("  $body "))
-        assertTrue(CloudAgentFinals.PREPARED_PAUSE.contains("아직 확인하지 못했어요"))
+        assertTrue(CloudAgentFinals.PREPARED_PAUSE.contains("아직 모름"))
     }
 }

@@ -241,7 +241,7 @@ fun ChatRunCoordinator.editMessage(messageId: String, text: String) = manage {
     check(app.repository.chat.fullMessageText(edited.id) == text)
     selectThread(source.threadId)
     enqueueRevision(source.threadId, branch.id, edited.id, text)
-    status.value = "수정한 요청의 새 답변을 준비합니다. 기존 도구 작업 결과는 유지됩니다."
+    status.value = "고친 부탁의 새 답 준비 중 · 전에 한 결과는 그대로"
 }
 
 fun ChatRunCoordinator.regenerate(messageId: String) = manage {

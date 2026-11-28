@@ -670,6 +670,7 @@ class MainActivity : ComponentActivity() {
                             com.user.localagent.externalagent.CloudAgentFinals.visibleAnswer(message.text) else message.text
                         val cleanText = text.replace(GoalPdfEmail.MARKER,"").trimEnd()
                         reports[message.id]?.takeIf {message.role=="assistant"}?.let {put("executionReport",JsonArray(it.map(::JsonPrimitive)))}
+                        roomActivities[message.id]?.takeIf {message.role=="assistant"&&it.threadId==composerThreadId}?.runStatus?.let {put("runStatus",it)}
                         pdfDrafts[message.id]?.let { put("pdfEmail",it) }
                         val files = verifiedFiles[message.id].orEmpty()
                         if (files.isEmpty()) put("text",cleanText.take(32000)) else {
@@ -729,7 +730,7 @@ class MainActivity : ComponentActivity() {
                                     when(phase){"waiting_input"->"답변을 기다리고 있어요";"waiting_goal"->"조건이 되면 이어서 진행";"clarification_record"->"추가 질문";"completed"->"응답 종료";"paused"->"확인 후 이어가기";"cancelled"->"중단됨";"failed"->"실행 실패";else->"실행 종료"})
                                 activity.startedAt.takeIf{it>0}?.let{put("startedAt",it)}
                                 if(phase!="waiting_goal")activity.finishedAt?.takeIf{it>0}?.let{put("finishedAt",it)}
-                                put("detail",if(latestQuestion)"아래에 답해 주시면 이 대화에서 이어갈게요." else if(activity.waitingForGoal)visibleActivityText(activity.goalWaitDetail) else "");put("canCancel",activity.waitingForGoal)
+                                put("detail",if(latestQuestion)"답 기다리는 중" else if(activity.waitingForGoal)visibleActivityText(activity.goalWaitDetail) else "");put("canCancel",activity.waitingForGoal)
                                 put("evidence",buildJsonArray{publicActivityWindow(activity.events).forEach{event->add(buildJsonObject{
                                     put("id",event.id);put("label",visibleActivityText(event.label));put("detail",visibleActivityText(event.detail))
                                     event.at.takeIf{it>0}?.let{put("at",it)}
@@ -753,7 +754,7 @@ class MainActivity : ComponentActivity() {
                                     this@MainActivity,id,composerThreadId,currentBranchId)
                                 else webAgent.openOwnerHistory(this@MainActivity,id,composerThreadId,currentBranchId,booking=command.action=="checkBookingHistory")
                                 if(!opened)android.widget.Toast.makeText(this@MainActivity,
-                                    "선택한 화면을 열 수 없어요. 예약처의 예약 내역과 카드 거래 내역에서 확인해 주세요.",android.widget.Toast.LENGTH_LONG).show()
+                                    "화면을 열 수 없음 · 예약처 예약 내역과 카드 거래 내역 확인",android.widget.Toast.LENGTH_LONG).show()
                             }
                             "answerGoalQuestion"->if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty()){
                                 chat.sendGoalOwnerAnswer(payload.getValue("runId").jsonPrimitive.content,
@@ -807,7 +808,7 @@ class MainActivity : ComponentActivity() {
                             "send"->{
                                 val token=payload.getValue("submitToken").jsonPrimitive.content
                                 val text=payload.getValue("text").jsonPrimitive.content
-                                if(attachmentPreparing.value){status.value="첨부 자료를 준비하고 있습니다. 준비가 끝난 뒤 보내주세요."}
+                                if(attachmentPreparing.value){status.value="첨부 준비 중 · 끝나면 보내기"}
                                 else if(token !in submittedTokens&&chat.sendFromReact(text,composerThreadId,currentBranchId,token)){
                                     submittedTokens+=token;while(submittedTokens.size>128)submittedTokens.remove(submittedTokens.first())
                                     if(chat.draft.value==text)chat.updateDraft("",composerThreadId)
@@ -825,8 +826,8 @@ class MainActivity : ComponentActivity() {
                                 if(id==runForRoom&&id==chat.activeRunId&&payload.getValue("actionEpoch").jsonPrimitive.long==epoch){
                                     if(command.action=="stop")chat.stopRun(id,composerThreadId)
                                     else if(!attachmentPreparing.value&&app.chatAttachments.state.value.isEmpty())chat.steer(payload.getValue("text").jsonPrimitive.content,id,composerThreadId)
-                                    else status.value="첨부 자료를 준비 중이거나 선택한 상태에서는 추가 지시를 적용할 수 없습니다. 입력은 유지했습니다."
-                                }else status.value="작업이 바뀌어 이전 화면의 지시를 적용하지 않았습니다."
+                                    else status.value="첨부가 있을 때는 추가 지시 안 됨 · 입력은 그대로"
+                                }else status.value="작업이 바뀌어 지시 안 넣음"
                                 if(command.action!="stop")composerEpoch++
                             }
                             "dismissOfficeGuide"->if(officeOpen)dismissOfficeGuide()
@@ -844,8 +845,8 @@ class MainActivity : ComponentActivity() {
                                         else app.officeProfile.clear()
                                     }.isSuccess}
                                     officeProfileRevision++
-                                    status.value=if(!ok)"직원 정보를 저장하지 못했습니다. 입력값을 확인해 주세요."
-                                        else if(saving&&entries!!.isNotEmpty())"직원 정보를 이 휴대폰에 암호화해 저장했습니다." else "직원 정보를 지웠습니다."
+                                    status.value=if(!ok)"직원 정보 저장 못 함 · 입력값 확인 필요"
+                                        else if(saving&&entries!!.isNotEmpty())"직원 정보를 이 휴대폰에 잠가 저장함" else "직원 정보 지움"
                                 }
                             }
                             "selectModel"->payload.getValue("id").jsonPrimitive.content.takeIf{id->modelChoices.any{it.first==id}}?.let{id->chooseConversationModel(id,composerThreadId)}
@@ -874,8 +875,8 @@ class MainActivity : ComponentActivity() {
                                         val intent=GoalPdfEmail.composer(this@MainActivity,app,composerThreadId,currentBranchId,id,preview)
                                         if (app.runs.selectedThreadId.value == composerThreadId) startActivity(intent)
                                     } catch(cancel:CancellationException){throw cancel}
-                                    catch(_:android.content.ActivityNotFoundException){status.value="휴대폰에서 Gmail을 열 수 없어요. 첨부한 초안은 여기에 보관했어요."}
-                                    catch(_:Exception){status.value="이 대화에서 첨부 원본을 다시 확인할 수 없어요. 파일을 다시 저장해 주세요."}
+                                    catch(_:android.content.ActivityNotFoundException){status.value="Gmail을 열 수 없음 · 초안은 여기 남겨 둠"}
+                                    catch(_:Exception){status.value="첨부 원본을 못 찾음 · 파일 다시 저장 필요"}
                                 }
                             }
                             "messageFiles"->{
@@ -884,7 +885,7 @@ class MainActivity : ComponentActivity() {
                                 if(names!=null)this@MainActivity.lifecycleScope.launch {
                                     val checked=ChatResultPreviews.files(this@MainActivity,app,composerThreadId,currentBranchId,mapOf(id to names))
                                     if(checked[id]==names)fileMessageId=id
-                                    else status.value="이 대화에서 저장한 파일을 찾지 못했어요."
+                                    else status.value="저장한 파일을 못 찾음"
                                 }
                             }
                             "messageMenu"->{
@@ -903,7 +904,7 @@ class MainActivity : ComponentActivity() {
                             "openWaitingApproval"->otherApprovalOpened=pendingActions.firstOrNull{it.threadId==approvalThread}?.presentationId
                         }
                     }else if(command.action in setOf("send","steer","attach","removeAttachment")){
-                        status.value="대화가 바뀌어 방금 요청을 적용하지 않았어요. 다시 확인해 주세요."
+                        status.value="대화가 바뀌어 방금 부탁 안 넣음"
                     }
                 })}
                 if(inlineCredentials!=null)key(inlineCredentials.id){
@@ -919,7 +920,7 @@ class MainActivity : ComponentActivity() {
                                         val opened=try{chat.reopenOwnerLogin(binding.runId,composerThreadId,currentBranchId)}
                                             catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
                                             catch(_:Exception){false}
-                                        if(!opened)status.value="이 작업을 이어갈 수 있는지 확인해 주세요."
+                                        if(!opened)status.value="이어갈 수 있는지 확인 필요"
                                     }else webAgent.unfoldOwnerLogin(inlineCredentials.id)
                                 }}){Text("로그인 열기")}
                                 TextButton(onClick={webAgent.cancelLoginCard(inlineCredentials.id)}){Text("대기 그만두기")}
@@ -927,8 +928,8 @@ class MainActivity : ComponentActivity() {
                         }else if(inlineSite?.nolGuide==true)com.user.localagent.integrations.InlineNolConnection(webAgent,
                             inlineSite,window,Modifier.fillMaxSize(),onVerified={lifecycleScope.launch {
                                 app.repository.chat.addMessage(composerThreadId,currentBranchId,"assistant",
-                                    "NOL 로그인 상태를 확인했어요. 로그인 상태가 유지되는 동안 이 휴대폰에서 같은 연결을 이어서 쓸 수 있어요."+
-                                        if(inlineSite.vaultSaveFailed)" 이번 비밀번호는 금고에 저장되지 않았어요." else "")
+                                    "NOL 로그인 확인함 · 로그인이 유지되는 동안 이 휴대폰에서 이어 씀"+
+                                        if(inlineSite.vaultSaveFailed)" · 이번 비밀번호는 금고에 저장 안 됨" else "")
                             }})
                         else if(inlineSite!=null)com.user.localagent.integrations.InlineWebsiteLogin(webAgent,inlineSite,window,Modifier.fillMaxSize())
                         else com.user.localagent.integrations.InlineBrowserLoginCard(webAgent,inlineCredentials,window,
@@ -952,9 +953,9 @@ class MainActivity : ComponentActivity() {
                             openingLogin=true
                             try {
                                 loginNotice=if(chat.reopenOwnerLogin(pausedLogin.runId,composerThreadId,currentBranchId))null
-                                    else "이 작업의 로그인 화면을 열 수 없어요. PC 연결을 확인해 주세요."
+                                    else "로그인 화면을 열 수 없음 · PC 연결 확인 필요"
                             }catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
-                            catch(_:Exception){loginNotice="로그인 화면을 열지 못했어요. PC 연결을 확인한 뒤 다시 눌러 주세요."}
+                            catch(_:Exception){loginNotice="로그인 화면을 못 엶 · PC 연결 확인 뒤 다시 누르기"}
                             finally{openingLogin=false}
                         }},modifier=Modifier.fillMaxWidth(),enabled=!openingLogin){
                             Text(if(openingLogin)"로그인 화면 확인 중" else "사이트 로그인 다시 열기")
@@ -975,7 +976,7 @@ class MainActivity : ComponentActivity() {
                                 val started=webAgent.startNolConnection(binding,message.id)
                                 if(started){connectionsOpen=false;connectionStatus=null}
                                 else app.repository.chat.addMessage(composerThreadId,currentBranchId,"assistant",
-                                    "다른 로그인 작업이 열려 있어요. 그 작업을 마친 뒤 다시 연결할 수 있어요.")
+                                    "다른 로그인 작업이 열려 있음 · 그 일을 마치고 다시 연결")
                                 started
                             }
                         }, modifier=Modifier.fillMaxWidth().fillMaxHeight(0.68f).padding(horizontal=12.dp))
