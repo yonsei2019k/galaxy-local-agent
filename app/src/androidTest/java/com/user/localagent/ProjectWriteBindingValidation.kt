@@ -95,6 +95,28 @@ class ProjectWriteBindingValidation {
         val good=tools.execute(call("write_project_file","source.txt","replacement",hash(r)))
         assertTrue(good.content,good.success);assertEquals("replacement",f.workspace.read("source.txt"));assertEquals("keep unchanged",f.workspace.read("keep.txt"))
     }}
+
+    @Test fun permissionRevokedAtCommitKeepsTheOriginalFile()=runBlocking(Dispatchers.IO){fixture{f->
+        f.workspace.write("source.txt","original")
+        val tools=f.tools()
+        val observed=read(tools,"source.txt")
+        accept(tools,listOf(observed))
+        val expectedBinding=f.workspace.bindingFingerprint()
+        val reachedCommit=CompletableDeferred<String>()
+        val permission=CompletableDeferred<Boolean>()
+        val write=async {
+            tools.execute(call("write_project_file","source.txt","replacement",hash(observed)),verifyProjectWrite={binding->
+                reachedCommit.complete(binding)
+                check(permission.await())
+            })
+        }
+        assertEquals(expectedBinding,withTimeout(5_000){reachedCommit.await()})
+        permission.complete(false)
+        val refused=withTimeout(5_000){write.await()}
+        assertFalse(refused.success)
+        assertTrue(refused.effectNotApplied)
+        assertEquals("original",f.workspace.read("source.txt"))
+    }}
     @Test fun matchingSchemaHashCannotAuthorizeAnOmittedOrTruncatedActualBody()=runBlocking(Dispatchers.IO){fixture{f->
         f.workspace.write("source.txt","actual complete source")
         val tools=f.tools();val r=read(tools,"source.txt")

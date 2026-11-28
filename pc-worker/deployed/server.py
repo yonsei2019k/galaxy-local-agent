@@ -200,12 +200,13 @@ class Handler(BaseHTTPRequestHandler):
    operation={'/v1/browser/open':BROWSER.open,'/v1/browser/read':BROWSER.read,'/v1/browser/act':BROWSER.act,'/v1/browser/close':BROWSER.close,
      '/v1/browser/public-read':BROWSER.public_read,'/v1/browser/release':BROWSER_WORK.release,
      '/v1/browser/save-pdf':BROWSER.save_pdf}.get(path)
-   owner_login=path in ('/v1/browser/owner-login-form','/v1/browser/owner-login-submit','/v1/browser/owner-login-status')
+   owner_login=path in ('/v1/browser/owner-login-form','/v1/browser/owner-login-submit','/v1/browser/owner-login-status','/v1/browser/owner-login-observe')
    if owner_login:
     if (self.client_address[0].startswith('127.') or self.headers.get_all('X-ZipHap-Agent-Capability',[]) or
         self.headers.get_all('X-ZipHap-Phone-Capability',[])):
      self.reply({'error':'PAIRED_PHONE_ONLY'},403);return
-    operation={'form':BROWSER.owner_login_form,'submit':BROWSER.owner_login_submit,'status':BROWSER.owner_login_status}[path.rsplit('-',1)[1]]
+    operation={'form':BROWSER.owner_login_form,'submit':BROWSER.owner_login_submit,'status':BROWSER.owner_login_status,
+      'observe':BROWSER.owner_login_observe}[path.rsplit('-',1)[1]]
    if self.command!='POST' or operation is None:raise ValueError('BROWSER_ROUTE')
    self.connection.settimeout(90)
    request=self.body(8192)

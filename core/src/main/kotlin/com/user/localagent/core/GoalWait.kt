@@ -48,12 +48,22 @@ data class GoalWaitRecord(
     val lastMediaProgressAt: Long? = null,
     val lastMediaSampleAt: Long? = null,
     val transientParentDigest: String? = null,
+    val stopReason: GoalWaitStopReason? = null,
 ) {
     init {
         require(id.isNotBlank() && goalId.isNotBlank()) { "대기 기록에는 식별자가 필요합니다." }
         require(transientParentDigest==null || condition is WaitCondition.AtTime && !condition.needsPlayback && transientParentDigest.matches(Regex("[0-9a-f]{64}")))
         require(wakesToday >= 0 && wakesTotal >= 0 && pcRetries >= 0) { "대기 횟수는 0 이상이어야 합니다." }
         require(anchorMinuteOfDay == null || anchorMinuteOfDay in 0..1439) { "기준 시각이 하루 범위를 벗어났습니다." }
+    }
+}
+
+@Serializable
+enum class GoalWaitStopReason(val code:String) {
+    DEADLINE("wait_deadline"), AUTH_EXPIRED("wait_auth_expired"), OWNER_CANCELLED("wait_cancelled");
+
+    companion object {
+        fun fromCode(code:String):GoalWaitStopReason?=entries.firstOrNull {it.code==code}
     }
 }
 
@@ -92,6 +102,7 @@ object GoalWaitPolicy {
         val rolled = if (record.dayKey != today) record.copy(wakesToday = 0, dayKey = today) else record
         if (now >= rolled.deadlineAt) return WaitDecision.Stop("wait_deadline")
         if (rolled.resumedOnceFor == rolled.id) return WaitDecision.Stop("wait_duplicate_wake")
+        rolled.stopReason?.let {return WaitDecision.Stop(it.code)}
         if (!pcAvailable) {
             val retries = (rolled.pcRetries.coerceAtMost(PC_RETRY_LIMIT) + 1).coerceAtMost(PC_RETRY_LIMIT)
             val delay = if (retries < PC_RETRY_LIMIT) PC_RETRY_INTERVAL_MS else HOUR_MS
@@ -125,6 +136,7 @@ object GoalWaitPolicy {
     /** An undated authentication handoff is woken exclusively by the owner's verified event. */
     fun dueAt(record: GoalWaitRecord): Long? {
         if (record.resumedOnceFor == record.id) return null
+        if (record.stopReason != null) return 0L
         val due = record.retryAt ?: if (record.observedEvent != null) 0L else when (val c = record.condition) {
             is WaitCondition.AtTime -> c.atEpochMillis
             is WaitCondition.OwnerAuth -> record.deadlineAt

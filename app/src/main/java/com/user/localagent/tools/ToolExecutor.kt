@@ -110,14 +110,47 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
         connectionRunId?.let { repository.chat.run(it) }?.takeIf {it.threadId==connectionThreadId}?.let {
             com.user.localagent.pcBrowserWorkKey(com.user.localagent.QueuedChatRequest.fromJson(it.contextJson))
         }
-    private suspend fun restorablePcAuthOrigin():String? {
+    private suspend fun restorablePcAuthSource():com.user.localagent.data.ChatRunRecord? {
         val row=connectionRunId?.let {repository.chat.run(it)}?:return null
         val request=com.user.localagent.QueuedChatRequest.fromJson(row.contextJson)
         val original=com.user.localagent.BrowserAuthContinuation.source(request){repository.chat.run(it)}?:return null
-        return com.user.localagent.BrowserAuthContinuation.pcLoginOrigin(original.contextJson).takeIf {connectionIsRunLive()}
+        return original.takeIf {connectionIsRunLive()}
+    }
+    private suspend fun completedMediaWait():com.user.localagent.core.WaitCondition.MediaEnd? {
+        val row=connectionRunId?.let {repository.chat.run(it)}?:return null
+        val original=com.user.localagent.QueuedChatRequest.fromJson(row.contextJson)
+        var segment=original.goalSegment?:return null
+        val scope=segment.scopeKey
+        val goalId=segment.goalId
+        val key=com.user.localagent.pcBrowserWorkKey(original)
+        repeat(8) {
+            val parent=segment.parentRunId?.let {repository.chat.run(it)}?:return null
+            if(!connectionIsRunLive()||parent.threadId!=row.threadId||parent.branchId!=row.branchId||
+                parent.projectId!=row.projectId||com.user.localagent.goalDigest(parent.contextJson)!=segment.parentCheckpointDigest)return null
+            val context=Json.parseToJsonElement(parent.contextJson).jsonObject
+            val parked=com.user.localagent.QueuedChatRequest.fromJson(parent.contextJson)
+            val prior=parked.goalSegment?:return null
+            if(prior.scopeKey!=scope||prior.goalId!=goalId||com.user.localagent.pcBrowserWorkKey(parked)!=key ||
+                parked.externalAgentRevision!=original.externalAgentRevision||parked.capturedPcRevision!=original.capturedPcRevision)return null
+            val wake=context["hostGoalWake"] as? JsonObject
+            if(wake?.get("event")==JsonPrimitive(com.user.localagent.core.WakeEvent.MEDIA_ENDED.name)) {
+                val step=parked.previousSteps.lastOrNull()?:return null
+                if(step.tool!=com.user.localagent.core.GoalWaitToolCatalog.WAIT||
+                    step.evidence.state!=com.user.localagent.core.VerificationState.VERIFIED||step.evidence.effectNotApplied)return null
+                return com.user.localagent.core.GoalWaitToolCatalog.parse(ToolCall("parked-media",step.tool,step.arguments))
+                    as? com.user.localagent.core.WaitCondition.MediaEnd
+            }
+            if(wake!=null||!com.user.localagent.goalTransientFailure(parent)||
+                parked.previousSteps.any {!com.user.localagent.core.ToolReadPolicy.isReadOnly(it.tool)})return null
+            segment=prior
+        }
+        return null
     }
     private val pcBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.pc(context,::browserWorkBinding,
-        ::pcBrowserSession,::restorablePcAuthOrigin)}
+        ::pcBrowserSession,
+        {restorablePcAuthSource()?.let {com.user.localagent.BrowserAuthContinuation.pcLoginOrigin(it.contextJson)}},
+        {restorablePcAuthSource()?.let {com.user.localagent.BrowserAuthContinuation.pcTaskPage(it.contextJson)}},
+        ::completedMediaWait)}
     internal var deferBrowserLogin:()->Boolean={false}
     private val appBrowser by lazy {com.user.localagent.compute.BrowserAgentTools.app(context,::browserWorkBinding){deferBrowserLogin()}}
     private fun browserFor(name:String)=when(name){
@@ -200,10 +233,12 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
             else->null
         }
     }
-    suspend fun execute(call:ToolCall,approvedScreenSnapshot:String?=null,skillAvailableTools:Set<String> = capturedAvailableTools, verifyGrant:suspend ()->Unit={}):ToolResult=
-        if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call,null,skillAvailableTools,verifyGrant)}
-        else executeUnlocked(call,approvedScreenSnapshot,skillAvailableTools,verifyGrant)
-    private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?,skillAvailableTools:Set<String>,verifyGrant:suspend ()->Unit):ToolResult = withContext(Dispatchers.IO) {
+    suspend fun execute(call:ToolCall,approvedScreenSnapshot:String?=null,skillAvailableTools:Set<String> = capturedAvailableTools,
+        verifyGrant:suspend ()->Unit={},verifyProjectWrite:suspend (String)->Unit={verifyGrant()}):ToolResult=
+        if(call.name in setOf("create_reminder","update_reminder","delete_reminder"))scheduler.withMutation{executeUnlocked(call,null,skillAvailableTools,verifyGrant,verifyProjectWrite)}
+        else executeUnlocked(call,approvedScreenSnapshot,skillAvailableTools,verifyGrant,verifyProjectWrite)
+    private suspend fun executeUnlocked(call:ToolCall,approvedScreenSnapshot:String?,skillAvailableTools:Set<String>,
+        verifyGrant:suspend ()->Unit,verifyProjectWrite:suspend (String)->Unit):ToolResult = withContext(Dispatchers.IO) {
         try {
             if(!com.user.localagent.core.WebsiteExecutionPolicy.allows(call))return@withContext ToolResult(call.id,false,
                 com.user.localagent.core.WebsiteExecutionPolicy.HEADLESS_NOTICE,VerificationState.FAILED,"phone_web_route_unavailable",effectNotApplied=true)
@@ -267,7 +302,8 @@ class ToolExecutor(private val context:Context,private val repository:LocalRepos
                 }.toString()
                 "list_project_files"->buildJsonObject {put("project",projectWorkspace.state.value.name);put("entries",buildJsonArray {projectWorkspace.list(call.s("path")).forEach {entry->add(buildJsonObject {put("path",entry.path);put("directory",entry.directory);put("bytes",entry.bytes)})}});put("limit",100);put("untrustedSourceData",true)}.toString()
                 "read_project_file"->{val read=projectWorkspace.readForTool(call.s("path"),projectReadAuthority);buildJsonObject {put("path",read.path);put("text",clip(read.text,8000));put("truncated",read.text.length>8000);put("sha256",read.sha256);put("readToken",read.token);put("untrustedSourceData",true)}.toString()}
-                "write_project_file"->projectWorkspace.writeForTool(call.s("path"),call.s("content"),call.arguments["expectedSha256"]?.jsonPrimitive?.content,projectReadAuthority)
+                "write_project_file"->projectWorkspace.writeForTool(call.s("path"),call.s("content"),
+                    call.arguments["expectedSha256"]?.jsonPrimitive?.content,projectReadAuthority,verifyProjectWrite)
                 "create_document"->checkNotNull(createDocument){"문서 생성 연결이 필요합니다."}.invoke(call)
                 "generate_image"->checkNotNull(createImage){"이미지 생성 연결을 준비해주세요."}.invoke(call)
                 "search_web","search_shopping"->{

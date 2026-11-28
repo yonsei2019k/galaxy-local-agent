@@ -85,7 +85,7 @@ internal class ConnectedRecordLearning(context: Context, private val repository:
         if (candidates != sources) write(rows() - (candidates - sources.toSet()).toSet())
         if (sources.isEmpty()) return LearningPass(0, 0, if (hasPending()) "learning_batch_saved" else "learning_idle")
         val container = app ?: return LearningPass(0, 0, "learning_device_busy")
-        if (container.runs.busy.value || container.runs.queued.value.isNotEmpty())
+        if (container.scopedRuns.busy.value || container.scopedRuns.queued.value.isNotEmpty())
             return LearningPass(0, 0, "learning_device_busy")
         container.models.refresh()
         val model = container.models.models.value.firstOrNull {
@@ -96,7 +96,7 @@ internal class ConnectedRecordLearning(context: Context, private val repository:
         val engine = LocalInferenceEngine(context)
         val result = try {
             container.cancelIdleUnload()
-            if (RuntimeGate.foreground.get() || container.runs.busy.value)
+            if (RuntimeGate.foreground.get() || container.scopedRuns.busy.value)
                 return LearningPass(0, 0, "learning_device_busy")
             container.engine.unloadPhoneResidency()
             withTimeout(90_000) {

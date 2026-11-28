@@ -55,6 +55,37 @@ class GoalSegmentAutopilotTest {
     @Test fun unknownRuntimeEffectCannotBeReplayedEvenWhenAllVisibleStepsSayVerified() {
         pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(unknown=true))
     }
+
+    @Test fun serviceRedeliveryIsBoundToTheSameLatestRunAndConversation() {
+        val interrupted=row(status="interrupted",errorCode="process_restarted")
+        assertTrue(trackedGoalRunMatches("run-a","thread","branch",goal(),interrupted))
+        assertFalse(trackedGoalRunMatches("other","thread","branch",goal(),interrupted))
+        assertFalse(trackedGoalRunMatches("run-a","thread","new-branch",goal(),interrupted))
+        assertFalse(trackedGoalRunMatches("run-a","thread","branch",goal(),interrupted.copy(threadId="other")))
+        assertFalse(trackedGoalRunMatches("run-a","thread","branch",goal(listOf("run-a","run-b")),interrupted))
+        assertFalse(trackedGoalRunMatches("run-a","thread","branch",goal().copy(status=GoalStatus.COMPLETE),interrupted))
+    }
+
+    @Test fun previousServiceCanRecoverOnlyItsImmediateUnstartedChild() {
+        val original=request()
+        val latest=child(original,decide(original) as GoalSegmentDecision.Continue)
+        val candidate=row(latest,status="queued",errorCode=null)
+        val current=checkNotNull(latest.goal)
+        val binding=checkNotNull(latest.goalSegment)
+        assertTrue(trackedGoalHandoffMatches("run-a",current,candidate,binding))
+        assertFalse(trackedGoalHandoffMatches("other",current,candidate,binding))
+        assertFalse(trackedGoalHandoffMatches("run-a",current,candidate.copy(status="running"),binding))
+        assertFalse(trackedGoalHandoffMatches("run-a",current,candidate.copy(startedAt=started),binding))
+        assertFalse(trackedGoalHandoffMatches("run-a",current.copy(linkedRunIds=listOf("run-a","other","run-b")),candidate,binding))
+    }
+
+    @Test fun persistedStopBlocksRestartAndACompletedParentsChild() {
+        for(status in listOf("cancelled","interrupted","completed")) {
+            val stopped=row(status=status,errorCode=GOAL_STOP_REQUESTED)
+            pause(GoalAutopilotPauseReason.STOPPED,goalRestartDecision(stopped,goal(),"scope",started+100,unknownEffects=false))
+            pause(GoalAutopilotPauseReason.STOPPED,goalSegmentDecision(stopped,goal(),"scope",started+100,unknownEffects=false))
+        }
+    }
     @Test fun unverifiedStepsAndKnownFailuresAreRetainedAndStopAutomaticContinuation() {
         pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT,decide(request(listOf(step(state=VerificationState.UNVERIFIED)))))
         for(noEffect in listOf(false,true)) {
@@ -268,6 +299,27 @@ class GoalSegmentAutopilotTest {
         }.toString(),VerificationState.VERIFIED,"saved")
         assertNotNull(goalOutcomeProof(call,result(original)))
         assertNull(goalOutcomeProof(call,result("https://example.org/another.pdf")))
+    }
+
+    @Test fun playbackProofRequiresTheObservedEndAndExactRequestedPage() {
+        val url="https://example.org/lesson?id=7"
+        val target=GoalProofTarget(GoalProofKind.BROWSER_PLAYBACK_ENDED,url)
+        val call=ToolCall("playback",PcBrowserToolCatalog.READ,buildJsonObject {put(BrowserMediaRule.EXPRESSION,"ended")})
+        fun result(source:String,status:String="ended",position:Int=60000)=ToolResult(call.id,true,buildJsonObject {
+            put("url",source);put("loginRequired",false)
+            put("playbackEvidence",buildJsonObject {
+                put("playbackStatus",status);put("positionMs",position);put("durationMs",60000)
+                put("playerSignature","${"a".repeat(32)}:1:0")
+            })
+        }.toString(),VerificationState.VERIFIED)
+        fun step(result:ToolResult)=HarnessStep(call,StepEvidence(call.name,result.verification,result.verificationSummary,
+            auditId="observed-playback",outcomeProof=goalOutcomeProof(call,result)))
+        val criterion=GoalCriterion(text=target.playbackCriterion(),proofTarget=target)
+        assertTrue(goalCriterionMatches(criterion,step(result(url))))
+        assertFalse(goalCriterionMatches(criterion,step(result("https://example.org/lesson?id=8"))))
+        assertFalse(goalCriterionMatches(criterion,step(result(url,"playing"))))
+        assertFalse(goalCriterionMatches(criterion,step(result(url,position=1))))
+        assertFalse(goalCriterionMatches(criterion.copy(text="강의 이수 완료"),step(result(url))))
     }
 
     @Test fun completedCourseReadMatchesOnlyTheExactOfficialCourseListCriterion() {

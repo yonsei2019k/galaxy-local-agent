@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -588,8 +589,6 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             check(child.browserAuthParentRunId==parent.id && child.userMessageId==parent.userMessageId)
             check(child.threadId==parent.threadId&&child.branchId==parent.branchId&&child.projectId==parent.projectId)
             if(dao.run(child.runId)!=null)return@withTransaction null
-            val newest=dao.messagePage(parent.threadId,parent.branchId,null,1).singleOrNull()
-            if(newest?.runId!=parent.id || newest.role!="assistant")return@withTransaction null
             val created=createRun(parent.threadId,parent.branchId,parent.userMessageId,parent.modelId,parent.contextSize,
                 parent.thinking,child.toJson(),child.runId,reserveAssistant=false)
             insertMessage(MessageRecord(role="assistant",text="",threadId=parent.threadId,branchId=parent.branchId,runId=child.runId))
@@ -735,15 +734,16 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val scheduledStop=r.errorCode.takeIf {
             ScheduledReadPolicy.isId(runId)&&it in setOf(ScheduledReadPolicy.STOP_REQUESTED,ScheduledReadPolicy.WORKER_STOPPED)
         }
+        val goalStop=r.errorCode==com.user.localagent.GOAL_STOP_REQUESTED
         val finalStatus=when(scheduledStop){
             ScheduledReadPolicy.STOP_REQUESTED->"cancelled"
             ScheduledReadPolicy.WORKER_STOPPED->"interrupted"
-            else->status
+            else->if(goalStop&&r.status !in TERMINAL&&status in TERMINAL)"cancelled" else status
         }
         if(r.status in TERMINAL)check(finalStatus==r.status){"종료된 작업을 다시 시작하지 않습니다."}
         if(contextJson!=null)checkBinding(r)
         if(finalStatus !in TERMINAL)validRun(runId)
-        val finalError=scheduledStop?:errorCode
+        val finalError=scheduledStop?:if(goalStop) r.errorCode else errorCode
         val preserved=contextJson?.let {com.user.localagent.ChatExecutionReport.retain(r.contextJson,it)}?:r.contextJson
         r.copy(status=finalStatus,errorCode=finalError,contextJson=preserved,updatedAt=now(),finishedAt=if(finalStatus in TERMINAL)now()else null).also {dao.run(it)}
     }
@@ -763,6 +763,27 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         run.copy(contextJson=preserved,updatedAt=now()).also {dao.run(it)}
     }
     suspend fun checkpointRun(runId:String,contextJson:String)=updateRunContext(runId,contextJson)
+    internal suspend fun recordDispatchedGoalFile(runId:String,marker:JsonObject,binding:JsonObject)=database.withTransaction {
+        val run=validRun(runId)
+        check(run.status=="running"&&run.errorCode!=com.user.localagent.GOAL_STOP_REQUESTED)
+        val context=Json.parseToJsonElement(run.contextJson).jsonObject
+        val next=JsonObject(context+(com.user.localagent.InterruptedGoalFileCheck.KEY to marker))
+        check(com.user.localagent.InterruptedGoalFileCheck.load(next,binding)!=null)
+        val saved=next.toString()
+        require(saved.length<=2_000_000)
+        dao.run(run.copy(contextJson=saved,updatedAt=now()))
+    }
+
+    internal suspend fun recordInterruptedGoalFileMatch(expected:ChatRunRecord):ChatRunRecord=database.withTransaction {
+        val run=checkNotNull(dao.run(expected.id))
+        check(run==expected&&run.status=="interrupted"&&run.errorCode=="goal_autopilot_unknown_effect")
+        checkBinding(run)
+        val context=Json.parseToJsonElement(run.contextJson).jsonObject
+        check(context[com.user.localagent.InterruptedGoalFileCheck.KEY] is JsonObject)
+        val saved=JsonObject((context-com.user.localagent.InterruptedGoalFileCheck.KEY)+
+            (com.user.localagent.InterruptedGoalFileCheck.MATCHED to JsonPrimitive(true))).toString()
+        run.copy(contextJson=saved,updatedAt=now()).also {dao.run(it)}
+    }
     suspend fun switchRunToPrivateModel(runId:String,originalModel:String,contextJson:String,privateReadEvidence:JsonArray?=null)=database.withTransaction {
         require(contextJson.length<=2_000_000)
         val run=validRun(runId)
@@ -864,6 +885,35 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         dao.run(run.copy(errorCode=errorCode,updatedAt=now()))
     }
 
+    /** A host status update for a parked run remains valid even after its execution grant changes. */
+    internal suspend fun writeBlockedGoalWait(expected:ChatRunRecord,goalId:String,errorCode:String,text:String)=database.withTransaction {
+        val run=checkNotNull(dao.run(expected.id))
+        check(run==expected && run.status !in setOf("queued","running","waiting_approval"))
+        check(com.user.localagent.QueuedChatRequest.fromJson(run.contextJson).goalSegment?.goalId==goalId)
+        check(errorCode in setOf("goal_wait_scope_changed","goal_wait_checkpoint_unavailable","goal_wait_cancelled",
+            "goal_wait_deadline","goal_wait_auth_expired"))
+        if(run.errorCode==errorCode)return@withTransaction
+        val thread=checkNotNull(dao.thread(run.threadId))
+        if(thread.deletedAt==null&&thread.activeBranchId==run.branchId&&thread.projectId==run.projectId&&
+            dao.branch(run.branchId)?.threadId==run.threadId) {
+            val id=UUID.nameUUIDFromBytes("blocked-goal-wait:${run.id}:$errorCode".toByteArray(Charsets.UTF_8)).toString()
+            if(local.messageById(id)==null) {
+                val after=dao.assistantForRun(run.id)?.id?:run.userMessageId
+                insertMessage(MessageRecord(id=id,role="assistant",text=text,threadId=run.threadId,branchId=run.branchId),after)
+            }
+        }
+        if(run.status=="paused"&&run.errorCode=="waiting_goal_condition" ||
+            run.status=="interrupted"&&run.errorCode=="process_restarted")
+            dao.run(run.copy(status="paused",errorCode=errorCode,updatedAt=now(),finishedAt=run.finishedAt?:now()))
+    }
+
+    internal suspend fun cancelOrdinaryBrowserAuthWait(expected:ChatRunRecord):Boolean=database.withTransaction {
+        val run=dao.run(expected.id)?:return@withTransaction false
+        if(!com.user.localagent.BrowserAuthContinuation.canCancel(expected,run))return@withTransaction false
+        dao.run(run.copy(errorCode=com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED,updatedAt=now()))
+        true
+    }
+
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
         require(text.isNotBlank()&&text.length<=1_000_000&&'\u0000' !in text)
         val run=validRun(runId);check(run.status in setOf("running","waiting_approval")){"시작된 작업의 답변만 저장합니다."}
@@ -925,17 +975,49 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val active=dao.runsForThread(threadId).filter {it.status !in TERMINAL||ChatQueueStore.isResumeQueued(it)}
         active.forEach {r->dao.run(r.copy(status=if(r.status in TERMINAL)r.status else"cancelled",contextJson=ChatQueueStore.withoutResumeFlag(r.contextJson),errorCode=if(r.status in TERMINAL)r.errorCode else errorCode,updatedAt=now(),finishedAt=r.finishedAt?:now()));queueStore.discardEmptyCancelledAssistant(r.id)};active.size
     }
-    suspend fun recoverInterruptedRuns():Int=database.withTransaction {
-        val active=dao.interrupted();active.forEach {r->
-            dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
-            val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
-            dao.run(r.copy(status=if(stoppedByOwner)"cancelled" else "interrupted",
-                errorCode=when {
-                    stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
-                    r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
-                    else->"process_restarted"
-                },updatedAt=now(),finishedAt=now()))
-        };active.size
+    suspend fun recoverInterruptedRuns(except:Set<String> = emptySet()):Int=database.withTransaction {
+        val active=dao.interrupted().filterNot {it.id in except}
+        active.forEach {recoverInterruptedRun(it)}
+        active.size
+    }
+    internal suspend fun recordGoalStopRequest(request:com.user.localagent.QueuedChatRequest) = database.withTransaction {
+        val row=dao.run(request.runId)?:return@withTransaction
+        if(row.status !in setOf("running","waiting_approval","paused","interrupted","completed"))return@withTransaction
+        check(row.threadId==request.threadId&&row.branchId==request.branchId&&row.projectId==request.projectId)
+        val captured=com.user.localagent.QueuedChatRequest.fromJson(row.contextJson)
+        check(request.goalSegment!=null&&captured.goalSegment==request.goalSegment&&captured.runId==request.runId)
+        if(row.errorCode!=com.user.localagent.GOAL_STOP_REQUESTED)
+            dao.run(row.copy(errorCode=com.user.localagent.GOAL_STOP_REQUESTED,updatedAt=now()))
+    }
+    internal suspend fun recoverOrphanedRun(expected:ChatRunRecord):ChatRunRecord?=database.withTransaction {
+        if(dao.run(expected.id)!=expected||expected.status !in setOf("running","waiting_approval"))return@withTransaction null
+        recoverInterruptedRun(expected)
+    }
+    internal suspend fun recordTrackedGoalScopeChanged(expected:ChatRunRecord):Boolean=database.withTransaction {
+        if(dao.run(expected.id)!=expected||expected.errorCode==com.user.localagent.GOAL_STOP_REQUESTED||
+            expected.status in setOf("running","waiting_approval"))return@withTransaction false
+        dao.run(expected.copy(status=if(expected.status=="queued")"paused" else expected.status,
+            errorCode="goal_recovery_scope_changed",updatedAt=now()))
+        true
+    }
+    private suspend fun recoverInterruptedRun(r:ChatRunRecord):ChatRunRecord {
+        dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
+        val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED ||
+            r.errorCode==com.user.localagent.GOAL_STOP_REQUESTED
+        val stoppedAuth=r.errorCode==com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
+        val browserAuth=!stoppedAuth&&r.status=="running"&&runCatching {
+            val request=com.user.localagent.QueuedChatRequest.fromJson(r.contextJson)
+            com.user.localagent.BrowserAuthContinuation.allowsOrdinaryHandoff(request)&&
+                com.user.localagent.BrowserAuthContinuation.canReopenLogin(r.contextJson)
+        }.getOrDefault(false)
+        return r.copy(status=when {stoppedByOwner||stoppedAuth->"cancelled";browserAuth->"paused";else->"interrupted"},
+            errorCode=when {
+                stoppedByOwner->r.errorCode
+                stoppedAuth->com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
+                browserAuth->"waiting_browser_auth"
+                r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
+                else->"process_restarted"
+            },updatedAt=now(),finishedAt=now()).also {dao.run(it)}
     }
     suspend fun messagePage(threadId:String,branchId:String?=null,beforePosition:Long?=null,limit:Int=100):ChatMessagePage {
         require(limit in 1..200);val t=activeThread(threadId);val branch=branchId?:t.activeBranchId;activeBranch(threadId,branch)

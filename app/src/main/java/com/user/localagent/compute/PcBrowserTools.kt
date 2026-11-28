@@ -32,13 +32,37 @@ class BrowserAgentSettings private constructor(context:Context,name:String) {
 /** Executes open/read/action for one browser; refusals come back as {"error": CODE}. */
 typealias BrowserBackend = suspend (operation:String,body:JsonObject)->JsonObject
 
+internal sealed interface PairedMediaRead {
+    data object Unavailable : PairedMediaRead
+    data object SessionGone : PairedMediaRead
+    data class Observed(val page:com.user.localagent.integrations.MediaEndWatcher.Observation) : PairedMediaRead
+}
+
+internal fun classifyPairedMediaRead(status:Int,page:JsonObject):PairedMediaRead {
+    if(status==409&&page["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE"))return PairedMediaRead.SessionGone
+    if(status!=200||page["error"]!=null||page["blocked"]==JsonPrimitive(true)||
+        page["externalHandoffBlocked"]==JsonPrimitive(true))return PairedMediaRead.Unavailable
+    if(page["loginRequired"]==JsonPrimitive(true))return PairedMediaRead.Observed(
+        com.user.localagent.integrations.MediaEndWatcher.Observation("",null,loginRequired=true))
+    val url=(page["url"] as? JsonPrimitive)?.takeIf {it.isString}?.content?.takeIf {it.isNotBlank()}
+        ?:return PairedMediaRead.Unavailable
+    val media=page["media"] as? JsonObject?:return PairedMediaRead.Unavailable
+    val player=when(media["status"]) {
+        JsonPrimitive("observed")->BrowserMediaSample.from(media)?:return PairedMediaRead.Unavailable
+        JsonPrimitive("player_unavailable")->null
+        else->return PairedMediaRead.Unavailable
+    }
+    return PairedMediaRead.Observed(com.user.localagent.integrations.MediaEndWatcher.Observation(url,player))
+}
+
 /**
  * One instance per request executor and browser: remembers the last page snapshot so owner approval names the
  * real control. Irreversible clicks and typing outside search boxes need the owner; the browser itself refuses
  * login/card/OTP fields. PC actions use a one-time approval token. In-app actions use the
  * snapshot ID attached to the owner's approval.
  */
-class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where:String,private val enabled:()->Boolean,private val backend:BrowserBackend) {
+class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where:String,private val enabled:()->Boolean,
+    private val completedMediaWait:suspend ()->WaitCondition.MediaEnd?={null},private val backend:BrowserBackend) {
     companion object {
         private const val APP_APPROVED_SNAPSHOT="approvedAppSnapshot"
         internal const val PHONE_AUTH_REQUIRED="PHONE_BROWSER_AUTH_REQUIRED"
@@ -82,20 +106,19 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val source=response["sourceSha256"]?.jsonPrimitive?.contentOrNull?.takeIf {it.matches(Regex("[a-f0-9]{64}"))}
             return PairedPdf(bytes,source,response["officialKairbCoursePdf"]==JsonPrimitive(true))
         }
-        internal suspend fun samplePairedMedia(context:Context,workKey:String):
-            com.user.localagent.integrations.MediaEndWatcher.Observation? {
-            if(!BrowserAgentSettings.pc(context).enabled())return null
-            val page=pcRequest(context,"read",buildJsonObject {put("work",workKey);put("observeMedia",true)})
-            if(page["loginRequired"]==JsonPrimitive(true))
-                return com.user.localagent.integrations.MediaEndWatcher.Observation("",null,loginRequired=true)
-            val url=page["url"]?.jsonPrimitive?.contentOrNull?:return null
-            return com.user.localagent.integrations.MediaEndWatcher.Observation(url,
-                (page["media"] as? JsonObject)?.let(BrowserMediaSample::from))
+        internal suspend fun samplePairedMedia(context:Context,workKey:String):PairedMediaRead {
+            if(!BrowserAgentSettings.pc(context).enabled())return PairedMediaRead.Unavailable
+            val transport=PcTransport(context)
+            val config=transport.available(waitForRestart=true)?:return PairedMediaRead.Unavailable
+            val (status,page)=transport.jsonWithStatus(config,"/v1/browser/read",
+                buildJsonObject {put("work",workKey);put("observeMedia",true)},85_000)
+            return classifyPairedMediaRead(status,page)
         }
         fun pc(context:Context,work:suspend ()->com.user.localagent.integrations.AppWebAgent.WorkBinding?,
-                session:suspend ()->String?,recoverAuth:suspend ()->String?):BrowserAgentTools {
+                session:suspend ()->String?,recoverAuth:suspend ()->String?,recoverTarget:suspend ()->String?,
+                completedMediaWait:suspend ()->WaitCondition.MediaEnd?):BrowserAgentTools {
             var authenticatedPageRead=false
-            return BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()}){operation,body->
+            return BrowserAgentTools(PcBrowserToolCatalog,"PC 백그라운드 브라우저",{BrowserAgentSettings.pc(context).enabled()},completedMediaWait){operation,body->
                 val transport=PcTransport(context)
                 val config=transport.available(waitForRestart=true)?:throw PcBrowserNotConnected()
                 val workKey=checkNotNull(session()){"PC 브라우저 작업을 확인할 수 없어요."}
@@ -108,26 +131,35 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
                 }
                 var result=if(operation=="open")openPaired(body.getValue("url").jsonPrimitive.content,85_000)
                     else transport.jsonWithStatus(config,"/v1/browser/$operation",JsonObject(body+("work" to JsonPrimitive(workKey))),85_000).second
-                val reopened=if(operation=="read"&&result["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE"))
-                    recoverAuth()?.let(PcLoginSite::entry) else null
-                val restartRead=reopened!=null
-                if(reopened!=null)result=openPaired(reopened,28_000)
-                val url=if(restartRead)reopened else body["url"]?.jsonPrimitive?.contentOrNull
                 val binding=work()
-                val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: url
-                val observedOrigin=PcLoginSite.origin(observedUrl)
                 val expected=if(operation=="read"&&!authenticatedPageRead&&binding!=null)
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                         com.user.localagent.integrations.AppWebAgent.get(context).confirmedPcOriginFor(binding)
                     }?:recoverAuth()
                 else null
+                val target=expected?.let { recoverTarget() }
+                fun matchesTarget(page:JsonObject):Boolean = target==null ||
+                    com.user.localagent.integrations.BrowserLoginRoutes.pairedTaskPage(
+                        (page["url"] as? JsonPrimitive)?.contentOrNull,checkNotNull(expected))==target
+                if(target!=null&&(result["error"]==JsonPrimitive("BROWSER_WORK_SESSION_GONE") ||
+                    result["error"]==null&&result["loginRequired"]==JsonPrimitive(false)&&!matchesTarget(result))){
+                    result=openPaired(target,28_000)
+                    // The navigation restores the destination, then the original read supplies any requested observation.
+                    if(result["error"]==null&&result["loginRequired"]==JsonPrimitive(false)&&matchesTarget(result))
+                        result=transport.jsonWithStatus(config,"/v1/browser/read",
+                            JsonObject(body+("work" to JsonPrimitive(workKey))),28_000).second
+                }
                 if(expected!=null && result["loginRequired"]!=JsonPrimitive(true) && result["error"]==null){
-                    if(result["loginRequired"]!=JsonPrimitive(false)||PcLoginSite.origin(result["url"]?.jsonPrimitive?.contentOrNull)!=expected||
+                    val actual=result["url"]?.jsonPrimitive?.contentOrNull
+                    if(result["loginRequired"]!=JsonPrimitive(false)||PcLoginSite.origin(actual)!=expected||
+                        !matchesTarget(result)||
                         result["snapshotId"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()||result["blocked"]==JsonPrimitive(true)||
                         result["externalHandoffBlocked"]==JsonPrimitive(true))
                         return@BrowserAgentTools buildJsonObject { put("error","OWNER_LOGIN_PAGE_CHANGED") }
                     authenticatedPageRead=true
                 }
+                val observedUrl=result["url"]?.jsonPrimitive?.contentOrNull ?: body["url"]?.jsonPrimitive?.contentOrNull
+                val observedOrigin=PcLoginSite.origin(observedUrl)
                 if(binding!=null && observedOrigin!=null &&
                     result["loginRequired"]==JsonPrimitive(false) && result["blocked"]!=JsonPrimitive(true) &&
                     result["snapshotId"] is JsonPrimitive) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
@@ -504,7 +536,10 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
             val watch=bound?:mediaWatch?.takeIf {it.matches()}?:MediaWatch(url,sample.playerId,sample.epoch,BrowserMediaProgress())
             bound=watch
             mediaWatch=watch
-            val reading=watch.progress.observe(sample,nowMs())
+            val observed=watch.progress.observe(sample,nowMs())
+            val priorEnd=if(sample.ended&&observed.status==BrowserMediaStatus.CHECKING)completedMediaWait() else null
+            val reading=if(matchesCompletedMediaWait(priorEnd,url,sample))observed.copy(status=BrowserMediaStatus.ENDED)
+                else observed
             val status=reading.status
             val facts=NativeMediaFacts(
                 if(status==BrowserMediaStatus.CHECKING)null else status==BrowserMediaStatus.PLAYING,
@@ -723,3 +758,7 @@ class BrowserAgentTools(private val catalog:BrowserToolCatalog,private val where
         put("dataOnly",true)
     }.toString()
 }
+
+internal fun matchesCompletedMediaWait(wait:WaitCondition.MediaEnd?,url:String,sample:BrowserMediaSample):Boolean =
+    wait!=null&&wait.pageUrl==url&&wait.playerSignature==sample.playerId+":"+sample.epoch&&
+        sample.ended&&!sample.seeking&&sample.durationMs?.let {sample.positionMs in maxOf(0L,it-250)..it+250}==true

@@ -232,20 +232,22 @@ def _write_site_session(page, origin, key):
 def _restore_site_session(page, origin, key):
     path = _vault_path(origin, key)
     if path is None:
-        return
+        return False
     from data_store import _dpapi
     try:
         if path.stat().st_size > 262144:
-            return
+            return False
         saved = json.loads(_dpapi(path.read_bytes(), False))
         now = time.time()
         if not 0 <= now - saved['savedAt'] < 30 * 86400:
-            return
+            return False
         cookies = [item for item in saved['cookies'] if item['url'] == origin + '/' and item.get('expires', now + 1) > now]
         if cookies:
             page.call('Storage.setCookies', {'cookies': cookies}, timeout=4)
+            return True
     except (BrowserError, KeyError, OSError, TypeError, ValueError):
-        return
+        pass
+    return False
 
 
 class _Page:
@@ -567,6 +569,7 @@ class BrowserAgent:
         self.owner_login_attempts = []
         self.owner_login_attempt = None
         self.session_restore_checked = set()
+        self.restored_owner_session = None
         self.owner_login_return_url = None
         self.work_origin = None
 
@@ -736,6 +739,34 @@ class BrowserAgent:
                 return self._with_saved_session(self._owner_signed_in(), prior[3])
             return self._owner_login_stage()
 
+    def owner_login_observe(self, request):
+        if set(request) != {'origin'} or not isinstance(request['origin'], str):
+            raise BrowserError('OWNER_LOGIN_FORMAT')
+        origin = request['origin']
+        with self.lock:
+            if self.page is None or self.process is not None and self.process.poll() is not None:
+                raise BrowserError('BROWSER_WORK_PAGE_GONE', 409)
+            try:
+                self.page.evaluate('1', timeout=4)
+                prior = self.owner_login_attempt
+                signed_in = False
+                attempted = prior and prior[2] is self.page and prior[3] == origin and time.monotonic() < prior[1]
+                restored = self.restored_owner_session == (self.page, origin) and self.work_origin == origin
+                if (attempted or restored) and self.page.evaluate('location.origin', timeout=4) == origin:
+                    if origin == KAIRB_ORIGIN:
+                        signed_in = (self.page.evaluate(KAIRB_SIGNED_IN, timeout=4) is True or
+                                     self.page.evaluate(KAIRB_ON_COURSES, timeout=4) is True)
+                    else:
+                        stage = self.page.evaluate(OWNER_POST_STAGE + '(' + json.dumps(origin) + ')', timeout=4)
+                        signed_in = stage == 'signed_in' and not getattr(self.page, 'hallym_login_required', False)
+            except (BrowserError, ConnectionResetError, BrokenPipeError) as error:
+                if isinstance(error, BrowserError) and error.code != 'DEVTOOLS_CLOSED':
+                    raise
+                self.page.close()
+                self.page = None
+                raise BrowserError('BROWSER_WORK_PAGE_GONE', 409) from None
+            return {'signedIn': signed_in, 'origin': origin}
+
     def _with_saved_session(self, result, origin):
         attempt = self.owner_login_attempt
         if result.get('signedIn') is True and attempt and len(attempt) == 5 and attempt[4] and attempt[3] == origin:
@@ -785,6 +816,8 @@ class BrowserAgent:
             request = urllib.request.Request(f'http://127.0.0.1:{port}/json/new?about:blank', method='PUT')
             pages = [json.loads(urllib.request.urlopen(request, timeout=5).read(1 << 16))]
         self.page = _Page(pages[0]['webSocketDebuggerUrl'])
+        self.session_restore_checked.clear()
+        self.restored_owner_session = None
         self.page.call('Page.enable'); self.page.call('Runtime.enable')
 
     def _settle(self, timeout=12):
@@ -956,7 +989,8 @@ class BrowserAgent:
             requested = urllib.parse.urlsplit(request['url'])
             self.work_origin = browser_origin(request['url'])
             if request.get('sessionKey') and self.work_origin not in self.session_restore_checked:
-                _restore_site_session(self.page, self.work_origin, request['sessionKey'])
+                if _restore_site_session(self.page, self.work_origin, request['sessionKey']):
+                    self.restored_owner_session = (self.page, self.work_origin)
                 self.session_restore_checked.add(self.work_origin)
             target = request['url']
             self.page.hallym_login_required = False

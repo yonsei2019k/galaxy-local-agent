@@ -35,6 +35,22 @@ class BrowserAuthContinuationTest {
         assertNotEquals(BrowserAuthContinuation.childId("parent-a"),BrowserAuthContinuation.childId("parent-b"))
     }
 
+    @Test fun anotherReadOnlyAuthHandoffKeepsOriginalBrowserAndAuthority() {
+        val original=QueuedChatRequest("parent","thread","branch",null,"check courses","auto",false,emptyList(),"user",
+            capturedPcRevision=4L,allowExternalAgent=true,externalAgentRevision=7L)
+        val first=BrowserAuthContinuation.child(original,1L)
+        val second=BrowserAuthContinuation.child(first,2L)
+        assertTrue(BrowserAuthContinuation.allowsOrdinaryHandoff(second))
+        assertEquals(original.userMessageId,second.userMessageId)
+        assertEquals(original.capturedPcRevision,second.capturedPcRevision)
+        assertEquals(original.externalAgentRevision,second.externalAgentRevision)
+        assertEquals(first.runId,second.browserAuthParentRunId)
+        assertEquals(original.runId,second.browserWorkRootRunId)
+        assertEquals(pcBrowserWorkKey(original),pcBrowserWorkKey(first))
+        assertEquals(pcBrowserWorkKey(original),pcBrowserWorkKey(second))
+        assertEquals(second,QueuedChatRequest.fromJson(second.toJson()))
+    }
+
     @Test fun statusTimeoutPreservesOnlyTheMatchingSettledLoginRead() {
         val stage="PC_BRIDGE_TIMEOUT_GET_SESSION_STATUS"
         assertTrue(BrowserAuthContinuation.canPauseAfterStatusTimeout(stage,"a","a",listOf(auth)))
@@ -95,6 +111,47 @@ class BrowserAuthContinuationTest {
         for(origin in listOf("http://courses.example.org","https://localhost","https://user@courses.example.org","https://courses.example.org/?token=x")){
             assertNull(BrowserAuthContinuation.pcLoginOrigin(bound(origin)))
         }
+    }
+
+    @Test fun pcRecoveryKeepsTheExactReadTargetAndDropsAuthenticationParameters() {
+        val origin="https://courses.example.org"
+        val target="$origin/course/details?reservationId=fixture&date=2026-11-26"
+        val page="$target&access%5Ftoken=discarded&signature=discarded#fragment"
+        val open=HarnessStep("open_pc_browser_page",buildJsonObject {put("url",page)},
+            StepEvidence("open_pc_browser_page",VerificationState.VERIFIED,""))
+        val read=step("read_pc_browser_page",VerificationState.FAILED,true,BrowserAgentTools.PHONE_AUTH_REQUIRED)
+        val request=QueuedChatRequest("run","thread","branch",null,"owner query","auto",false,emptyList(),"user")
+        fun context(steps:List<HarnessStep>,observed:String?=null):String {
+            val json=Json.parseToJsonElement(request.copy(previousSteps=steps).toJson()).jsonObject
+            return JsonObject(json+mapOf(BrowserAuthContinuation.PC_LOGIN_ORIGIN_KEY to JsonPrimitive(origin))+
+                observed?.let {mapOf(BrowserAuthContinuation.PC_LOGIN_TASK_PAGE_KEY to JsonPrimitive(it))}.orEmpty()).toString()
+        }
+        assertEquals(target,BrowserAuthContinuation.pcTaskPage(context(listOf(open,read))))
+        assertEquals(target,BrowserAuthContinuation.pcTaskPage(context(listOf(read),page)))
+        assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(read),"https://courses.example.org.other/course/details")))
+        val action=HarnessStep("act_on_pc_browser_page",buildJsonObject {
+            put("action","back");put("snapshotId","fixture-snapshot")
+        },StepEvidence("act_on_pc_browser_page",VerificationState.VERIFIED,""))
+        assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(open,action,read))))
+        assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(read))))
+    }
+
+    @Test fun aDismissedOrReplacedHandoffCannotBeParkedAsWaiting() {
+        assertFalse(BrowserAuthContinuation.matchesHandoff(null,"original",confirmedInCurrentWork=false))
+        assertTrue(BrowserAuthContinuation.matchesHandoff(null,"original",confirmedInCurrentWork=true))
+        assertTrue(BrowserAuthContinuation.matchesHandoff("original","original",confirmedInCurrentWork=false))
+        assertFalse(BrowserAuthContinuation.matchesHandoff("replacement","original",confirmedInCurrentWork=true))
+    }
+
+    @Test fun cancellationUsesTheLatestCheckpointButRejectsChangedScopeOrFinishedRuns() {
+        val before=com.user.localagent.data.ChatRunRecord("run","thread","branch",projectId="project",
+            projectRevision=2,status="running")
+        val checkpoint=before.copy(contextJson="{\"progress\":true}",updatedAt=before.updatedAt+1)
+        assertTrue(BrowserAuthContinuation.canCancel(before,checkpoint))
+        assertTrue(BrowserAuthContinuation.canCancel(before,checkpoint.copy(status="paused",errorCode="waiting_browser_auth")))
+        assertFalse(BrowserAuthContinuation.canCancel(before,checkpoint.copy(projectRevision=3)))
+        assertFalse(BrowserAuthContinuation.canCancel(before,checkpoint.copy(branchId="new-branch")))
+        assertFalse(BrowserAuthContinuation.canCancel(before,checkpoint.copy(status="completed")))
     }
 
     @Test fun reopenUsesTheOriginalOfficialPcSiteAndOnlySettledReads() {

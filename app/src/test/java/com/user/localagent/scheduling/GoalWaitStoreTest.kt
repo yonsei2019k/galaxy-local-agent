@@ -1,6 +1,10 @@
 package com.user.localagent.scheduling
 
 import com.user.localagent.core.GoalWaitRecord
+import com.user.localagent.core.GoalWaitPolicy
+import com.user.localagent.core.GoalWaitStopReason
+import com.user.localagent.core.WakeEvent
+import com.user.localagent.core.WaitDecision
 import com.user.localagent.core.WaitCondition
 import org.junit.Assert.*
 import org.junit.Test
@@ -32,5 +36,64 @@ class GoalWaitStoreTest {
         val consumed = first.copy(resumedOnceFor=first.id,wakesTotal=1)
         assertTrue(store.replace(consumed,first))
         assertEquals(consumed,GoalWaitStore({ data },{ fail() }).get(first.goalId))
+    }
+
+    @Test fun recreatedHostBlocksOnlyAChildOfTheExactOwnerStoppedParent() {
+        var data:String?=null
+        val store=GoalWaitStore({data},{data=it})
+        assertTrue(store.replace(first,null))
+        val stopped=checkNotNull(store.markOwnerStopped(first,"stopped")).second
+        assertFalse(store.replace(first.copy(resumedOnceFor=first.id),first))
+        assertTrue(store.replace(stopped.copy(resumedOnceFor=stopped.id),stopped))
+        val recreated=GoalWaitStore({data},{fail()})
+        assertTrue(recreated.ownerStoppedParent("goal","parent","thread","branch"))
+        assertFalse(recreated.ownerStoppedParent("goal","next","thread","branch"))
+        assertFalse(recreated.ownerStoppedParent("goal","parent","thread","other"))
+    }
+
+    @Test fun capacityReclaimsOnlyTheExactObsoleteRecord() {
+        var data: String? = null
+        val store = GoalWaitStore({ data },{ data=it })
+        val records=(1..256).map {first.copy(id="wait-$it",goalId="goal-$it")}
+        records.forEach {assertTrue(store.replace(it,null))}
+        val stale=records.first()
+        val current=stale.copy(id="new-wait")
+        assertTrue(store.replace(current,stale))
+        assertFalse(store.replace(first,null,setOf(stale)))
+        assertTrue(store.replace(first,null,setOf(records.last())))
+        assertEquals(current,store.get(current.goalId))
+        assertEquals(first,store.get(first.goalId))
+        assertNull(store.get(records.last().goalId))
+    }
+
+    @Test fun aRecordedStopSurvivesRestartAndCannotTurnIntoAResume() {
+        var data:String?=null
+        val store=GoalWaitStore({data},{data=it})
+        assertTrue(store.replace(first,null))
+        val stopping=first.copy(stopReason=GoalWaitStopReason.AUTH_EXPIRED,retryAt=50_000)
+        assertTrue(store.replace(stopping,first))
+        val reopened=GoalWaitStore({data},{data=it})
+        val saved=checkNotNull(reopened.get(first.goalId))
+        assertEquals(stopping,saved)
+        assertEquals(0L,GoalWaitPolicy.dueAt(saved))
+        assertEquals(WaitDecision.Stop("wait_auth_expired"),
+            GoalWaitPolicy.onWake(saved,WakeEvent.OWNER_AUTH_DONE,1000,java.time.ZoneOffset.UTC,true))
+        assertTrue(reopened.replace(saved.copy(resumedOnceFor=saved.id),saved))
+        assertNull(GoalWaitPolicy.dueAt(checkNotNull(reopened.get(first.goalId))))
+    }
+
+    @Test fun aStopFollowsTheLatestPollButNeverCancelsADifferentExecution() {
+        var data:String?=null
+        val store=GoalWaitStore({data},{data=it})
+        assertTrue(store.replace(first,null))
+        val successor=first.copy(id="poll-replacement")
+        assertTrue(store.replace(successor,first))
+        assertNull(store.markOwnerStopped(first.copy(parentRunId="another-execution"),"wrong-stop"))
+        val (old,stopping)=checkNotNull(store.markOwnerStopped(first,"owner-stop"))
+        assertEquals(successor,old)
+        assertEquals(GoalWaitStopReason.OWNER_CANCELLED,stopping.stopReason)
+        assertEquals(0L,GoalWaitPolicy.dueAt(stopping))
+        assertFalse(store.replace(successor.copy(id="another-poll"),successor))
+        assertEquals(stopping to stopping,store.markOwnerStopped(first,"another-stop"))
     }
 }

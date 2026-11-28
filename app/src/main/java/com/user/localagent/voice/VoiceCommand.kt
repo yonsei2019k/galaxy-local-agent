@@ -194,14 +194,33 @@ class VoiceCommandActivity:ComponentActivity() {
 class AgentRunService:Service() {
     companion object {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
+        internal const val RESUME_BROWSER_AUTH_RUN="resume_browser_auth_run"
         private val cleanupHolds=RunCleanupHoldRegistry {android.os.SystemClock.elapsedRealtime()}
         /** Submission success is distinct from RunKeepAlive.await's actual startForeground receipt. */
-        fun track(context:Context,runId:String,threadId:String,text:String):Boolean {
+        fun track(context:Context,runId:String,threadId:String,text:String,recoverGoal:Boolean=false,previousGoalRunId:String?=null):Boolean {
             val token=RunKeepAlive.begin(runId)?:return false
             return runCatching {
-                ContextCompat.startForegroundService(context,Intent(context,AgentRunService::class.java)
-                    .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",text.take(200)).putExtra("keepAliveToken",token))
+                val intent=Intent(context,AgentRunService::class.java)
+                    .putExtra("runId",runId).putExtra("threadId",threadId).putExtra("text",if(recoverGoal)"장기 작업 진행 중" else text.take(200))
+                    .putExtra("keepAliveToken",token)
+                    .putExtra("recoverGoal",recoverGoal)
+                val continuing=recoverGoal&&previousGoalRunId?.let {RunKeepAlive.snapshot(it).active}==true
+                checkNotNull(if(continuing)context.startService(intent) else ContextCompat.startForegroundService(context,intent))
             }.onFailure{RunKeepAlive.acknowledge(runId,token,false,"FOREGROUND_START_REJECTED")}.isSuccess
+        }
+        internal fun notifyRecoveryNeeded(context:Context,runId:String,threadId:String) {
+            val manager=context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
+            val intent=PendingIntent.getActivity(context,runId.hashCode(),
+                Intent(context,MainActivity::class.java).putExtra("open_thread_id",threadId)
+                    .putExtra(RESUME_BROWSER_AUTH_RUN,runId)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            manager.notify(ID+1+(runId.hashCode() and 0xffff),NotificationCompat.Builder(context,ALERTS)
+                .setSmallIcon(R.drawable.ic_agent).setContentTitle("이어서 진행할 작업이 있어요")
+                .setContentText("앱을 열어 주시면 로그인한 화면부터 확인하고 이어갈게요.")
+                .setContentIntent(intent).setAutoCancel(true).setOnlyAlertOnce(true)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
         }
         /**
          * Terminal DB state may precede native teardown and durable next-segment registration.
@@ -221,7 +240,11 @@ class AgentRunService:Service() {
             return info.importance<=ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         }
     }
-    private class Tracked(val threadId:String,val text:String,val token:String?,val since:Long=System.currentTimeMillis()){var approvalNotified=false}
+    private class Tracked(val threadId:String,val text:String,val token:String?,val since:Long=System.currentTimeMillis()){
+        var approvalNotified=false
+        var recovering=false
+        var recoveryNoticeShown=false
+    }
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
     private val runs=LinkedHashMap<String,Tracked>()
     private var job:Job?=null
@@ -232,8 +255,13 @@ class AgentRunService:Service() {
         manager.createNotificationChannel(NotificationChannel(CHANNEL,"에이전트 작업 진행",NotificationManager.IMPORTANCE_LOW))
         manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
         val runId=intent?.getStringExtra("runId");val threadId=intent?.getStringExtra("threadId")
-        val token=intent?.getStringExtra("keepAliveToken")
-        if(runId!=null&&threadId!=null)runs[runId]=Tracked(threadId,intent.getStringExtra("text").orEmpty(),token)
+        val recoverGoal=intent?.getBooleanExtra("recoverGoal",false)==true&&runId!=null&&threadId!=null
+        val recovering=recoverGoal&&(flags and (START_FLAG_REDELIVERY or START_FLAG_RETRY))!=0&&runId !in runs
+        val token=if(recovering)runId?.let(RunKeepAlive::begin)else intent?.getStringExtra("keepAliveToken")
+        val tracked=if(runId!=null&&threadId!=null)Tracked(threadId,intent.getStringExtra("text").orEmpty(),token).also {
+            it.recovering=recovering
+            runs[runId]=it
+        }else null
         val latest=runs.entries.lastOrNull()
         // startForeground must follow every startForegroundService, even one that brought nothing to track.
         try{ServiceCompat.startForeground(this,ID,ongoing(latest?.key,latest?.value),if(Build.VERSION.SDK_INT>=34)ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)}
@@ -244,7 +272,22 @@ class AgentRunService:Service() {
         if(runId!=null&&token!=null)RunKeepAlive.acknowledge(runId,token,true)
         if(runs.isEmpty()){stopSelf();return START_NOT_STICKY}
         if(job?.isActive!=true)job=scope.launch{watch(manager)}
-        return START_NOT_STICKY
+        if(recovering&&runId!=null&&threadId!=null&&tracked!=null&&token!=null)scope.launch {
+            try {
+                val recovered=(application as LocalAgentApplication).container.scopedRuns.recoverTrackedGoal(runId,threadId)
+                if(recovered.authorityChanged){
+                    alert(manager,runId,tracked,"작업 권한이 바뀌었어요","확인한 내용은 남겨뒀어요. 대화에서 권한을 확인한 뒤 이어갈 수 있어요.")
+                    tracked.recoveryNoticeShown=true
+                }
+                if(recovered.successorId?.let {it!=runId}==true)tracked.recoveryNoticeShown=true
+            }catch(cancel:CancellationException){throw cancel}
+            catch(_:com.user.localagent.GoalRecoveryForegroundUnavailable){
+                alert(manager,runId,tracked,"이어서 진행할 작업이 있어요","앱을 열어 주시면 중단된 작업부터 확인하고 이어갈게요.")
+                tracked.recoveryNoticeShown=true
+            }catch(error:Exception){com.user.localagent.FailureLog.record(this@AgentRunService,"goal_service_recovery",error)}
+            finally {tracked.recovering=false}
+        }
+        return if(recoverGoal)START_REDELIVER_INTENT else START_NOT_STICKY
     }
 
     private fun open(runId:String,threadId:String)=PendingIntent.getActivity(this,runId.hashCode(),
@@ -258,12 +301,14 @@ class AgentRunService:Service() {
         val app=(application as LocalAgentApplication).container
         while(runs.isNotEmpty()){
             delay(2000)
-            val pending=app.runs.approval.value
+            val pending=app.scopedRuns.pendingActions.value
             for((runId,run) in runs.entries.toList()){
-                if(pending!=null&&pending.runId==runId){
+                if(run.recovering)continue
+                val approval=pending.firstOrNull {it.runId==runId}
+                if(approval!=null){
                     if(!run.approvalNotified&&!appOnScreen()){
                         run.approvalNotified=true
-                        alert(manager,runId,run,"승인이 필요합니다","눌러서 ZipHap에서 확인해주세요: "+(pending.reviewText?.lineSequence()?.firstOrNull{it.isNotBlank()}?:pending.call.name))
+                        alert(manager,runId,run,"승인이 필요합니다","눌러서 ZipHap에서 확인해주세요: "+(approval.reviewText?.lineSequence()?.firstOrNull{it.isNotBlank()}?:approval.call.name))
                     }
                 }else run.approvalNotified=false
                 val row=withContext(Dispatchers.IO){app.repository.chat.run(runId)}
@@ -273,7 +318,7 @@ class AgentRunService:Service() {
                     runs.remove(runId)
                     cleanupHolds.clear(runId)
                     run.token?.let{RunKeepAlive.acknowledge(runId,it,false,"FOREGROUND_TRACKING_ENDED")}
-                    if(row!=null&&!appOnScreen()){
+                    if(row!=null&&!run.recoveryNoticeShown&&!appOnScreen()){
                         val answer=withContext(Dispatchers.IO){
                             app.repository.chat.messages(run.threadId).first().lastOrNull{it.runId==runId&&it.role=="assistant"}?.text.orEmpty()
                         }

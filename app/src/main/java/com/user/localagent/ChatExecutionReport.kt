@@ -242,8 +242,16 @@ internal object ChatExecutionReport {
             ?.let {Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M월 d일 HH:mm"))}
         return when {
         status=="waiting_approval"->"내용을 확인하고 승인해 주시면 이어갈게요."
-        status=="paused"&&context.str("hostGoalWaitKind")=="media"->"영상 종료를 기다리고 있어요. 종료 신호를 받으면 사이트 진도를 확인해요."
-        status=="paused"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context || error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"사이트에서 인증을 마쳐 주세요. 이어서 로그인됐는지 확인할게요."
+        status=="paused"&&error=="waiting_goal_condition"&&context.str("hostGoalWaitKind")=="media"->"영상 종료를 기다리고 있어요. 종료 신호를 받으면 사이트 진도를 확인해요."
+        status=="paused"&&(error=="waiting_goal_condition"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context) ||
+            error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"사이트에서 인증을 마쳐 주세요. 이어서 로그인됐는지 확인할게요."
+        status=="paused"&&error=="goal_wait_cancelled"->"예약된 이어가기를 취소했어요. 확인한 내용은 작업 기록에 남겼어요."
+        status=="paused"&&error=="goal_wait_deadline"->"예약된 작업의 기한이 지났어요. 확인한 내용은 작업 기록에 남겼어요."
+        status=="paused"&&error=="goal_wait_auth_expired"->"사이트 인증 요청이 만료됐어요. 확인한 내용은 작업 기록에 남겼어요."
+        status=="paused"&&error=="browser_auth_cancelled"->"로그인 대기를 취소했어요. 확인한 내용은 작업 기록에 남겼어요."
+        status=="paused"&&error=="goal_wait_scope_changed"->"대기 중 작업 권한이나 대화 범위가 바뀌어 일시정지했어요."
+        error=="goal_recovery_scope_changed"->"작업을 이어가는 데 필요한 권한이나 대화 범위가 바뀌었어요. 이전에 확인한 내용은 남겨뒀어요."
+        status=="paused"&&error=="goal_wait_checkpoint_unavailable"->"저장된 대기 지점을 열지 못했어요. 작업 기록에서 마지막 단계를 확인할 수 있어요."
         status=="paused"&&error==GOAL_OWNER_INPUT->"위 질문에 답해 주시면 이 대화에서 이어갈게요."
             status=="paused"&&error=="waiting_goal_condition"&&due!=null->"예약 대기 · $due 이후 다시 확인해요."
         status=="paused"&&error=="waiting_goal_condition"->"조건 대기 · 예약한 조건을 다시 확인한 뒤 이어가요."
@@ -259,6 +267,8 @@ internal object ChatExecutionReport {
         val ending=state(status,error,context)
         if(history.lines.isEmpty() && history.checklist.isEmpty() && "goalSegment" !in context && "hostGoalCriteriaCounts" !in context && (ending==null || status=="completed" || KEY !in context))return emptyList()
         return buildList {
+            if(context[InterruptedGoalFileCheck.MATCHED]==JsonPrimitive(true))
+                add("앱이 다시 열린 뒤 파일을 읽어 요청한 내용과 일치하는지 확인했어요. 이전 저장 동작이 끝났는지는 확인할 수 없어요.")
             history.lines.forEachIndexed {i,line->
                 if(i==1&&history.omitted>0)add("중간 단계 ${history.omitted}개는 요약에서 생략했어요.")
                 add(line.text)

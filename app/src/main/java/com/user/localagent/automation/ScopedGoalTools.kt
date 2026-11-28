@@ -48,8 +48,8 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                                 listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
                                     "$open${proof.target}$close" in ownerInstruction
                                 })
-                    else if(proof.kind==GoalProofKind.BROWSER_PDF_SOURCE)
-                        draft.criteria[index].text==proof.browserPdfCriterion() &&
+                    else if(proof.kind in setOf(GoalProofKind.BROWSER_PDF_SOURCE,GoalProofKind.BROWSER_PLAYBACK_ENDED))
+                        draft.criteria[index].text==(if(proof.kind==GoalProofKind.BROWSER_PDF_SOURCE)proof.browserPdfCriterion() else proof.playbackCriterion()) &&
                             (ownerInstruction.lineSequence().any {it.trim()==proof.target} ||
                                 listOf('"' to '"','“' to '”','「' to '」').any { (open,close) ->
                                     "$open${proof.target}$close" in ownerInstruction
@@ -224,6 +224,9 @@ class ScopedGoalTools(private val scope:ChatAccessScope,private val store:GoalTo
                 put("outcome",goal.outcome);put("constraints",JsonArray(goal.constraints.map(::JsonPrimitive)))
                 put("totalConstraints",goal.constraints.size);put("constraintsComplete",true)
                 put("totalCriteria",goal.criteria.size);put("criteriaOffset",offset)
+                put("criteriaNeedingOwnerConfirmation",goal.criteria.count {
+                    it.proofTarget==null && it.status!=GoalCriterionStatus.USER_CONFIRMED
+                })
                 put("criteriaPartial",offset!=0||selected.size!=goal.criteria.size)
                 put("nextCriteriaOffset",if(offset+selected.size<goal.criteria.size)JsonPrimitive(offset+selected.size)else JsonNull)
                 put("criteria",buildJsonArray {selected.forEach {criterion->add(buildJsonObject {

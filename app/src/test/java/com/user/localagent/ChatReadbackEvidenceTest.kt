@@ -54,6 +54,24 @@ class ChatReadbackEvidenceTest {
         assertTrue(assess(tools,listOf(fileRead("운엉팀"),fileWrite(),fileRead())).readbackSatisfied)
         assertFalse(assess(tools,listOf(fileWrite(),fileRead("다른 내용",sha("운영팀")))).readbackSatisfied)
     }
+    @Test fun aTruncatedProjectReadUsesTheWorkspaceDigestOnlyWithItsHostReceipt(){
+        val text="x".repeat(10000)
+        val path="handoff.txt"
+        val hash=sha(text)
+        val call=ToolCall("write","write_project_file",buildJsonObject {put("path",path);put("content",text)})
+        val unknown=ToolResult(call.id,false,"",VerificationState.UNVERIFIED)
+        val expected=checkNotNull(GoalFileReadback.from(call,unknown))
+        val write=ObservedToolOutcome(call,checkNotNull(expected.confirmed(call,path,hash,expected.size)))
+        fun read(token:String,sha:String=hash)=outcome("read_project_file",buildJsonObject {put("path",path)},buildJsonObject {
+            put("path",path);put("text",text.take(8000));put("sha256",sha);put("truncated",true);put("readToken",token)
+        })
+        val tools=setOf("read_project_file","write_project_file")
+        val token="00000000-0000-4000-8000-000000000001"
+        assertTrue(assess(tools,listOf(write,read(token))).readbackSatisfied)
+        assertFalse(assess(tools,listOf(write,read("invalid"))).readbackSatisfied)
+        assertFalse(assess(tools,listOf(write,read(token,"1".repeat(64)))).readbackSatisfied)
+    }
+
     @Test fun reminderGroupAndScheduleAreComparedAcrossActualReceiptShapes(){
         fun record(listing:Boolean,at:Long)=buildJsonObject{
             put("id","reminder-id");put("title","장비 반납");put(if(listing)"scope"else"group","team");put("atEpochMillis",at);put("updatedAt",2)

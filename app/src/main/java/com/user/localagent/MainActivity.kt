@@ -392,6 +392,12 @@ class MainActivity : ComponentActivity() {
             val project=thread.projectId?.let {app.repository.chat.project(it)}
             if(project?.archived==true)return@launch
             requestedTab.value=if(threadId==app.runs.selectedThreadId.value)0 else 6
+            val authRun=intent.getStringExtra(com.user.localagent.voice.AgentRunService.RESUME_BROWSER_AUTH_RUN)
+                ?.takeIf {it.length in 1..128}?:return@launch
+            lifecycle.withResumed { Unit }
+            try {app.goalWaits.resumeConfirmedBrowserAuth(threadId,authRun)}
+            catch(cancel:CancellationException){throw cancel}
+            catch(error:Exception){FailureLog.record(this@MainActivity,"browser_auth_resume_visible",error)}
         }
     }
 
@@ -920,7 +926,9 @@ class MainActivity : ComponentActivity() {
                                         if(!opened)status.value="이 작업을 이어갈 수 있는지 확인해 주세요."
                                     }else webAgent.unfoldOwnerLogin(inlineCredentials.id)
                                 }}){Text("로그인 열기")}
-                                TextButton(onClick={webAgent.cancelLoginCard(inlineCredentials.id)}){Text("대기 그만두기")}
+                                TextButton(onClick={lifecycleScope.launch {
+                                    chat.cancelOwnerLoginWait(inlineCredentials.id,composerThreadId,currentBranchId)
+                                }}){Text("대기 그만두기")}
                             }
                         }else if(inlineSite?.nolGuide==true)com.user.localagent.integrations.InlineNolConnection(webAgent,
                             inlineSite,window,Modifier.fillMaxSize(),onVerified={lifecycleScope.launch {

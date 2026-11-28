@@ -15,6 +15,18 @@ import kotlinx.serialization.json.jsonObject
 
 internal object BrowserAuthContinuation {
     const val PENDING_SOURCE="hostPendingBrowserAuthSource"
+    const val OWNER_CANCELLED="browser_auth_cancelled"
+
+    fun matchesHandoff(current:String?,expected:String,confirmedInCurrentWork:Boolean):Boolean =
+        current==expected||current==null&&confirmedInCurrentWork
+
+    fun canCancel(expected:ChatRunRecord,latest:ChatRunRecord):Boolean =
+        expected.id==latest.id&&expected.threadId==latest.threadId&&expected.branchId==latest.branchId&&
+            expected.projectId==latest.projectId&&expected.threadRevision==latest.threadRevision&&
+            expected.projectRevision==latest.projectRevision&&
+            (expected.status=="running"&&latest.status=="running"||
+                (expected.status=="running"||expected.status=="paused"&&expected.errorCode=="waiting_browser_auth")&&
+                    latest.status=="paused"&&latest.errorCode=="waiting_browser_auth")
 
     /** A retry keeps the original host handoff even if its immediate parent only saw a timeout. */
     suspend fun source(request:QueuedChatRequest,load:suspend(String)->ChatRunRecord?):ChatRunRecord? {
@@ -51,6 +63,10 @@ internal object BrowserAuthContinuation {
     fun verifiedPage(result:ToolResult):Boolean {
         if(!result.success||result.verification!=VerificationState.VERIFIED)return false
         val data=runCatching{Json.parseToJsonElement(result.content).jsonObject}.getOrNull()?:return false
+        return verifiedPage(data)
+    }
+
+    fun verifiedPage(data:kotlinx.serialization.json.JsonObject):Boolean {
         val snapshot=data["snapshotId"] as? JsonPrimitive ?:return false
         return snapshot.isString&&snapshot.content.isNotBlank()&&data["loginRequired"]==JsonPrimitive(false)&&
             data["blocked"]!=JsonPrimitive(true)&&data["externalHandoffBlocked"]!=JsonPrimitive(true)
@@ -65,11 +81,22 @@ internal object BrowserAuthContinuation {
             else->"로그인 뒤 같은 브라우저의 페이지를 다시 읽었지만 원래 작업을 이어갈 화면을 확인하지 못했어요."
         }
     }
-    val reopenablePauses=setOf("browser_auth_on_phone","waiting_browser_auth","browser_auth_resume_expired")
+    val reopenablePauses=setOf("browser_auth_on_phone","waiting_browser_auth","browser_auth_resume_expired",
+        "browser_auth_resume_unavailable")
     fun childId(parent:String):String = UUID.nameUUIDFromBytes("ziphap-browser-auth:$parent".toByteArray(Charsets.UTF_8)).toString()
+
+    fun allowsOrdinaryHandoff(request:QueuedChatRequest):Boolean = request.goal==null&&request.officeStage==null&&
+        request.scheduledReadTool==null&&request.continuation==null&&request.attachments.isEmpty()&&
+        request.allowExternalAgent&&request.mode=="act"
+
+    fun child(original:QueuedChatRequest,queueOrder:Long):QueuedChatRequest = original.copy(
+        runId=childId(original.runId),queueOrder=queueOrder,previousSteps=emptyList(),readbackObligations=null,
+        browserAuthParentRunId=original.runId,
+        browserWorkRootRunId=original.browserWorkRootRunId?:original.browserAuthParentRunId)
 
     const val NAVER_RETURN_PAGE_KEY = "hostNaverAuthReturnPage"
     const val PC_LOGIN_ORIGIN_KEY = "hostPairedBrowserLoginOrigin"
+    const val PC_LOGIN_TASK_PAGE_KEY = "hostPairedBrowserTaskPage"
     data class ReopenPage(val url:String,val naver:Boolean,val taskUrl:String?=null)
 
     fun reopenPage(contextJson:String):ReopenPage? {
@@ -99,6 +126,21 @@ internal object BrowserAuthContinuation {
         val recorded=(Json.parseToJsonElement(contextJson).jsonObject[PC_LOGIN_ORIGIN_KEY] as? JsonPrimitive)?.content
         if(recorded!=null)return recorded.takeIf {com.user.localagent.compute.PcLoginSite.origin(it)==it}
         return com.user.localagent.compute.PcLoginSite.KAIRB.takeIf {canReopenPcLogin(steps)}
+    }
+
+    fun pcTaskPage(contextJson:String):String? {
+        val origin=pcLoginOrigin(contextJson)?:return null
+        val recorded=(Json.parseToJsonElement(contextJson).jsonObject[PC_LOGIN_TASK_PAGE_KEY] as? JsonPrimitive)?.content
+        return BrowserLoginRoutes.pairedTaskPage(recorded,origin)
+            ?:pcTaskFromSteps(QueuedChatRequest.fromJson(contextJson).previousSteps,origin)
+    }
+
+    fun pcTaskFromSteps(steps:List<HarnessStep>,origin:String):String? {
+        if(steps.lastOrNull()?.tool !in setOf("open_pc_browser_page","read_pc_browser_page"))return null
+        val open=steps.lastOrNull {it.tool in com.user.localagent.core.PcBrowserToolCatalog.names &&
+            it.tool!="read_pc_browser_page"}?.takeIf {it.tool=="open_pc_browser_page"}?:return null
+        val raw=(open.arguments["url"] as? JsonPrimitive)?.content
+        return BrowserLoginRoutes.pairedTaskPage(raw,origin)
     }
 
     fun canReopenPcLogin(steps:List<HarnessStep>):Boolean {

@@ -83,7 +83,31 @@ internal class PairedWebsiteLogin private constructor(
 ) {
     val host:String get()=URI(origin).host
     companion object {
-        suspend fun reopen(context:Context,connection:PcConnection,work:String,origin:String):PairedWebsiteLogin? {
+        suspend fun observeSignedIn(context:Context,connection:PcConnection,work:String,origin:String,taskUrl:String?):Boolean {
+            fun current()=BrowserAgentSettings.pc(context).enabled()&&
+                PcComputeSettings.get(context).snapshot()?.samePair(connection)==true
+            if(PcLoginSite.origin(origin)!=origin||!current())return false
+            return withContext(Dispatchers.IO) {
+                val transport=PcTransport(context)
+                val body=buildJsonObject {put("work",work);put("origin",origin)}
+                suspend fun observe()=transport.jsonWithStatus(connection,"/v1/browser/owner-login-observe",body,20_000)
+                var result=observe()
+                val gone=(result.second["error"] as? JsonPrimitive)?.contentOrNull in
+                    setOf("BROWSER_WORK_SESSION_GONE","BROWSER_WORK_PAGE_GONE")
+                if(result.first==409&&gone&&current()){
+                    val target=com.user.localagent.integrations.BrowserLoginRoutes.pairedTaskPage(taskUrl,origin)?:return@withContext false
+                    val saved=PairedWebsiteSessionKeys.openFields(context,target)
+                    if(saved.isEmpty()||!current())return@withContext false
+                    val opened=transport.jsonWithStatus(connection,"/v1/browser/open",
+                        JsonObject(mapOf("work" to JsonPrimitive(work),"url" to JsonPrimitive(target))+saved),25_000)
+                    if(opened.first!=200||opened.second["loginRequired"]!=JsonPrimitive(false)||!current())return@withContext false
+                    result=observe()
+                }
+                current()&&result.first==200&&result.second["origin"]==JsonPrimitive(origin)&&result.second["signedIn"]==JsonPrimitive(true)
+            }
+        }
+
+        suspend fun reopen(context:Context,connection:PcConnection,work:String,origin:String,taskUrl:String?=null):PairedWebsiteLogin? {
             if(PcLoginSite.origin(origin)!=origin)return null
             fun stillPaired()=BrowserAgentSettings.pc(context).enabled()&&
                 PcComputeSettings.get(context).snapshot()?.samePair(connection)==true
@@ -91,7 +115,8 @@ internal class PairedWebsiteLogin private constructor(
             prepare(context,connection,work,origin)?.let {return it.takeIf {stillPaired()} }
             if(!stillPaired())return null
             val (status,page)=PcTransport(context).jsonWithStatus(connection,"/v1/browser/open",buildJsonObject {
-                put("url",PcLoginSite.entry(origin));put("work",work)
+                val task=com.user.localagent.integrations.BrowserLoginRoutes.pairedTaskPage(taskUrl,origin)
+                put("url",task?:PcLoginSite.entry(origin));put("work",work)
             },25_000)
             if(status!=200||page["loginRequired"]!=JsonPrimitive(true)||!stillPaired())return null
             return prepare(context,connection,work,origin)
