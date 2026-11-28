@@ -997,7 +997,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(parent.threadRevision!=access.threadRevision||
                 parent.projectRevision!=(access.projectId?.let {chat.project(it)?.revision}?:0L))return@withLock
             requireGoalSegmentScope(request,access)
-            requireCapturedGoalAuthority(request)
+            if(parent.errorCode!=GOAL_STOP_REQUESTED)requireCapturedGoalAuthority(request)
             val previous=if(trackedRunId==parent.id)null else {
                 if(!trackedGoalHandoffMatches(trackedRunId,goal,parent,segment))return@withLock
                 val source=chat.run(trackedRunId)?:return@withLock
@@ -1033,6 +1033,16 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             if(existing)return@withLock
         }
         if(thread.activeBranchId!=parent.branchId)return@withLock
+        if(parent.errorCode==GOAL_STOP_REQUESTED&&
+            goal.status in setOf(GoalStatus.ACTIVE,GoalStatus.WAITING)&&
+            parent.status in com.user.localagent.data.ChatStore.TERMINAL+"paused") {
+            requireGoalRunBinding(goal,parent)
+            pauseApprovedGoal(access,goal,parent,GoalAutopilotPauseReason.STOPPED)
+            app.goalWaits.store.get(goal.id)?.takeIf {
+                it.parentRunId==parent.id&&it.threadId==thread.id&&it.branchId==parent.branchId
+            }?.let {app.goalWaits.cancel(it)}
+            return@withLock
+        }
         if(goal.status==GoalStatus.PAUSED&&parent.status=="interrupted"&&
             parent.errorCode in setOf("process_restarted",GoalAutopilotPauseReason.UNKNOWN_EFFECT.code)&&
             InterruptedGoalFileCheck.KEY in parent.contextJson) {
