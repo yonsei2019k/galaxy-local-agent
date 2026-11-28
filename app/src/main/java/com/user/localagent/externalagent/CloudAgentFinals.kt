@@ -53,9 +53,9 @@ object CloudAgentFinals {
             else->"사이트"
         }
         val where=if(outcome.call.name==PcBrowserToolCatalog.action)"PC 작업 중 " else ""
-        val next=if(phone)"휴대폰에서 인증을 마치면 현재 페이지부터 다시 확인할 수 있어요."
-            else "이 작업에 ‘사이트 로그인 다시 열기’가 보이면 휴대폰에서 인증해 주세요."
-        return "${where}${site}에서 로그인이 필요해 멈췄어요. 직전 동작이 반영됐는지는 아직 확인하지 못했어요. $next"
+        val next=if(phone)"휴대폰에서 인증을 마쳐 주세요. 이 대화로 돌아오면 로그인됐는지 확인할게요."
+            else "‘사이트 로그인 다시 열기’ 버튼이 보이면 눌러서 인증해 주세요."
+        return "${where}${site}에서 로그인이 필요해요. 마지막으로 시도한 작업은 결과를 아직 확인하지 못했어요. $next"
     }
 
     internal fun unfinishedNotice(actual:Collection<PhoneAgentExecution>):String {

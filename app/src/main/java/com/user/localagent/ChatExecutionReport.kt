@@ -241,16 +241,16 @@ internal object ChatExecutionReport {
             ?.takeIf {it in 946684800000L..7258118400000L}
             ?.let {Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M월 d일 HH:mm"))}
         return when {
-        status=="waiting_approval"->"소유자의 실행 승인을 기다리고 있어요."
+        status=="waiting_approval"->"내용을 확인하고 승인해 주시면 이어갈게요."
         status=="paused"&&context.str("hostGoalWaitKind")=="media"->"영상 종료를 기다리고 있어요. 종료 신호를 받으면 사이트 진도를 확인해요."
-        status=="paused"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context || error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"인증 대기 · 공식 인증을 마친 뒤 같은 작업에서 로그인 결과를 확인해요."
-        status=="paused"&&error==GOAL_OWNER_INPUT->"답변 대기 · 이 대화의 추가 질문에 답하면 이어가요."
+        status=="paused"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context || error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"사이트에서 인증을 마쳐 주세요. 이어서 로그인됐는지 확인할게요."
+        status=="paused"&&error==GOAL_OWNER_INPUT->"위 질문에 답해 주시면 이 대화에서 이어갈게요."
             status=="paused"&&error=="waiting_goal_condition"&&due!=null->"예약 대기 · $due 이후 다시 확인해요."
         status=="paused"&&error=="waiting_goal_condition"->"조건 대기 · 예약한 조건을 다시 확인한 뒤 이어가요."
-        status=="paused"->"일시 정지 · 작업 기록을 확인한 뒤 이어갈 수 있어요."
-        status=="interrupted"->"실행 중단 · 마지막 결과를 다시 확인해야 해요."
+        status=="paused"->"여기까지 확인했어요. 작업을 이어가면 마지막 상태부터 확인할게요."
+        status=="interrupted"->"작업이 중간에 멈췄어요. 계속하려면 마지막 결과를 먼저 확인해야 해요."
         status=="cancelled"->"작업을 중단했어요."
-        status=="failed"->"실행 실패 · 마지막으로 확인된 단계까지 기록했어요."
+        status=="failed"->"작업을 끝내지 못했어요. 마지막으로 확인한 내용은 작업 기록에 남겼어요."
         status=="completed"->"이 실행 구간이 끝났어요."
         else->null
         }

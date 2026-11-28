@@ -165,6 +165,7 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   const author = assistant ? message.authorLabel ?? '집순이' : undefined
   const startsGroup = assistant && (previousHasCards || !(previous?.role === 'assistant' && (previous.authorLabel ?? '집순이') === author))
   const report = message.executionReport ?? []
+  const hasAnswer = !!message.text.trim()
   const recentReport = report.slice(-8)
   const earlierReport = report.slice(0, -8)
   return (
@@ -172,14 +173,14 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
       {assistant ? <div className="assistant-text conversation-bubble">
         {message.text.trim() && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
-        {!!report.length && <section className="execution-report" aria-label="작업 진행 보고">
-          <strong>작업 진행 보고</strong>
+        {!!report.length && <details className="execution-report" aria-label="확인한 내용" open={!hasAnswer} key={hasAnswer ? 'answered' : 'in-progress'}>
+          <summary>확인한 내용</summary>
           <ol>{recentReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           {!!earlierReport.length && <details>
             <summary>앞서 확인한 단계 {earlierReport.length}개</summary>
             <ol>{earlierReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           </details>}
-        </section>}
+        </details>}
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />
           {message.fileFormats.length === 1 ? message.fileFormats[0].toUpperCase() : `파일 ${message.fileFormats.length}개`} 열기·저장

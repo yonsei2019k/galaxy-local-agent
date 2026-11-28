@@ -151,7 +151,7 @@ describe('native conversation', () => {
     const report = host.querySelector('.execution-report')!
     expect(report.querySelector(':scope > ol li')?.textContent).toBe(executionReport[1])
     expect(report.querySelector('details')?.open).toBe(false)
-    expect(report.querySelector('details li')?.textContent).toBe(executionReport[0])
+    expect(report.querySelector(':scope > details li')?.textContent).toBe(executionReport[0])
   })
   it('renders persisted execution changes in order on the same assistant reply, including before it has text', () => {
     mount()
@@ -159,17 +159,18 @@ describe('native conversation', () => {
     const answer = { id: 'one-report', role: 'assistant' as const, text: '', executionReport: report }
     const renderReport = (message: typeof answer) => snapshot({ ...base, messages: [message] })
     renderReport(answer)
-    const first = host.querySelector('section[aria-label="작업 진행 보고"]')
+    const first = host.querySelector('details[aria-label="확인한 내용"]')
     expect([...first!.querySelectorAll('li')].map(li => li.textContent)).toEqual(report)
     renderReport({ ...answer, executionReport: ['영상 재생 중 (관찰 위치 2분 0초)', report[1]] })
     expect(host.querySelectorAll('article.message')).toHaveLength(1)
     expect(host.querySelectorAll('.execution-report li')).toHaveLength(2)
     expect(first).toBe(host.querySelector('.execution-report'))
+    expect((first as HTMLDetailsElement).open).toBe(true)
     expect(host.textContent).not.toContain(report[0])
     expect(host.textContent).toContain('관찰 위치 2분 0초')
     const done = { ...answer, text: '결과를 확인했어요.', executionReport: ['영상 재생 종료', '사이트 수강완료 목록에서 기초교육 확인'] }
-    snapshot({ ...base, messages: [] })
     renderReport(done)
+    expect(host.querySelector<HTMLDetailsElement>('.execution-report')?.open).toBe(false)
     expect(host.querySelector('article.message')?.textContent).toContain(done.text)
     expect([...host.querySelectorAll('.execution-report li')].map(li => li.textContent)).toEqual(done.executionReport)
     expect(readSnapshot({ ...base, messages: [{ ...answer, role: 'user' }] })).toBeNull()
