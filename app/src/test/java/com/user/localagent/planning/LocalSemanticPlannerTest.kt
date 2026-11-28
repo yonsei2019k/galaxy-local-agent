@@ -83,9 +83,7 @@ class LocalSemanticPlannerTest {
     }
     @Test fun unsupportedStructuredCountUsesCountedPlainGeneration()=runBlocking {
         val engine=Engine().apply{countStructured=false}
-        // This checks tokenizer capability fallback, not timeout repair. A 40ms real-clock
-        // generation budget spuriously retries on busy CI hosts while other variants compile.
-        val result=LocalSemanticPlanner(engine,{},budget.copy(totalMs=5_000,firstGenerationMs=1_000,retryGenerationMs=1_000)).plan("request",emptyList(),chosen,setOf("calculate"))
+        val result=LocalSemanticPlanner(engine,{},PlanningBudget()).plan("request",emptyList(),chosen,setOf("calculate"))
         assertFalse(result.constrainedDecoding);assertEquals(1,engine.plainCalls)
     }
     @Test fun invalidToolNeverPromotedByRetry()=runBlocking {
@@ -99,7 +97,7 @@ class LocalSemanticPlannerTest {
         val lookup="""{"action":"TOOL_TASK","goal":"메모 찾기","requiredTools":["search_notes"]}"""
         for(second in listOf(lookup,question,"{}")){
             val engine=Engine().apply{proposedPlans=listOf(question,second)}
-            val result=LocalSemanticPlanner(engine,{},budget).plan("지정한 제목의 메모를 찾아줘",emptyList(),chosen,setOf("search_notes"))
+            val result=LocalSemanticPlanner(engine,{},PlanningBudget()).plan("지정한 제목의 메모를 찾아줘",emptyList(),chosen,setOf("search_notes"))
             assertEquals(2,result.attempts)
             assertEquals("대상 메모는 무엇인가요?",engine.inputs[1].getValue("localContextData").jsonObject.getValue("proposedQuestion").jsonPrimitive.content)
             assertEquals(if(second==lookup)"TOOL_TASK" else "CLARIFY",result.plan.action.name)
