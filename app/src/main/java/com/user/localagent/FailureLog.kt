@@ -1,6 +1,8 @@
 package com.user.localagent
 
 import android.content.Context
+import com.user.localagent.core.ObservedToolOutcome
+import com.user.localagent.core.VerificationState
 import java.io.File
 import java.time.Instant
 
@@ -11,6 +13,18 @@ object FailureLog {
 
     @Synchronized fun record(context:Context,stage:String,error:Throwable?,code:String?=null){
         append(context,stage,error,code,"")
+    }
+
+    @Synchronized internal fun taskStop(context: Context, runId: String, stage: String, code: String,
+        error: Throwable?, outcomes: List<ObservedToolOutcome>, activeTool: String? = null) {
+        val last = outcomes.lastOrNull()
+        val verified = outcomes.count { it.result.success && it.result.verification == VerificationState.VERIFIED }
+        val recent = outcomes.takeLast(8).joinToString(",") {
+            "${token(it.call.name)}:${it.result.verification.name}:${it.result.success}:${it.result.effectNotApplied}"
+        }
+        append(context, stage, error, code,
+            " run=${token(runId)} tool=${token(activeTool ?: last?.call?.name)} steps=${outcomes.size}" +
+                " verified=$verified recent(tool:verification:success:effectNotApplied)=$recent")
     }
 
     @Synchronized internal fun cloudStop(context:Context,code:String,
