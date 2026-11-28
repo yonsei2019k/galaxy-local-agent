@@ -266,6 +266,8 @@ internal object ChatExecutionReport {
         val ending=state(status,error,context)
         if(history.lines.isEmpty() && history.checklist.isEmpty() && "goalSegment" !in context && "hostGoalCriteriaCounts" !in context && (ending==null || status=="completed" || KEY !in context))return emptyList()
         return buildList {
+            if(context[InterruptedGoalFileCheck.MATCHED]==JsonPrimitive(true))
+                add("앱이 다시 열린 뒤 파일을 읽어 요청한 내용과 일치하는지 확인했어요. 이전 저장 동작이 끝났는지는 확인할 수 없어요.")
             history.lines.forEachIndexed {i,line->
                 if(i==1&&history.omitted>0)add("중간 단계 ${history.omitted}개는 요약에서 생략했어요.")
                 add(line.text)

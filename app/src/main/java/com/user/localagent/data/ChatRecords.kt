@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -761,6 +762,27 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         run.copy(contextJson=preserved,updatedAt=now()).also {dao.run(it)}
     }
     suspend fun checkpointRun(runId:String,contextJson:String)=updateRunContext(runId,contextJson)
+    internal suspend fun recordDispatchedGoalFile(runId:String,marker:JsonObject,binding:JsonObject)=database.withTransaction {
+        val run=validRun(runId)
+        check(run.status=="running")
+        val context=Json.parseToJsonElement(run.contextJson).jsonObject
+        val next=JsonObject(context+(com.user.localagent.InterruptedGoalFileCheck.KEY to marker))
+        check(com.user.localagent.InterruptedGoalFileCheck.load(next,binding)!=null)
+        val saved=next.toString()
+        require(saved.length<=2_000_000)
+        dao.run(run.copy(contextJson=saved,updatedAt=now()))
+    }
+
+    internal suspend fun recordInterruptedGoalFileMatch(expected:ChatRunRecord):ChatRunRecord=database.withTransaction {
+        val run=checkNotNull(dao.run(expected.id))
+        check(run==expected&&run.status=="interrupted"&&run.errorCode=="process_restarted")
+        checkBinding(run)
+        val context=Json.parseToJsonElement(run.contextJson).jsonObject
+        check(context[com.user.localagent.InterruptedGoalFileCheck.KEY] is JsonObject)
+        val saved=JsonObject((context-com.user.localagent.InterruptedGoalFileCheck.KEY)+
+            (com.user.localagent.InterruptedGoalFileCheck.MATCHED to JsonPrimitive(true))).toString()
+        run.copy(contextJson=saved,updatedAt=now()).also {dao.run(it)}
+    }
     suspend fun switchRunToPrivateModel(runId:String,originalModel:String,contextJson:String,privateReadEvidence:JsonArray?=null)=database.withTransaction {
         require(contextJson.length<=2_000_000)
         val run=validRun(runId)
@@ -886,8 +908,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
 
     internal suspend fun cancelOrdinaryBrowserAuthWait(expected:ChatRunRecord)=database.withTransaction {
         val run=checkNotNull(dao.run(expected.id))
-        check(run==expected&&run.status=="paused"&&run.errorCode=="waiting_browser_auth")
-        dao.run(run.copy(errorCode="browser_auth_cancelled",updatedAt=now()))
+        check(run==expected&&(run.status=="running"||run.status=="paused"&&run.errorCode=="waiting_browser_auth"))
+        dao.run(run.copy(errorCode=com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED,updatedAt=now()))
     }
 
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {
@@ -955,14 +977,16 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val active=dao.interrupted();active.forEach {r->
             dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}
             val stoppedByOwner=ScheduledReadPolicy.isId(r.id)&&r.errorCode==ScheduledReadPolicy.STOP_REQUESTED
-            val browserAuth=r.status=="running"&&runCatching {
+            val stoppedAuth=r.errorCode==com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
+            val browserAuth=!stoppedAuth&&r.status=="running"&&runCatching {
                 val request=com.user.localagent.QueuedChatRequest.fromJson(r.contextJson)
                 com.user.localagent.BrowserAuthContinuation.allowsOrdinaryHandoff(request)&&
                     com.user.localagent.BrowserAuthContinuation.canReopenLogin(r.contextJson)
             }.getOrDefault(false)
-            dao.run(r.copy(status=when {stoppedByOwner->"cancelled";browserAuth->"paused";else->"interrupted"},
+            dao.run(r.copy(status=when {stoppedByOwner||stoppedAuth->"cancelled";browserAuth->"paused";else->"interrupted"},
                 errorCode=when {
                     stoppedByOwner->ScheduledReadPolicy.STOP_REQUESTED
+                    stoppedAuth->com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED
                     browserAuth->"waiting_browser_auth"
                     r.status=="waiting_approval"&&runCatching {com.user.localagent.QueuedChatRequest.fromJson(r.contextJson).goalSegment!=null}.getOrDefault(false)->"process_restarted_approval"
                     else->"process_restarted"

@@ -136,6 +136,13 @@ class BrowserAuthContinuationTest {
         assertNull(BrowserAuthContinuation.pcTaskPage(context(listOf(read))))
     }
 
+    @Test fun aDismissedOrReplacedHandoffCannotBeParkedAsWaiting() {
+        assertFalse(BrowserAuthContinuation.matchesHandoff(null,"original",confirmedInCurrentWork=false))
+        assertTrue(BrowserAuthContinuation.matchesHandoff(null,"original",confirmedInCurrentWork=true))
+        assertTrue(BrowserAuthContinuation.matchesHandoff("original","original",confirmedInCurrentWork=false))
+        assertFalse(BrowserAuthContinuation.matchesHandoff("replacement","original",confirmedInCurrentWork=true))
+    }
+
     @Test fun reopenUsesTheOriginalOfficialPcSiteAndOnlySettledReads() {
         fun open(url:String)=HarnessStep("open_pc_browser_page",buildJsonObject {put("url",url)},
             StepEvidence("open_pc_browser_page",VerificationState.VERIFIED,"Observed"))

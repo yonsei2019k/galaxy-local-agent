@@ -998,14 +998,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     requireGoalSegmentScope(request,access)
                     requireCapturedGoalAuthority(request)
                     check(app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
-                    when(val decision=goalRestartDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),
-                        goalRunEffectsUnresolved(parent,access.scopeKey),useNativeBudget=true)) {
+                    val recovered=observeInterruptedGoalFile(parent,request,access)
+                    when(val decision=goalRestartDecision(recovered,goal,access.scopeKey,System.currentTimeMillis(),
+                        goalRunEffectsUnresolved(recovered,access.scopeKey),useNativeBudget=true)) {
                         is GoalSegmentDecision.Continue -> {
-                            if(goalTransientFailure(parent))scheduleTransientGoalRetry(access,goal,parent,request)
-                            else queueNextGoalSegment(access,goal,parent,decision,checkNotNull(currentCoroutineContext()[Job]))
+                            if(goalTransientFailure(recovered))scheduleTransientGoalRetry(access,goal,recovered,request)
+                            else queueNextGoalSegment(access,goal,recovered,decision,checkNotNull(currentCoroutineContext()[Job]))
                         }
-                        GoalSegmentDecision.Complete -> completeApprovedGoal(access,goal,parent)
-                        is GoalSegmentDecision.Pause -> pauseApprovedGoal(access,goal,parent,decision.reason)
+                        GoalSegmentDecision.Complete -> completeApprovedGoal(access,goal,recovered)
+                        is GoalSegmentDecision.Pause -> pauseApprovedGoal(access,goal,recovered,decision.reason)
                     }
                 }
             } catch(cancel:CancellationException){throw cancel}
@@ -1807,7 +1808,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     // Preserve actual host outcomes before the terminal-state write closes context updates.
                     runCatching {persistStepEvidence()}
                     runCatching {sealLocalGoalJournal(request)}
-                    val stopCode=if(request.scheduledReadTool==null)null else app.repository.chat.run(request.runId)?.errorCode
+                    val recordedCode=app.repository.chat.run(request.runId)?.errorCode
+                    val stopCode=recordedCode.takeIf {request.scheduledReadTool!=null||it==BrowserAuthContinuation.OWNER_CANCELLED}
                     if(stopCode==ScheduledReadPolicy.WORKER_STOPPED)interruptedTerminalState="interrupted"
                     app.repository.chat.updateRun(request.runId,checkNotNull(interruptedTerminalState),errorCode=stopCode)
                 }
@@ -2656,7 +2658,39 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val stored=checkNotNull(app.repository.chat.run(request.runId))
         check(stored.threadId==request.threadId&&stored.branchId==request.branchId&&stored.projectId==request.projectId)
         val old=Json.parseToJsonElement(stored.contextJson).jsonObject
-        app.repository.chat.updateRunContext(request.runId,JsonObject(old+mapOf("sharedEngineState" to Json.parseToJsonElement(checkpoint))).toString())
+        val native=Json.parseToJsonElement(checkpoint).jsonObject
+        val marker=old[InterruptedGoalFileCheck.KEY] as? JsonObject
+        val retained=if(InterruptedGoalFileCheck.activeCallMatches(native,marker?.get("callId")))old
+            else old-InterruptedGoalFileCheck.KEY
+        app.repository.chat.updateRunContext(request.runId,JsonObject(retained+("sharedEngineState" to native)).toString())
+    }
+
+    private suspend fun observeInterruptedGoalFile(parent:com.user.localagent.data.ChatRunRecord,request:QueuedChatRequest,
+        access:com.user.localagent.data.ChatAccessScope):com.user.localagent.data.ChatRunRecord {
+        if(parent.status!="interrupted"||parent.errorCode!="process_restarted"||!request.allowTools)return parent
+        val saved=Json.parseToJsonElement(parent.contextJson).jsonObject
+        val file=InterruptedGoalFileCheck.load(saved,goalJournalBinding(request,access.scopeKey))?:return parent
+        val workspace=app.workspaceFor(request.projectId)
+        suspend fun stillAllowed():Boolean = app.repository.chat.run(parent.id)==parent &&
+            app.repository.chat.accessScope(request.threadId)==access &&
+            app.repository.chat.thread(request.threadId)?.activeBranchId==request.branchId &&
+            parent.threadRevision==access.threadRevision &&
+            parent.projectRevision==(request.projectId?.let {id->
+                val project=checkNotNull(app.repository.chat.project(id))
+                check("read_project_file" !in project.settings.disabledTools)
+                project.revision
+            }?:0L) && workspace.bindingFingerprint()==request.workspaceBinding
+        return try {
+            workspace.acquireLease().use {
+                if(!stillAllowed())return parent
+                requireCapturedGoalAuthority(request)
+                val digest=withTimeoutOrNull(4_000L) {workspace.hashForAudit(file.path,file.size)}?:return parent
+                if(!file.matches(digest.path,digest.sha256,digest.bytes)||!stillAllowed())return parent
+                requireCapturedGoalAuthority(request)
+                app.repository.chat.recordInterruptedGoalFileMatch(parent)
+            }
+        }catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){parent}
     }
     /** Goal-bound local runs get the same write-ahead record as cloud runs. No record means no local goal effect. */
     private suspend fun openLocalGoalJournal(request:QueuedChatRequest) {
@@ -3849,9 +3883,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     ordinaryBrowserAuth=true)
                 val returnPage=browser.waitingNaverReturnPage(request.runId)
                 persistStepEvidence(naverReturnPage=returnPage)
-                if(app.goalWaits.register(record,null)){
+                val parked=queueOwner.queueMutation.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if(!browser.isCurrentAuthHandoff(request.runId,binding)||!app.goalWaits.register(record,null))
+                        return@withLock false
                     answer("휴대폰에서 사이트 로그인을 완료하면 지금 맡은 일을 이어갈게요.")
                     app.repository.chat.updateRun(request.runId,"paused",errorCode="waiting_browser_auth")
+                    true
+                }
+                if(parked){
                     app.goalWaits.arm(record)
                     if(browser.authAlreadyConfirmed(binding))app.goalWaits.confirmAuth(binding)
                     status.value="휴대폰 인증 대기"
@@ -4276,11 +4316,23 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 if(browser.ownerLoginCard.value?.id!=cardId||browser.ownerWorkBinding.value!=work)return@withLock false
                 val parent=app.repository.chat.run(work.runId)
                 val wait=app.goalWaits.store.get(work.runId)
-                if(parent?.status!="paused"||parent.errorCode!="waiting_browser_auth"||wait?.ordinaryBrowserAuth!=true||
-                    wait.parentRunId!=work.runId||wait.threadId!=threadId||wait.branchId!=branchId)return@withLock false
+                val worker=executionForRun(work.runId)
+                val active=worker?.activeRequest
+                if(parent?.status=="running"&&active?.threadId==threadId&&active.branchId==branchId&&
+                    BrowserAuthContinuation.allowsOrdinaryHandoff(active)) {
+                    app.repository.chat.cancelOrdinaryBrowserAuthWait(parent)
+                    browser.cancelLoginCard(cardId)
+                    worker.cancelOwnedExecution()
+                    return@withLock true
+                }
+                if(parent?.status!="paused"||parent.errorCode!="waiting_browser_auth"||parent.threadId!=threadId||
+                    parent.branchId!=branchId||wait!=null&&(!wait.ordinaryBrowserAuth||
+                        wait.parentRunId!=work.runId||wait.threadId!=threadId||wait.branchId!=branchId))return@withLock false
                 app.repository.chat.cancelOrdinaryBrowserAuthWait(parent)
-                app.goalWaits.cancel(wait)
-                app.goalWaits.store.get(wait.goalId)?.takeIf {it.id==wait.id}?.let {app.goalWaits.store.remove(it)}
+                if(wait!=null){
+                    app.goalWaits.cancel(wait)
+                    app.goalWaits.store.get(wait.goalId)?.takeIf {it.id==wait.id}?.let {app.goalWaits.store.remove(it)}
+                }
                 true
             }
             if(!ordinary)cancelParkedGoal(threadId,work.runId,branchId)
@@ -4862,6 +4914,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             persistStepEvidence()
             return refused
         }}
+        if(toolRequest.goalSegment!=null&&"read_project_file" in requestAuthorizedTools)
+            GoalFileReadback.intended(call)?.let { file->
+                val binding=goalJournalBinding(toolRequest,checkNotNull(toolRequest.goalSegment).scopeKey)
+                app.repository.chat.recordDispatchedGoalFile(bound.id,InterruptedGoalFileCheck.marker(call,file),binding)
+            }
         if (localPdfDraft) {
             val (prepared,proof) = GoalPdfEmail.prepare(app, context, toolRequest, call)
             verifiedDraftProof=proof

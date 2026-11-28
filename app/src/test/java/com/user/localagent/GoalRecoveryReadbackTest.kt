@@ -9,6 +9,8 @@ import com.user.localagent.core.ToolResult
 import com.user.localagent.core.VerificationState
 import com.user.localagent.core.WaitCondition
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
@@ -36,6 +38,29 @@ class GoalRecoveryReadbackTest {
         assertEquals(PairedMediaRead.Unavailable,classifyPairedMediaRead(200,buildJsonObject {}))
         val login=classifyPairedMediaRead(200,buildJsonObject {put("loginRequired",true)}) as PairedMediaRead.Observed
         assertTrue(login.page.loginRequired)
+    }
+
+    @Test fun restartCheckRequiresADispatchedMarkerForTheSameUnfinishedCallAndScope() {
+        val call=ToolCall("file-call","write_project_file",buildJsonObject {
+            put("path","result.txt");put("content","private fixture content")
+        })
+        val file=checkNotNull(GoalFileReadback.intended(call))
+        val binding=buildJsonObject {put("scopeId","captured-scope")}
+        val native=buildJsonObject {
+            put("inFlight",call.id);put("inFlightTool",call.name);put("closed",false);put("uncertain",false)
+            put("binding",binding)
+        }
+        val begun=JsonObject(mapOf("sharedEngineState" to native))
+        assertNull(InterruptedGoalFileCheck.load(begun,binding))
+        val marker=InterruptedGoalFileCheck.marker(call,file)
+        val dispatched=JsonObject(begun+(InterruptedGoalFileCheck.KEY to marker))
+        val restored=checkNotNull(InterruptedGoalFileCheck.load(dispatched,binding))
+        assertFalse(marker.toString().contains("private fixture content"))
+        assertTrue(restored.matches(file.path,file.sha256,file.size))
+        assertFalse(restored.matches(file.path,file.sha256,file.size+1))
+        assertNull(InterruptedGoalFileCheck.load(dispatched,buildJsonObject {put("scopeId","other")}))
+        val settled=JsonObject(dispatched+("sharedEngineState" to JsonObject(native+("inFlight" to JsonPrimitive("other-call")))))
+        assertNull(InterruptedGoalFileCheck.load(settled,binding))
     }
 
     @Test fun aParkedEndCarriesForwardOnlyForTheSameFinishedPlayer() {

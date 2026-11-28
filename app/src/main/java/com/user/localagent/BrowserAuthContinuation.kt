@@ -15,6 +15,10 @@ import kotlinx.serialization.json.jsonObject
 
 internal object BrowserAuthContinuation {
     const val PENDING_SOURCE="hostPendingBrowserAuthSource"
+    const val OWNER_CANCELLED="browser_auth_cancelled"
+
+    fun matchesHandoff(current:String?,expected:String,confirmedInCurrentWork:Boolean):Boolean =
+        current==expected||current==null&&confirmedInCurrentWork
 
     /** A retry keeps the original host handoff even if its immediate parent only saw a timeout. */
     suspend fun source(request:QueuedChatRequest,load:suspend(String)->ChatRunRecord?):ChatRunRecord? {

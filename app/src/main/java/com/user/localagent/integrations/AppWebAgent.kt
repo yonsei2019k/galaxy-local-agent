@@ -417,6 +417,11 @@ class AppWebAgent private constructor(private val context:Context) {
     internal fun authAlreadyConfirmed(binding:String):Boolean =
         lastConfirmedCard?.let { "$loginProcess:$it"==binding }==true
 
+    internal fun isCurrentAuthHandoff(runId:String,binding:String):Boolean =
+        browserWorkBinding.value?.runId==runId &&
+            com.user.localagent.BrowserAuthContinuation.matchesHandoff(waitingAuthBinding(runId),binding,
+                authAlreadyConfirmed(binding)&&isConfirmedBrowserCurrent(runId))
+
     internal fun isConfirmedBrowserCurrent(runId:String):Boolean =
         browserWorkBinding.value?.runId==runId && (confirmedPcLogin?.current(context) ?:
             (lastConfirmedOrigin!=null && secureOrigin(webView?.url)==lastConfirmedOrigin))
