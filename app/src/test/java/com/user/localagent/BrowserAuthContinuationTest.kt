@@ -143,6 +143,17 @@ class BrowserAuthContinuationTest {
         assertFalse(BrowserAuthContinuation.matchesHandoff("replacement","original",confirmedInCurrentWork=true))
     }
 
+    @Test fun cancellationUsesTheLatestCheckpointButRejectsChangedScopeOrFinishedRuns() {
+        val before=com.user.localagent.data.ChatRunRecord("run","thread","branch",projectId="project",
+            projectRevision=2,status="running")
+        val checkpoint=before.copy(contextJson="{\"progress\":true}",updatedAt=before.updatedAt+1)
+        assertTrue(BrowserAuthContinuation.canCancel(before,checkpoint))
+        assertTrue(BrowserAuthContinuation.canCancel(before,checkpoint.copy(status="paused",errorCode="waiting_browser_auth")))
+        assertFalse(BrowserAuthContinuation.canCancel(before,checkpoint.copy(projectRevision=3)))
+        assertFalse(BrowserAuthContinuation.canCancel(before,checkpoint.copy(branchId="new-branch")))
+        assertFalse(BrowserAuthContinuation.canCancel(before,checkpoint.copy(status="completed")))
+    }
+
     @Test fun reopenUsesTheOriginalOfficialPcSiteAndOnlySettledReads() {
         fun open(url:String)=HarnessStep("open_pc_browser_page",buildJsonObject {put("url",url)},
             StepEvidence("open_pc_browser_page",VerificationState.VERIFIED,"Observed"))

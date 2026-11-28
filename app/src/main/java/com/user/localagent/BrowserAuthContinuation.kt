@@ -20,6 +20,14 @@ internal object BrowserAuthContinuation {
     fun matchesHandoff(current:String?,expected:String,confirmedInCurrentWork:Boolean):Boolean =
         current==expected||current==null&&confirmedInCurrentWork
 
+    fun canCancel(expected:ChatRunRecord,latest:ChatRunRecord):Boolean =
+        expected.id==latest.id&&expected.threadId==latest.threadId&&expected.branchId==latest.branchId&&
+            expected.projectId==latest.projectId&&expected.threadRevision==latest.threadRevision&&
+            expected.projectRevision==latest.projectRevision&&
+            (expected.status=="running"&&latest.status=="running"||
+                (expected.status=="running"||expected.status=="paused"&&expected.errorCode=="waiting_browser_auth")&&
+                    latest.status=="paused"&&latest.errorCode=="waiting_browser_auth")
+
     /** A retry keeps the original host handoff even if its immediate parent only saw a timeout. */
     suspend fun source(request:QueuedChatRequest,load:suspend(String)->ChatRunRecord?):ChatRunRecord? {
         val direct=request.browserAuthParentRunId

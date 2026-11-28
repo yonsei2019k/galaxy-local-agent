@@ -775,7 +775,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
 
     internal suspend fun recordInterruptedGoalFileMatch(expected:ChatRunRecord):ChatRunRecord=database.withTransaction {
         val run=checkNotNull(dao.run(expected.id))
-        check(run==expected&&run.status=="interrupted"&&run.errorCode=="process_restarted")
+        check(run==expected&&run.status=="interrupted"&&run.errorCode=="goal_autopilot_unknown_effect")
         checkBinding(run)
         val context=Json.parseToJsonElement(run.contextJson).jsonObject
         check(context[com.user.localagent.InterruptedGoalFileCheck.KEY] is JsonObject)
@@ -906,10 +906,11 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
             dao.run(run.copy(status="paused",errorCode=errorCode,updatedAt=now(),finishedAt=run.finishedAt?:now()))
     }
 
-    internal suspend fun cancelOrdinaryBrowserAuthWait(expected:ChatRunRecord)=database.withTransaction {
-        val run=checkNotNull(dao.run(expected.id))
-        check(run==expected&&(run.status=="running"||run.status=="paused"&&run.errorCode=="waiting_browser_auth"))
+    internal suspend fun cancelOrdinaryBrowserAuthWait(expected:ChatRunRecord):Boolean=database.withTransaction {
+        val run=dao.run(expected.id)?:return@withTransaction false
+        if(!com.user.localagent.BrowserAuthContinuation.canCancel(expected,run))return@withTransaction false
         dao.run(run.copy(errorCode=com.user.localagent.BrowserAuthContinuation.OWNER_CANCELLED,updatedAt=now()))
+        true
     }
 
     suspend fun writeRunAnswer(runId:String,text:String):MessageRecord=database.withTransaction {

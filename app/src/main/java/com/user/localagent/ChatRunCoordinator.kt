@@ -350,8 +350,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
         }else cancelOwnedExecution()
     }
-    private fun cancelOwnedExecution(){
-        activeRequest?.let {queueOwner.goalStopEpochs.merge(it.threadId,1L,Long::plus)}
+    private fun cancelOwnedExecution(invalidateGoalContinuations:Boolean=true){
+        if(invalidateGoalContinuations)activeRequest?.let {queueOwner.goalStopEpochs.merge(it.threadId,1L,Long::plus)}
         executionEngine.cancel();requestResearch?.cancel();ownedRequestJob?.cancel()
         approval.value?.decision?.complete(false)
     }
@@ -997,16 +997,27 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     if(request.goalSegment==null)return@withLock
                     requireGoalSegmentScope(request,access)
                     requireCapturedGoalAuthority(request)
-                    check(app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
-                    val recovered=observeInterruptedGoalFile(parent,request,access)
-                    when(val decision=goalRestartDecision(recovered,goal,access.scopeKey,System.currentTimeMillis(),
-                        goalRunEffectsUnresolved(recovered,access.scopeKey),useNativeBudget=true)) {
+                    val unknown=goalRunEffectsUnresolved(parent,access.scopeKey)
+                    if(!unknown)check(app.workspaceFor(request.projectId).bindingFingerprint()==request.workspaceBinding)
+                    when(val decision=goalRestartDecision(parent,goal,access.scopeKey,System.currentTimeMillis(),
+                        unknown,useNativeBudget=true)) {
                         is GoalSegmentDecision.Continue -> {
-                            if(goalTransientFailure(recovered))scheduleTransientGoalRetry(access,goal,recovered,request)
-                            else queueNextGoalSegment(access,goal,recovered,decision,checkNotNull(currentCoroutineContext()[Job]))
+                            if(goalTransientFailure(parent))scheduleTransientGoalRetry(access,goal,parent,request)
+                            else queueNextGoalSegment(access,goal,parent,decision,checkNotNull(currentCoroutineContext()[Job]))
                         }
-                        GoalSegmentDecision.Complete -> completeApprovedGoal(access,goal,recovered)
-                        is GoalSegmentDecision.Pause -> pauseApprovedGoal(access,goal,recovered,decision.reason)
+                        GoalSegmentDecision.Complete -> completeApprovedGoal(access,goal,parent)
+                        is GoalSegmentDecision.Pause -> {
+                            pauseApprovedGoal(access,goal,parent,decision.reason)
+                            if(decision.reason==GoalAutopilotPauseReason.UNKNOWN_EFFECT&&parent.status=="interrupted"&&
+                                parent.errorCode=="process_restarted"&&InterruptedGoalFileCheck.KEY in parent.contextJson) {
+                                chat.run(parent.id)?.let {paused->
+                                    scope.launch {
+                                        initialized.await()
+                                        observeInterruptedGoalFile(paused,request,access)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             } catch(cancel:CancellationException){throw cancel}
@@ -2666,10 +2677,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     }
 
     private suspend fun observeInterruptedGoalFile(parent:com.user.localagent.data.ChatRunRecord,request:QueuedChatRequest,
-        access:com.user.localagent.data.ChatAccessScope):com.user.localagent.data.ChatRunRecord {
-        if(parent.status!="interrupted"||parent.errorCode!="process_restarted"||!request.allowTools)return parent
+        access:com.user.localagent.data.ChatAccessScope) {
+        if(parent.status!="interrupted"||parent.errorCode!=GoalAutopilotPauseReason.UNKNOWN_EFFECT.code||!request.allowTools)return
         val saved=Json.parseToJsonElement(parent.contextJson).jsonObject
-        val file=InterruptedGoalFileCheck.load(saved,goalJournalBinding(request,access.scopeKey))?:return parent
+        val file=InterruptedGoalFileCheck.load(saved,goalJournalBinding(request,access.scopeKey))?:return
         val workspace=app.workspaceFor(request.projectId)
         suspend fun stillAllowed():Boolean = app.repository.chat.run(parent.id)==parent &&
             app.repository.chat.accessScope(request.threadId)==access &&
@@ -2679,18 +2690,23 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val project=checkNotNull(app.repository.chat.project(id))
                 check("read_project_file" !in project.settings.disabledTools)
                 project.revision
-            }?:0L) && workspace.bindingFingerprint()==request.workspaceBinding
-        return try {
-            workspace.acquireLease().use {
-                if(!stillAllowed())return parent
+            }?:0L) && workspace.bindingFingerprint()==request.workspaceBinding &&
+            goals.loadGuarded(access)?.let {live->
+                live.id==request.goal?.id&&live.status==GoalStatus.PAUSED&&live.linkedRunIds.lastOrNull()==parent.id
+            }==true
+        try {
+            withTimeoutOrNull(4_000L) { workspace.acquireLease().use {
+                if(!stillAllowed())return@withTimeoutOrNull
                 requireCapturedGoalAuthority(request)
-                val digest=withTimeoutOrNull(4_000L) {workspace.hashForAudit(file.path,file.size)}?:return parent
-                if(!file.matches(digest.path,digest.sha256,digest.bytes)||!stillAllowed())return parent
+                val digest=workspace.hashForAudit(file.path,file.size)
+                if(!file.matches(digest.path,digest.sha256,digest.bytes)||!stillAllowed())return@withTimeoutOrNull
                 requireCapturedGoalAuthority(request)
+                currentCoroutineContext().ensureActive()
                 app.repository.chat.recordInterruptedGoalFileMatch(parent)
-            }
+                Unit
+            }}
         }catch(cancel:CancellationException){throw cancel}
-        catch(_:Exception){parent}
+        catch(_:Exception){ /* An optional local observation leaves the uncertain result intact. */ }
     }
     /** Goal-bound local runs get the same write-ahead record as cloud runs. No record means no local goal effect. */
     private suspend fun openLocalGoalJournal(request:QueuedChatRequest) {
@@ -4320,15 +4336,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val active=worker?.activeRequest
                 if(parent?.status=="running"&&active?.threadId==threadId&&active.branchId==branchId&&
                     BrowserAuthContinuation.allowsOrdinaryHandoff(active)) {
-                    app.repository.chat.cancelOrdinaryBrowserAuthWait(parent)
+                    if(!app.repository.chat.cancelOrdinaryBrowserAuthWait(parent))return@withLock false
                     browser.cancelLoginCard(cardId)
-                    worker.cancelOwnedExecution()
+                    worker.cancelOwnedExecution(invalidateGoalContinuations=false)
                     return@withLock true
                 }
                 if(parent?.status!="paused"||parent.errorCode!="waiting_browser_auth"||parent.threadId!=threadId||
                     parent.branchId!=branchId||wait!=null&&(!wait.ordinaryBrowserAuth||
                         wait.parentRunId!=work.runId||wait.threadId!=threadId||wait.branchId!=branchId))return@withLock false
-                app.repository.chat.cancelOrdinaryBrowserAuthWait(parent)
+                if(!app.repository.chat.cancelOrdinaryBrowserAuthWait(parent))return@withLock false
                 if(wait!=null){
                     app.goalWaits.cancel(wait)
                     app.goalWaits.store.get(wait.goalId)?.takeIf {it.id==wait.id}?.let {app.goalWaits.store.remove(it)}
