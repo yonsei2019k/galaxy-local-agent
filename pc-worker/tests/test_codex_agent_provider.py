@@ -247,8 +247,11 @@ class OwnedProcessTreeTests(unittest.TestCase):
                 def alive():
                     try:os.kill(descendant,0)
                     except ProcessLookupError:return False
-                    stat=Path(f"/proc/{descendant}/stat")
-                    return not(stat.exists() and stat.read_text().split()[2]=="Z")
+                    try:
+                        stat=Path(f"/proc/{descendant}/stat").read_text()
+                    except FileNotFoundError:
+                        return False
+                    return stat.rsplit(")",1)[1].split()[0] != "Z"
                 end=time.monotonic()+5
                 while alive() and time.monotonic()<end:time.sleep(.02)
                 self.assertFalse(alive())

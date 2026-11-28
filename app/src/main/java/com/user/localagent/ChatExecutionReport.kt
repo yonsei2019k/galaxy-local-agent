@@ -254,3 +254,34 @@ internal object ChatExecutionReport {
         status=="cancelled"->"그만둠"
         status=="failed"->listOfNotNull("끝내지 못함",notice?:"확인한 데까지 남겨 둠").joinToString(" · ")
         status=="completed"->listOfNotNull("끝남",notice).joinToString(" · ")
+        else->null
+        }
+    }
+    fun display(history:History,status:String,error:String?,context:JsonObject):List<String> {
+        val ending=state(status,error,context)
+        if(history.lines.isEmpty() && history.checklist.isEmpty() && "goalSegment" !in context && "hostGoalCriteriaCounts" !in context &&
+            RunStatusLabels.KEY !in context && (ending==null || status=="completed" || KEY !in context))return emptyList()
+        return buildList {
+            history.lines.forEachIndexed {i,line->
+                if(i==1&&history.omitted>0)add("중간 단계 ${history.omitted}개 생략")
+                add(line.text)
+            }
+            val media=history.lines.indexOfLast {it.key.startsWith("media:")}
+            if(media>=0 && history.lines.drop(media+1).none {it.key.startsWith("course:")||it.key.startsWith("certificate:")})
+                add("재생만 봄 · 진도율이나 이수 처리는 아직 모름")
+            val counts=context["hostGoalCriteriaCounts"] as? JsonObject
+            if(counts!=null) {
+                val verified=(counts["verified"] as? JsonPrimitive)?.intOrNull
+                val owner=(counts["owner"] as? JsonPrimitive)?.intOrNull
+                val total=(counts["total"] as? JsonPrimitive)?.intOrNull
+                if(total!=null && total in 1..1000 && verified!=null && verified in 0..total && owner!=null && owner in 0..(total-verified))
+                    add("목표 기준 ${total}개 · 직접 확인 ${verified}개 · 주인이 확인 ${owner}개 · 아직 ${total-verified-owner}개")
+            }
+            val resumed=wake(context)
+            if(resumed!=null && history.lines.lastOrNull()!=resumed)add(resumed.text)
+            if(context[GoalPdfEmail.KEY] is JsonObject)add("PDF 첨부 메일 초안 준비 · 보냈는지는 아직 모름")
+            addAll(history.checklist)
+            if(resumed==null || status!="paused")ending?.let {add(it)}
+        }.let { lines -> if(lines.size<=40)lines else listOf(lines.first())+lines.takeLast(39) }
+    }
+}
