@@ -4557,7 +4557,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val child=QueuedChatRequest.fromJson(saved.contextJson)
                     check(child.runId==id&&child.browserAuthParentRunId==parent.id)
                     verifyBrowserAuthChild(child)
-                    com.user.localagent.voice.AgentRunService.track(context,id,parent.threadId,original.text)
+                    if(!ensureBrowserAuthForeground(parent,child,original.text))return@withLock false
                     queued.value=queued.value+child
                 }
                 return@withLock true
@@ -4583,11 +4583,13 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 val current=browser.authAlreadyConfirmed(authBinding)&&browser.isConfirmedBrowserCurrent(parent.id)
                 check(current||BrowserAuthContinuation.pcLoginOrigin(parent.contextJson)!=null)
                 val child=BrowserAuthContinuation.child(original,System.currentTimeMillis())
+                if(!ensureBrowserAuthForeground(parent,child,original.text))return@withLock false
+                if(app.goalWaits.store.get(record.goalId)!=record)return@withLock true
+                verifyBrowserAuthSource(parent,original)
                 checkNotNull(app.repository.chat.enqueueAuthenticatedBrowserResume(parent,child))
-                queued.value=queued.value+child
                 browser.bindResumedWork(parent.id,
                     com.user.localagent.integrations.AppWebAgent.WorkBinding(child.runId,child.threadId,child.branchId))
-                com.user.localagent.voice.AgentRunService.track(context,child.runId,parent.threadId,original.text)
+                queued.value=queued.value+child
                 status.value="로그인 확인 · 원래 작업 이어가는 중"
             } catch(cancel:CancellationException){throw cancel}
             catch(error:Exception) {
@@ -4602,9 +4604,20 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             true
         }
-        if(result)app.goalWaits.store.remove(record)
-        drain()
+        if(result){
+            app.goalWaits.store.remove(record)
+            drain()
+        }
         result
+    }
+
+    private suspend fun ensureBrowserAuthForeground(parent:com.user.localagent.data.ChatRunRecord,child:QueuedChatRequest,text:String):Boolean {
+        if(com.user.localagent.voice.RunKeepAlive.snapshot(child.runId).active)return true
+        if(com.user.localagent.voice.AgentRunService.track(context,child.runId,parent.threadId,text)&&
+            com.user.localagent.voice.RunKeepAlive.await(child.runId).active)return true
+        status.value="로그인 확인은 남겨뒀어요. 앱을 열면 원래 작업을 이어갈 수 있어요."
+        com.user.localagent.voice.AgentRunService.notifyRecoveryNeeded(context,parent.id,parent.threadId)
+        return false
     }
 
     internal suspend fun isGoalWaitReady(record:GoalWaitRecord):Boolean = withContext(Dispatchers.Main.immediate) {
@@ -4658,6 +4671,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 savedWait&&chat.restoreInterruptedGoalWait(parent)
             if(ready&&goal.status==GoalStatus.ACTIVE)
                 goals.saveGuarded(access,goal.copy(status=GoalStatus.WAITING))
+            else if(!ready&&goal.status==GoalStatus.ACTIVE&&app.goalWaits.store.get(goal.id)==record)
+                pauseBlockedGoalWait(record,access,goal,parent,authorityChanged=false)
             Unit
         }
     }

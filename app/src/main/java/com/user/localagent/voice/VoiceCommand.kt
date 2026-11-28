@@ -207,6 +207,19 @@ class AgentRunService:Service() {
                 checkNotNull(if(continuing)context.startService(intent) else ContextCompat.startForegroundService(context,intent))
             }.onFailure{RunKeepAlive.acknowledge(runId,token,false,"FOREGROUND_START_REJECTED")}.isSuccess
         }
+        internal fun notifyRecoveryNeeded(context:Context,runId:String,threadId:String) {
+            val manager=context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
+            val intent=PendingIntent.getActivity(context,runId.hashCode(),
+                Intent(context,MainActivity::class.java).putExtra("open_thread_id",threadId)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            manager.notify(ID+1+(runId.hashCode() and 0xffff),NotificationCompat.Builder(context,ALERTS)
+                .setSmallIcon(R.drawable.ic_agent).setContentTitle("이어서 진행할 작업이 있어요")
+                .setContentText("앱을 열어 주시면 로그인한 화면부터 확인하고 이어갈게요.")
+                .setContentIntent(intent).setAutoCancel(true).setOnlyAlertOnce(true)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
+        }
         /**
          * Terminal DB state may precede native teardown and durable next-segment registration.
          * Callers retain this only through that handoff, using the original goal's fixed deadline.
