@@ -75,7 +75,7 @@ internal class GoalWaitWork(private val context: Context) {
     }
 
     suspend fun confirmAuth(binding:String):Boolean {
-        val previous=store.all().singleOrNull { it.condition==WaitCondition.OwnerAuth(binding) && it.observedEvent==null &&
+        val previous=store.all().singleOrNull { it.condition==WaitCondition.OwnerAuth(binding) && it.observedEvent==null && it.stopReason==null &&
             it.resumedOnceFor!=it.id && it.deadlineAt>System.currentTimeMillis() } ?: return false
         val confirmed=previous.copy(id=java.util.UUID.randomUUID().toString(),observedEvent=WakeEvent.OWNER_AUTH_DONE)
         if(!store.replace(confirmed,previous))return false
@@ -99,7 +99,7 @@ internal class GoalWaitWork(private val context: Context) {
 
     suspend fun onPcAvailable() {
         for (previous in store.all()) {
-            if (previous.pcRetries == 0 || previous.retryAt == null || previous.resumedOnceFor == previous.id) continue
+            if (previous.pcRetries == 0 || previous.retryAt == null || previous.resumedOnceFor == previous.id || previous.stopReason!=null) continue
             val immediate = previous.copy(id = java.util.UUID.randomUUID().toString(), retryAt = null)
             if (store.replace(immediate, previous)) arm(immediate)
         }
@@ -132,6 +132,8 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
             return Result.success()
         }
         val dueAt=GoalWaitPolicy.dueAt(record) ?: return Result.success()
+        if(record.stopReason!=null)
+            return if(app.runs.settleUnreadyGoalWait(record))Result.success() else Result.retry()
         if(System.currentTimeMillis()<dueAt){
             val delayed=record.copy(id=java.util.UUID.randomUUID().toString())
             if(app.goalWaits.store.replace(delayed,record))app.goalWaits.arm(delayed)

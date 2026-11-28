@@ -65,6 +65,7 @@ import com.user.localagent.core.GoalProofKind
 import com.user.localagent.core.GoalProgressToolCatalog
 import com.user.localagent.core.GoalStatus
 import com.user.localagent.core.GoalWaitRecord
+import com.user.localagent.core.GoalWaitStopReason
 import com.user.localagent.core.GoalWaitPolicy
 import com.user.localagent.core.GoalWaitToolCatalog
 import com.user.localagent.core.WaitCondition
@@ -953,6 +954,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             parent.branchId==record.branchId&&record.resumedOnceFor!=record.id
                     }
                     val hasWake=Json.parseToJsonElement(parent.contextJson).jsonObject["hostGoalWake"] is JsonObject
+                    if(wait?.stopReason!=null){
+                        finishRecordedGoalWaitStop(wait,access,goal,parent)
+                        return@withLock
+                    }
                     if(wait!=null&&goal.status in setOf(GoalStatus.WAITING,GoalStatus.ACTIVE)&&
                         !parkedGoalAuthorityMatches(wait,requireGoalRunBinding(goal,parent),access,parent)) {
                         pauseBlockedGoalWait(wait,access,goal,parent,authorityChanged=true)
@@ -2483,8 +2488,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         val message=authentication ?: WorkFailureReport.describe(why,observedOutcomes,unknownEffect)
         val recoverable=request.goalSegment!=null&&stop.pending!=com.user.localagent.externalagent.AgentPhoneCallState.UNKNOWN_EFFECT&&
             requestSteps.isNotEmpty()&&requestSteps.all {isReadTool(it.tool)||it.evidence.effectNotApplied}
-        publishActionFinal(request,requestAuthorizedTools,if(recoverable)"확인한 결과를 저장했어요. 남은 단계부터 이어갈게요." else message,
-            true,if(recoverable)"partial_recoverable_provider" else why)
+        publishActionFinal(request,requestAuthorizedTools,message,true,if(recoverable)"partial_recoverable_provider" else why)
     }
 
     private suspend fun publishProviderQuestion(request:QueuedChatRequest,report:JsonObject,
@@ -4167,16 +4171,15 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
         if(expectedRunId!=null && record.parentRunId!=expectedRunId)return@withLock
         if(branchId!=null && (record.branchId!=branchId || app.repository.chat.thread(threadId)?.activeBranchId!=branchId))
             return@withLock
-        val paused=goals.saveGuarded(access,goal.copy(status=GoalStatus.PAUSED))
-        if(selectedThreadId.value==threadId)goalState.value=paused
-        val parent=app.repository.chat.run(record.parentRunId)
-        try {
-            if(parent!=null)app.repository.chat.writeBlockedGoalWait(parent,goal.id,"goal_wait_cancelled",
-                "예약된 이어가기를 취소했어요. 지금까지 확인한 내용은 남겨뒀어요.")
-        } finally {
-            app.goalWaits.cancel(record)
+        val parent=app.repository.chat.run(record.parentRunId)?:return@withLock
+        val stopping=record.stopReason?.let {record}?:record.copy(id=UUID.randomUUID().toString(),
+            stopReason=GoalWaitStopReason.OWNER_CANCELLED)
+        if(stopping!=record&&!app.goalWaits.store.replace(stopping,record))return@withLock
+        app.goalWaits.armAfterWake(stopping)
+        if(finishRecordedGoalWaitStop(stopping,access,goal,parent)){
+            if(stopping!=record)app.goalWaits.cancel(record)
+            app.goalWaits.cancel(stopping)
         }
-        if(parent!=null&&record.pcMedia)releasePcBrowserAfter(QueuedChatRequest.fromJson(parent.contextJson))
     }
 
     internal suspend fun reopenOwnerLogin(runId:String,threadId:String,branchId:String):Boolean = withContext(Dispatchers.Main.immediate) {
@@ -4226,7 +4229,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                     val connection=com.user.localagent.compute.PcTransport(context).available()?:return@withLock false
                     val origin=pcOrigin?:return@withLock false
                     val signedIn=try {
-                        com.user.localagent.compute.PairedWebsiteLogin.observeSignedIn(context,connection,pcBrowserWorkKey(original),origin)
+                        com.user.localagent.compute.PairedWebsiteLogin.observeSignedIn(context,connection,pcBrowserWorkKey(original),origin,
+                            BrowserAuthContinuation.pcTaskPage(parent.contextJson))
                     } catch(cancel:CancellationException) {throw cancel}
                     catch(_:Exception) {false}
                     if(signedIn){
@@ -4373,8 +4377,10 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val thread = chat.thread(record.threadId) ?: return@withLock true
             val access = chat.accessScope(thread.id)
             val goal = goals.loadGuarded(access) ?: return@withLock true
-            if (goal.id != record.goalId || goal.status != GoalStatus.WAITING || goal.linkedRunIds.lastOrNull() != parent.id ||
+            if (goal.id != record.goalId || goal.linkedRunIds.lastOrNull() != parent.id ||
                 parent.threadId != thread.id || parent.branchId != record.branchId) return@withLock true
+            if(record.stopReason!=null)return@withLock finishRecordedGoalWaitStop(record,access,goal,parent)
+            if(goal.status!=GoalStatus.WAITING)return@withLock true
             val authorityChanged = thread.activeBranchId != record.branchId ||
                 !parkedGoalAuthorityMatches(record, requireGoalRunBinding(goal, parent), access,parent)
             val parentReady = record.matchesTransientParent(parent) || parent.status == "paused" && parent.errorCode == "waiting_goal_condition"
@@ -4397,6 +4403,27 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             goalState.value = paused
             status.value = message
         }
+    }
+
+    private suspend fun finishRecordedGoalWaitStop(record:GoalWaitRecord,access:com.user.localagent.data.ChatAccessScope,
+        goal:GoalDefinition,parent:com.user.localagent.data.ChatRunRecord):Boolean {
+        val reason=checkNotNull(record.stopReason)
+        if(record.ordinaryBrowserAuth||goal.id!=record.goalId||goal.linkedRunIds.lastOrNull()!=parent.id||
+            parent.id!=record.parentRunId||record.threadId!=parent.threadId||record.branchId!=parent.branchId||
+            goal.status !in setOf(GoalStatus.WAITING,GoalStatus.ACTIVE,GoalStatus.PAUSED))return true
+        if(app.goalWaits.store.get(record.goalId)!=record||record.resumedOnceFor==record.id)return true
+        if(executionForRun(parent.id)!=null||parent.status in setOf("queued","running","waiting_approval"))return false
+        val message=when(reason) {
+            GoalWaitStopReason.DEADLINE->"작업 기한이 지났어요. 확인한 내용은 이 카드에 남겨뒀어요."
+            GoalWaitStopReason.AUTH_EXPIRED->"이 인증 요청은 만료됐어요. 확인한 내용은 이 카드에 남겨뒀어요."
+            GoalWaitStopReason.OWNER_CANCELLED->"예약된 이어가기를 취소했어요. 지금까지 확인한 내용은 남겨뒀어요."
+        }
+        app.repository.chat.writeBlockedGoalWait(parent,record.goalId,"goal_"+reason.code,message)
+        val paused=if(goal.status==GoalStatus.PAUSED)goal else goals.saveGuarded(access,goal.copy(status=GoalStatus.PAUSED))
+        check(app.goalWaits.store.replace(record.copy(resumedOnceFor=record.id),record))
+        if(selectedThreadId.value==record.threadId){goalState.value=paused;status.value=message}
+        if(reason==GoalWaitStopReason.OWNER_CANCELLED&&record.pcMedia)releasePcBrowserAfter(QueuedChatRequest.fromJson(parent.contextJson))
+        return true
     }
 
     internal suspend fun wakeGoal(record: GoalWaitRecord,event:WakeEvent): Boolean = withContext(Dispatchers.Main.immediate) {
@@ -4472,20 +4499,17 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                         if((goalStopEpochs[record.threadId]?:0L)!=epoch)cancelStoppedGoalContinuationsLocked(record.threadId)
                     }
                     is WaitDecision.Stop -> {
-                        if(outcome.code=="wait_duplicate_wake")return@withLock true
-                        val paused=goals.saveGuarded(access,goal.copy(status=GoalStatus.PAUSED))
-                        if(selectedThreadId.value==record.threadId)goalState.value=paused
-                        val message=if(outcome.code=="wait_deadline") "작업 기한이 지났어요. 확인한 내용은 이 카드에 남겨뒀어요."
-                            else "이 인증 요청은 만료됐어요. 확인한 내용은 이 카드에 남겨뒀어요."
-                        if(transientRetry)app.repository.chat.noteGoalRetry(parent,"deadline",message)
-                        else app.repository.chat.writeGoalWaitOutcome(parent.id,message,"goal_"+outcome.code)
-                        app.goalWaits.store.replace(record.copy(resumedOnceFor=record.id),record)
-                        return@withLock true
+                        val reason=GoalWaitStopReason.fromCode(outcome.code)?:return@withLock true
+                        val stopping=record.copy(stopReason=reason)
+                        if(!app.goalWaits.store.replace(stopping,record))return@withLock true
+                        return@withLock finishRecordedGoalWaitStop(stopping,access,goal,parent)
                     }
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) {
                 FailureLog.record(context,"goal_wait_wake",error,"wake_rejected")
+                val durableStop=app.goalWaits.store.get(record.goalId)
+                if(durableStop?.takeIf {it.id==record.id}?.stopReason!=null)return@withLock false
                 val currentAccess=app.repository.chat.accessScope(record.threadId)
                 val current=goals.loadGuarded(currentAccess)
                 if (current!=null && (current==goal || current==savedActive)) {

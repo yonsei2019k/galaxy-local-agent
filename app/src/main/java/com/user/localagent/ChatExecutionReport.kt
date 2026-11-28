@@ -246,6 +246,8 @@ internal object ChatExecutionReport {
         status=="paused"&&(error=="waiting_goal_condition"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context) ||
             error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"사이트에서 인증을 마쳐 주세요. 이어서 로그인됐는지 확인할게요."
         status=="paused"&&error=="goal_wait_cancelled"->"예약된 이어가기를 취소했어요. 확인한 내용은 작업 기록에 남겼어요."
+        status=="paused"&&error=="goal_wait_deadline"->"예약된 작업의 기한이 지났어요. 확인한 내용은 작업 기록에 남겼어요."
+        status=="paused"&&error=="goal_wait_auth_expired"->"사이트 인증 요청이 만료됐어요. 확인한 내용은 작업 기록에 남겼어요."
         status=="paused"&&error=="browser_auth_cancelled"->"로그인 대기를 취소했어요. 확인한 내용은 작업 기록에 남겼어요."
         status=="paused"&&error=="goal_wait_scope_changed"->"대기 중 작업 권한이나 대화 범위가 바뀌어 일시정지했어요."
         status=="paused"&&error=="goal_wait_checkpoint_unavailable"->"저장된 대기 지점을 열지 못했어요. 작업 기록에서 마지막 단계를 확인할 수 있어요."

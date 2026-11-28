@@ -867,7 +867,8 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         val run=checkNotNull(dao.run(expected.id))
         check(run==expected && run.status !in setOf("queued","running","waiting_approval"))
         check(com.user.localagent.QueuedChatRequest.fromJson(run.contextJson).goalSegment?.goalId==goalId)
-        check(errorCode in setOf("goal_wait_scope_changed","goal_wait_checkpoint_unavailable","goal_wait_cancelled"))
+        check(errorCode in setOf("goal_wait_scope_changed","goal_wait_checkpoint_unavailable","goal_wait_cancelled",
+            "goal_wait_deadline","goal_wait_auth_expired"))
         if(run.errorCode==errorCode)return@withTransaction
         val thread=checkNotNull(dao.thread(run.threadId))
         if(thread.deletedAt==null&&thread.activeBranchId==run.branchId&&thread.projectId==run.projectId&&

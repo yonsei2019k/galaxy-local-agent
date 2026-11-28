@@ -1,6 +1,10 @@
 package com.user.localagent.scheduling
 
 import com.user.localagent.core.GoalWaitRecord
+import com.user.localagent.core.GoalWaitPolicy
+import com.user.localagent.core.GoalWaitStopReason
+import com.user.localagent.core.WakeEvent
+import com.user.localagent.core.WaitDecision
 import com.user.localagent.core.WaitCondition
 import org.junit.Assert.*
 import org.junit.Test
@@ -47,5 +51,21 @@ class GoalWaitStoreTest {
         assertEquals(current,store.get(current.goalId))
         assertEquals(first,store.get(first.goalId))
         assertNull(store.get(records.last().goalId))
+    }
+
+    @Test fun aRecordedStopSurvivesRestartAndCannotTurnIntoAResume() {
+        var data:String?=null
+        val store=GoalWaitStore({data},{data=it})
+        assertTrue(store.replace(first,null))
+        val stopping=first.copy(stopReason=GoalWaitStopReason.AUTH_EXPIRED,retryAt=50_000)
+        assertTrue(store.replace(stopping,first))
+        val reopened=GoalWaitStore({data},{data=it})
+        val saved=checkNotNull(reopened.get(first.goalId))
+        assertEquals(stopping,saved)
+        assertEquals(0L,GoalWaitPolicy.dueAt(saved))
+        assertEquals(WaitDecision.Stop("wait_auth_expired"),
+            GoalWaitPolicy.onWake(saved,WakeEvent.OWNER_AUTH_DONE,1000,java.time.ZoneOffset.UTC,true))
+        assertTrue(reopened.replace(saved.copy(resumedOnceFor=saved.id),saved))
+        assertNull(GoalWaitPolicy.dueAt(checkNotNull(reopened.get(first.goalId))))
     }
 }

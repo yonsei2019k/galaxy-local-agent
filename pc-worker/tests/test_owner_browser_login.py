@@ -26,13 +26,37 @@ class OwnerLoginDialog(unittest.TestCase):
         request = {'origin': origin}
         with patch.object(browser.time, 'monotonic', return_value=1000):
             self.assertEqual(agent.owner_login_observe(request), {'signedIn': False, 'origin': origin})
-            agent.page.evaluate.assert_not_called()
+            agent.page.evaluate.assert_called_once_with('1', timeout=4)
             agent.owner_login_attempt = ('0' * 64, 1100, agent.page, origin, None)
-            agent.page.evaluate.side_effect = [origin, False, False]
+            agent.page.evaluate.side_effect = [1, origin, False, False]
             self.assertFalse(agent.owner_login_observe(request)['signedIn'])
-            agent.page.evaluate.side_effect = [origin, False, True]
+            agent.page.evaluate.side_effect = [1, origin, False, True]
             self.assertTrue(agent.owner_login_observe(request)['signedIn'])
+            agent.page.evaluate.side_effect = [1]
             self.assertFalse(agent.owner_login_observe({'origin': 'https://example.org'})['signedIn'])
+            agent.owner_login_attempt = None
+            agent.restored_owner_session = (agent.page, origin)
+            agent.work_origin = origin
+            agent.page.evaluate.side_effect = [1, origin, False, False]
+            self.assertFalse(agent.owner_login_observe(request)['signedIn'])
+            agent.page.evaluate.side_effect = [1, origin, False, True]
+            self.assertTrue(agent.owner_login_observe(request)['signedIn'])
+
+    def test_owner_login_observation_distinguishes_a_closed_page_from_a_timeout(self):
+        from unittest.mock import Mock
+        agent = browser.BrowserAgent(profile='unused')
+        page = agent.page = Mock()
+        request = {'origin': browser.KAIRB_ORIGIN}
+        page.evaluate.side_effect = browser.BrowserError('DEVTOOLS_TIMEOUT', 504)
+        with self.assertRaises(browser.BrowserError) as timeout:
+            agent.owner_login_observe(request)
+        self.assertEqual(timeout.exception.code, 'DEVTOOLS_TIMEOUT')
+        self.assertIs(agent.page, page)
+        page.evaluate.side_effect = browser.BrowserError('DEVTOOLS_CLOSED', 502)
+        with self.assertRaises(browser.BrowserError) as closed:
+            agent.owner_login_observe(request)
+        self.assertEqual(closed.exception.code, 'BROWSER_WORK_PAGE_GONE')
+        self.assertIsNone(agent.page)
 
     def test_cooldown_reports_remaining_time_without_using_the_form(self):
         from unittest.mock import patch

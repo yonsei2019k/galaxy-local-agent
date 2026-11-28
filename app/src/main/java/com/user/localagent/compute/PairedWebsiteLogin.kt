@@ -83,15 +83,28 @@ internal class PairedWebsiteLogin private constructor(
 ) {
     val host:String get()=URI(origin).host
     companion object {
-        suspend fun observeSignedIn(context:Context,connection:PcConnection,work:String,origin:String):Boolean {
+        suspend fun observeSignedIn(context:Context,connection:PcConnection,work:String,origin:String,taskUrl:String?):Boolean {
             fun current()=BrowserAgentSettings.pc(context).enabled()&&
                 PcComputeSettings.get(context).snapshot()?.samePair(connection)==true
             if(PcLoginSite.origin(origin)!=origin||!current())return false
-            val (status,page)=withContext(Dispatchers.IO) {
-                PcTransport(context).jsonWithStatus(connection,"/v1/browser/owner-login-observe",
-                    buildJsonObject {put("work",work);put("origin",origin)},20_000)
+            return withContext(Dispatchers.IO) {
+                val transport=PcTransport(context)
+                val body=buildJsonObject {put("work",work);put("origin",origin)}
+                suspend fun observe()=transport.jsonWithStatus(connection,"/v1/browser/owner-login-observe",body,20_000)
+                var result=observe()
+                val gone=(result.second["error"] as? JsonPrimitive)?.contentOrNull in
+                    setOf("BROWSER_WORK_SESSION_GONE","BROWSER_WORK_PAGE_GONE")
+                if(result.first==409&&gone&&current()){
+                    val target=com.user.localagent.integrations.BrowserLoginRoutes.pairedTaskPage(taskUrl,origin)?:return@withContext false
+                    val saved=PairedWebsiteSessionKeys.openFields(context,target)
+                    if(saved.isEmpty()||!current())return@withContext false
+                    val opened=transport.jsonWithStatus(connection,"/v1/browser/open",
+                        JsonObject(mapOf("work" to JsonPrimitive(work),"url" to JsonPrimitive(target))+saved),25_000)
+                    if(opened.first!=200||opened.second["loginRequired"]!=JsonPrimitive(false)||!current())return@withContext false
+                    result=observe()
+                }
+                current()&&result.first==200&&result.second["origin"]==JsonPrimitive(origin)&&result.second["signedIn"]==JsonPrimitive(true)
             }
-            return current()&&status==200&&page["origin"]==JsonPrimitive(origin)&&page["signedIn"]==JsonPrimitive(true)
         }
 
         suspend fun reopen(context:Context,connection:PcConnection,work:String,origin:String,taskUrl:String?=null):PairedWebsiteLogin? {
