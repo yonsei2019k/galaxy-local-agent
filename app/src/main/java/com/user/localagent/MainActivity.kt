@@ -392,10 +392,16 @@ class MainActivity : ComponentActivity() {
             val project=thread.projectId?.let {app.repository.chat.project(it)}
             if(project?.archived==true)return@launch
             requestedTab.value=if(threadId==app.runs.selectedThreadId.value)0 else 6
+            val goalWake=intent.getStringExtra(com.user.localagent.voice.AgentRunService.RESUME_GOAL_WAIT_RUN)
+                ?.takeIf {it.length in 1..128}
             val authRun=intent.getStringExtra(com.user.localagent.voice.AgentRunService.RESUME_BROWSER_AUTH_RUN)
-                ?.takeIf {it.length in 1..128}?:return@launch
+                ?.takeIf {it.length in 1..128}
+            if(goalWake==null&&authRun==null)return@launch
             lifecycle.withResumed { Unit }
-            try {app.goalWaits.resumeConfirmedBrowserAuth(threadId,authRun)}
+            try {
+                if(goalWake!=null)app.goalWaits.resumeVisibleGoalWait(threadId,goalWake)
+                else if(authRun!=null)app.goalWaits.resumeConfirmedBrowserAuth(threadId,authRun)
+            }
             catch(cancel:CancellationException){throw cancel}
             catch(error:Exception){FailureLog.record(this@MainActivity,"browser_auth_resume_visible",error)}
         }
@@ -680,8 +686,12 @@ class MainActivity : ComponentActivity() {
                         val statusCard = activity?.runStatus?.takeIf { shownText.isBlank() &&
                             (it["phase"] as? JsonPrimitive)?.contentOrNull !in setOf("queued","running","waiting_approval") }
                         reports[message.id]?.takeIf {message.role=="assistant"}?.let { report ->
-                            val lines = if (activity != null && statusCard != null && report === activity.executionReport && activity.executionReportEndsWithStatus) report.dropLast(1) else report
-                            if (lines.isNotEmpty()) put("executionReport",JsonArray(lines.map(::JsonPrimitive)))
+                            val lines = if (statusCard != null && report === activity && report.executionReportEndsWithStatus)
+                                report.executionReport.dropLast(1) else report.executionReport
+                            if (lines.isNotEmpty()) {
+                                put("executionReport",JsonArray(lines.map(::JsonPrimitive)))
+                                put("executionReportActive",report.status in setOf("queued","running","waiting_approval"))
+                            }
                         }
                         activity?.runStatus?.let {put("runStatus",it)}
                         activity?.receipt?.let {put("receipt",it)}

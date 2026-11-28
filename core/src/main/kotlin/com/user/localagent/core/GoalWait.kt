@@ -49,6 +49,7 @@ data class GoalWaitRecord(
     val lastMediaSampleAt: Long? = null,
     val transientParentDigest: String? = null,
     val stopReason: GoalWaitStopReason? = null,
+    val foregroundRetry: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && goalId.isNotBlank()) { "대기 기록에는 식별자가 필요합니다." }

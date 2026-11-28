@@ -73,7 +73,7 @@ function Welcome({ staff, guide, compact, situation, calendarGranted, hasDraft, 
         {plain && <p>말만 하면 끝까지 챙길게요</p>}
         {plain && onChangeCharacter && <button type="button" className="text-button welcome-character-change" onClick={onChangeCharacter}>집순이 모습 바꾸기</button>}
       </div>}
-      {compact && <h1>{staff ? `${staff}에게 말 걸기` : guide ? '안녕하세요, 집순이예요!' : '무엇을 해 둘까요?'}</h1>}
+      {compact && <h1>{staff ? `${staff}에게 말 걸기` : '집순이와 해볼 일'}</h1>}
       {!compact && suggestions.length > 0 && <div className="room-suggestions" aria-label="해볼 일 예시">
         {suggestions.map(example => <button type="button" key={example} className="suggestion-chip" disabled={hasDraft}
           onClick={() => onSendExample?.(example)}>{example}</button>)}
@@ -172,19 +172,19 @@ function Message({ message, previous, previousHasCards, previews, enabled, onCop
   return (
     <article className={`message message--${message.role}${assistant && !startsGroup ? ' message--continued' : ''}`} aria-label={user ? '내 메시지' : assistant ? author + ' 답변' : '작업 기록'}>
       {startsGroup && <div className="message-label"><Character choice={character} size={24} decorative /> {author}</div>}
-      {assistant ? <div className="assistant-text">
+      {assistant ? <div className={hasText ? "assistant-text conversation-bubble" : "assistant-text"}>
         {hasText && <RichAnswer text={message.text} onPrepareStay={onPrepareStay} photo={onStayPhoto ? { messageId: message.id, request: onStayPhoto } : undefined} />}
         {statusCard && <RunStatusCard status={statusCard} report={report} onAction={enabled ? statusAction : undefined} />}
         {/* The host's structured run report (not model text) as a grey card with a resting 집순이 face. */}
-        {!statusCard && !!report.length && <section className="execution-report" aria-label="작업 진행 보고">
+        {!statusCard && !!report.length && <details className="execution-report" aria-label="확인한 내용" open={reportActive} key={reportActive ? "in-progress" : "settled"}>
           <span className="execution-report-face" aria-hidden="true"><Character choice={character} size={40} decorative /></span>
-          <strong>작업 진행 보고</strong>
+          <summary>확인한 내용</summary>
           <ol>{recentReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           {!!earlierReport.length && <details>
             <summary>앞서 확인한 단계 {earlierReport.length}개</summary>
             <ol>{earlierReport.map((line, index) => <li key={index}>{line}</li>)}</ol>
           </details>}
-        </section>}
+        </details>}
         {assistant && message.receipt && <ReceiptCard receipt={message.receipt} />}
         {!!message.fileFormats?.length && <button type="button" className="attachment answer-files" disabled={!enabled}
           onClick={() => onFiles(message.id)}><Icon name="file" />

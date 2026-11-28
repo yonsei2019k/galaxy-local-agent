@@ -143,6 +143,36 @@ class GoalSegmentAutopilotTest {
         assertEquals(changed.toJson(),QueuedChatRequest.fromJson(changed.toJson()).toJson())
     }
 
+    @Test fun projectReadUsesFileEvidenceInsteadOfDeliveryToken() {
+        val call=ToolCall("file","read_project_file",buildJsonObject {put("path","plan.md")})
+        fun digest(token:String,sha:String="a".repeat(64),path:String="plan.md",truncated:Boolean=false)=
+            observedGoalProgress(call,ToolResult(call.id,true,buildJsonObject {
+                put("path",path);put("sha256",sha);put("truncated",truncated);put("readToken",token)
+            }.toString(),VerificationState.VERIFIED,"Observed file"))
+        val first=digest("one")
+        assertNotNull(first)
+        assertEquals(first,digest("two"))
+        assertNotEquals(first,digest("two","b".repeat(64)))
+        assertNotEquals(first,digest("two",truncated=true))
+        assertNull(digest("two",path="other.md"))
+    }
+
+    @Test fun onlyVerifiedMediaEndBecomesAnArchivedMilestone() {
+        val step=HarnessStep(GoalWaitToolCatalog.WAIT,buildJsonObject {
+            put("condition",buildJsonObject {put("kind","media_end");put("ledgerItemId","lesson-1")})
+        },StepEvidence(GoalWaitToolCatalog.WAIT,VerificationState.VERIFIED,"Wait registered"))
+        val waiting=request(listOf(step))
+        fun mark(event:WakeEvent):String? {
+            val context=Json.parseToJsonElement(waiting.toJson()).jsonObject
+            val wake=buildJsonObject {put("event",event.name)}
+            val ledger=completedGoalLedger(waiting,JsonObject(context+("hostGoalWake" to wake)).toString())
+            return completedMediaWaitKey(ledger.single().step)
+        }
+        assertNull(mark(WakeEvent.MEDIA_STALLED))
+        assertNull(mark(WakeEvent.PLAYER_GONE))
+        assertEquals("media-ended-v1:lesson-1",mark(WakeEvent.MEDIA_ENDED))
+    }
+
     @Test fun verifiedNavigationCountsOncePerDestinationAcrossChangingPageText() {
         val call = ToolCall("link", PcBrowserToolCatalog.ACTION, buildJsonObject {
             put("action","click"); put(BrowserNavigationRule.LABEL,"자료"); put(BrowserNavigationRule.VERIFY,"자료 목록")

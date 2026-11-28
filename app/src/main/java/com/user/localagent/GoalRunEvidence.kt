@@ -85,6 +85,15 @@ internal fun observedGoalProgress(call:ToolCall,result:ToolResult):String? {
             if(done.isEmpty())return null
             JsonArray(done)
         }
+        call.name=="read_project_file" -> {
+            val file=payload?:return null
+            val path=file["path"] as? JsonPrimitive?:return null
+            val sha=file["sha256"] as? JsonPrimitive?:return null
+            val truncated=file["truncated"] as? JsonPrimitive?:return null
+            if(!path.isString||path!=call.arguments["path"]||!sha.isString||
+                !sha.content.matches(Regex("[a-f0-9]{64}"))||truncated.isString||truncated.booleanOrNull==null)return null
+            JsonArray(listOf(path,sha,truncated))
+        }
         payload!=null -> JsonObject(payload-filteredGoalObservationKeys)
         else -> JsonPrimitive(content.replace(Regex("\\s+")," ").trim())
     }
@@ -262,10 +271,7 @@ internal fun compactGoalLedger(entries:List<GoalLedgerEntry>,archived:GoalObserv
         if(!retain) {
             goalMilestoneKey(step)?.let(archived::add)
             goalRepeatedReadKey(step)?.let(archived::add)
-            if(step.tool==GoalWaitToolCatalog.WAIT) {
-                val condition=step.arguments["condition"] as? JsonObject
-                condition?.get("ledgerItemId")?.jsonPrimitive?.contentOrNull?.let {archived.add("media:$it")}
-            }
+            completedMediaWaitKey(step)?.let(archived::add)
         }
         retain
     }
@@ -298,8 +304,25 @@ internal fun goalRepeatedReadKey(step:HarnessStep):String? {
 }
 
 /** All states and positions are retained; no deduplication can erase an uncertain effect. */
-internal fun completedGoalLedger(request:QueuedChatRequest):List<GoalLedgerEntry> {
-    val ledger=request.goalLedger+request.previousSteps.drop(request.goalReadbackSeedCount).mapIndexed {index,step->GoalLedgerEntry(request.runId,index,step)}
+internal fun mediaWaitItem(step:HarnessStep):String? {
+    if(step.tool!=GoalWaitToolCatalog.WAIT||step.evidence.state!=VerificationState.VERIFIED||
+        step.evidence.effectNotApplied)return null
+    val condition=step.arguments["condition"] as? JsonObject?:return null
+    if(condition["kind"]!=JsonPrimitive("media_end"))return null
+    return (condition["ledgerItemId"] as? JsonPrimitive)?.takeIf {it.isString}?.content
+}
+private fun mediaWaitDigest(item:String)=goalDigest("goal-media-ended-v1\n$item")
+internal fun completedMediaWaitKey(step:HarnessStep):String? =
+    mediaWaitItem(step)?.takeIf {step.evidence.progressDigest==mediaWaitDigest(it)}?.let {"media-ended-v1:$it"}
+
+internal fun completedGoalLedger(request:QueuedChatRequest,contextJson:String=request.toJson()):List<GoalLedgerEntry> {
+    val wake=(Json.parseToJsonElement(contextJson).jsonObject["hostGoalWake"] as? JsonObject)?.get("event")
+    val steps=request.previousSteps.drop(request.goalReadbackSeedCount)
+    val ledger=request.goalLedger+steps.mapIndexed {index,step->
+        val item=if(index==steps.lastIndex&&wake==JsonPrimitive(WakeEvent.MEDIA_ENDED.name))mediaWaitItem(step)else null
+        GoalLedgerEntry(request.runId,index,if(item==null)step else
+            HarnessStep(step.tool,step.arguments,step.evidence.copy(progressDigest=mediaWaitDigest(item))))
+    }
     check(ledger.map {it.sourceRunId to it.stepIndex}.distinct().size==ledger.size)
     return ledger
 }
@@ -329,7 +352,7 @@ internal fun collectGoalLedger(goal:GoalDefinition,sources:List<GoalRunEvidenceS
         check(source.status !in setOf("queued","running","waiting_approval"))
         val request=checkpoints.getValue(source.runId)
         check(request.runId==source.runId&&request.threadId==source.threadId&&request.projectId==source.projectId&&request.goal?.id==goal.id)
-        val all=completedGoalLedger(request)
+        val all=completedGoalLedger(request,source.contextJson)
         check(all.none {goalUnverifiedEffect(it.step)||PreparedHandoff.pendingEffect(it.step)||
             goalUncertainFailure(it.step)}){"목표의 미확인 효과·실패·외부 확인 대기를 버리고 새 실행을 예약하지 않았습니다."}
         val captured=checkNotNull(request.goal)
@@ -361,7 +384,12 @@ internal fun goalLedgerForRenewedWindow(ledger:List<GoalLedgerEntry>,archive:Goa
         val step=entry.step
         val drop=excess>0 && ToolReadPolicy.isReadOnly(step.tool) && step.evidence.state==VerificationState.VERIFIED &&
             step.evidence.outcomeProof==null && step.tool !in goalArtifactBrowserReads && !PreparedHandoff.pendingEffect(step)
-        if(drop) {excess--;goalMilestoneKey(step)?.let(archive::add);goalRepeatedReadKey(step)?.let(archive::add)}
+        if(drop) {
+            excess--
+            goalMilestoneKey(step)?.let(archive::add)
+            goalRepeatedReadKey(step)?.let(archive::add)
+            completedMediaWaitKey(step)?.let(archive::add)
+        }
         !drop
     }
     if(kept.size>=GoalSegmentBinding.PHASE_TOOL_CALLS||!goalLedgerFits(kept))throw GoalAutopilotPaused(GoalAutopilotPauseReason.TOOL_BUDGET)

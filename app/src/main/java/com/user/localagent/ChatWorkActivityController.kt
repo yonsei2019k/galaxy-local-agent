@@ -188,7 +188,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
         put(target.messageId,UiRunActivity(run.id,threadId,target.messageId,displayStatus,mode,run.startedAt?:0L,
             maxOf(run.updatedAt,records.maxOfOrNull{it.atEpochMillis}?:0L),events,totalEvents=total,hasOlder=total>records.size,loadingOlder=run.id in loading,
             waitingForReply=waitingForReply,replyChoices=choices,waitingForGoal=run.status=="paused"&&run.errorCode=="waiting_goal_condition"&&
-                runCatching{Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWake"]==null}.getOrDefault(false),
+                ("hostGoalWake" !in context || "hostGoalRetryAt" in context),
             goalWaitDetail=runCatching { Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalWaitDetail"]?.jsonPrimitive?.content.orEmpty() }.getOrDefault(""),
             userMessageId=run.userMessageId,finishedAt=run.finishedAt,goalOwnerReply=waitingForReply&&run.errorCode==GOAL_OWNER_INPUT,
             executionReport=report,reportGroup=reportGroup,

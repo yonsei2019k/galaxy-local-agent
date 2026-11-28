@@ -195,6 +195,7 @@ class AgentRunService:Service() {
     companion object {
         private const val CHANNEL="agent-run";private const val ALERTS="agent-run-alerts";private const val ID=7321
         internal const val RESUME_BROWSER_AUTH_RUN="resume_browser_auth_run"
+        internal const val RESUME_GOAL_WAIT_RUN="resume_goal_wait_run"
         private val cleanupHolds=RunCleanupHoldRegistry {android.os.SystemClock.elapsedRealtime()}
         /** Submission success is distinct from RunKeepAlive.await's actual startForeground receipt. */
         fun track(context:Context,runId:String,threadId:String,text:String,recoverGoal:Boolean=false,previousGoalRunId:String?=null):Boolean {
@@ -208,17 +209,18 @@ class AgentRunService:Service() {
                 checkNotNull(if(continuing)context.startService(intent) else ContextCompat.startForegroundService(context,intent))
             }.onFailure{RunKeepAlive.acknowledge(runId,token,false,"FOREGROUND_START_REJECTED")}.isSuccess
         }
-        internal fun notifyRecoveryNeeded(context:Context,runId:String,threadId:String) {
+        internal fun notifyRecoveryNeeded(context:Context,runId:String,threadId:String,goalWait:Boolean=false) {
             val manager=context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(ALERTS,"에이전트 승인·결과",NotificationManager.IMPORTANCE_HIGH))
             val intent=PendingIntent.getActivity(context,runId.hashCode(),
                 Intent(context,MainActivity::class.java).putExtra("open_thread_id",threadId)
-                    .putExtra(RESUME_BROWSER_AUTH_RUN,runId)
+                    .putExtra(if(goalWait)RESUME_GOAL_WAIT_RUN else RESUME_BROWSER_AUTH_RUN,runId)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             manager.notify(ID+1+(runId.hashCode() and 0xffff),NotificationCompat.Builder(context,ALERTS)
                 .setSmallIcon(R.drawable.ic_agent).setContentTitle("이어서 진행할 작업이 있어요")
-                .setContentText("앱을 열어 주시면 로그인한 화면부터 확인하고 이어갈게요.")
+                .setContentText(if(goalWait)"앱 열기 · 저장한 작업 이어서 하기"
+                    else "앱을 열어 주시면 로그인한 화면부터 확인하고 이어갈게요.")
                 .setContentIntent(intent).setAutoCancel(true).setOnlyAlertOnce(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
         }

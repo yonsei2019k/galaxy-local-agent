@@ -255,7 +255,7 @@ describe('native conversation', () => {
     expect(host.querySelector('main [role="progressbar"]')).toBeNull()
   })
 
-  it('routes app destinations through the menu and opens tools from the centered chat header', () => {
+  it('routes app destinations through the menu and opens tools from the composer', () => {
     mount()
     snapshot({ ...base, singleConversation: true })
     expect(Array.from(host.querySelectorAll('.desktop-sidebar .destination-nav button'), button => button.textContent))
@@ -266,7 +266,7 @@ describe('native conversation', () => {
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'historySearch' } })
     click('나의 집순이')
     expect(requests().at(-1)).toMatchObject({ action: 'navigate', payload: { panel: 'settings' } })
-    expect(host.querySelector('.topbar--centered .topbar-identity .character')).not.toBeNull()
+    expect(host.querySelector('.topbar--center .topbar-who .character')).not.toBeNull()
     click('더하기 메뉴')
     expect(host.querySelector('.composer-sheet .sheet-action')).not.toBeNull()
     click('닫기')

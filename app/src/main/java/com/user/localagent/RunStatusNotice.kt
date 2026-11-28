@@ -78,6 +78,12 @@ internal object RunStatusLabels {
         "browser_auth_on_phone" to RunNotice("사이트 로그인 필요","open_login"),
         "browser_auth_resume_expired" to RunNotice("로그인 확인 시간 지남","open_login"),
         "browser_auth_resume_unavailable" to RunNotice("로그인 뒤 못 이어감"),
+        "goal_recovery_scope_changed" to RunNotice("이전에 받은 권한 변경"),
+        "goal_wait_scope_changed" to RunNotice("대기 중 작업 권한 변경"),
+        "goal_wait_checkpoint_unavailable" to RunNotice("이전 작업 기록 확인 필요"),
+        "wait_deadline" to RunNotice("작업 마감 시간 지남"),
+        "wait_auth_expired" to RunNotice("로그인 확인 시간 지남"),
+        "wait_cancelled" to RunNotice("요청하신 대기 취소"),
     )
 
     fun phaseId(status:String,errorCode:String?):String = when {

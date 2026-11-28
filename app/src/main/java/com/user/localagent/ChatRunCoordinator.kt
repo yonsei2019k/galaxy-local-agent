@@ -191,6 +191,21 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
     private var goalCleanupHold:java.io.Closeable?=null
     private var localGoalEffects:GoalEffectRecorder?=null
     private var goalActiveClock:GoalActiveClock?=null
+    private var providerDeadlineElapsedMs:Long?=null
+
+    private suspend fun awaitApproval(request:QueuedChatRequest,decision:Deferred<Boolean>):Boolean = outsideGoalActiveTime {
+        if(request.goalSegment==null)return@outsideGoalActiveTime decision.await()
+        val available=providerDeadlineElapsedMs?.minus(android.os.SystemClock.elapsedRealtime())?.minus(5_000L)
+        val window=minOf(120_000L,available?:120_000L)
+        val accepted=if(window>0)withTimeoutOrNull(window){decision.await()}else null
+        if(accepted==null) {
+            decision.cancel()
+            val reason=GoalAutopilotPauseReason.APPROVAL_EXPIRED
+            requestAutopilotPauseReason=reason
+            throw GoalAutopilotPaused(reason)
+        }
+        accepted
+    }
     /** Owner decision waits are not goal active time. */
     private suspend fun <T> outsideGoalActiveTime(block: suspend () -> T): T {
         val clock = goalActiveClock ?: return block()
@@ -2473,6 +2488,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val launch=launchPhoneProvider(request,client,publicResearch,allowCloudPersonalData){check(authority().permits(capture))}
             lastProviderState=launch.getValue("state").jsonPrimitive.content
             persistNativeState()
+            providerDeadlineElapsedMs=android.os.SystemClock.elapsedRealtime()+cloudDeadlineMs
             val provider=withTimeoutOrNull(cloudDeadlineMs) {
                 var lastStage:String?=null
                 while(true){
@@ -2622,6 +2638,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             }
             throw error
         } finally {
+            providerDeadlineElapsedMs=null
             externalEffectGuard=null
             withContext(NonCancellable){
                 try {
@@ -3781,7 +3798,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             projectId=request.projectId,branchId=request.branchId,reviewText=preview.approvalText()+"\n\n확인하면 위 수신자에게 실제 메일을 발송합니다. 반복 전송을 허용하는 승인이 아닙니다.")
         check(approval.value==null){"다른 실행 확인이 진행 중입니다."}
         approval.value=action;status.value="실제 메일 내용과 수신자를 확인해주세요."
-        val allowed=try {deferred.await()}finally {if(approval.value===action)approval.value=null}
+        val allowed=try {awaitApproval(request,deferred)}finally {if(approval.value===action)approval.value=null}
         currentCoroutineContext().ensureActive()
         return allowed&&requestJob?.isActive==true&&activeRequest?.runId==expectedRunId&&
             app.repository.chat.accessScope(request.threadId)==access&&
@@ -4156,7 +4173,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             reviewText="여러 연락처 중 수신자를 선택해주세요. 선택 전에는 문자 앱을 열지 않습니다.\n문자 내용:\n"+call.arguments.getValue("message").jsonPrimitive.content,recipientChoices=choices)
         check(approval.value==null)
         approval.value=action;status.value="문자 수신자 선택 대기"
-        val accepted=try{outsideGoalActiveTime{decision.await()}}finally{if(approval.value===action)approval.value=null}
+        val accepted=try{awaitApproval(request,decision)}finally{if(approval.value===action)approval.value=null}
         if(!accepted)throw CancellationException("사용자가 수신자 선택을 취소했습니다.")
         currentCoroutineContext().ensureActive()
         check(app.repository.chat.run(request.runId)?.let{it.status=="running"&&it.threadId==action.threadId&&it.projectId==action.projectId}==true)
@@ -4833,9 +4850,11 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 when (val outcome=GoalWaitPolicy.onWake(acceptedRecord,event,System.currentTimeMillis(),ZoneId.systemDefault(),pcAvailable)) {
                     is WaitDecision.RetryLater -> {
                         val retry=outcome.record.copy(id=UUID.randomUUID().toString(),
-                            retryAt=outcome.atEpochMillis,observedEvent=event)
+                            retryAt=outcome.atEpochMillis,observedEvent=event,foregroundRetry=false)
                         check(app.goalWaits.store.replace(retry,record))
-                        if(!app.goalWaits.armAfterWake(retry))return@withLock false
+                        val armed=app.goalWaits.armAfterWake(retry)
+                        publishGoalWaitRetry(retry,parent,transientRetry)
+                        if(!armed)return@withLock false
                         return@withLock true
                     }
                     is WaitDecision.Rearm -> {
@@ -4861,7 +4880,8 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                             goals.saveGuarded(access,checkNotNull(savedActive).copy(status=GoalStatus.WAITING))
                             return@withLock false
                         }
-                        val queued=queueNextGoalSegment(access,savedActive,row,next,checkNotNull(scope.coroutineContext[Job]))
+                        val queued=queueNextGoalSegment(access,savedActive,row,next,checkNotNull(scope.coroutineContext[Job]),
+                            pauseOnForegroundUnavailable=false)
                         val queuedRunId=checkNotNull(queued.queuedRunId)
                         goalQueuedEpochs[queuedRunId]=epoch
                         app.goalWaits.store.replace(outcome.record,record)
@@ -4880,6 +4900,29 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) {
+                if(error is GoalRecoveryForegroundUnavailable && error.suppressed.isEmpty() && !stopPending() &&
+                    app.goalWaits.store.get(record.goalId)==record && app.repository.chat.accessScope(record.threadId)==access) {
+                    val restored=goals.loadGuarded(access)
+                    val attempted=savedActive
+                    val latest=app.repository.chat.run(parent.id)
+                    if(restored!=null&&attempted!=null&&restored.copy(updatedAt=attempted.updatedAt)==attempted&&
+                        latest!=null&&parkedGoalAuthorityMatches(record,original,access,latest)&&
+                        restored.status==GoalStatus.ACTIVE&&restored.linkedRunIds.lastOrNull()==parent.id) {
+                        val waiting=goals.saveGuarded(access,restored.copy(status=GoalStatus.WAITING))
+                        if(selectedThreadId.value==record.threadId)goalState.value=waiting
+                        val retry=record.copy(id=UUID.randomUUID().toString(),resumedOnceFor=null,observedEvent=event,
+                            retryAt=minOf(System.currentTimeMillis()+15*60_000L,record.deadlineAt),foregroundRetry=true)
+                        if(app.goalWaits.store.replace(retry,record)) {
+                            app.goalWaits.armAfterWake(retry)
+                            publishGoalWaitRetry(retry,latest,transientRetry)
+                            if(!record.foregroundRetry)runCatching {
+                                com.user.localagent.voice.AgentRunService.notifyRecoveryNeeded(context,parent.id,parent.threadId,goalWait=true)
+                            }.onFailure {FailureLog.record(context,"goal_wait_foreground_notice",it)}
+                            return@withLock true
+                        }
+                        return@withLock false
+                    }
+                }
                 FailureLog.record(context,"goal_wait_wake",error,"wake_rejected")
                 val durableStop=app.goalWaits.store.get(record.goalId)
                 if(durableStop?.takeIf {it.parentRunId==record.parentRunId&&it.threadId==record.threadId&&it.branchId==record.branchId}
@@ -4903,6 +4946,20 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             drain()
             true
         }
+    }
+
+    private suspend fun publishGoalWaitRetry(record:GoalWaitRecord,parent:ChatRunRecord,transient:Boolean) {
+        val due=GoalWaitPolicy.dueAt(record)?:return
+        val time=java.time.Instant.ofEpochMilli(due).atZone(ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("M월 d일 HH:mm"))
+        val label=if(record.foregroundRetry)"앱 열기 또는 $time 이후 다시 확인" else "$time 이후 다시 확인"
+        if(transient) {
+            app.repository.chat.noteGoalRetry(parent,"scheduled",label)
+            return
+        }
+        val stored=Json.parseToJsonElement(parent.contextJson).jsonObject
+        val updated=JsonObject(stored+mapOf("hostGoalRetryAt" to JsonPrimitive(due),"hostGoalWaitDetail" to JsonPrimitive(label)))
+        app.repository.chat.updateRunContext(parent.id,RunStatusLabels.write(updated,RunNotice(label)).toString())
     }
 
     private suspend fun answerWaitingOutcome(runId:String,event:WakeEvent,reason:GoalAutopilotPauseReason?=null) {
@@ -5200,7 +5257,7 @@ class ChatRunCoordinator internal constructor(internal val context:android.conte
             val request=checkNotNull(activeRequest)
             endScreenWork(request.runId)
             val action=PendingAction(call,deferred,runId=request.runId,threadId=request.threadId,projectId=request.projectId,branchId=request.branchId,reviewText=targetReview);approval.value=action
-            val allowed=try { outsideGoalActiveTime { deferred.await() } } finally { approval.value=null }
+            val allowed=try {awaitApproval(request,deferred)} finally {if(approval.value===action)approval.value=null}
             traceAttempt?.let{workTraceSession?.approval(it,if(allowed)com.user.localagent.data.WorkTraceCode.APPROVAL_ACCEPTED else com.user.localagent.data.WorkTraceCode.APPROVAL_DECLINED)}
             if(!allowed) throw CancellationException("사용자가 실행을 취소했습니다.")
             if(action.call.name in setOf(com.user.localagent.core.ScreenControlToolCatalog.ACTION,

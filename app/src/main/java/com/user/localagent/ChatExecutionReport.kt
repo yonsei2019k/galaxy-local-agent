@@ -237,11 +237,13 @@ internal object ChatExecutionReport {
         if(error=="goal_verified_complete")return "목표 기준 모두 확인함"
         GoalAutopilotPauseReason.entries.find {it.code==error}?.let {return it.label}
         val notice=RunStatusLabels.read(context)?.reason
-        val due=(context["hostGoalWaitAt"] as? JsonPrimitive)?.longOrNull
+        val retry=(context["hostGoalRetryAt"] as? JsonPrimitive)?.longOrNull
+        val due=(retry?:((context["hostGoalWaitAt"] as? JsonPrimitive)?.longOrNull))
             ?.takeIf {it in 946684800000L..7258118400000L}
             ?.let {Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M월 d일 HH:mm"))}
         return when {
         status=="waiting_approval"->"허락 기다리는 중"
+        status=="paused"&&error=="waiting_goal_condition"&&retry!=null&&due!=null->"$due 이후 다시 확인"
         status=="paused"&&context.str("hostGoalWaitKind")=="media"->"영상 끝나기 기다리는 중 · 끝나면 진도 확인"
         status=="paused"&&(context.str("hostGoalWaitKind")=="auth" || "hostGoalOwnerLogin" in context || error in setOf("waiting_browser_auth","browser_auth_on_phone"))->"로그인 기다리는 중 · 공식 로그인 뒤 결과 다시 확인"
         status=="paused"&&error==GOAL_OWNER_INPUT->"답 기다리는 중"

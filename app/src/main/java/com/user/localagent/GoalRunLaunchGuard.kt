@@ -109,7 +109,7 @@ data class GoalSegmentBinding(
 internal enum class GoalAutopilotPauseReason(val code:String) {
     LEGACY_CONTEXT("goal_autopilot_legacy_context"), STOPPED("goal_autopilot_stopped"),
     UNKNOWN_EFFECT("goal_autopilot_unknown_effect"), FAILED_STEP("goal_autopilot_failed_step"),
-    OWNER_HANDOFF("goal_autopilot_owner_handoff"), REQUIRED_READBACK("goal_autopilot_required_readback"),
+    OWNER_HANDOFF("goal_autopilot_owner_handoff"), APPROVAL_EXPIRED("goal_autopilot_approval_expired"), REQUIRED_READBACK("goal_autopilot_required_readback"),
     SEGMENT_BUDGET("goal_autopilot_segment_budget"), TOOL_BUDGET("goal_autopilot_tool_budget"),
     TIME_BUDGET("goal_autopilot_time_budget"), NO_PROGRESS("goal_autopilot_no_progress"),
     INVALID_CHECKPOINT("goal_autopilot_invalid_checkpoint"),
@@ -125,6 +125,7 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
         UNKNOWN_EFFECT->"마지막 일이 됐는지 아직 모름"
         FAILED_STEP->"바꾼 뒤 결과를 못 봄"
         OWNER_HANDOFF->"직접 확인이 필요함"
+        APPROVAL_EXPIRED->"승인 대기 시간 지남 · 새 승인 필요"
         REQUIRED_READBACK->"바꾼 결과를 다시 봤지만 못 찾음"
         LEGACY_CONTEXT->"예전 부탁이라 자동으로 못 이어감"
         INVALID_CHECKPOINT->"저장된 기록을 못 봄"
@@ -140,6 +141,7 @@ internal enum class GoalAutopilotPauseReason(val code:String) {
         UNKNOWN_EFFECT->"마지막 요청이 처리됐는지 확인이 필요해요. 같은 요청이 두 번 처리될 수 있어 잠시 멈췄어요."
         FAILED_STEP->"변경을 시도한 뒤 결과를 확인하지 못했어요. 앞에서 확인한 내용은 작업 내역에 남아 있어요."
         OWNER_HANDOFF->"추가 지시나 외부 앱의 실제 결과 확인이 필요해 일시 정지했습니다."
+        APPROVAL_EXPIRED->"승인 시간 만료 · 해당 동작 실행 전 · 새 승인 필요"
         REQUIRED_READBACK->"변경을 요청했는데 다시 조회했을 때 결과를 확인할 수 없었어요."
         LEGACY_CONTEXT->"기존 요청에는 자동 연속 실행 연결이 없어 일시 정지했습니다. 이전 권한을 확대하지 않았습니다."
         INVALID_CHECKPOINT->"저장된 실제 실행 근거를 확인하지 못해 일시 정지했습니다. 근거를 버리고 다시 실행하지 않습니다."
@@ -235,7 +237,7 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
     if(goal.status!=GoalStatus.ACTIVE||!request.allowTools||request.mode !in setOf("act","debug"))return pause(GoalAutopilotPauseReason.STOPPED)
     if(request.continuation!=null)return pause(GoalAutopilotPauseReason.OWNER_HANDOFF)
     if(unknownEffects)return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
-    val ledger=completedGoalLedger(request)
+    val ledger=completedGoalLedger(request,parent.contextJson)
     val totalCalls=Math.addExact(segment.archivedCalls,ledger.size)
     val archive=GoalObservationIndex.decode(segment.archivedObservations)
     if(ledger.any {goalUnverifiedEffect(it.step)})return pause(GoalAutopilotPauseReason.UNKNOWN_EFFECT)
@@ -264,12 +266,9 @@ internal fun goalSegmentDecision(parent:ChatRunRecord,goal:GoalDefinition,scopeK
         resumedArtifactAuth=segment.artifactWrapUp&&!segment.artifactAuthResumed&&authReady&&
             wake["event"]==JsonPrimitive(WakeEvent.OWNER_AUTH_DONE.name)
         if(waitReady && wake["event"]==JsonPrimitive(WakeEvent.MEDIA_ENDED.name)) {
-            val condition=finalStep?.arguments?.get("condition") as? JsonObject
-            val item=condition?.get("ledgerItemId")?.jsonPrimitive?.contentOrNull
-            completedMedia=item!=null&&condition?.get("kind")==JsonPrimitive("media_end")&&!archive.contains("media:$item")&&request.goalLedger.none {entry->
-                entry.step.tool==GoalWaitToolCatalog.WAIT&&
-                    (entry.step.arguments["condition"] as? JsonObject)?.get("ledgerItemId")==JsonPrimitive(item)
-            }
+            val item=finalStep?.let(::mediaWaitItem)
+            val key="media-ended-v1:$item"
+            completedMedia=item!=null&&!archive.contains(key)&&request.goalLedger.none {completedMediaWaitKey(it.step)==key}
         }
         wokeAt-parkedAt
     } else {

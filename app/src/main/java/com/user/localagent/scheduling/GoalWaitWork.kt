@@ -110,6 +110,16 @@ internal class GoalWaitWork(private val context: Context) {
         for (record in store.all()) arm(record)
     }
 
+    suspend fun resumeVisibleGoalWait(threadId:String,parentRunId:String) {
+        val record=store.all().singleOrNull {
+            it.foregroundRetry&&!it.ordinaryBrowserAuth&&it.threadId==threadId&&it.parentRunId==parentRunId&&
+                it.stopReason==null&&it.resumedOnceFor!=it.id
+        }?:return
+        val event=record.observedEvent?:return
+        val app=(context.applicationContext as? LocalAgentApplication)?.container?:return
+        app.scopedRuns.wakeGoal(record,event)
+    }
+
     suspend fun resumeConfirmedBrowserAuth(threadId:String,parentRunId:String) {
         val record=store.all().singleOrNull {
             it.ordinaryBrowserAuth&&it.threadId==threadId&&it.parentRunId==parentRunId&&
