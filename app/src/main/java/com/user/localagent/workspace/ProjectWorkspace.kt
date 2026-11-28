@@ -165,10 +165,12 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
     }}
     suspend fun releaseToolReadContext(reader:String)=withContext(Dispatchers.IO){operation.withLock{reads.keys.removeAll{it.first==reader}}}
     suspend fun write(path:String,content:String,expectedSha256:String?=null):String=writeScoped(path,content,expectedSha256,ownerReader)
-    suspend fun writeForTool(path:String,content:String,expectedSha256:String?=null,reader:String):String{
-        require(reader!=ownerReader&&reader.isNotBlank());return writeScoped(path,content,expectedSha256,reader)
+    suspend fun writeForTool(path:String,content:String,expectedSha256:String?=null,reader:String,
+        verifyBeforeCommit:suspend (String)->Unit={}):String{
+        require(reader!=ownerReader&&reader.isNotBlank());return writeScoped(path,content,expectedSha256,reader,verifyBeforeCommit)
     }
-    private suspend fun writeScoped(path:String,content:String,expectedSha256:String?,reader:String):String=withContext(Dispatchers.IO) {operation.withLock {WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()) {
+    private suspend fun writeScoped(path:String,content:String,expectedSha256:String?,reader:String,
+        verifyBeforeCommit:suspend (String)->Unit={}):String=withContext(Dispatchers.IO) {operation.withLock {WorkspaceMutationLocks.withBinding(mutationBindingUnlocked()) {
         require(content.length<=12_000&&'\u0000' !in content)
         val parts=ProjectPaths.segments(path);val selected=tree()
         val previous=runCatching {readUnlocked(parts)}.getOrElse {error->
@@ -179,6 +181,9 @@ class ProjectWorkspace(context:Context,private val workspaceId:String="default")
         if(previous!=null&&!(expectedSha256!=null&&expectedSha256==previousHash))throw com.user.localagent.core.ToolPreconditionRejected("기존 파일은 먼저 읽고 확인한 SHA-256으로 수정해야 합니다.")
         if(previous!=null){val evidence=reads[readKey(reader,path)];if(!(evidence!=null&&evidence.hash==previousHash&&evidence.complete&&evidence.binding==bindingUnlocked()))throw com.user.localagent.core.ToolPreconditionRejected("현재 실행에 파일 전체가 전달되지 않아 덮어쓰지 않았습니다. 발췌문으로 원본을 교체하지 않았습니다.")}
         else if(expectedSha256!=null)throw com.user.localagent.core.ToolPreconditionRejected("수정할 기존 파일이 없습니다.")
+        try {verifyBeforeCommit(bindingUnlocked())}
+        catch(cancel:CancellationException){throw cancel}
+        catch(_:Exception){throw com.user.localagent.core.ToolPreconditionRejected("파일을 변경하기 전에 작업 상태나 권한이 바뀌었어요.")}
         currentCoroutineContext().ensureActive()
         // A bounded write+readback finishes before cancellation is reported; it cannot claim an unverified save.
         withContext(NonCancellable) {

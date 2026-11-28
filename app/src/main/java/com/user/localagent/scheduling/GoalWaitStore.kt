@@ -15,6 +15,9 @@ internal class GoalWaitStore(private val load: () -> String?, private val save: 
     fun all(): List<GoalWaitRecord> = synchronized(lock) { read() }
 
     fun get(goalId: String): GoalWaitRecord? = all().singleOrNull { it.goalId == goalId }
+    fun ownerStoppedParent(goalId:String,parentRunId:String,threadId:String,branchId:String):Boolean =
+        get(goalId)?.let {it.stopReason==GoalWaitStopReason.OWNER_CANCELLED&&it.parentRunId==parentRunId&&
+            it.threadId==threadId&&it.branchId==branchId}==true
 
     fun atCapacity(): Boolean = synchronized(lock) { read().size >= MAX_RECORDS }
 

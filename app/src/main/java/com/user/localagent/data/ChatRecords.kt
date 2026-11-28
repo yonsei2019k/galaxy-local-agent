@@ -765,7 +765,7 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
     suspend fun checkpointRun(runId:String,contextJson:String)=updateRunContext(runId,contextJson)
     internal suspend fun recordDispatchedGoalFile(runId:String,marker:JsonObject,binding:JsonObject)=database.withTransaction {
         val run=validRun(runId)
-        check(run.status=="running")
+        check(run.status=="running"&&run.errorCode!=com.user.localagent.GOAL_STOP_REQUESTED)
         val context=Json.parseToJsonElement(run.contextJson).jsonObject
         val next=JsonObject(context+(com.user.localagent.InterruptedGoalFileCheck.KEY to marker))
         check(com.user.localagent.InterruptedGoalFileCheck.load(next,binding)!=null)
@@ -989,11 +989,16 @@ class ChatStore internal constructor(private val database:LocalDatabase) {
         if(row.errorCode!=com.user.localagent.GOAL_STOP_REQUESTED)
             dao.run(row.copy(errorCode=com.user.localagent.GOAL_STOP_REQUESTED,updatedAt=now()))
     }
-    internal suspend fun recoverTrackedGoalRun(expected:ChatRunRecord):ChatRunRecord?=database.withTransaction {
+    internal suspend fun recoverOrphanedRun(expected:ChatRunRecord):ChatRunRecord?=database.withTransaction {
         if(dao.run(expected.id)!=expected||expected.status !in setOf("running","waiting_approval"))return@withTransaction null
-        val request=com.user.localagent.QueuedChatRequest.fromJson(expected.contextJson)
-        if(request.goalSegment==null||request.runId!=expected.id)return@withTransaction null
         recoverInterruptedRun(expected)
+    }
+    internal suspend fun recordTrackedGoalScopeChanged(expected:ChatRunRecord):Boolean=database.withTransaction {
+        if(dao.run(expected.id)!=expected||expected.errorCode==com.user.localagent.GOAL_STOP_REQUESTED||
+            expected.status in setOf("running","waiting_approval"))return@withTransaction false
+        dao.run(expected.copy(status=if(expected.status=="queued")"paused" else expected.status,
+            errorCode="goal_recovery_scope_changed",updatedAt=now()))
+        true
     }
     private suspend fun recoverInterruptedRun(r:ChatRunRecord):ChatRunRecord {
         dao.allMessages(r.threadId).filter {it.runId==r.id}.forEach {m->checkpointMessage(r.id,m.id);dao.segmentsForMessage(m.id).filter {it.status=="running"}.forEach {finishSegment(it.id,"interrupted")}}

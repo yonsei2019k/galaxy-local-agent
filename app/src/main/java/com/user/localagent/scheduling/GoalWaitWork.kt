@@ -80,10 +80,11 @@ internal class GoalWaitWork(private val context: Context) {
         val confirmed=previous.copy(id=java.util.UUID.randomUUID().toString(),observedEvent=WakeEvent.OWNER_AUTH_DONE)
         if(!store.replace(confirmed,previous))return false
         val app=(context.applicationContext as? LocalAgentApplication)?.container
-        app?.runs?.scope?.launch {
+        app?.scopedRuns?.scope?.launch {
             repeat(40) {
-                val handled=if(confirmed.ordinaryBrowserAuth)app.runs.wakeBrowserAuth(confirmed)
-                    else app.runs.isGoalWaitReady(confirmed)&&app.runs.wakeGoal(confirmed,WakeEvent.OWNER_AUTH_DONE)
+                if(!confirmed.ordinaryBrowserAuth)app.scopedRuns.prepareScheduledGoalWait(confirmed)
+                val handled=if(confirmed.ordinaryBrowserAuth)app.scopedRuns.wakeBrowserAuth(confirmed)
+                    else app.scopedRuns.isGoalWaitReady(confirmed)&&app.scopedRuns.wakeGoal(confirmed,WakeEvent.OWNER_AUTH_DONE)
                 if(handled)return@launch
                 delay(250)
             }
@@ -132,26 +133,27 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
             return Result.success()
         }
         val dueAt=GoalWaitPolicy.dueAt(record) ?: return Result.success()
+        if(!record.ordinaryBrowserAuth)app.scopedRuns.prepareScheduledGoalWait(record)
         if(record.stopReason!=null)
-            return if(app.runs.settleUnreadyGoalWait(record))Result.success() else Result.retry()
+            return if(app.scopedRuns.settleUnreadyGoalWait(record))Result.success() else Result.retry()
         if(System.currentTimeMillis()<dueAt){
             val delayed=record.copy(id=java.util.UUID.randomUUID().toString())
             if(app.goalWaits.store.replace(delayed,record))app.goalWaits.arm(delayed)
             return Result.success()
         }
-        if(record.ordinaryBrowserAuth)return if(app.runs.wakeBrowserAuth(record))Result.success()
+        if(record.ordinaryBrowserAuth)return if(app.scopedRuns.wakeBrowserAuth(record))Result.success()
             else if(runAttemptCount<5)Result.retry() else Result.failure()
-        val ready=if(app.runs.isGoalWaitReady(record))true
+        val ready=if(app.scopedRuns.isGoalWaitReady(record))true
             else if(record.condition is WaitCondition.MediaEnd)withTimeoutOrNull(12_000) {
-                while(app.runs.isRunLive(record.parentRunId)){
+                while(app.scopedRuns.isRunLive(record.parentRunId)){
                     delay(250)
-                    if(app.runs.isGoalWaitReady(record))return@withTimeoutOrNull true
+                    if(app.scopedRuns.isGoalWaitReady(record))return@withTimeoutOrNull true
                 }
-                app.runs.isGoalWaitReady(record)
+                app.scopedRuns.isGoalWaitReady(record)
             }==true else false
-        if (!ready) return if (app.runs.settleUnreadyGoalWait(record)) Result.success() else Result.retry()
+        if (!ready) return if (app.scopedRuns.settleUnreadyGoalWait(record)) Result.success() else Result.retry()
         if (System.currentTimeMillis() >= record.deadlineAt) {
-            return if (app.runs.wakeGoal(record, WakeEvent.RESTORED_PAST_DUE)) Result.success() else Result.retry()
+            return if (app.scopedRuns.wakeGoal(record, WakeEvent.RESTORED_PAST_DUE)) Result.success() else Result.retry()
         }
         val existing=record.observedEvent
         val media=record.condition as? WaitCondition.MediaEnd
@@ -169,7 +171,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if(!app.goalWaits.store.replace(observed,record))return Result.success()
             record=observed
         }
-        return if (app.runs.wakeGoal(record,event)) Result.success()
+        return if (app.scopedRuns.wakeGoal(record,event)) Result.success()
             else if (runAttemptCount < 5) Result.retry() else Result.failure()
     }
 
@@ -186,8 +188,8 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         } catch(cancel:CancellationException){throw cancel}
           catch(_:Exception){PairedMediaRead.Unavailable}
         if (app.goalWaits.store.get(record.goalId) != record) return Result.success()
-        if (!app.runs.isGoalWaitReady(record)) {
-            return if (app.runs.settleUnreadyGoalWait(record)) Result.success() else Result.retry()
+        if (!app.scopedRuns.isGoalWaitReady(record)) {
+            return if (app.scopedRuns.settleUnreadyGoalWait(record)) Result.success() else Result.retry()
         }
         val observation=(probe as? PairedMediaRead.Observed)?.page
         val player=observation?.player
@@ -209,7 +211,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         if(event!=null) {
             val observed=record.copy(observedEvent=event)
             if(!app.goalWaits.store.replace(observed,record))return Result.success()
-            return if(app.runs.wakeGoal(observed,event))Result.success() else Result.retry()
+            return if(app.scopedRuns.wakeGoal(observed,event))Result.success() else Result.retry()
         }
         val next=record.copy(id=java.util.UUID.randomUUID().toString(),
             mediaPollAt=now+GoalWaitPolicy.mediaPollDelay(player?.positionMs,player?.durationMs,player?.rate,moved),lastMediaProgressAt=if(moved)now else lastProgress,
@@ -243,7 +245,7 @@ class GoalWaitWorker(context: Context, params: WorkerParameters) : CoroutineWork
         wakeLock.acquire(GoalWaitPolicy.MEDIA_MAX_MS)
         var ended=false
         return try {
-            val watcher=MediaEndWatcher({ if(app.runs.isGoalWaitReady(record)) web.sampleGoalMedia(work) else null },
+            val watcher=MediaEndWatcher({ if(app.scopedRuns.isGoalWaitReady(record)) web.sampleGoalMedia(work) else null },
                 ::active,SystemClock::elapsedRealtime,::delay)
             watcher.watch(condition.pageUrl,player).also { ended=it==WakeEvent.MEDIA_ENDED }
         } finally {

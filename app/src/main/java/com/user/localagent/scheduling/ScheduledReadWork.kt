@@ -52,7 +52,7 @@ internal class ScheduledReadWork(private val context: Context, private val app: 
             }
             ScheduledReadToolCatalog.CANCEL -> {
                 val id = text("scheduleId")
-                val record = recovery.cancel { app.runs.cancelScheduledRead(registrationRunId, id) }
+                val record = recovery.cancel { app.scopedRuns.cancelScheduledRead(registrationRunId, id) }
                 scheduledReadCancellationReceipt(
                     call, id, record.status, record.errorCode == ScheduledReadPolicy.STOP_REQUESTED,
                     cancelSystemWork = { WorkManager.getInstance(context).cancelUniqueWork(id).await() },
@@ -95,12 +95,12 @@ class ScheduledReadWorker(context: Context, parameters: WorkerParameters) : Coro
         val id = inputData.getString(ScheduledReadWork.INPUT_ID)?.takeIf(ScheduledReadPolicy::isId) ?: return Result.failure()
         val app = (applicationContext as? LocalAgentApplication)?.container ?: return Result.failure()
         return try {
-            if (app.runs.deliverScheduledRead(id)) Result.retry() else {
+            if (app.scopedRuns.deliverScheduledRead(id)) Result.retry() else {
                 app.repository.chat.awaitScheduledRead(id)
                 Result.success()
             }
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) {runCatching {app.runs.interruptScheduledRead(id)}}
+            withContext(NonCancellable) {runCatching {app.scopedRuns.interruptScheduledRead(id)}}
             throw cancelled
         } catch (_: Exception) {
             if (runAttemptCount < 5) Result.retry() else Result.failure()

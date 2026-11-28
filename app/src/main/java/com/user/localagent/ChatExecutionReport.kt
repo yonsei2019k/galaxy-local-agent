@@ -250,6 +250,7 @@ internal object ChatExecutionReport {
         status=="paused"&&error=="goal_wait_auth_expired"->"사이트 인증 요청이 만료됐어요. 확인한 내용은 작업 기록에 남겼어요."
         status=="paused"&&error=="browser_auth_cancelled"->"로그인 대기를 취소했어요. 확인한 내용은 작업 기록에 남겼어요."
         status=="paused"&&error=="goal_wait_scope_changed"->"대기 중 작업 권한이나 대화 범위가 바뀌어 일시정지했어요."
+        error=="goal_recovery_scope_changed"->"작업을 이어가는 데 필요한 권한이나 대화 범위가 바뀌었어요. 이전에 확인한 내용은 남겨뒀어요."
         status=="paused"&&error=="goal_wait_checkpoint_unavailable"->"저장된 대기 지점을 열지 못했어요. 작업 기록에서 마지막 단계를 확인할 수 있어요."
         status=="paused"&&error==GOAL_OWNER_INPUT->"위 질문에 답해 주시면 이 대화에서 이어갈게요."
             status=="paused"&&error=="waiting_goal_condition"&&due!=null->"예약 대기 · $due 이후 다시 확인해요."

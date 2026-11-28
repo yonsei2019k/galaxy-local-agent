@@ -258,12 +258,17 @@ class AgentRunService:Service() {
         if(runs.isEmpty()){stopSelf();return START_NOT_STICKY}
         if(job?.isActive!=true)job=scope.launch{watch(manager)}
         if(recovering&&runId!=null&&threadId!=null&&tracked!=null&&token!=null)scope.launch {
-            tracked.recoveryNoticeShown=true
             try {
-                (application as LocalAgentApplication).container.scopedRuns.recoverTrackedGoal(runId,threadId)
+                val recovered=(application as LocalAgentApplication).container.scopedRuns.recoverTrackedGoal(runId,threadId)
+                if(recovered.authorityChanged){
+                    alert(manager,runId,tracked,"작업 권한이 바뀌었어요","확인한 내용은 남겨뒀어요. 대화에서 권한을 확인한 뒤 이어갈 수 있어요.")
+                    tracked.recoveryNoticeShown=true
+                }
+                if(recovered.successorId?.let {it!=runId}==true)tracked.recoveryNoticeShown=true
             }catch(cancel:CancellationException){throw cancel}
             catch(_:com.user.localagent.GoalRecoveryForegroundUnavailable){
                 alert(manager,runId,tracked,"이어서 진행할 작업이 있어요","앱을 열어 주시면 중단된 작업부터 확인하고 이어갈게요.")
+                tracked.recoveryNoticeShown=true
             }catch(error:Exception){com.user.localagent.FailureLog.record(this@AgentRunService,"goal_service_recovery",error)}
             finally {tracked.recovering=false}
         }

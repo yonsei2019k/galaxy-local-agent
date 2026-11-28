@@ -38,6 +38,19 @@ class GoalWaitStoreTest {
         assertEquals(consumed,GoalWaitStore({ data },{ fail() }).get(first.goalId))
     }
 
+    @Test fun recreatedHostBlocksOnlyAChildOfTheExactOwnerStoppedParent() {
+        var data:String?=null
+        val store=GoalWaitStore({data},{data=it})
+        assertTrue(store.replace(first,null))
+        val stopped=checkNotNull(store.markOwnerStopped(first,"stopped")).second
+        assertFalse(store.replace(first.copy(resumedOnceFor=first.id),first))
+        assertTrue(store.replace(stopped.copy(resumedOnceFor=stopped.id),stopped))
+        val recreated=GoalWaitStore({data},{fail()})
+        assertTrue(recreated.ownerStoppedParent("goal","parent","thread","branch"))
+        assertFalse(recreated.ownerStoppedParent("goal","next","thread","branch"))
+        assertFalse(recreated.ownerStoppedParent("goal","parent","thread","other"))
+    }
+
     @Test fun capacityReclaimsOnlyTheExactObsoleteRecord() {
         var data: String? = null
         val store = GoalWaitStore({ data },{ data=it })
