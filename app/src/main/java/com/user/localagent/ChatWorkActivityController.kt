@@ -194,7 +194,7 @@ internal fun mapWorkActivities(threadId:String,targets:List<WorkActivityTarget>,
             executionReport=report,reportGroup=reportGroup,
             executionReportEndsWithStatus=report.isNotEmpty()&&report.last()==ChatExecutionReport.state(run.status,run.errorCode,context),
             receipt=ActionReceiptCard.read(context),
-            runStatus=RunStatusLabels.card(run.status,run.errorCode,context).json(),
+            runStatus=RunStatusLabels.card(displayStatus,run.errorCode,context).json(),
             canOpenOwnerLogin=run.status=="paused" && (run.errorCode=="waiting_goal_condition"||run.errorCode in BrowserAuthContinuation.reopenablePauses) &&
                 runCatching { BrowserAuthContinuation.canReopenLogin(run.contextJson) || run.errorCode=="waiting_goal_condition" &&
                     Json.parseToJsonElement(run.contextJson).jsonObject["hostGoalOwnerLogin"]==JsonPrimitive(true) }.getOrDefault(false)))

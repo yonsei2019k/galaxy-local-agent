@@ -36,7 +36,8 @@ class ChatWorkActivityControllerTest {
         val segment=run("completed").copy(errorCode=pause.code,finishedAt=5000)
         val activity=project(segment,emptyList()).getValue("assistant-a")
         assertEquals("paused",activity.status)
-        assertEquals(pause.description,activity.events.single().detail)
+        assertEquals(pause.label,activity.events.single().detail)
+        assertEquals(kotlinx.serialization.json.JsonPrimitive("paused"),activity.runStatus?.get("phase"))
         assertEquals("completed",project(segment.copy(errorCode="goal_verified_complete"),emptyList())
             .getValue("assistant-a").status)
     }
